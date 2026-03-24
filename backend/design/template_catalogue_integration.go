@@ -241,7 +241,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Retrieve templates via XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Manager")
+			Scope("Contract Signer")
+		})
 
 		Payload(TemplateCatalogueRetrieveRequest)
 		Result(TemplateCatalogueRetrieveResponse)
@@ -262,7 +268,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Retrieve template via XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Manager")
+			Scope("Contract Signer")
+		})
 
 		Payload(TemplateCatalogueRetrieveByIdRequest)
 		Result(TemplateCatalogueRetrieveByIdResponse)
@@ -282,7 +294,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Create participant in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueCreateParticipantRequest)
 		Result(TemplateCatalogueCreateParticipantResponse)
@@ -301,7 +315,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Create service offering in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueCreateServiceOfferingRequest)
 		Result(TemplateCatalogueCreateServiceOfferingResponse)
@@ -320,7 +336,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Get current participant from XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueGetCurrentParticipantRequest)
 		Result(TemplateCatalogueGetCurrentParticipantResponse)
@@ -339,7 +357,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Get current service offering from XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueGetCurrentServiceOfferingRequest)
 		Result(TemplateCatalogueGetCurrentServiceOfferingResponse)
@@ -358,7 +378,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Update participant in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueUpdateParticipantRequest)
 		Result(TemplateCatalogueUpdateParticipantResponse)
@@ -378,7 +400,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Update service offering in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueUpdateServiceOfferingRequest)
 		Result(TemplateCatalogueUpdateServiceOfferingResponse)
@@ -398,7 +422,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Delete participant in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueDeleteRequest)
 		Result(TemplateCatalogueDeleteResponse)
@@ -418,7 +444,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Delete service offering in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
-		Security(JWTAuth)
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
 
 		Payload(TemplateCatalogueDeleteRequest)
 		Result(TemplateCatalogueDeleteResponse)

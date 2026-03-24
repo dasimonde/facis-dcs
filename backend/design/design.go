@@ -27,6 +27,7 @@ var JWTAuth = JWTSecurity("jwt", func() {
 	Scope("Template Manager", "Manage template lifecycle")
 	Scope("Auditor", "Perform audits and generate reports")
 	Scope("Compliance Officer", "Monitor compliance and report incidents")
+	Scope("System Administrator", "Maintains system configurations, permissions, and user access")
 })
 
 // API root
