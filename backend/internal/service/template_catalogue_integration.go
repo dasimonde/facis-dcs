@@ -4,6 +4,7 @@ import (
 	"context"
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	"digital-contracting-service/internal/auth"
+	"digital-contracting-service/internal/middleware"
 
 	"goa.design/clue/log"
 )
@@ -44,7 +45,12 @@ func (s *templateCatalogueIntegrationsrvc) CreateServiceOffering(ctx context.Con
 }
 
 func (s *templateCatalogueIntegrationsrvc) GetCurrentParticipant(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueGetCurrentParticipantRequest) (res *templatecatalogueintegration.TemplateCatalogueGetCurrentParticipantResponse, err error) {
-	log.Printf(ctx, "templateCatalogueIntegration.getCurrentParticipant")
+	participantID := middleware.GetParticipantID(ctx)
+	if participantID == "" {
+		log.Printf(ctx, "templateCatalogueIntegration.getCurrentParticipant participant_id_missing")
+		return nil, nil
+	}
+	log.Printf(ctx, "templateCatalogueIntegration.getCurrentParticipant participant_id=%s", participantID)
 	return &templatecatalogueintegration.TemplateCatalogueGetCurrentParticipantResponse{
 		LegalName:          "",
 		RegistrationNumber: "",

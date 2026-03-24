@@ -49,7 +49,7 @@ func (a JWTAuthenticator) JWTAuth(ctx context.Context, token string, scheme *sec
 	}
 
 	// Inject the validated identity into the context for downstream use.
-	ctx = middleware.InjectAuthContext(ctx, info.Roles, info.Username)
+	ctx = middleware.InjectAuthContext(ctx, info.Roles, info.Username, info.ParticipantID)
 	return ctx, nil
 }
 

@@ -46,8 +46,9 @@ func NewOIDCValidator(ctx context.Context, config OIDCConfig) (*OIDCValidator, e
 
 // TokenInfo holds the validated identity extracted from a JWT.
 type TokenInfo struct {
-	Roles    []string
-	Username string
+	Roles         []string
+	Username      string
+	ParticipantID string
 }
 
 // ValidateToken verifies the token signature, issuer, and azp claim, then
@@ -73,10 +74,14 @@ func (v *OIDCValidator) ValidateToken(ctx context.Context, token string) (*Token
 	if username == "" {
 		username, _ = claims["sub"].(string)
 	}
+	// This value is set by the Keycloak -> Clients -> <client_id>
+	// -> <client_id>-dedicated -> Configure a new mapper / Add mapper (by configuration) -> Hardcoded claim
+	participantID, _ := claims["participant-id"].(string)
 
 	return &TokenInfo{
-		Roles:    extractRoles(claims),
-		Username: username,
+		Roles:         extractRoles(claims),
+		Username:      username,
+		ParticipantID: participantID,
 	}, nil
 }
 
@@ -129,8 +134,9 @@ type authCtxKey struct{}
 
 // AuthContext carries the validated caller identity through the request context.
 type AuthContext struct {
-	Roles    []string
-	Username string
+	Roles         []string
+	Username      string
+	ParticipantID string
 }
 
 // GetRoles extracts roles from the request context.
@@ -149,6 +155,14 @@ func GetUsername(ctx context.Context) string {
 	return ""
 }
 
+// GetParticipantID extracts the authenticated participant ID from the request context.
+func GetParticipantID(ctx context.Context) string {
+	if ac, ok := ctx.Value(authCtxKey{}).(AuthContext); ok {
+		return ac.ParticipantID
+	}
+	return ""
+}
+
 // HasRole checks if the context contains a specific role.
 func HasRole(ctx context.Context, requiredRole string) bool {
 	for _, role := range GetRoles(ctx) {
@@ -160,6 +174,6 @@ func HasRole(ctx context.Context, requiredRole string) bool {
 }
 
 // InjectAuthContext injects the validated identity into the request context.
-func InjectAuthContext(ctx context.Context, roles []string, username string) context.Context {
-	return context.WithValue(ctx, authCtxKey{}, AuthContext{Roles: roles, Username: username})
+func InjectAuthContext(ctx context.Context, roles []string, username string, participantID string) context.Context {
+	return context.WithValue(ctx, authCtxKey{}, AuthContext{Roles: roles, Username: username, ParticipantID: participantID})
 }
