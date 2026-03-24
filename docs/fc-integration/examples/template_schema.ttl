@@ -1,0 +1,142 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix dcs-template: <https://argo.asd-stack.eu/facis/dcs-semantic/template/v1#> .
+
+
+<https://argo.asd-stack.eu/facis/dcs-semantic/template/v1>
+  a owl:Ontology ;
+  rdfs:label "FACIS DCS Template Ontology" ;
+  rdfs:comment "Ontology for contract template." .
+
+### Core template classes
+dcs-template:ContractTemplate a rdfs:Class ;
+  rdfs:label "Contract Template" .
+
+### Template properties
+dcs-template:did a rdf:Property ;
+  rdfs:label "DID of the contract template" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
+dcs-template:documentNumber a rdf:Property ;
+  rdfs:label "Document Number" ;
+  rdfs:comment "Identifier shared/ by all versions of the same contract template." ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
+dcs-template:version a rdf:Property ;
+  rdfs:label "Version" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:integer .
+
+dcs-template:templateType a rdf:Property ;
+  rdfs:label "The Type of the template" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
+dcs-template:name a rdf:Property ;
+  rdfs:label "The name of the template" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
+dcs-template:description a rdf:Property ;
+  rdfs:label "A description for that template" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
+dcs-template:participantId a rdf:Property ;
+  rdfs:label "Participant ID" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
+dcs-template:publisher a rdf:Property ;
+  rdfs:label "Publisher" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
+dcs-template:createdAt a rdf:Property ;
+  rdfs:label "The timestamp when the contract template was created" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:dateTime .
+
+dcs-template:updatedAt a rdf:Property ;
+  rdfs:label "The timestamp when the contract temlate was updated" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:dateTime .
+
+
+### Template shape
+
+dcs-template:ContractTemplateShape
+  a sh:NodeShape ;
+  sh:targetClass dcs-template:ContractTemplate ;
+
+  sh:property [
+    sh:path dcs-template:did ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+    sh:path dcs-template:documentNumber ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+    sh:path dcs-template:version ;
+    sh:datatype xsd:integer ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:minInclusive 0 ;
+  ] ;
+
+  sh:property [
+    sh:path dcs-template:templateType ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+    sh:path dcs-template:name ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+    sh:path dcs-template:description ;
+    sh:datatype xsd:string ;
+    sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+      sh:path dcs-template:participantId ;
+      sh:datatype xsd:string ;
+      sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+      sh:path dcs-template:publisher ;
+      sh:datatype xsd:string ;
+      sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+    sh:path dcs-template:createdAt ;
+    sh:datatype xsd:dateTime ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+
+  sh:property [
+    sh:path dcs-template:updatedAt ;
+    sh:datatype xsd:dateTime ;
+    sh:maxCount 1 ;
+  ] .
