@@ -232,6 +232,20 @@ var TemplateCatalogueDeleteResponse = Type("TemplateCatalogueDeleteResponse", fu
 	Required("sdHash")
 })
 
+var TemplateCatalogueDeleteParticipantRequest = Type("TemplateCatalogueDeleteParticipantRequest", func() {
+	Description("Delete current participant request")
+
+	Token("token", String, "JWT token")
+})
+
+var TemplateCatalogueDeleteParticipantResponse = Type("TemplateCatalogueDeleteParticipantResponse", func() {
+	Description("Delete participant response")
+
+	Attribute("id", String, "Participant id")
+
+	Required("id")
+})
+
 // Template Catalogue Integration Service (TR <-> XFSC Catalogue)
 var _ = Service("TemplateCatalogueIntegration", func() {
 	Description("Integration APIs between the Template Repository (TR) and the XFSC Catalogue for template retrieval and the management of participants and service offerings.")
@@ -417,24 +431,23 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		})
 	})
 
-	// DELETE /catalogue/participant/delete/{sdHash}
+	// DELETE /catalogue/participant/delete
 	Method("delete_participant", func() {
-		Description("Delete participant in XFSC Catalogue.")
+		Description("Delete current participant in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
 			Scope("System Administrator")
 		})
 
-		Payload(TemplateCatalogueDeleteRequest)
-		Result(TemplateCatalogueDeleteResponse)
+		Payload(TemplateCatalogueDeleteParticipantRequest)
+		Result(TemplateCatalogueDeleteParticipantResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
-			DELETE("/catalogue/participant/delete/{sdHash}")
-			Param("sdHash")
+			DELETE("/catalogue/participant/delete")
 			Response(StatusOK)
 		})
 	})

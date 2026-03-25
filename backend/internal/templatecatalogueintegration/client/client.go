@@ -47,6 +47,11 @@ func (c *FederatedCatalogueClient) Post(ctx context.Context, path string, bearer
 	return c.doRequest(ctx, http.MethodPost, path, bearerToken, query, body)
 }
 
+// Delete sends a DELETE request to Federated Catalogue.
+func (c *FederatedCatalogueClient) Delete(ctx context.Context, path string, bearerToken string, query url.Values) (*Response, error) {
+	return c.doRequest(ctx, http.MethodDelete, path, bearerToken, query, nil)
+}
+
 func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("federated catalogue api url is empty")

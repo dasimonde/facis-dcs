@@ -135,11 +135,24 @@ func (s *templateCatalogueIntegrationsrvc) UpdateServiceOffering(ctx context.Con
 	}, nil
 }
 
-func (s *templateCatalogueIntegrationsrvc) DeleteParticipant(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueDeleteRequest) (res *templatecatalogueintegration.TemplateCatalogueDeleteResponse, err error) {
-	sdHash := req.SdHash
-	log.Printf(ctx, "templateCatalogueIntegration.deleteParticipant sdHash=%s", sdHash)
-	return &templatecatalogueintegration.TemplateCatalogueDeleteResponse{
-		SdHash: sdHash,
+// Delete the current participant from the Federated Catalogue.
+// The participant group will be deleted from the Keycloak.
+func (s *templateCatalogueIntegrationsrvc) DeleteParticipant(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueDeleteParticipantRequest) (res *templatecatalogueintegration.TemplateCatalogueDeleteParticipantResponse, err error) {
+	handler := command.DeleteParticipant{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.DeleteParticipantCmd{
+		ID:    middleware.GetParticipantID(ctx),
+		Token: *req.Token,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+
+	return &templatecatalogueintegration.TemplateCatalogueDeleteParticipantResponse{
+		ID: result.ID,
 	}, nil
 }
 
