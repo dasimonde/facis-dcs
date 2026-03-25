@@ -68,6 +68,9 @@ export DATABASE_URL="user=username password=password dbname=postgres sslmode=dis
 # API routing
 export API_PATH_PREFIX="/api"
 
+# Federated Catalogue
+export FEDERATED_CATALOGUE_API_URL="http://localhost:8081"
+
 # OIDC/Keycloak Authentication
 export OIDC_ISSUER_URL="https://keycloak.example.com/realms/yourrealm"
 export OIDC_CLIENT_ID="digital-contracting-service"

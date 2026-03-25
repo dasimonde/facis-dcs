@@ -82,6 +82,15 @@ spec:
               {{- else }}
               value: {{ include "digital-contracting-service.natsURL" . | quote }}
               {{- end }}
+            - name: FEDERATED_CATALOGUE_API_URL
+              {{- if .Values.federatedCatalogue.secretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.federatedCatalogue.secretRef.name | quote }}
+                  key: {{ .Values.federatedCatalogue.secretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.federatedCatalogue.apiURL | quote }}
+              {{- end }}
             - name: DCS_API_PATH
               value: {{ include "digital-contracting-service.apiPath" . | quote }}
             - name: DCS_UI_PATH

@@ -115,9 +115,9 @@ var TemplateCatalogueCreateParticipantRequest = Type("TemplateCatalogueCreatePar
 var TemplateCatalogueCreateParticipantResponse = Type("TemplateCatalogueCreateParticipantResponse", func() {
 	Description("Create participant response")
 
-	Attribute("sdHash", String, "Self-description hash")
+	Attribute("id", String, "Participant id")
 
-	Required("sdHash")
+	Required("id")
 })
 
 var TemplateCatalogueCreateServiceOfferingRequest = Type("TemplateCatalogueCreateServiceOfferingRequest", func() {

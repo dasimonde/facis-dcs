@@ -89,6 +89,7 @@ ENV OIDC_ISSUER_URL=""
 ENV OIDC_CLIENT_ID=""
 ENV OIDC_REDIRECT_URI=""
 ENV OIDC_LOGOUT_REDIRECT_URI=""
+ENV FEDERATED_CATALOGUE_API_URL=""
 
 # Frontend and Backend path configuration (production defaults)
 ENV DCS_UI_PATH="/ui/"

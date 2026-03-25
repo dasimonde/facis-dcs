@@ -15,8 +15,9 @@ import (
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/service"
-	"digital-contracting-service/migrations"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/db/pg"
+	"digital-contracting-service/migrations"
 	"flag"
 	"fmt"
 	"net"
@@ -95,6 +96,10 @@ func main() {
 	}
 	jwtAuth := auth.NewJWTAuthenticator(oidcValidator)
 
+	// Initialize the Federated Catalogue client.
+	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
+	templateCatalogueClient := fcclient.NewFederatedCatalogueClient(fcURL)
+
 	ctRepo := pg.PostgresContractTemplateRepo{Ctx: ctx}
 	rtRepo := pg.PostgresReviewTaskRepo{Ctx: ctx}
 	atRepo := pg.PostgresApprovalTaskRepo{Ctx: ctx}
@@ -121,7 +126,7 @@ func main() {
 		orchestrationWebhooksSvc = service.NewOrchestrationWebhooks(jwtAuth)
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(jwtAuth)
 		signatureManagementSvc = service.NewSignatureManagement(jwtAuth)
-		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(jwtAuth)
+		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &rtRepo, &atRepo)
 	}
 

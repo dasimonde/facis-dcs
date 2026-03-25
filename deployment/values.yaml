@@ -214,6 +214,14 @@ messaging:
     name: ""
     key: "NATS_URL"
 
+federatedCatalogue:
+  apiURL: ""
+  # Optional secret reference for FEDERATED_CATALOGUE_API_URL.
+  # If set, it takes precedence over federatedCatalogue.apiURL.
+  secretRef:
+    name: ""
+    key: "FEDERATED_CATALOGUE_API_URL"
+
 # Optional explicit service host overrides when using in-chart dependencies
 # or custom service names.
 serviceDiscovery:

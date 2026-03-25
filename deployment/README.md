@@ -268,6 +268,7 @@ The DCS backend enforces role-based access control using Keycloak **client roles
 | `Template Manager` | Manage template lifecycle |
 | `Auditor` | Perform audits and generate reports |
 | `Compliance Officer` | Monitor compliance and report incidents |
+| `System Administrator` | Maintains system configurations, permissions, and user access |
 
 4. Assign roles to users:
    - Go to **Users** → select a user → **Role mapping** tab
@@ -338,6 +339,24 @@ Frontend → POST /auth/refresh (cookie sent automatically)
 7. Enter password: `test`
 8. Toggle OFF: **Temporary** (so you don't need to reset on first login)
 9. Click **"Save"**
+
+#### 7.6 Configure `participant-id` claim (required by DCS)
+
+The DCS backend reads the JWT claim named `participant-id` to determine the “current participant” of the DCS instance (used e.g. by `/catalogue/participant/current` and as the participant identifier for Federated Catalogue calls).
+
+Configure this claim on the `digital-contracting-service` client in Keycloak:
+
+1. In Keycloak, open **Clients** → **digital-contracting-service** → **Client scopes** → **digital-contracting-service-dedicated**
+2. Click **Configure a new mapper**, select **Hardcoded claim**:
+   - **Mapper type**: `Hardcoded claim`
+   - **Name**: `participant-id`
+   - **Token Claim Name**: `participant-id`
+   - **Claim value**: your participant DID, e.g. `did:web:<dcs-domain>:facis:participant:<participant-uuid>`
+   - **Claim JSON Type**: `String`
+3. Enable:
+   - **Add to ID token**: `On`
+   - **Add to access token**: `On`
+4. Click **Save**
 
 ### Step 8: Deploy DCS image in the cluster
 
@@ -556,6 +575,11 @@ Once all prerequisites are in place, you can deploy the Digital Contracting Serv
   - Default: empty
   - Example: `/api` or `/gateway/dcs`
   - Used e.g. by backend cookie path construction: `<API_PATH_PREFIX>/auth/refresh`
+
+- **`FEDERATED_CATALOGUE_API_URL`** - Base URL of the Federated Catalogue API used by the Template Catalogue integration
+  - Default: empty
+  - Must be reachable from the backend pods
+  - If unset, calls to the Federated Catalogue endpoints will fail
 
 **Example:**
 ```bash

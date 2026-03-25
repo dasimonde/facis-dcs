@@ -13,6 +13,7 @@ usage() {
   echo "  OIDC_REDIRECT_URI - Redirect URI for OIDC flow (default: http://localhost:8991)"
   echo "  OIDC_LOGOUT_REDIRECT_URI - Logout redirect URI (default: same as frontend URL)"
   echo "  API_PATH_PREFIX - API path prefix forwarded by reverse proxy (default: empty)"
+  echo "  FEDERATED_CATALOGUE_API_URL - Federated Catalogue API base URL (default: empty)"
   exit 1
 }
 
@@ -28,6 +29,7 @@ OIDC_CLIENT_ID="$7"
 OIDC_REDIRECT_URI="${OIDC_REDIRECT_URI:-http://localhost:8991}"
 OIDC_LOGOUT_REDIRECT_URI="${OIDC_LOGOUT_REDIRECT_URI:-}"
 API_PATH_PREFIX="${API_PATH_PREFIX:-}"
+FEDERATED_CATALOGUE_API_URL="${FEDERATED_CATALOGUE_API_URL:-}"
 
 # If OIDC_LOGOUT_REDIRECT_URI is not set, derive it from DOMAIN and PATH
 if [[ -z "$OIDC_LOGOUT_REDIRECT_URI" ]]; then
@@ -78,6 +80,7 @@ log "  - Client ID: $OIDC_CLIENT_ID"
 log "  - Redirect URI: $OIDC_REDIRECT_URI"
 log "  - Logout Redirect URI: $OIDC_LOGOUT_REDIRECT_URI"
 log "  - API Path Prefix: ${API_PATH_PREFIX:-<empty>}"
+log "  - Federated Catalogue API URL: ${FEDERATED_CATALOGUE_API_URL:-<empty>}"
 
 if [[ ! -f "$KUBECONFIG" ]]; then
   log "❌ Kubeconfig file not found: $KUBECONFIG"
@@ -173,6 +176,16 @@ hostAliases:
   - ip: "${TRAEFIK_CLUSTER_IP}"
     hostnames:
       - "${KEYCLOAK_HOSTNAME}"
+EOF
+fi
+
+# Add Federated Catalogue API URL override if set.
+if [[ -n "$FEDERATED_CATALOGUE_API_URL" ]]; then
+  log "ℹ️ Setting Federated Catalogue API URL override"
+  cat >> "$TMP_VALUES" <<EOF
+
+federatedCatalogue:
+  apiURL: "${FEDERATED_CATALOGUE_API_URL}"
 EOF
 fi
 
