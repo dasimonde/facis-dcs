@@ -82,6 +82,7 @@ var TemplateCatalogueRetrieveByIdResponse = Type("TemplateCatalogueRetrieveByIdR
 var TemplateCatalogueAddress = Type("TemplateCatalogueAddress", func() {
 	Description("Address information")
 
+	Attribute("country", String, "Country")
 	Attribute("street_address", String, "Street address")
 	Attribute("postal_code", String, "Postal code")
 	Attribute("locality", String, "Locality")
@@ -94,7 +95,6 @@ var TemplateCatalogueHeadquarterAddress = Type("TemplateCatalogueHeadquarterAddr
 	Attribute("street_address", String, "Headquarter street address")
 	Attribute("postal_code", String, "Headquarter postal code")
 	Attribute("locality", String, "Headquarter locality")
-	Attribute("legal_address", TemplateCatalogueAddress, "Legal address")
 })
 
 var TemplateCatalogueCreateParticipantRequest = Type("TemplateCatalogueCreateParticipantRequest", func() {
@@ -107,9 +107,10 @@ var TemplateCatalogueCreateParticipantRequest = Type("TemplateCatalogueCreatePar
 	Attribute("lei_code", String, "LEI code")
 	Attribute("ethereum_address", String, "Ethereum address")
 	Attribute("headquarter_address", TemplateCatalogueHeadquarterAddress, "Headquarter address")
+	Attribute("legal_address", TemplateCatalogueAddress, "Legal address")
 	Attribute("terms_and_conditions", String, "Terms and conditions")
 
-	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "terms_and_conditions")
+	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "legal_address", "terms_and_conditions")
 })
 
 var TemplateCatalogueCreateParticipantResponse = Type("TemplateCatalogueCreateParticipantResponse", func() {
@@ -152,9 +153,10 @@ var TemplateCatalogueGetCurrentParticipantResponse = Type("TemplateCatalogueGetC
 	Attribute("lei_code", String, "LEI code")
 	Attribute("ethereum_address", String, "Ethereum address")
 	Attribute("headquarter_address", TemplateCatalogueHeadquarterAddress, "Headquarter address")
+	Attribute("legal_address", TemplateCatalogueAddress, "Legal address")
 	Attribute("terms_and_conditions", String, "Terms and conditions")
 
-	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "terms_and_conditions")
+	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "legal_address", "terms_and_conditions")
 })
 
 var TemplateCatalogueGetCurrentServiceOfferingRequest = Type("TemplateCatalogueGetCurrentServiceOfferingRequest", func() {
@@ -172,27 +174,27 @@ var TemplateCatalogueGetCurrentServiceOfferingResponse = Type("TemplateCatalogue
 })
 
 var TemplateCatalogueUpdateParticipantRequest = Type("TemplateCatalogueUpdateParticipantRequest", func() {
-	Description("Update participant request")
+	Description("Update current participant request")
 
 	Token("token", String, "JWT token")
 
-	Attribute("sdHash", String, "Self-description hash")
 	Attribute("legal_name", String, "Legal name")
 	Attribute("registration_number", String, "Registration number")
 	Attribute("lei_code", String, "LEI code")
 	Attribute("ethereum_address", String, "Ethereum address")
 	Attribute("headquarter_address", TemplateCatalogueHeadquarterAddress, "Headquarter address")
+	Attribute("legal_address", TemplateCatalogueAddress, "Legal address")
 	Attribute("terms_and_conditions", String, "Terms and conditions")
 
-	Required("sdHash", "legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "terms_and_conditions")
+	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "legal_address", "terms_and_conditions")
 })
 
 var TemplateCatalogueUpdateParticipantResponse = Type("TemplateCatalogueUpdateParticipantResponse", func() {
 	Description("Update participant response")
 
-	Attribute("sdHash", String, "Self-description hash")
+	Attribute("id", String, "Participant id")
 
-	Required("sdHash")
+	Required("id")
 })
 
 var TemplateCatalogueUpdateServiceOfferingRequest = Type("TemplateCatalogueUpdateServiceOfferingRequest", func() {
@@ -358,11 +360,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Result(TemplateCatalogueGetCurrentParticipantResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			GET("/catalogue/participant/current")
 			Response(StatusOK)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
@@ -387,9 +391,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		})
 	})
 
-	// PUT /catalogue/participant/update/{sdHash}
+	// PUT /catalogue/participant/update
 	Method("update_participant", func() {
-		Description("Update participant in XFSC Catalogue.")
+		Description("Update current participant in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
@@ -400,12 +404,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Result(TemplateCatalogueUpdateParticipantResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
-			PUT("/catalogue/participant/update/{sdHash}")
-			Param("sdHash")
+			PUT("/catalogue/participant/update")
 			Response(StatusOK)
+			Response("not_found", StatusNotFound)
 		})
 	})
 

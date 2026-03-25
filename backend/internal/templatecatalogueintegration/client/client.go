@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 
 	"fmt"
 	"io"
@@ -19,6 +20,18 @@ type Response struct {
 	Headers    http.Header
 }
 
+// QueryResults matches the JSON body returned by FC /query.
+type QueryResults struct {
+	TotalCount int                      `json:"totalCount"`
+	Items      []map[string]interface{} `json:"items"`
+}
+
+// QueryRequest is the JSON payload sent to FC /query.
+type QueryRequest struct {
+	Statement  string            `json:"statement"`
+	Parameters map[string]string `json:"parameters"`
+}
+
 // FederatedCatalogueClient handles outbound requests to Federated Catalogue.
 type FederatedCatalogueClient struct {
 	baseURL    string
@@ -26,6 +39,7 @@ type FederatedCatalogueClient struct {
 }
 
 const ParticipantsEndpointPath = "/participants"
+const QueryEndpointPath = "/query"
 
 // NewFederatedCatalogueClient creates a Federated Catalogue client.
 func NewFederatedCatalogueClient(apiURL string) *FederatedCatalogueClient {
@@ -45,6 +59,35 @@ func (c *FederatedCatalogueClient) BaseURL() string {
 // Post sends a POST request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Post(ctx context.Context, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
 	return c.doRequest(ctx, http.MethodPost, path, bearerToken, query, body)
+}
+
+// Query sends an FC /query request and decodes the JSON response.
+func (c *FederatedCatalogueClient) Query(ctx context.Context, bearerToken string, req QueryRequest) (*QueryResults, error) {
+	bodyBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal /query request failed: %w", err)
+	}
+
+	resp, err := c.Post(ctx, QueryEndpointPath, bearerToken, nil, bodyBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	var results QueryResults
+	if err := json.Unmarshal(resp.Body, &results); err != nil {
+		return nil, fmt.Errorf("unmarshal /query response failed: %w", err)
+	}
+	return &results, nil
+}
+
+// Put sends a PUT request to Federated Catalogue.
+func (c *FederatedCatalogueClient) Put(ctx context.Context, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
+	return c.doRequest(ctx, http.MethodPut, path, bearerToken, query, body)
+}
+
+// Get sends a GET request to Federated Catalogue.
+func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, bearerToken string, query url.Values) (*Response, error) {
+	return c.doRequest(ctx, http.MethodGet, path, bearerToken, query, nil)
 }
 
 // Delete sends a DELETE request to Federated Catalogue.
@@ -97,23 +140,4 @@ func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string,
 func normalizeBaseURL(v string) string {
 	trimmed := strings.TrimSpace(v)
 	return strings.TrimRight(trimmed, "/")
-}
-
-// TODO: replace with the actual verification method
-// BuildProof returns a proof template.
-func (c *FederatedCatalogueClient) BuildProof(document map[string]interface{}, proofPurpose string) map[string]interface{} {
-	now := time.Now().UTC()
-
-	proof := map[string]interface{}{
-		"type":               "JsonWebSignature2020",
-		"created":            now.Format(time.RFC3339),
-		"proofPurpose":       proofPurpose,
-		"verificationMethod": "did:web:argo.asd-stack.eu#key-1",
-		"jws":                "eyJhbGciOiJSUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..kTCYt5XsITJX1CxPCT8yAV-TVIw5WEuts01mqpQy7UJiN5mgREEMGlv50aqzpqh4Qq_PbChOMqsLfRoPsnsgxD-WUcX16dUOqV0G_zS245-kronKb78cPktb3rk-BuQy72IFLN25DYuNzVBAh4vGHSrQyHUGlcTwLtjPAnKb78",
-	}
-	if proofPurpose == "authentication" {
-		proof["challenge"] = "1f44d55f-f161-4938-a659-f8026467f126"
-		proof["domain"] = "4jt78h47fh47"
-	}
-	return proof
 }

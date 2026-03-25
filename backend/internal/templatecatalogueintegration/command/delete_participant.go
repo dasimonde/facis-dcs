@@ -39,6 +39,9 @@ func (h *DeleteParticipant) Handle(cmd DeleteParticipantCmd) (*DeleteParticipant
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("delete participant failed with status %d", resp.StatusCode)
 	}
 

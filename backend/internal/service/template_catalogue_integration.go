@@ -7,6 +7,9 @@ import (
 	"digital-contracting-service/internal/middleware"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templatecatalogueintegration/command"
+	selfdescription "digital-contracting-service/internal/templatecatalogueintegration/selfdescription"
+	"errors"
+	"fmt"
 
 	"goa.design/clue/log"
 )
@@ -46,6 +49,7 @@ func (s *templateCatalogueIntegrationsrvc) CreateParticipant(ctx context.Context
 	headquarterStreet := ""
 	headquarterPostal := ""
 	headquarterLocality := ""
+	legalCountry := ""
 	legalStreet := ""
 	legalPostal := ""
 	legalLocality := ""
@@ -54,30 +58,37 @@ func (s *templateCatalogueIntegrationsrvc) CreateParticipant(ctx context.Context
 		headquarterStreet = derefString(req.HeadquarterAddress.StreetAddress)
 		headquarterPostal = derefString(req.HeadquarterAddress.PostalCode)
 		headquarterLocality = derefString(req.HeadquarterAddress.Locality)
-		if req.HeadquarterAddress.LegalAddress != nil {
-			legalStreet = derefString(req.HeadquarterAddress.LegalAddress.StreetAddress)
-			legalPostal = derefString(req.HeadquarterAddress.LegalAddress.PostalCode)
-			legalLocality = derefString(req.HeadquarterAddress.LegalAddress.Locality)
-		}
+	}
+	if req.LegalAddress != nil {
+		legalCountry = derefString(req.LegalAddress.Country)
+		legalStreet = derefString(req.LegalAddress.StreetAddress)
+		legalPostal = derefString(req.LegalAddress.PostalCode)
+		legalLocality = derefString(req.LegalAddress.Locality)
 	}
 
 	result, err := handler.Handle(command.CreateParticipantCmd{
-		Token:               *req.Token,
-		ParticipantID:       middleware.GetParticipantID(ctx),
-		LegalName:           req.LegalName,
-		RegistrationNumber:  req.RegistrationNumber,
-		LeiCode:             req.LeiCode,
-		EthereumAddress:     req.EthereumAddress,
-		HeadquarterCountry:  headquarterCountry,
-		HeadquarterStreet:   headquarterStreet,
-		HeadquarterPostal:   headquarterPostal,
-		HeadquarterLocality: headquarterLocality,
-		LegalStreet:         legalStreet,
-		LegalPostal:         legalPostal,
-		LegalLocality:       legalLocality,
-		TermsAndConditions:  req.TermsAndConditions,
+		Token: *req.Token,
+		Participant: selfdescription.ParticipantSdInput{
+			ParticipantID:             middleware.GetParticipantID(ctx),
+			LegalName:                 req.LegalName,
+			RegistrationNumber:        req.RegistrationNumber,
+			LeiCode:                   req.LeiCode,
+			EthereumAddress:           req.EthereumAddress,
+			HeadquarterCountry:        headquarterCountry,
+			HeadquarterStreetAddress:  headquarterStreet,
+			HeadquarterPostalCode:     headquarterPostal,
+			HeadquarterLocality:       headquarterLocality,
+			LegalAddressCountry:       legalCountry,
+			LegalAddressStreetAddress: legalStreet,
+			LegalAddressPostalCode:    legalPostal,
+			LegalAddressLocality:      legalLocality,
+			TermsAndConditions:        req.TermsAndConditions,
+		},
 	})
 	if err != nil {
+		if errors.Is(err, command.ErrParticipantAlreadyExists) {
+			return nil, templatecatalogueintegration.MakeBadRequest(err)
+		}
 		return nil, templatecatalogueintegration.MakeInternalError(err)
 	}
 
@@ -94,21 +105,40 @@ func (s *templateCatalogueIntegrationsrvc) CreateServiceOffering(ctx context.Con
 }
 
 func (s *templateCatalogueIntegrationsrvc) GetCurrentParticipant(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueGetCurrentParticipantRequest) (res *templatecatalogueintegration.TemplateCatalogueGetCurrentParticipantResponse, err error) {
-	participantID := middleware.GetParticipantID(ctx)
-	if participantID == "" {
-		log.Printf(ctx, "templateCatalogueIntegration.getCurrentParticipant participant_id_missing")
-		return nil, nil
+	handler := command.GetCurrentParticipant{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
 	}
-	log.Printf(ctx, "templateCatalogueIntegration.getCurrentParticipant participant_id=%s", participantID)
+
+	result, err := handler.Handle(command.GetCurrentParticipantCmd{
+		ParticipantID: middleware.GetParticipantID(ctx),
+		Token:         *req.Token,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("participant not found"))
+	}
+
 	return &templatecatalogueintegration.TemplateCatalogueGetCurrentParticipantResponse{
-		LegalName:          "",
-		RegistrationNumber: "",
-		LeiCode:            "",
-		EthereumAddress:    "",
+		LegalName:          result.LegalName,
+		RegistrationNumber: result.RegistrationNumber,
+		LeiCode:            result.LeiCode,
+		EthereumAddress:    result.EthereumAddress,
 		HeadquarterAddress: &templatecatalogueintegration.TemplateCatalogueHeadquarterAddress{
-			LegalAddress: &templatecatalogueintegration.TemplateCatalogueAddress{},
+			Country:       &result.HeadquarterCountry,
+			StreetAddress: &result.HeadquarterStreet,
+			PostalCode:    &result.HeadquarterPostal,
+			Locality:      &result.HeadquarterLocality,
 		},
-		TermsAndConditions: "",
+		LegalAddress: &templatecatalogueintegration.TemplateCatalogueAddress{
+			Country:       &result.LegalCountry,
+			StreetAddress: &result.LegalStreet,
+			PostalCode:    &result.LegalPostal,
+			Locality:      &result.LegalLocality,
+		},
+		TermsAndConditions: result.TermsAndConditions,
 	}, nil
 }
 
@@ -120,10 +150,60 @@ func (s *templateCatalogueIntegrationsrvc) GetCurrentServiceOffering(ctx context
 }
 
 func (s *templateCatalogueIntegrationsrvc) UpdateParticipant(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueUpdateParticipantRequest) (res *templatecatalogueintegration.TemplateCatalogueUpdateParticipantResponse, err error) {
-	sdHash := req.SdHash
-	log.Printf(ctx, "templateCatalogueIntegration.updateParticipant sdHash=%s", sdHash)
+	handler := command.UpdateParticipant{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	headquarterCountry := ""
+	headquarterStreet := ""
+	headquarterPostal := ""
+	headquarterLocality := ""
+	legalCountry := ""
+	legalStreet := ""
+	legalPostal := ""
+	legalLocality := ""
+	if req.HeadquarterAddress != nil {
+		headquarterCountry = derefString(req.HeadquarterAddress.Country)
+		headquarterStreet = derefString(req.HeadquarterAddress.StreetAddress)
+		headquarterPostal = derefString(req.HeadquarterAddress.PostalCode)
+		headquarterLocality = derefString(req.HeadquarterAddress.Locality)
+	}
+	if req.LegalAddress != nil {
+		legalCountry = derefString(req.LegalAddress.Country)
+		legalStreet = derefString(req.LegalAddress.StreetAddress)
+		legalPostal = derefString(req.LegalAddress.PostalCode)
+		legalLocality = derefString(req.LegalAddress.Locality)
+	}
+
+	result, err := handler.Handle(command.UpdateParticipantCmd{
+		Token: *req.Token,
+		Participant: selfdescription.ParticipantSdInput{
+			ParticipantID:             middleware.GetParticipantID(ctx),
+			LegalName:                 req.LegalName,
+			RegistrationNumber:        req.RegistrationNumber,
+			LeiCode:                   req.LeiCode,
+			EthereumAddress:           req.EthereumAddress,
+			HeadquarterCountry:        headquarterCountry,
+			HeadquarterStreetAddress:  headquarterStreet,
+			HeadquarterPostalCode:     headquarterPostal,
+			HeadquarterLocality:       headquarterLocality,
+			LegalAddressCountry:       legalCountry,
+			LegalAddressStreetAddress: legalStreet,
+			LegalAddressPostalCode:    legalPostal,
+			LegalAddressLocality:      legalLocality,
+			TermsAndConditions:        req.TermsAndConditions,
+		},
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("participant not found"))
+	}
+
 	return &templatecatalogueintegration.TemplateCatalogueUpdateParticipantResponse{
-		SdHash: sdHash,
+		ID: result.ID,
 	}, nil
 }
 
@@ -149,6 +229,11 @@ func (s *templateCatalogueIntegrationsrvc) DeleteParticipant(ctx context.Context
 	})
 	if err != nil {
 		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return &templatecatalogueintegration.TemplateCatalogueDeleteParticipantResponse{
+			ID: middleware.GetParticipantID(ctx),
+		}, nil
 	}
 
 	return &templatecatalogueintegration.TemplateCatalogueDeleteParticipantResponse{
