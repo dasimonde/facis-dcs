@@ -98,9 +98,28 @@ func (s *templateCatalogueIntegrationsrvc) CreateParticipant(ctx context.Context
 }
 
 func (s *templateCatalogueIntegrationsrvc) CreateServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueCreateServiceOfferingRequest) (res *templatecatalogueintegration.TemplateCatalogueCreateServiceOfferingResponse, err error) {
-	log.Printf(ctx, "templateCatalogueIntegration.createServiceOffering")
+	handler := command.CreateServiceOffering{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.CreateServiceOfferingCmd{
+		Token:              *req.Token,
+		ParticipantID:      middleware.GetParticipantID(ctx),
+		Description:        req.Description,
+		Keywords:           req.Keywords,
+		EndPointURL:        req.EndPointURL,
+		TermsAndConditions: req.TermsAndConditions,
+	})
+	if err != nil {
+		if errors.Is(err, command.ErrServiceOfferingAlreadyExists) {
+			return nil, templatecatalogueintegration.MakeBadRequest(err)
+		}
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+
 	return &templatecatalogueintegration.TemplateCatalogueCreateServiceOfferingResponse{
-		SdHash: "",
+		ID: result.ID,
 	}, nil
 }
 
@@ -208,10 +227,10 @@ func (s *templateCatalogueIntegrationsrvc) UpdateParticipant(ctx context.Context
 }
 
 func (s *templateCatalogueIntegrationsrvc) UpdateServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueUpdateServiceOfferingRequest) (res *templatecatalogueintegration.TemplateCatalogueUpdateServiceOfferingResponse, err error) {
-	sdHash := req.SdHash
-	log.Printf(ctx, "templateCatalogueIntegration.updateServiceOffering sdHash=%s", sdHash)
+	endPointURL := req.EndPointURL
+	log.Printf(ctx, "templateCatalogueIntegration.updateServiceOffering endPointURL=%s", endPointURL)
 	return &templatecatalogueintegration.TemplateCatalogueUpdateServiceOfferingResponse{
-		SdHash: sdHash,
+		ID: "",
 	}, nil
 }
 
@@ -241,11 +260,10 @@ func (s *templateCatalogueIntegrationsrvc) DeleteParticipant(ctx context.Context
 	}, nil
 }
 
-func (s *templateCatalogueIntegrationsrvc) DeleteServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueDeleteRequest) (res *templatecatalogueintegration.TemplateCatalogueDeleteResponse, err error) {
-	sdHash := req.SdHash
-	log.Printf(ctx, "templateCatalogueIntegration.deleteServiceOffering sdHash=%s", sdHash)
-	return &templatecatalogueintegration.TemplateCatalogueDeleteResponse{
-		SdHash: sdHash,
+func (s *templateCatalogueIntegrationsrvc) DeleteServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueDeleteServiceOfferingRequest) (res *templatecatalogueintegration.TemplateCatalogueDeleteServiceOfferingResponse, err error) {
+	log.Printf(ctx, "templateCatalogueIntegration.deleteServiceOffering")
+	return &templatecatalogueintegration.TemplateCatalogueDeleteServiceOfferingResponse{
+		ID: "",
 	}, nil
 }
 

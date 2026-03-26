@@ -39,6 +39,7 @@ type FederatedCatalogueClient struct {
 }
 
 const ParticipantsEndpointPath = "/participants"
+const SelfDescriptionsEndpointPath = "/self-descriptions"
 const QueryEndpointPath = "/query"
 
 // NewFederatedCatalogueClient creates a Federated Catalogue client.

@@ -128,15 +128,21 @@ var TemplateCatalogueCreateServiceOfferingRequest = Type("TemplateCatalogueCreat
 
 	Attribute("end_point_url", String, "Service offering endpoint URL")
 
-	Required("end_point_url")
+	Attribute("terms_and_conditions", String, "Terms and conditions")
+
+	Attribute("keywords", ArrayOf(String), "Service offering keywords")
+
+	Attribute("description", String, "Service offering description")
+
+	Required("end_point_url", "terms_and_conditions", "keywords", "description")
 })
 
 var TemplateCatalogueCreateServiceOfferingResponse = Type("TemplateCatalogueCreateServiceOfferingResponse", func() {
 	Description("Create service offering response")
 
-	Attribute("sdHash", String, "Self-description hash")
+	Attribute("id", String, "Service offering id")
 
-	Required("sdHash")
+	Required("id")
 })
 
 var TemplateCatalogueGetCurrentParticipantRequest = Type("TemplateCatalogueGetCurrentParticipantRequest", func() {
@@ -202,36 +208,37 @@ var TemplateCatalogueUpdateServiceOfferingRequest = Type("TemplateCatalogueUpdat
 
 	Token("token", String, "JWT token")
 
-	Attribute("sdHash", String, "Self-description hash")
 	Attribute("end_point_url", String, "Service offering endpoint URL")
 
-	Required("sdHash", "end_point_url")
+	Attribute("terms_and_conditions", String, "Terms and conditions")
+
+	Attribute("keywords", ArrayOf(String), "Service offering keywords")
+
+	Attribute("description", String, "Service offering description")
+
+	Required("end_point_url", "terms_and_conditions", "keywords", "description")
 })
 
 var TemplateCatalogueUpdateServiceOfferingResponse = Type("TemplateCatalogueUpdateServiceOfferingResponse", func() {
 	Description("Update service offering response")
 
-	Attribute("sdHash", String, "Self-description hash")
+	Attribute("id", String, "Service offering id")
 
-	Required("sdHash")
+	Required("id")
 })
 
-var TemplateCatalogueDeleteRequest = Type("TemplateCatalogueDeleteRequest", func() {
-	Description("Delete request by sdHash")
+var TemplateCatalogueDeleteServiceOfferingRequest = Type("TemplateCatalogueDeleteServiceOfferingRequest", func() {
+	Description("Delete current service offering request")
 
 	Token("token", String, "JWT token")
-
-	Attribute("sdHash", String, "Self-description hash")
-
-	Required("sdHash")
 })
 
-var TemplateCatalogueDeleteResponse = Type("TemplateCatalogueDeleteResponse", func() {
-	Description("Delete response")
+var TemplateCatalogueDeleteServiceOfferingResponse = Type("TemplateCatalogueDeleteServiceOfferingResponse", func() {
+	Description("Delete service offering response")
 
-	Attribute("sdHash", String, "Self-description hash")
+	Attribute("id", String, "Service offering id")
 
-	Required("sdHash")
+	Required("id")
 })
 
 var TemplateCatalogueDeleteParticipantRequest = Type("TemplateCatalogueDeleteParticipantRequest", func() {
@@ -383,11 +390,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Result(TemplateCatalogueGetCurrentServiceOfferingResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			GET("/catalogue/service-offering/current")
 			Response(StatusOK)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
@@ -414,9 +423,9 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		})
 	})
 
-	// PUT /catalogue/service-offering/update/{sdHash}
+	// PUT /catalogue/service-offering/update
 	Method("update_service_offering", func() {
-		Description("Update service offering in XFSC Catalogue.")
+		Description("Update current service offering in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
@@ -427,12 +436,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Result(TemplateCatalogueUpdateServiceOfferingResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
-			PUT("/catalogue/service-offering/update/{sdHash}")
-			Param("sdHash")
+			PUT("/catalogue/service-offering/update")
 			Response(StatusOK)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
@@ -457,25 +467,26 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		})
 	})
 
-	// DELETE /catalogue/service-offering/delete/{sdHash}
+	// DELETE /catalogue/service-offering/delete
 	Method("delete_service_offering", func() {
-		Description("Delete service offering in XFSC Catalogue.")
+		Description("Delete current service offering in XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
 			Scope("System Administrator")
 		})
 
-		Payload(TemplateCatalogueDeleteRequest)
-		Result(TemplateCatalogueDeleteResponse)
+		Payload(TemplateCatalogueDeleteServiceOfferingRequest)
+		Result(TemplateCatalogueDeleteServiceOfferingResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
-			DELETE("/catalogue/service-offering/delete/{sdHash}")
-			Param("sdHash")
+			DELETE("/catalogue/service-offering/delete")
 			Response(StatusOK)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
