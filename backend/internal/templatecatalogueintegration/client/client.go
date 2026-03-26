@@ -32,6 +32,26 @@ type QueryRequest struct {
 	Parameters map[string]string `json:"parameters"`
 }
 
+type SelfDescriptionMeta struct {
+	SdHash string `json:"sdHash"`
+	ID     string `json:"id"`
+}
+
+type SelfDescriptionResult struct {
+	Meta    SelfDescriptionMeta `json:"meta"`
+	Content *string             `json:"content"`
+}
+
+type GetSelfDescriptionsResponse struct {
+	TotalCount int                     `json:"totalCount"`
+	Items      []SelfDescriptionResult `json:"items"`
+}
+
+type GetSelfDescriptionsRequest struct {
+	IDs         []string
+	WithContent bool
+}
+
 // FederatedCatalogueClient handles outbound requests to Federated Catalogue.
 type FederatedCatalogueClient struct {
 	baseURL    string
@@ -79,6 +99,32 @@ func (c *FederatedCatalogueClient) Query(ctx context.Context, bearerToken string
 		return nil, fmt.Errorf("unmarshal /query response failed: %w", err)
 	}
 	return &results, nil
+}
+
+func (c *FederatedCatalogueClient) GetSelfDescriptions(ctx context.Context, bearerToken string, req GetSelfDescriptionsRequest) (*GetSelfDescriptionsResponse, error) {
+	query := url.Values{}
+	if len(req.IDs) > 0 {
+		query.Set("ids", strings.Join(req.IDs, ","))
+	}
+	// withContent default is false in FC API
+	if req.WithContent {
+		query.Set("withContent", "true")
+	}
+	query.Set("withMeta", "true")
+
+	resp, err := c.Get(ctx, SelfDescriptionsEndpointPath, bearerToken, query)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("get self-descriptions failed with status %d", resp.StatusCode)
+	}
+
+	var out GetSelfDescriptionsResponse
+	if err := json.Unmarshal(resp.Body, &out); err != nil {
+		return nil, fmt.Errorf("unmarshal self-descriptions response failed: %w", err)
+	}
+	return &out, nil
 }
 
 // Put sends a PUT request to Federated Catalogue.

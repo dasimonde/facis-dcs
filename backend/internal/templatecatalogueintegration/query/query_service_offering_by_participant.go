@@ -14,7 +14,7 @@ type GetServiceOfferingByParticipantQry struct {
 }
 
 type ServiceOfferingByParticipantResponse struct {
-	SdHash             string
+	URI                string
 	Keywords           []string
 	Description        string
 	EndPointURL        string
@@ -32,7 +32,7 @@ MATCH (so:ServiceOffering)-[:offeredBy]->(p:Participant)
 WHERE p.uri = $participantId
 OPTIONAL MATCH (so)-[:termsAndConditions]->(tc)
 RETURN {
-  sd_hash: so.sdHash,
+  uri: so.uri,
   end_point_url: so.endPointURL,
   terms_and_conditions: tc.content,
   keywords: so.keyword,
@@ -77,7 +77,7 @@ func (h *GetServiceOfferingByParticipantHandler) Handle(qry GetServiceOfferingBy
 	}
 
 	return &ServiceOfferingByParticipantResponse{
-		SdHash:             derefString(offering, "sd_hash"),
+		URI:                derefString(offering, "uri"),
 		Keywords:           derefStringSlice(offering, "keywords"),
 		Description:        derefString(offering, "description"),
 		EndPointURL:        derefString(offering, "end_point_url"),

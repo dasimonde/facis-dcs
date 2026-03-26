@@ -244,10 +244,28 @@ func (s *templateCatalogueIntegrationsrvc) UpdateParticipant(ctx context.Context
 }
 
 func (s *templateCatalogueIntegrationsrvc) UpdateServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueUpdateServiceOfferingRequest) (res *templatecatalogueintegration.TemplateCatalogueUpdateServiceOfferingResponse, err error) {
-	endPointURL := req.EndPointURL
-	log.Printf(ctx, "templateCatalogueIntegration.updateServiceOffering endPointURL=%s", endPointURL)
+	handler := command.UpdateServiceOffering{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.UpdateServiceOfferingCmd{
+		Token:              *req.Token,
+		ParticipantID:      middleware.GetParticipantID(ctx),
+		Keywords:           req.Keywords,
+		Description:        req.Description,
+		EndPointURL:        req.EndPointURL,
+		TermsAndConditions: req.TermsAndConditions,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("service offering not found"))
+	}
+
 	return &templatecatalogueintegration.TemplateCatalogueUpdateServiceOfferingResponse{
-		ID: "",
+		ID: result.ID,
 	}, nil
 }
 
@@ -267,9 +285,7 @@ func (s *templateCatalogueIntegrationsrvc) DeleteParticipant(ctx context.Context
 		return nil, templatecatalogueintegration.MakeInternalError(err)
 	}
 	if result == nil {
-		return &templatecatalogueintegration.TemplateCatalogueDeleteParticipantResponse{
-			ID: middleware.GetParticipantID(ctx),
-		}, nil
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("participant not found"))
 	}
 
 	return &templatecatalogueintegration.TemplateCatalogueDeleteParticipantResponse{
@@ -278,9 +294,24 @@ func (s *templateCatalogueIntegrationsrvc) DeleteParticipant(ctx context.Context
 }
 
 func (s *templateCatalogueIntegrationsrvc) DeleteServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueDeleteServiceOfferingRequest) (res *templatecatalogueintegration.TemplateCatalogueDeleteServiceOfferingResponse, err error) {
-	log.Printf(ctx, "templateCatalogueIntegration.deleteServiceOffering")
+	handler := command.DeleteServiceOffering{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.DeleteServiceOfferingCmd{
+		Token:         *req.Token,
+		ParticipantID: middleware.GetParticipantID(ctx),
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("service offering not found"))
+	}
+
 	return &templatecatalogueintegration.TemplateCatalogueDeleteServiceOfferingResponse{
-		ID: "",
+		ID: result.ID,
 	}, nil
 }
 
