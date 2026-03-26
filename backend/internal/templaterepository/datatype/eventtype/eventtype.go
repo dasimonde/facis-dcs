@@ -19,6 +19,7 @@ const (
 	Search       EventType = "SEARCH_CONTRACT_TEMPLATE"
 	Archive      EventType = "ARCHIVE_CONTRACT_TEMPLATE"
 	Register     EventType = "REGISTER_CONTRACT_TEMPLATE"
+	Audit        EventType = "AUDIT_CONTRACT_TEMPLATE"
 )
 
 var validStates = map[EventType]bool{
@@ -33,6 +34,7 @@ var validStates = map[EventType]bool{
 	Search:       true,
 	Archive:      true,
 	Register:     true,
+	Audit:        true,
 }
 
 func NewEventType(s string) (EventType, error) {

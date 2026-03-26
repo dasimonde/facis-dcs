@@ -256,3 +256,20 @@ func (e RegisterEvent) EventType() string {
 func (e RegisterEvent) GetDID() string {
 	return e.DID
 }
+
+// AuditEvt is emitted when template data is registered.
+type AuditEvt struct {
+	DID        string    `json:"did"`
+	AuditedBy  string    `json:"audited_by"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e AuditEvt) EventType() string {
+	return eventtype.Audit.String()
+}
+
+// GetDID implements the Event interface.
+func (e AuditEvt) GetDID() string {
+	return e.DID
+}

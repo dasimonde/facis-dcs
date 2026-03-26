@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"goa.design/clue/log"
 )
 
 // TemplateRepository service example implementation.
@@ -537,6 +536,22 @@ func (s *templateRepositorysrvc) Archive(ctx context.Context, req *templaterepos
 
 // retrieve audit history of template actions.
 func (s *templateRepositorysrvc) Audit(ctx context.Context, req *templaterepository.ContractTemplateAuditRequest) (res *templaterepository.ContractTemplateAuditResponse, err error) {
-	log.Printf(ctx, "templateRepository.audit")
-	return nil, nil
+
+	cmd := command.AuditCmd{
+		DID:       req.Did,
+		AuditedBy: middleware.GetUsername(ctx),
+	}
+	handler := command.Auditor{
+		Ctx:    ctx,
+		DB:     s.DB,
+		CTRepo: s.CTRepo,
+	}
+	err = handler.Handle(cmd)
+	if err != nil {
+		return nil, templaterepository.MakeInternalError(err)
+	}
+
+	return &templaterepository.ContractTemplateAuditResponse{
+		Did: req.Did,
+	}, nil
 }

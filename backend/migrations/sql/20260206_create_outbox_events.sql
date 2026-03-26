@@ -11,8 +11,6 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     event_data JSONB NOT NULL,
 
     did VARCHAR(255),
-    document_number VARCHAR(128),
-    version int,
 
     processed BOOLEAN DEFAULT FALSE,
     processed_at TIMESTAMP,
