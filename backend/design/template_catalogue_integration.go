@@ -174,9 +174,12 @@ var TemplateCatalogueGetCurrentServiceOfferingRequest = Type("TemplateCatalogueG
 var TemplateCatalogueGetCurrentServiceOfferingResponse = Type("TemplateCatalogueGetCurrentServiceOfferingResponse", func() {
 	Description("Current service offering response")
 
+	Attribute("keywords", ArrayOf(String), "Service offering keywords")
+	Attribute("description", String, "Service offering description")
 	Attribute("end_point_url", String, "Service offering endpoint URL")
+	Attribute("terms_and_conditions", String, "Terms and conditions")
 
-	Required("end_point_url")
+	Required("end_point_url", "terms_and_conditions", "keywords", "description")
 })
 
 var TemplateCatalogueUpdateParticipantRequest = Type("TemplateCatalogueUpdateParticipantRequest", func() {

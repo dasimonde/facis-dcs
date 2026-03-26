@@ -162,12 +162,29 @@ func (s *templateCatalogueIntegrationsrvc) GetCurrentParticipant(ctx context.Con
 }
 
 func (s *templateCatalogueIntegrationsrvc) GetCurrentServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueGetCurrentServiceOfferingRequest) (res *templatecatalogueintegration.TemplateCatalogueGetCurrentServiceOfferingResponse, err error) {
-	log.Printf(ctx, "templateCatalogueIntegration.getCurrentServiceOffering")
+	handler := command.GetCurrentServiceOffering{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.GetCurrentServiceOfferingCmd{
+		ParticipantID: middleware.GetParticipantID(ctx),
+		Token:         *req.Token,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("service offering not found"))
+	}
+
 	return &templatecatalogueintegration.TemplateCatalogueGetCurrentServiceOfferingResponse{
-		EndPointURL: "",
+		Keywords:           result.Keywords,
+		Description:        result.Description,
+		EndPointURL:        result.EndPointURL,
+		TermsAndConditions: result.TermsAndConditions,
 	}, nil
 }
-
 func (s *templateCatalogueIntegrationsrvc) UpdateParticipant(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueUpdateParticipantRequest) (res *templatecatalogueintegration.TemplateCatalogueUpdateParticipantResponse, err error) {
 	handler := command.UpdateParticipant{
 		Ctx:      ctx,
