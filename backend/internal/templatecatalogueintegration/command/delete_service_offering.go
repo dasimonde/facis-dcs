@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templatecatalogueintegration/query"
@@ -32,30 +33,18 @@ func (h *DeleteServiceOffering) Handle(cmd DeleteServiceOfferingCmd) (*DeleteSer
 	if cmd.ParticipantID == "" {
 		return nil, fmt.Errorf("participant id is empty")
 	}
-
-	// 1. Get the service offering by participant id
-	handler := query.GetServiceOfferingByParticipantHandler{
-		Ctx:      h.Ctx,
-		FCClient: h.FCClient,
-	}
-	serviceOffering, err := handler.Handle(query.GetServiceOfferingByParticipantQry{
-		ParticipantID: cmd.ParticipantID,
-		Token:         cmd.Token,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if serviceOffering == nil || serviceOffering.URI == "" {
-		return nil, nil
+	serviceOfferingID := strings.ReplaceAll(cmd.ParticipantID, "participant", "service-offering")
+	if serviceOfferingID == "" {
+		return nil, fmt.Errorf("service offering id is empty")
 	}
 
-	// 2. Get the self-description hash by service offering id
+	// 1. Get the self-description hash by service offering id
 	hashHandler := query.GetSelfDescriptionsMetaByIDsHandler{
 		Ctx:      h.Ctx,
 		FCClient: h.FCClient,
 	}
 	hashResult, err := hashHandler.Handle(query.GetSelfDescriptionsMetaByIDsQry{
-		IDs:   []string{serviceOffering.URI},
+		IDs:   []string{serviceOfferingID},
 		Token: cmd.Token,
 	})
 	if err != nil {
@@ -64,12 +53,12 @@ func (h *DeleteServiceOffering) Handle(cmd DeleteServiceOfferingCmd) (*DeleteSer
 	if hashResult == nil {
 		return nil, nil
 	}
-	sdHash := hashResult.SdHashByID[serviceOffering.URI]
+	sdHash := hashResult.SdHashByID[serviceOfferingID]
 	if sdHash == "" {
 		return nil, nil
 	}
 
-	// 3. Delete the service offering
+	// 2. Delete the service offering
 	path := client.SelfDescriptionsEndpointPath + "/" + url.PathEscape(sdHash)
 
 	resp, err := h.FCClient.Delete(h.Ctx, path, cmd.Token, nil)
@@ -84,6 +73,6 @@ func (h *DeleteServiceOffering) Handle(cmd DeleteServiceOfferingCmd) (*DeleteSer
 	}
 
 	return &DeleteServiceOfferingResult{
-		ID: serviceOffering.URI,
+		ID: serviceOfferingID,
 	}, nil
 }

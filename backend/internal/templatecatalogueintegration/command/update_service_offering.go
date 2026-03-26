@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
-	"digital-contracting-service/internal/templatecatalogueintegration/query"
 	"digital-contracting-service/internal/templatecatalogueintegration/selfdescription"
 )
 
@@ -50,25 +50,13 @@ func (h *UpdateServiceOffering) Handle(cmd UpdateServiceOfferingCmd) (*UpdateSer
 		return nil, fmt.Errorf("service offering description is empty")
 	}
 
-	// 1. Get the service offering by participant id
-	handler := query.GetServiceOfferingByParticipantHandler{
-		Ctx:      h.Ctx,
-		FCClient: h.FCClient,
-	}
-	serviceOffering, err := handler.Handle(query.GetServiceOfferingByParticipantQry{
-		ParticipantID: cmd.ParticipantID,
-		Token:         cmd.Token,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if serviceOffering == nil || serviceOffering.URI == "" {
-		return nil, nil
+	serviceOfferingID := strings.ReplaceAll(cmd.ParticipantID, "participant", "service-offering")
+	if serviceOfferingID == "" {
+		return nil, fmt.Errorf("service offering id is empty")
 	}
 
-	// 2. Update the service offering
 	jsonLD := selfdescription.BuildServiceOfferingSelfDescription(selfdescription.ServiceOfferingSdInput{
-		ServiceOfferingID:  serviceOffering.URI,
+		ServiceOfferingID:  serviceOfferingID,
 		ParticipantID:      cmd.ParticipantID,
 		EndPointURL:        cmd.EndPointURL,
 		TermsAndConditions: cmd.TermsAndConditions,
@@ -92,5 +80,5 @@ func (h *UpdateServiceOffering) Handle(cmd UpdateServiceOfferingCmd) (*UpdateSer
 		return nil, fmt.Errorf("update service offering failed with status %d", resp.StatusCode)
 	}
 
-	return &UpdateServiceOfferingResult{ID: serviceOffering.URI}, nil
+	return &UpdateServiceOfferingResult{ID: serviceOfferingID}, nil
 }
