@@ -60,7 +60,8 @@ type FederatedCatalogueClient struct {
 
 const ParticipantsEndpointPath = "/participants"
 const SelfDescriptionsEndpointPath = "/self-descriptions"
-const QueryEndpointPath = "/query"
+// Use distributed search query in the Federated Catalogue API
+const QueryEndpointPath = "/query/search"
 
 // NewFederatedCatalogueClient creates a Federated Catalogue client.
 func NewFederatedCatalogueClient(apiURL string) *FederatedCatalogueClient {
