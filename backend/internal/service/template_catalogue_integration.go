@@ -10,8 +10,6 @@ import (
 	selfdescription "digital-contracting-service/internal/templatecatalogueintegration/selfdescription"
 	"errors"
 	"fmt"
-
-	"goa.design/clue/log"
 )
 
 type templateCatalogueIntegrationsrvc struct {
@@ -23,17 +21,41 @@ func NewTemplateCatalogueIntegration(jwtAuth auth.JWTAuthenticator, fcClient *fc
 	return &templateCatalogueIntegrationsrvc{JWTAuthenticator: jwtAuth, fcClient: fcClient}
 }
 
-func (s *templateCatalogueIntegrationsrvc) Retrieve(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueRetrieveRequest) (res *templatecatalogueintegration.TemplateCatalogueRetrieveResponse, err error) {
-	log.Printf(ctx, "templateCatalogueIntegration.retrieve")
-	return &templatecatalogueintegration.TemplateCatalogueRetrieveResponse{}, nil
+func (s *templateCatalogueIntegrationsrvc) RetrieveTemplate(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueRetrieveRequest) (res *templatecatalogueintegration.TemplateCatalogueRetrieveResponse, err error) {
+	handler := command.RetrieveTemplates{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.RetrieveTemplatesCmd{
+		Token:  *req.Token,
+		Offset: req.Offset,
+		Limit:  req.Limit,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	return result, nil
 }
 
-func (s *templateCatalogueIntegrationsrvc) RetrieveByID(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueRetrieveByIDRequest) (res *templatecatalogueintegration.TemplateCatalogueRetrieveByIDResponse, err error) {
-	did := req.Did
-	log.Printf(ctx, "templateCatalogueIntegration.retrieveByID did=%s", did)
-	return &templatecatalogueintegration.TemplateCatalogueRetrieveByIDResponse{
-		Did: did,
-	}, nil
+func (s *templateCatalogueIntegrationsrvc) RetrieveTemplateByID(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueRetrieveByIDRequest) (res *templatecatalogueintegration.TemplateCatalogueRetrieveByIDResponse, err error) {
+	handler := command.RetrieveTemplateByID{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.RetrieveTemplateByIDCmd{
+		Token: *req.Token,
+		DID:   req.Did,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("template not found"))
+	}
+
+	return result, nil
 }
 
 // Create a new participant in the Federated Catalogue.

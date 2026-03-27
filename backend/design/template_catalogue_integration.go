@@ -71,12 +71,30 @@ var TemplateCatalogueRetrieveByIdResponse = Type("TemplateCatalogueRetrieveByIdR
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
-	Attribute("participant_id", String, "Participant id")
+	// Optional participant summary
+	Attribute("participant", TemplateCatalogueParticipantSummary, "Participant summary")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 	Attribute("sd_meta", TemplateCatalogueSdMeta, "Federated Catalogue meta")
 
 	Required("did")
+})
+
+var TemplateCatalogueParticipantHeadquarterSummary = Type("TemplateCatalogueParticipantHeadquarterSummary", func() {
+	Description("Participant headquarter summary")
+
+	Attribute("country", String, "Headquarter country")
+	Attribute("locality", String, "Headquarter locality")
+})
+
+var TemplateCatalogueParticipantSummary = Type("TemplateCatalogueParticipantSummary", func() {
+	Description("Participant summary returned with template detail")
+
+	Attribute("legal_name", String, "Participant legal name")
+	Attribute("registration_number", String, "Participant registration number")
+	Attribute("lei_code", String, "Participant LEI code")
+	Attribute("headquarter_address", TemplateCatalogueParticipantHeadquarterSummary, "Participant headquarter summary")
+	Attribute("terms_and_conditions", String, "Participant terms and conditions")
 })
 
 var TemplateCatalogueAddress = Type("TemplateCatalogueAddress", func() {
@@ -263,7 +281,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 	Description("Integration APIs between the Template Repository (TR) and the XFSC Catalogue for template retrieval and the management of participants and service offerings.")
 
 	// GET /catalogue/template/retrieve
-	Method("retrieve", func() {
+	Method("retrieve_template", func() {
 		Description("Retrieve templates via XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
@@ -290,7 +308,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 	})
 
 	// GET /catalogue/template/retrieve/{did}
-	Method("retrieve_by_id", func() {
+	Method("retrieve_template_by_id", func() {
 		Description("Retrieve template via XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 

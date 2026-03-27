@@ -62,6 +62,7 @@ func BuildTemplateResourceSelfDescription(input TemplateResourceInput) map[strin
 			"dcs-template:version":        input.Version,
 			"dcs-template:templateType":   input.TemplateType,
 			"dcs-template:description":    input.Description,
+			"dcs-template:participantId":  input.ParticipantID,
 			"dcs-template:createdAt": map[string]interface{}{
 				"@type":  "xsd:dateTime",
 				"@value": createdAt,
