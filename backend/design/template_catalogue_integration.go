@@ -4,18 +4,6 @@ import (
 	. "goa.design/goa/v3/dsl"
 )
 
-var TemplateCatalogueSdMeta = Type("TemplateCatalogueSdMeta", func() {
-	Description("Federated Catalogue meta for a self-description")
-
-	Attribute("id", String, "Self-description id")
-	Attribute("sdHash", String, "Self-description hash")
-	Attribute("issuer", String, "Self-description issuer")
-	Attribute("uploadDatetime", String, "Upload datetime")
-	Attribute("statusDatetime", String, "Status datetime")
-
-	Required("sdHash", "issuer", "uploadDatetime", "statusDatetime")
-})
-
 var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
 	Description("Template catalogue item returned to the client")
 
@@ -28,7 +16,6 @@ var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
 	Attribute("participant_id", String, "Participant id")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
-	Attribute("sd_meta", TemplateCatalogueSdMeta, "Federated Catalogue meta")
 
 	Required("did")
 })
@@ -75,7 +62,6 @@ var TemplateCatalogueRetrieveByIdResponse = Type("TemplateCatalogueRetrieveByIdR
 	Attribute("participant", TemplateCatalogueParticipantSummary, "Participant summary")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
-	Attribute("sd_meta", TemplateCatalogueSdMeta, "Federated Catalogue meta")
 
 	Required("did")
 })
