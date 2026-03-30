@@ -31,7 +31,10 @@ func (h *DeleteParticipant) Handle(cmd DeleteParticipantCmd) (*DeleteParticipant
 	if cmd.ID == "" {
 		return nil, fmt.Errorf("participant id is empty")
 	}
-
+	// The participant graph node won't be deleted if other SDs depend on it.
+	if err := h.deleteOtherSelfDescriptionsByIDs(cmd.Token, cmd.ID); err != nil {
+		return nil, err
+	}
 	path := fcclient.ParticipantsEndpointPath + "/" + url.PathEscape(cmd.ID)
 
 	resp, err := h.FCClient.Delete(h.Ctx, path, cmd.Token, nil)
@@ -48,4 +51,38 @@ func (h *DeleteParticipant) Handle(cmd DeleteParticipantCmd) (*DeleteParticipant
 	return &DeleteParticipantResult{
 		ID: cmd.ID,
 	}, nil
+}
+
+// deleteOtherSelfDescriptionsByIDs deletes all SDs except the participant's own SD.
+func (h *DeleteParticipant) deleteOtherSelfDescriptionsByIDs(token string, participantID string) error {
+	sdResp, err := h.FCClient.GetSelfDescriptions(h.Ctx, token, fcclient.GetSelfDescriptionsRequest{
+		WithContent: false,
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, item := range sdResp.Items {
+		if item.Meta.ID == participantID {
+			continue
+		}
+		sdHash := item.Meta.SdHash
+		if sdHash == "" {
+			continue
+		}
+
+		path := fcclient.SelfDescriptionsEndpointPath + "/" + url.PathEscape(sdHash)
+		delResp, err := h.FCClient.Delete(h.Ctx, path, token, nil)
+		if err != nil {
+			return err
+		}
+		if delResp.StatusCode == http.StatusNotFound {
+			continue
+		}
+		if delResp.StatusCode != http.StatusOK && (delResp.StatusCode < 200 || delResp.StatusCode >= 300) {
+			return fmt.Errorf("delete self-description failed with status %d", delResp.StatusCode)
+		}
+	}
+
+	return nil
 }

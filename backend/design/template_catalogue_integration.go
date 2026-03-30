@@ -455,7 +455,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 
 	// DELETE /catalogue/participant/delete
 	Method("delete_participant", func() {
-		Description("Delete current participant in XFSC Catalogue.")
+		Description("Delete current participant in XFSC Catalogue, including dependent self-descriptions.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
