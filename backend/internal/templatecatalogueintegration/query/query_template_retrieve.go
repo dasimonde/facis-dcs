@@ -4,6 +4,7 @@ import (
 	"context"
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	"fmt"
+	"strconv"
 
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
 )
@@ -30,6 +31,7 @@ RETURN {
   did: ct.did,
   document_number: ct.documentNumber,
   version: ct.version,
+  schema_version: ct.schemaVersion,
   name: ct.name,
   description: ct.description,
   template_type: ct.templateType,
@@ -88,6 +90,7 @@ func (h *RetrieveTemplatesHandler) Handle(qry RetrieveTemplatesQry) (*templateca
 			Did:            derefString(ct, "did"),
 			DocumentNumber: stringPtr(derefString(ct, "document_number")),
 			Version:        intPtr(derefInt(ct, "version")),
+			SchemaVersion:  intPtr(derefInt(ct, "schema_version")),
 			Name:           stringPtr(derefString(ct, "name")),
 			Description:    stringPtr(derefString(ct, "description")),
 			TemplateType:   stringPtr(derefString(ct, "template_type")),
@@ -118,6 +121,11 @@ func derefInt(m map[string]interface{}, key string) int {
 		return t
 	case int64:
 		return int(t)
+	case string:
+		if i, err := strconv.Atoi(t); err == nil {
+			return i
+		}
+		return 0
 	default:
 		return 0
 	}

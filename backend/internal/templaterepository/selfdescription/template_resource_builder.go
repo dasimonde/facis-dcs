@@ -25,6 +25,8 @@ func BuildTemplateResourceSelfDescription(input TemplateResourceInput) map[strin
 
 	createdAt := input.CreatedAt.UTC().Format(time.RFC3339)
 	updatedAt := input.UpdatedAt.UTC().Format(time.RFC3339)
+	schemaVersion := 1
+	schemaContextURL := fmt.Sprintf("https://argo.asd-stack.eu/facis/dcs-semantic/template/v%d#", schemaVersion)
 
 	verifiableCredential := map[string]interface{}{
 		"@context": []string{
@@ -38,7 +40,7 @@ func BuildTemplateResourceSelfDescription(input TemplateResourceInput) map[strin
 				"gax-trust-framework": "https://w3id.org/gaia-x/gax-trust-framework#",
 				"dct":                 "http://purl.org/dc/terms/",
 				"xsd":                 "http://www.w3.org/2001/XMLSchema#",
-				"dcs-template":        "https://argo.asd-stack.eu/facis/dcs-semantic/template/v1#",
+				"dcs-template":        schemaContextURL,
 			},
 			"@id": templateID,
 			"@type": []string{
@@ -60,6 +62,7 @@ func BuildTemplateResourceSelfDescription(input TemplateResourceInput) map[strin
 			"dcs-template:did":            input.DID,
 			"dcs-template:documentNumber": input.DocumentNumber,
 			"dcs-template:version":        input.Version,
+			"dcs-template:schemaVersion":  schemaVersion,
 			"dcs-template:templateType":   input.TemplateType,
 			"dcs-template:description":    input.Description,
 			"dcs-template:participantId":  input.ParticipantID,

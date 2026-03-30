@@ -13,6 +13,7 @@ var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("schema_version", Int, "Schema version of the contract template")
 	Attribute("participant_id", String, "Participant id")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
@@ -58,6 +59,7 @@ var TemplateCatalogueRetrieveByIdResponse = Type("TemplateCatalogueRetrieveByIdR
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("schema_version", Int, "Schema version of the contract template")
 	// Optional participant summary
 	Attribute("participant", TemplateCatalogueParticipantSummary, "Participant summary")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
