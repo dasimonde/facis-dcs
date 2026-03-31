@@ -183,6 +183,43 @@ func (s *templateCatalogueIntegrationsrvc) GetCurrentParticipant(ctx context.Con
 	}, nil
 }
 
+func (s *templateCatalogueIntegrationsrvc) GetCurrentParticipantSummary(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueGetCurrentParticipantRequest) (res *templatecatalogueintegration.TemplateCatalogueParticipantSummary, err error) {
+	handler := command.GetCurrentParticipantSummary{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.GetCurrentParticipantSummaryCmd{
+		ParticipantID: middleware.GetParticipantID(ctx),
+		Token:         *req.Token,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	if result == nil {
+		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("participant not found"))
+	}
+
+	return result, nil
+}
+
+func (s *templateCatalogueIntegrationsrvc) ListOtherParticipants(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueListOtherParticipantsRequest) (res []*templatecatalogueintegration.TemplateCatalogueParticipantSummary, err error) {
+	handler := command.ListOtherParticipants{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	result, err := handler.Handle(command.ListOtherParticipantsCmd{
+		ParticipantID: middleware.GetParticipantID(ctx),
+		Token:         *req.Token,
+	})
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+
+	return result, nil
+}
+
 func (s *templateCatalogueIntegrationsrvc) GetCurrentServiceOffering(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueGetCurrentServiceOfferingRequest) (res *templatecatalogueintegration.TemplateCatalogueGetCurrentServiceOfferingResponse, err error) {
 	handler := command.GetCurrentServiceOffering{
 		Ctx:      ctx,

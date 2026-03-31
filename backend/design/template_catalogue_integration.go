@@ -171,6 +171,12 @@ var TemplateCatalogueGetCurrentParticipantResponse = Type("TemplateCatalogueGetC
 	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "legal_address", "terms_and_conditions")
 })
 
+var TemplateCatalogueListOtherParticipantsRequest = Type("TemplateCatalogueListOtherParticipantsRequest", func() {
+	Description("List other participants request")
+
+	Token("token", String, "JWT token")
+})
+
 var TemplateCatalogueGetCurrentServiceOfferingRequest = Type("TemplateCatalogueGetCurrentServiceOfferingRequest", func() {
 	Description("Get current service offering request")
 
@@ -383,6 +389,50 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 			GET("/catalogue/participant/current")
 			Response(StatusOK)
 			Response("not_found", StatusNotFound)
+		})
+	})
+
+	// GET /catalogue/participant/current/summary
+	Method("get_current_participant_summary", func() {
+		Description("Get current participant summary from XFSC Catalogue.")
+		Meta("dcs:requirements", "DCS-IR-SI-01")
+
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
+
+		Payload(TemplateCatalogueGetCurrentParticipantRequest)
+		Result(TemplateCatalogueParticipantSummary)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Not found")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/catalogue/participant/current/summary")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+		})
+	})
+
+	// GET /catalogue/participant/others
+	Method("list_other_participants", func() {
+		Description("List participants from XFSC Catalogue, excluding the current participant.")
+		Meta("dcs:requirements", "DCS-IR-SI-01")
+
+		Security(JWTAuth, func() {
+			Scope("System Administrator")
+		})
+
+		Payload(TemplateCatalogueListOtherParticipantsRequest)
+		Result(ArrayOf(TemplateCatalogueParticipantSummary))
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/catalogue/participant/others")
+			Response(StatusOK)
 		})
 	})
 
