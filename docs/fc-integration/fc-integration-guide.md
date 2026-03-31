@@ -123,21 +123,34 @@ Add missing package to component scan, ```fc-service-server/src/main/java.../Ser
 
 ### Docker Compose Configuration
 
-In the development environment, update the following environment variables in `docker-compose.yml` before starting FC:
+In the development environment, configure the following variables under `services.server.environment` in `docker-compose.yml` before starting FC:
 
-
-```
+```yaml
 services:
   server:
     environment:
       # Add the following at the end of the environment variables
+
+      # Disable VP/VC signature verification in local development
       FEDERATED_CATALOGUE_VERIFICATION_VP_SIGNATURE: "false"
       FEDERATED_CATALOGUE_VERIFICATION_VC_SIGNATURE: "false"
+
+      # Keycloak and JWT issuer configuration
+      KEYCLOAK_AUTH_SERVER_URL: "http://keycloak:8080"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "http://keycloak:8080/realms/<your-realm>"
+
+      # This FC instance (self)
+      FEDERATED_CATALOGUE_QUERY_SELF: "http://host.docker.internal:8081"
+
+      # Partner FC instances (index starts at 0)
+      FEDERATED_CATALOGUE_QUERY_PARTNERS_0: "http://host.docker.internal:18081"
+      FEDERATED_CATALOGUE_QUERY_PARTNERS_1: "http://host.docker.internal:28081"
+      # Add more partners as needed:
+      # FEDERATED_CATALOGUE_QUERY_PARTNERS_2: "http://host.docker.internal:38081"
+      # FEDERATED_CATALOGUE_QUERY_PARTNERS_3: "http://host.docker.internal:48081"
 ```
 
-This disables VP and VC signature verification.
-
-In production, this configuration may be used temporarily until EV-SSL certificates are available and signature verification is fully implemented.
+In production, VP/VC verification may be temporarily disabled until EV-SSL certificates are available and signature verification is fully implemented.
 
 ## Examples
 
