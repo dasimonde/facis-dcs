@@ -1,7 +1,7 @@
-CREATE TYPE template_state AS ENUM ('DRAFT', 'SUBMITTED', 'REJECTED', 'REVIEWED', 'APPROVED', 'REGISTERED', 'DELETED', 'DEPRECATED');
+CREATE TYPE contract_template_state AS ENUM ('DRAFT', 'SUBMITTED', 'REJECTED', 'REVIEWED', 'APPROVED', 'REGISTERED', 'DELETED', 'DEPRECATED');
 
 
-CREATE TYPE template_type AS ENUM ('FRAME_CONTRACT', 'SUB_CONTRACT');
+CREATE TYPE contract_template_type AS ENUM ('FRAME_CONTRACT', 'SUB_CONTRACT');
 
 
 CREATE TABLE IF NOT EXISTS contract_templates
@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS contract_templates
     created_at      TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    state           template_state NOT NULL,
-    template_type   template_type  NOT NULL,
+    state           contract_template_state NOT NULL,
+    template_type   contract_template_type  NOT NULL,
 
     document_number VARCHAR(255),
     version         INT,
@@ -51,7 +51,7 @@ EXECUTE FUNCTION update_updated_at_column();
 
 ------------------------------------------------------------------------------------------------------------------------
 
-CREATE TYPE contract_templates_review_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED', 'VERIFIED');
+CREATE TYPE contract_template_review_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED', 'VERIFIED');
 
 CREATE TABLE IF NOT EXISTS contract_templates_review_task
 (
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS contract_templates_review_task
 
     did             VARCHAR(255)      NOT NULL CHECK (did <> ''),
 
-    state    contract_templates_review_task_state NOT NULL,
+    state    contract_template_review_task_state NOT NULL,
     reviewer VARCHAR(255)      NOT NULL CHECK (reviewer <> ''),
 
     created_by      VARCHAR(255)      NOT NULL,
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS contract_templates_review_task
 
 ------------------------------------------------------------------------------------------------------------------------
 
-CREATE TYPE contract_templates_approval_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED', 'RESUBMITTED');
+CREATE TYPE contract_template_approval_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED', 'RESUBMITTED');
 
 
 CREATE TABLE IF NOT EXISTS contract_templates_approval_task
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS contract_templates_approval_task
 
     did             VARCHAR(255)        NOT NULL CHECK (did <> ''),
 
-    state    contract_templates_approval_task_state NOT NULL,
+    state    contract_template_approval_task_state NOT NULL,
     approver VARCHAR(255)        NOT NULL CHECK (approver <> ''),
 
     created_by      VARCHAR(255)        NOT NULL,

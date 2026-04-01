@@ -73,7 +73,7 @@ func TestCreate_RejectContractTemplateInReviewedState(t *testing.T) {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
 
-	assert.Equal(t, contracttemplatestate.Draft, contractTemplate.State)
+	assert.Equal(t, contracttemplatestate.Rejected, contractTemplate.State)
 }
 
 func TestCreate_RejectContractTemplateInReviewedStateWithInvalidUser(t *testing.T) {

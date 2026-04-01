@@ -1283,7 +1283,7 @@ func TestUpdateManage_SetContractTemplateStateFromReviewedToSubmitted(t *testing
 		t.Fatalf("Failed to begin transaction: %v", err)
 	}
 
-	reviewTasksExist, err := repo.RTRepo.ReadAllByID(tx, cmd.DID)
+	reviewTasksExist, err := repo.RTRepo.ReadAllByDID(tx, cmd.DID)
 	if err != nil {
 		t.Fatalf("could not check existing review tasks: %v", err)
 	}

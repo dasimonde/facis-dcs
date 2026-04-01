@@ -69,7 +69,7 @@ func (h *Rejecter) Handle(cmd RejectCmd) error {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Draft.String())
+	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}
@@ -85,16 +85,6 @@ func (h *Rejecter) Handle(cmd RejectCmd) error {
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)
-	}
-
-	err = h.RTRepo.Delete(tx, cmd.DID)
-	if err != nil {
-		return fmt.Errorf("could not delete review tasks: %w", err)
-	}
-
-	err = h.ATRepo.Delete(tx, cmd.DID)
-	if err != nil {
-		return fmt.Errorf("could not delete approval tasks: %w", err)
 	}
 
 	return tx.Commit()

@@ -69,7 +69,7 @@ func (r *PostgresReviewTaskRepo) ReadAll(tx *sqlx.Tx, did string) ([]db.ReviewTa
 	return reviewTasks, nil
 }
 
-func (r *PostgresReviewTaskRepo) ReadAllByID(tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
+func (r *PostgresReviewTaskRepo) ReadAllByDID(tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
 	query := `
         SELECT id, did, state, reviewer,
                created_by, created_at
