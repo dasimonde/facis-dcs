@@ -104,6 +104,11 @@ dcs-template:templateData a rdf:Property ;
   rdfs:label "Template data of the contract template" ;
   rdfs:domain dcs-template:ContractTemplate .
 
+dcs-template:templateDataJSON a rdf:Property ;
+  rdfs:label "Template data JSON" ;
+  rdfs:domain dcs-template:ContractTemplate ;
+  rdfs:range xsd:string .
+
 ### 3. Template Shape
 
 dcs-template:ContractTemplateShape
@@ -190,6 +195,12 @@ dcs-template:ContractTemplateShape
     sh:minCount 1 ;
     sh:maxCount 1 ;
     sh:node dcs-template:TemplateDataShape ;
+  ] ;
+  sh:property [
+    sh:path dcs-template:templateDataJSON ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
   ] .
 
 ### 4. TemplateData Properties
