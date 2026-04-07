@@ -396,15 +396,18 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 	}
 
 	cmd := command.VerifyCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
-		VerifiedBy: middleware.GetUsername(ctx),
+		DID:           req.Did,
+		UpdatedAt:     updatedAt,
+		VerifiedBy:    middleware.GetUsername(ctx),
+		ParticipantID: middleware.GetParticipantID(ctx),
+		Token:         *req.Token,
 	}
 	handler := command.Verifier{
-		Ctx:    ctx,
-		DB:     s.DB,
-		CTRepo: s.CTRepo,
-		RTRepo: s.RTRepo,
+		Ctx:      ctx,
+		DB:       s.DB,
+		CTRepo:   s.CTRepo,
+		RTRepo:   s.RTRepo,
+		FCClient: s.FCClient,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {

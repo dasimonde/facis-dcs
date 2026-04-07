@@ -52,6 +52,10 @@ type GetSelfDescriptionsRequest struct {
 	WithContent bool
 }
 
+type fcErrorBody struct {
+	Message string `json:"message"`
+}
+
 // FederatedCatalogueClient handles outbound requests to Federated Catalogue.
 type FederatedCatalogueClient struct {
 	baseURL    string
@@ -60,8 +64,10 @@ type FederatedCatalogueClient struct {
 
 const ParticipantsEndpointPath = "/participants"
 const SelfDescriptionsEndpointPath = "/self-descriptions"
+
 // Use distributed search query in the Federated Catalogue API
 const QueryEndpointPath = "/query/search"
+const VerificationEndpointPath = "/verification"
 
 // NewFederatedCatalogueClient creates a Federated Catalogue client.
 func NewFederatedCatalogueClient(apiURL string) *FederatedCatalogueClient {
@@ -188,4 +194,14 @@ func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string,
 func normalizeBaseURL(v string) string {
 	trimmed := strings.TrimSpace(v)
 	return strings.TrimRight(trimmed, "/")
+}
+
+// ExtractErrorMessage tries to extract an error message from the response body of a failed FC request.
+func (c *FederatedCatalogueClient) ExtractErrorMessage(body []byte) string {
+	_ = c
+	var errBody fcErrorBody
+	if err := json.Unmarshal(body, &errBody); err != nil {
+		return ""
+	}
+	return errBody.Message
 }

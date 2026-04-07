@@ -65,8 +65,10 @@ func (h *Registrar) Handle(cmd RegisterCmd) error {
 		return fmt.Errorf("could not read template data: %w", err)
 	}
 
-	if err := h.publishTemplateResourceToFC(cmd, processData, fullTemplate); err != nil {
-		return fmt.Errorf("could not publish template to Federated Catalogue: %w", err)
+	if h.FCClient != nil {
+		if err := h.publishTemplateResourceToFC(cmd, processData, fullTemplate); err != nil {
+			return fmt.Errorf("could not publish template to Federated Catalogue: %w", err)
+		}
 	}
 
 	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Registered.String())
@@ -109,8 +111,9 @@ func (h *Registrar) publishTemplateResourceToFC(cmd RegisterCmd, processData *db
 	if cmd.ParticipantID == "" {
 		return fmt.Errorf("participant id is empty")
 	}
-	if processData.DocumentNumber == nil || *processData.DocumentNumber == "" {
-		return fmt.Errorf("document number is empty")
+	documentNumber := ""
+	if processData.DocumentNumber != nil && *processData.DocumentNumber != "" {
+		documentNumber = *processData.DocumentNumber
 	}
 
 	templateType := fullTemplate.TemplateType
@@ -130,7 +133,7 @@ func (h *Registrar) publishTemplateResourceToFC(cmd RegisterCmd, processData *db
 	sd := selfdescription.BuildTemplateResourceSelfDescription(selfdescription.TemplateResourceInput{
 		ParticipantID:  cmd.ParticipantID,
 		DID:            cmd.DID,
-		DocumentNumber: *processData.DocumentNumber,
+		DocumentNumber: documentNumber,
 		Version:        version,
 		TemplateType:   templateType,
 		Name:           name,
@@ -151,6 +154,9 @@ func (h *Registrar) publishTemplateResourceToFC(cmd RegisterCmd, processData *db
 	}
 
 	if resp.StatusCode != http.StatusCreated {
+		if message := h.FCClient.ExtractErrorMessage(resp.Body); message != "" {
+			return fmt.Errorf("publish template resource failed: %s", message)
+		}
 		return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
 	}
 	return nil
