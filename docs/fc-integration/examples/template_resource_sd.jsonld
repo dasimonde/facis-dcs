@@ -1,80 +1,240 @@
 {
-  "@context":[
+  "@context": [
     "https://www.w3.org/2018/credentials/v1",
     "https://w3id.org/security/suites/jws-2020/v1"
   ],
-  "holder":"did:web:argo.asd-stack.eu",
-  "id":"http://example.org/presentations/3731",
-  "type":[
+  "holder": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8",
+  "id": "did:web:argo.asd-stack.eu:facis:template:930e2471-9f74-4d8f-b539-7626fe518783::0",
+  "type": [
     "VerifiablePresentation"
   ],
-  "verifiableCredential":[
+  "verifiableCredential": [
     {
-      "@context":[
+      "@context": [
         "https://www.w3.org/2018/credentials/v1",
         "https://www.w3.org/2018/credentials/examples/v1",
         "https://w3id.org/security/suites/jws-2020/v1"
       ],
-      "credentialSubject":{
-        "@context":{
-          "gax-core":"https://w3id.org/gaia-x/core#",
-          "gax-trust-framework":"https://w3id.org/gaia-x/gax-trust-framework#",
-          "dct":"http://purl.org/dc/terms/",
-          "xsd":"http://www.w3.org/2001/XMLSchema#",
-          "dcs-template":"https://argo.asd-stack.eu/facis/dcs-semantic/template/v1#"
+      "credentialSubject": {
+        "@context": {
+          "APPROVED_TEMPLATE": "dcs-template-data:APPROVED_TEMPLATE",
+          "CLAUSE": "dcs-template-data:CLAUSE",
+          "SECTION": "dcs-template-data:SECTION",
+          "TEXT": "dcs-template-data:TEXT",
+          "blockId": "dcs-template-data:blockId",
+          "children": "dcs-template-data:children",
+          "conditionId": "dcs-template-data:conditionId",
+          "conditionIds": "dcs-template-data:conditionIds",
+          "conditionName": "dcs-template-data:conditionName",
+          "customMetaData": "dcs-template-data:customMetaData",
+          "date": "dcs-template-data:date",
+          "dcs-template": "https://argo.asd-stack.eu/facis/dcs-semantic/template/v1#",
+          "dcs-template-data": "https://argo.asd-stack.eu/facis/dcs-semantic/template-data/v1#",
+          "dcs-template:templateData": "dcs-template:templateData",
+          "dct": "http://purl.org/dc/terms/",
+          "decimal": "dcs-template-data:decimal",
+          "did": "dcs-template-data:did",
+          "documentBlocks": "dcs-template-data:documentBlocks",
+          "documentOutline": "dcs-template-data:documentOutline",
+          "document_number": "dcs-template-data:document_number",
+          "gax-core": "https://w3id.org/gaia-x/core#",
+          "gax-trust-framework": "https://w3id.org/gaia-x/gax-trust-framework#",
+          "integer": "dcs-template-data:integer",
+          "isRequired": "dcs-template-data:isRequired",
+          "isRoot": "dcs-template-data:isRoot",
+          "name": "dcs-template-data:name",
+          "operate": "dcs-template-data:operate",
+          "operators": "dcs-template-data:operators",
+          "parameterName": "dcs-template-data:parameterName",
+          "parameters": "dcs-template-data:parameters",
+          "schemaVersion": "dcs-template-data:schemaVersion",
+          "semanticConditions": "dcs-template-data:semanticConditions",
+          "string": "dcs-template-data:string",
+          "subTemplateSnapshots": "dcs-template-data:subTemplateSnapshots",
+          "targets": "dcs-template-data:targets",
+          "templateDataVersion": "dcs-template-data:templateDataVersion",
+          "templateId": "dcs-template-data:templateId",
+          "template_data": "dcs-template-data:template_data",
+          "text": "dcs-template-data:text",
+          "title": "dcs-template-data:title",
+          "type": "@type",
+          "value": "dcs-template-data:value",
+          "version": "dcs-template-data:version",
+          "xsd": "http://www.w3.org/2001/XMLSchema#"
         },
-        "@id":"did:web:argo.asd-stack.eu:contract-template:25625b2b-b5e0-46fc-8d69-4fe38d9f036d",
-        "@type":[
+        "@id": "did:web:argo.asd-stack.eu:facis:template:930e2471-9f74-4d8f-b539-7626fe518783::0",
+        "@type": [
           "gax-trust-framework:Resource",
           "dcs-template:ContractTemplate"
         ],
-        "gax-core:operatedBy":{
-          "@id":"did:web:argo.asd-stack.eu"
+        "gax-core:operatedBy": {
+          "@id": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8"
         },
-        "gax-trust-framework:name":{
-          "@type":"xsd:string",
-          "@value":"Standard Data Sharing Agreement"
+        "gax-trust-framework:name": {
+          "@type": "xsd:string",
+          "@value": "Standard Data Sharing Agreement"
         },
-        "dct:description":{
-          "@type":"xsd:string",
-          "@value":"Template for cross-company data sharing."
+        "dct:description": {
+          "@type": "xsd:string",
+          "@value": ""
         },
-        "dcs-template:name":"Standard Data Sharing Agreement",
-        "dcs-template:did":"did:web:argo.asd-stack.eu:contract-template:25625b2b-b5e0-46fc-8d69-4fe38d9f036d",
-        "dcs-template:documentNumber":"25625b2b-b5e0-46fc-8d69-4fe38d9f036d",
-        "dcs-template:version":1,
-        "dcs-template:schemaVersion":1,
-        "dcs-template:templateType":"SUB_CONTRACT",
-        "dcs-template:description":"",
-        "dcs-template:createdAt":{
-          "@type":"xsd:dateTime",
-          "@value":"2026-03-18T10:00:00Z"
+        "dcs-template:name": "Standard Data Sharing Agreement",
+        "dcs-template:did": "930e2471-9f74-4d8f-b539-7626fe518783",
+        "dcs-template:documentNumber": "25625b2b-b5e0-46fc-8d69-4fe38d9f036d",
+        "dcs-template:version": 1,
+        "dcs-template:schemaVersion": 1,
+        "dcs-template:templateType": "SUB_CONTRACT",
+        "dcs-template:description": "",
+        "dcs-template:participantId": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8",
+        "dcs-template:createdAt": {
+          "@type": "xsd:dateTime",
+          "@value": "2026-04-07T13:11:18Z"
         },
-        "dcs-template:updatedAt":{
-          "@type":"xsd:dateTime",
-          "@value":"2026-03-18T10:00:00Z"
+        "dcs-template:updatedAt": {
+          "@type": "xsd:dateTime",
+          "@value": "2026-04-07T13:11:18Z"
+        },
+        "dcs-template:templateDataJSON": "{\"customMetaData\": [{\"name\": \"jurisdiction\", \"value\": \"Germany\"}], \"documentBlocks\": [{\"text\": \"From {{88e963e3-72e2-4d87-bd96-74d644179756.start}} to {{88e963e3-72e2-4d87-bd96-74d644179756.end}}.\", \"type\": \"CLAUSE\", \"title\": \"clause 1\", \"blockId\": \"f3dc781b-6557-45ed-b290-9fe71606f9b8\", \"conditionIds\": [\"88e963e3-72e2-4d87-bd96-74d644179756\"]}, {\"text\": \"text: {{597b9bd8-f40f-4edb-8730-1beb240e0230.text}}.\\ndecimal: {{597b9bd8-f40f-4edb-8730-1beb240e0230.decimal}}.\\ninteger: {{597b9bd8-f40f-4edb-8730-1beb240e0230.integer}}\", \"type\": \"CLAUSE\", \"title\": \"clause 2\", \"blockId\": \"d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5\", \"conditionIds\": [\"597b9bd8-f40f-4edb-8730-1beb240e0230\"]}, {\"text\": \"\", \"type\": \"SECTION\", \"title\": \"section 1\", \"blockId\": \"5fa9dcd4-4d98-4a34-a2de-7f42f17f196a\"}, {\"text\": \"\", \"type\": \"SECTION\", \"title\": \"section 2\", \"blockId\": \"5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb\"}, {\"text\": \"\\ntext widget.\", \"type\": \"TEXT\", \"title\": \"\", \"blockId\": \"9169a092-4f5b-4957-b316-a904963adea0\"}], \"documentOutline\": [{\"isRoot\": true, \"blockId\": \"24056306-e8fc-4f79-aef9-040beb19968b\", \"children\": [\"5fa9dcd4-4d98-4a34-a2de-7f42f17f196a\", \"5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb\"]}, {\"isRoot\": false, \"blockId\": \"5fa9dcd4-4d98-4a34-a2de-7f42f17f196a\", \"children\": [\"f3dc781b-6557-45ed-b290-9fe71606f9b8\", \"9169a092-4f5b-4957-b316-a904963adea0\"]}, {\"isRoot\": false, \"blockId\": \"5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb\", \"children\": [\"d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5\"]}], \"semanticConditions\": [{\"parameters\": [{\"type\": \"date\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"start\"}, {\"type\": \"date\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"end\"}], \"conditionId\": \"88e963e3-72e2-4d87-bd96-74d644179756\", \"conditionName\": \"date rule\", \"schemaVersion\": \"v1\"}, {\"parameters\": [{\"type\": \"string\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"text\"}, {\"type\": \"decimal\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"decimal\"}, {\"type\": \"integer\", \"operators\": [], \"isRequired\": false, \"parameterName\": \"integer\"}], \"conditionId\": \"597b9bd8-f40f-4edb-8730-1beb240e0230\", \"conditionName\": \"rule 2\", \"schemaVersion\": \"v1\"}], \"templateDataVersion\": 1, \"subTemplateSnapshots\": []}",
+        "dcs-template:templateData": {
+          "customMetaData": [
+            {
+              "name": "jurisdiction",
+              "value": "Germany"
+            }
+          ],
+          "documentBlocks": [
+            {
+              "text": "From {{88e963e3-72e2-4d87-bd96-74d644179756.start}} to {{88e963e3-72e2-4d87-bd96-74d644179756.end}}.",
+              "type": "CLAUSE",
+              "title": "clause 1",
+              "blockId": "f3dc781b-6557-45ed-b290-9fe71606f9b8",
+              "conditionIds": [
+                "88e963e3-72e2-4d87-bd96-74d644179756"
+              ]
+            },
+            {
+              "text": "text: {{597b9bd8-f40f-4edb-8730-1beb240e0230.text}}.\ndecimal: {{597b9bd8-f40f-4edb-8730-1beb240e0230.decimal}}.\ninteger: {{597b9bd8-f40f-4edb-8730-1beb240e0230.integer}}",
+              "type": "CLAUSE",
+              "title": "clause 2",
+              "blockId": "d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5",
+              "conditionIds": [
+                "597b9bd8-f40f-4edb-8730-1beb240e0230"
+              ]
+            },
+            {
+              "text": "",
+              "type": "SECTION",
+              "title": "section 1",
+              "blockId": "5fa9dcd4-4d98-4a34-a2de-7f42f17f196a"
+            },
+            {
+              "text": "",
+              "type": "SECTION",
+              "title": "section 2",
+              "blockId": "5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb"
+            },
+            {
+              "text": "\ntext widget.",
+              "type": "TEXT",
+              "title": "",
+              "blockId": "9169a092-4f5b-4957-b316-a904963adea0"
+            }
+          ],
+          "documentOutline": [
+            {
+              "isRoot": true,
+              "blockId": "24056306-e8fc-4f79-aef9-040beb19968b",
+              "children": [
+                "5fa9dcd4-4d98-4a34-a2de-7f42f17f196a",
+                "5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb"
+              ]
+            },
+            {
+              "isRoot": false,
+              "blockId": "5fa9dcd4-4d98-4a34-a2de-7f42f17f196a",
+              "children": [
+                "f3dc781b-6557-45ed-b290-9fe71606f9b8",
+                "9169a092-4f5b-4957-b316-a904963adea0"
+              ]
+            },
+            {
+              "isRoot": false,
+              "blockId": "5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb",
+              "children": [
+                "d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5"
+              ]
+            }
+          ],
+          "semanticConditions": [
+            {
+              "parameters": [
+                {
+                  "type": "date",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "start"
+                },
+                {
+                  "type": "date",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "end"
+                }
+              ],
+              "conditionId": "88e963e3-72e2-4d87-bd96-74d644179756",
+              "conditionName": "date rule",
+              "schemaVersion": "v1"
+            },
+            {
+              "parameters": [
+                {
+                  "type": "string",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "text"
+                },
+                {
+                  "type": "decimal",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "decimal"
+                },
+                {
+                  "type": "integer",
+                  "operators": [],
+                  "isRequired": false,
+                  "parameterName": "integer"
+                }
+              ],
+              "conditionId": "597b9bd8-f40f-4edb-8730-1beb240e0230",
+              "conditionName": "rule 2",
+              "schemaVersion": "v1"
+            }
+          ],
+          "templateDataVersion": 1,
+          "subTemplateSnapshots": []
         }
       },
-      "expirationDate":"2034-01-23T11:29:40Z",
-      "issuanceDate":"2026-03-18T10:00:00Z",
-      "issuer":"did:web:argo.asd-stack.eu",
-      "type":[
+      "expirationDate": "2034-01-23T11:29:40Z",
+      "issuanceDate": "2026-04-07T13:12:16Z",
+      "issuer": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8",
+      "type": [
         "VerifiableCredential"
       ],
-      "proof":{
-        "type":"JsonWebSignature2020",
-        "created":"2024-02-06T08:16:17Z",
-        "proofPurpose":"assertionMethod",
-        "verificationMethod":"did:web:argo.asd-stack.eu",
-        "jws":"eyJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdLCJhbGciOiJQUzI1NiJ9..bdGSWtgdmLtagbzClK9hBwEAZlSi3Dm3q_dwIinpCbyIxo2_T6vj3MYbEh6IHNRZ8SX0vwnSfY3EZNLbAY7rw6PcaVFHOP9RoMYiFmzLx8v1lX2VXDS0dfTWMkGD1Ja7rxCZPzMlqS7gCFG1sMItS65-jSMgz96t3o4KyT70EyjxW6Z48ERetALnbUpjTJlqzDheLI-ZmTGyryfBR9n0zZZEY1YYBiuZNp-4aY5sGG15evU1UQO2R8GF8vyForbazqUZe2JJTBDaUOZnUmuK42MNBJYSOLcMYcHVi2oSNETeUt3Qgy5ayZ9-wfQgwzDOwsnlv30uREUkXpFJaVjJpbqSOoPgrxy6zdYe9Zhd4uTgs8taJcBJcc-Hairj9eYDwUmacMoVCHS-ZIfmPHC084lfY3EOaA-gdQ0Gfh003Pncg1TTLzvL_eBsEyt2dle82nBAwZs6poskcON18WkjY-Ck2nVws7WGNYMjwXHxr4dRGEr0utBuh1fvSgni8ubO4rVpeuBKLZrE-OAevRGT61k0wNJSUyPiVvGeDi5ZaVZNdrbp8Srm1_c09wyUkikzaopC51fZYJB3ghgS1VQKhmYOwyEJKp3UxpZqzYNqolmrkDs4MOE9e57XgmE2X6_oK10-0my_6GgcePOl265YQ46VSh8Akm1xUuFgO_oYFx8"
+      "proof": {
+        "type": "JsonWebSignature2020",
+        "created": "2026-04-07T13:12:16Z",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:web:argo.asd-stack.eu#key-1",
+        "jws": "eyJhbGciOiJSUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..kTCYt5XsITJX1CxPCT8yAV-TVIw5WEuts01mqpQy7UJiN5mgREEMGlv50aqzpqh4Qq_PbChOMqsLfRoPsnsgxD-WUcX16dUOqV0G_zS245-kronKb78cPktb3rk-BuQy72IFLN25DYuNzVBAh4vGHSrQyHUGlcTwLtjPAnKb78"
       }
     }
   ],
-  "proof":{
-    "type":"JsonWebSignature2020",
-    "created":"2024-02-06T08:16:17Z",
-    "proofPurpose":"assertionMethod",
-    "verificationMethod":"did:web:argo.asd-stack.eu",
-    "jws":"eyJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdLCJhbGciOiJQUzI1NiJ9..JaX7ZPZRs7lGRKI05RFdo5ADQM_7L4xauVgrT-e7pkR5jkYTC86enNQylDNKZSNg6ZudfEaUvkhKnDZpKgmp7TG4D79sF9Q6355heUZ-Mw4yd6kZBmaQQgOFuGnnGT86AdSSZhGR5Mvh9lYR8J-84Wg4M2hpFeHFCqUP3bsQPlKTEphoWhZR4Sp4imFUDyHkBLihACAYSp9jnWBr3DpT_dj2BNUb6z77VuQf8dPqPC6p77Xj6nYGz19_Bf2l_Ch_Sl6GvxJ3vS4jqY3JgseqJwarArlRCTGIkLx5qZi38DMNIfWI7eNQHNfCNusSH6i0_h51eY6t27pmXzjP9CDW_nMWmmlERMc13eELg84QI4Yk2UqNZ89EjNMTWyWRumqaptLMeNrjHjtAleUWDjVknJ_8bjo5S7f3x-r2xpwnI5j75u4CH6_L0ksGdEKuporZ7DLX8LSxE438ZGtpHgNxkfT1Hb9Scy-sK5LhzLSmmFAvArIKpsecPpqF898oavfy7bNsSbZmmW5chDKeYXdFvX_ts-eMHXBhwxDfI2VRBwqE34azsIbp3foSxynT1O77m6EUB56Sh2Vp7vf_ahsIJSHlWkYJErQbYaRGGesP9xOd40s5cnsWRqusAC0PyqIa5CLxCWG8K1Pa0WiCXAskk6wmZ594VelFm9VFIPkn2AM"
+  "proof": {
+    "type": "JsonWebSignature2020",
+    "created": "2026-04-07T13:12:16Z",
+    "proofPurpose": "assertionMethod",
+    "verificationMethod": "did:web:argo.asd-stack.eu#key-1",
+    "jws": "eyJhbGciOiJSUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..kTCYt5XsITJX1CxPCT8yAV-TVIw5WEuts01mqpQy7UJiN5mgREEMGlv50aqzpqh4Qq_PbChOMqsLfRoPsnsgxD-WUcX16dUOqV0G_zS245-kronKb78cPktb3rk-BuQy72IFLN25DYuNzVBAh4vGHSrQyHUGlcTwLtjPAnKb78"
   }
 }
