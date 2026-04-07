@@ -4,6 +4,7 @@
 @prefix owl:  <http://www.w3.org/2002/07/owl#> .
 @prefix sh:   <http://www.w3.org/ns/shacl#> .
 @prefix dcs-template: <https://argo.asd-stack.eu/facis/dcs-semantic/template/v1#> .
+@prefix dcs-template-data: <https://argo.asd-stack.eu/facis/dcs-semantic/template-data/v1#> .
 
 
 <https://argo.asd-stack.eu/facis/dcs-semantic/template/v1>
@@ -11,11 +12,37 @@
   rdfs:label "FACIS DCS Template Ontology" ;
   rdfs:comment "Ontology for contract template." .
 
-### Core template classes
+<https://argo.asd-stack.eu/facis/dcs-semantic/template-data/v1>
+  a owl:Ontology ;
+  rdfs:label "FACIS DCS Template Data Ontology" ;
+  rdfs:comment "Ontology for contract template data." .
+
+#### =================================================================
+#### Table of Contents
+#### 1. Core Template Classes
+#### 2. Template Properties
+#### 3. Template Shape
+#### 4. TemplateData Properties
+#### 4.1. DocumentOutline Properties
+#### 4.2. SemanticConditions Properties
+#### 4.3. CustomMetaData Properties
+#### 4.4. SubTemplateSnapshots Properties
+#### 5. TemplateData Shape
+#### 5.1. DocumentOutline Shape
+#### 5.2. SemanticConditions Shape
+#### 5.3. CustomMetaData Shape
+#### 5.4. SubTemplateSnapshots Shape
+#### =================================================================
+
+### 1. Core template classes
 dcs-template:ContractTemplate a rdfs:Class ;
   rdfs:label "Contract Template" .
 
-### Template properties
+dcs-template-data:TemplateData a rdfs:Class ;
+  rdfs:label "Template Data" ;
+  rdfs:comment "Corresponds to the contract_templates table 'template_data' field and stores the full JSON content." .
+
+### 2. Template Properties
 dcs-template:did a rdf:Property ;
   rdfs:label "DID of the contract template" ;
   rdfs:domain dcs-template:ContractTemplate ;
@@ -73,8 +100,11 @@ dcs-template:updatedAt a rdf:Property ;
   rdfs:domain dcs-template:ContractTemplate ;
   rdfs:range xsd:dateTime .
 
+dcs-template:templateData a rdf:Property ;
+  rdfs:label "Template data of the contract template" ;
+  rdfs:domain dcs-template:ContractTemplate .
 
-### Template shape
+### 3. Template Shape
 
 dcs-template:ContractTemplateShape
   a sh:NodeShape ;
@@ -153,4 +183,439 @@ dcs-template:ContractTemplateShape
     sh:path dcs-template:updatedAt ;
     sh:datatype xsd:dateTime ;
     sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template:templateData ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:node dcs-template:TemplateDataShape ;
+  ] .
+
+### 4. TemplateData Properties
+dcs-template-data:template_data a rdf:Property ;
+  rdfs:label "Template data" .
+
+dcs-template-data:type a rdf:Property ;
+  rdfs:label "Type" .
+
+dcs-template-data:documentBlocks a rdf:Property ;
+  rdfs:label "Document blocks" .
+
+dcs-template-data:blockId a rdf:Property ;
+  rdfs:label "Block ID" .
+
+dcs-template-data:text a rdf:Property ;
+  rdfs:label "Block text" .
+
+dcs-template-data:title a rdf:Property ;
+  rdfs:label "Block title" .
+
+dcs-template-data:templateId a rdf:Property ;
+  rdfs:label "Template ID" .
+
+dcs-template-data:version a rdf:Property ;
+  rdfs:label "Version" .
+
+dcs-template-data:document_number a rdf:Property ;
+  rdfs:label "Document number" .
+
+dcs-template-data:name a rdf:Property ;
+  rdfs:label "Name" .
+
+dcs-template-data:value a rdf:Property ;
+  rdfs:label "Value" .
+
+dcs-template-data:did a rdf:Property ;
+  rdfs:label "DID" .
+
+dcs-template-data:conditionIds a rdf:Property ;
+  rdfs:label "Condition IDs" .
+
+dcs-template-data:templateDataVersion a rdf:Property ;
+  rdfs:label "Template data version" .
+
+### 4.1. DocumentOutline Properties
+dcs-template-data:documentOutline a rdf:Property ;
+  rdfs:label "Document outline" .
+
+dcs-template-data:isRoot a rdf:Property ;
+  rdfs:label "Is root block" .
+
+dcs-template-data:children a rdf:Property ;
+  rdfs:label "Child block IDs" .
+
+### 4.2. SemanticConditions Properties
+dcs-template-data:semanticConditions a rdf:Property ;
+  rdfs:label "Semantic conditions" .
+
+dcs-template-data:parameters a rdf:Property ;
+  rdfs:label "Semantic condition parameters" .
+
+dcs-template-data:conditionId a rdf:Property ;
+  rdfs:label "Condition ID" .
+
+dcs-template-data:conditionName a rdf:Property ;
+  rdfs:label "Condition name" .
+
+dcs-template-data:schemaVersion a rdf:Property ;
+  rdfs:label "Schema version" .
+
+dcs-template-data:parameterName a rdf:Property ;
+  rdfs:label "Parameter name" .
+
+dcs-template-data:isRequired a rdf:Property ;
+  rdfs:label "Is required" .
+
+dcs-template-data:operators a rdf:Property ;
+  rdfs:label "Operators" .
+
+dcs-template-data:operate a rdf:Property ;
+  rdfs:label "Operator type" .
+
+dcs-template-data:targets a rdf:Property ;
+  rdfs:label "Operator targets" .
+
+### 4.3. CustomMetaData Properties
+dcs-template-data:customMetaData a rdf:Property ;
+  rdfs:label "Custom metadata" .
+
+### 4.4. SubTemplateSnapshots Properties
+dcs-template-data:subTemplateSnapshots a rdf:Property ;
+  rdfs:label "Sub-template snapshots" .
+
+### 5. TemplateData Shape
+dcs-template:TemplateDataShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path dcs-template-data:documentOutline ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 0 ;
+    sh:node dcs-template:DocumentOutlineBlockShape ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:semanticConditions ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 0 ;
+    sh:node dcs-template:SemanticConditionShape ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:documentBlocks ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 0 ;
+    sh:node dcs-template:DocumentBlockUnionShape ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:customMetaData ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 0 ;
+    sh:node dcs-template:MetaDataShape ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:subTemplateSnapshots ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 0 ;
+    sh:node dcs-template:SubTemplateSnapshotShape ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:templateDataVersion ;
+    sh:datatype xsd:integer ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] .
+
+### 5.1. DocumentOutline Shape
+dcs-template:DocumentOutlineBlockShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path dcs-template-data:blockId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:isRoot ;
+    sh:datatype xsd:boolean ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:children ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+  ] .
+
+dcs-template:DocumentBlockUnionShape
+  a sh:NodeShape ;
+  sh:or (
+    dcs-template:SectionBlockShape
+    dcs-template:TextBlockShape
+    dcs-template:ClauseBlockShape
+    dcs-template:ApprovedTemplateBlockShape
+  ) .
+
+dcs-template:SectionBlockShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue dcs-template-data:SECTION ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:blockId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:text ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:title ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] .
+
+dcs-template:TextBlockShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue dcs-template-data:TEXT ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:blockId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:text ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:title ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] .
+
+dcs-template:ClauseBlockShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue dcs-template-data:CLAUSE ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:blockId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:text ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:title ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:conditionIds ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+  ] .
+
+dcs-template:ApprovedTemplateBlockShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue dcs-template-data:APPROVED_TEMPLATE ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:blockId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:text ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:title ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:templateId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:version ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:or (
+      [ sh:datatype xsd:integer ]
+      [ sh:datatype xsd:double ]
+      [ sh:datatype xsd:decimal ]
+    ) ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:document_number ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] .
+
+### 5.2. SemanticConditions Shape
+dcs-template:SemanticConditionShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path dcs-template-data:conditionId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:conditionName ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:schemaVersion ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:parameters ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 1 ;
+    sh:node dcs-template:SemanticConditionParameterShape ;
+  ] .
+
+dcs-template:SemanticConditionParameterShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path dcs-template-data:parameterName ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:nodeKind sh:IRI ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:in ( dcs-template-data:date dcs-template-data:string dcs-template-data:integer dcs-template-data:decimal ) ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:isRequired ;
+    sh:datatype xsd:boolean ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:operators ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 0 ;
+    sh:node dcs-template:SemanticParameterOperatorShape ;
+  ] .
+
+dcs-template:SemanticParameterOperatorShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path dcs-template-data:operate ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:in (
+      "lessThan"
+      "lessThanOrEqual"
+      "greaterThan"
+      "greaterThanOrEqual"
+      "equal"
+      "notEqual"
+    ) ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:targets ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+  ] .
+
+### 5.3. CustomMetaData Shape
+dcs-template:MetaDataShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path dcs-template-data:name ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:value ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] .
+
+### 5.4. SubTemplateSnapshots Shape
+dcs-template:SubTemplateSnapshotShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path dcs-template-data:did ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:document_number ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:version ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+    sh:or (
+      [ sh:datatype xsd:integer ]
+      [ sh:datatype xsd:decimal ]
+      [ sh:datatype xsd:double ]
+    ) ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:name ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:description ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:template_data ;
+    sh:nodeKind sh:BlankNodeOrIRI ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+    sh:node dcs-template:TemplateDataShape ;
   ] .

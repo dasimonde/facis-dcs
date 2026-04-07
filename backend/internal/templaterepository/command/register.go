@@ -66,8 +66,7 @@ func (h *Registrar) Handle(cmd RegisterCmd) error {
 	}
 
 	if err := h.publishTemplateResourceToFC(cmd, processData, fullTemplate); err != nil {
-		// TODO: We ignore the error here, because the Federated Catalogue may not be available until the deployment script includes it.
-		// return err
+		return fmt.Errorf("could not publish template to Federated Catalogue: %w", err)
 	}
 
 	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Registered.String())
@@ -138,6 +137,7 @@ func (h *Registrar) publishTemplateResourceToFC(cmd RegisterCmd, processData *db
 		Description:    description,
 		CreatedAt:      fullTemplate.CreatedAt,
 		UpdatedAt:      fullTemplate.UpdatedAt,
+		TemplateData:   fullTemplate.TemplateData,
 	})
 
 	body, err := json.Marshal(sd)
