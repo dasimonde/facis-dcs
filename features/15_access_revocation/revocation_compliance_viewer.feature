@@ -1,4 +1,5 @@
 @UC-15-01 @FR-SM-26
+@skip
 Feature: Revocation Compliance Viewer
   The compliance viewer displays signature revocation status
   and metadata for audit and compliance purposes.

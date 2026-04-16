@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { AuthenticationService } from '@/services/authentication-service'
+import { ROUTES } from '@/router/router'
+import { authenticationService } from '@/services/authentication-service'
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -7,9 +8,13 @@ const router = useRouter()
 
 onMounted(async () => {
   // Exchange refresh token cookie for access token
-  await AuthenticationService.refresh()
+  const result = await authenticationService.refresh()
   // Redirect to templates list on success
-  router.replace({ name: 'templates.list' })
+  if (result) {
+    router.replace({ name: ROUTES.TEMPLATES.LIST })
+  } else {
+    router.replace({ name: ROUTES.HOME })
+  }
 })
 </script>
 

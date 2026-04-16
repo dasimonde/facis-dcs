@@ -89,10 +89,11 @@ var ContractItem = Type("ContractItem", func() {
 	Attribute("state", String, "Current state of the contract")
 	Attribute("name", String, "The name of the contract")
 	Attribute("description", String, "The description of the contract")
+	Attribute("created_by", String, "Identifier of who created the contract negotiation")
 	Attribute("created_at", String, "Created at")
 	Attribute("updated_at", String, "Updated at")
 
-	Required("did", "state", "created_at", "updated_at")
+	Required("did", "state", "created_by", "created_at", "updated_at")
 })
 
 var ContractReviewTaskItem = Type("ContractReviewTaskItem", func() {

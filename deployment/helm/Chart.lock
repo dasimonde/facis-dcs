@@ -1,0 +1,18 @@
+dependencies:
+- name: postgresql
+  repository: file://charts/postgresql
+  version: 0.1.0
+- name: keycloak
+  repository: file://charts/keycloak
+  version: 0.1.0
+- name: nats
+  repository: file://charts/nats
+  version: 0.1.0
+- name: neo4j
+  repository: file://charts/neo4j
+  version: 0.1.0
+- name: federated-catalogue
+  repository: file://charts/federated-catalogue
+  version: 0.1.0
+digest: sha256:be19e2048b3eb531035c887599d76e4040265fc970dd52a508038edc11954db4
+generated: "2026-04-15T14:30:10.508704702+02:00"

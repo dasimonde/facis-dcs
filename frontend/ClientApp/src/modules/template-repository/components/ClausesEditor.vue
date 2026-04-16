@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- Section 1: New clause -->
-    <section v-if="store.isEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+    <section v-if="uiStore.isTemplateEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
       <ClauseEditorForm mode="create" initial-title="" initial-text="" :semantic-conditions="semanticConditions"
         @submit="addClause" />
     </section>
@@ -12,7 +12,7 @@
       <ExistingClausesList :clause-blocks="clauseBlocks" :semantic-conditions="semanticConditions"
         :get-condition-name="getConditionName" @delete="deleteClause" :block-ids-in-outline="store.blockIdsInOutline"
         :editing-block-id="editingBlockId" @edit="startEditClause" @save="saveEditedClause" @cancel-edit="cancelEdit"
-        :editable="store.isEditable" />
+        :editable="uiStore.isTemplateEditable" />
     </section>
   </div>
 </template>
@@ -24,8 +24,10 @@ import { useTemplateDraftStore } from '@template-repository/store/templateDraftS
 import { isClauseBlock, type ClauseBlock } from '@template-repository/models/contract-templace'
 import ExistingClausesList from '@template-repository/components/clauses-editor/ExistingClausesList.vue'
 import ClauseEditorForm from '@template-repository/components/clauses-editor/ClauseEditorForm.vue'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 
 const store = useTemplateDraftStore()
+const uiStore = useTemplateEditorUiStore()
 const { documentBlocks, semanticConditions } = storeToRefs(store)
 
 const editingBlockId = ref<string | null>(null)

@@ -1,6 +1,6 @@
 <template>
   <div class="flex items-center h-16 px-4 overflow-hidden">
-    <RouterLink :to="{ name: 'home' }" #default="{ route }" class="font-bold text-2xl tracking-tight text-base-content uppercase">
+    <RouterLink :to="{ name: ROUTES.HOME }" #default="{ route }" class="font-bold text-2xl tracking-tight text-base-content uppercase">
       {{ route.meta.name }}
     </RouterLink>
   </div>
@@ -11,17 +11,15 @@
         <RouterLink :to="route.path" @click="closeMobileDrawer" :class="[
           'flex items-center gap-4 py-3 rounded-btn',
           isSidebarCollapsed ? 'justify-center px-0' : 'px-4'
-        ]" active-class="active bg-primary text-primary-content" :data-tip="isSidebarCollapsed ? route.meta.name : ''">
+        ]" active-class="active bg-primary text-primary-content" :data-tip="isSidebarCollapsed ? route.meta?.name : ''">
           <component :is="route.meta?.icon" class="w-6 h-6 shrink-0" aria-hidden="true" />
           <span v-if="!isSidebarCollapsed" class="font-medium whitespace-nowrap">
-            {{ route.meta.name }}
+            {{ route.meta?.name }}
           </span>
         </RouterLink>
       </li>
     </ul>
   </nav>
-
-  <TemplateListStateFilter v-if="$route.matched.some(route => route.name === 'templates.list') && !isSidebarCollapsed" class="px-3" />
 
   <div class="flex-1"></div>
 
@@ -34,17 +32,17 @@
             alt="Profile" />
         </div>
       </div>
-      <div v-if="!isSidebarCollapsed" class="overflow-hidden">
-        <p class="text-sm font-bold truncate">Tom Cook</p>
-        <p class="text-xs opacity-60">Admin</p>
+      <div v-if="!isSidebarCollapsed && user" class="overflow-hidden">
+        <p class="text-sm font-bold truncate">{{ user.name }}</p>
+        <p class="text-xs opacity-60">{{ user.username }}</p>
       </div>
     </div>
   </div>
 </template>
 
-
 <script setup lang="ts">
-import TemplateListStateFilter from '@/components/lists/template-list/TemplateListStateFilter.vue'
+import { ROUTES } from '@/router/router'
+import { useAuthStore } from '@/stores/auth-store'
 import { usePageStore } from '@core/store/page'
 import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
@@ -55,6 +53,9 @@ const router = useRouter()
 const pageStore = usePageStore()
 const { isSidebarCollapsed } = storeToRefs(pageStore)
 
+const authStore = useAuthStore()
+const { user } = storeToRefs(authStore)
+
 const closeMobileDrawer = () => {
   const drawerToggle = document.getElementById(pageStore.pageSidebarId) as HTMLInputElement | null
   if (drawerToggle) drawerToggle.checked = false
@@ -62,12 +63,15 @@ const closeMobileDrawer = () => {
 
 const navigationRoutes = computed(() => {
   try {
-    return router.getRoutes().filter(route =>
-      route.name &&
-      !route.path.includes(':') &&
-      route.meta?.name &&
-      route.meta?.hideInSidebar !== true
-    )
+    return router.getRoutes()
+      .filter(route =>
+        route.name &&
+        !route.path.includes(':') &&
+        route.meta?.name &&
+        route.meta?.hideInSidebar !== true &&
+        (!route.meta.roles || user.value?.roles?.some(role => route.meta.roles?.includes(role)))
+      )
+      .sort((routeA, routeB) => (routeA.meta.order || 999) - (routeB.meta.order || 999))
   } catch (e) {
     return []
   }

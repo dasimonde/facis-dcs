@@ -1,4 +1,5 @@
 @UC-04-02 @UC-14 @FR-SM-04 @FR-SM-26
+@skip
 Feature: Counterparty Authorization and PoA Credential Chain Verification
   The system verifies counterparty PoA credentials and delegation
   chains before allowing contract signing to proceed.

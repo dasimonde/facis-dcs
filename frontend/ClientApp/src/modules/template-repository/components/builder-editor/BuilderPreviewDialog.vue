@@ -19,7 +19,7 @@
               style="aspect-ratio: 210 / 297">
               <div :class="previewContainerClasses">
                 <TemplatePreview :document-outline="documentOutline" :document-blocks="documentBlocks"
-                  :semantic-conditions="semanticConditions" :approved-sub-templates="approvedSubTemplates" />
+                  :semantic-conditions="semanticConditions" :sub-template-snapshots="subTemplateSnapshots" />
               </div>
             </div>
           </div>
@@ -33,16 +33,13 @@
 import { storeToRefs } from 'pinia'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import { useApprovedSubTemplateStore } from '@template-repository/store/approvedSubTemplateStore'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 
 const uiStore = useTemplateEditorUiStore()
 const draftStore = useTemplateDraftStore()
-const approvedSubTemplateStore = useApprovedSubTemplateStore()
 
 const { isPreviewDialogOpen } = storeToRefs(uiStore)
-const { documentOutline, documentBlocks, semanticConditions } = storeToRefs(draftStore)
-const { templates: approvedSubTemplates } = storeToRefs(approvedSubTemplateStore)
+const { documentOutline, documentBlocks, semanticConditions, subTemplateSnapshots } = storeToRefs(draftStore)
 
 // This container is block, not flex
 const previewContainerClasses = 'w-full h-full overflow-auto px-10 py-8'

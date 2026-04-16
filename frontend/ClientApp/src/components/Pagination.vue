@@ -24,7 +24,7 @@ watch(currentPage, (newPage, oldPage) => {
       <button
         type="button"
         class="btn join-item btn-outline btn-accent"
-        :class="{ 'btn-active': page == currentPage }"
+        :class="{ 'btn-active': page === currentPage }"
         @click="currentPage = page"
       >
         {{ page }}

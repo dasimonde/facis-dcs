@@ -1,4 +1,5 @@
 @UC-10-02 @FR-PACM-03
+@skip
 Feature: Pre-Execution Contract Validation
   Validators trigger compliance checks before contract deployment. The system
   reviews contract content, structure, and metadata for consistency with

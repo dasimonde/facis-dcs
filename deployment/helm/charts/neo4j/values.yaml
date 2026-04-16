@@ -1,0 +1,34 @@
+image:
+  repository: neo4j
+  tag: "5.18-community"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  httpPort: 7474
+  boltPort: 7687
+  nodePortHttp: null
+  nodePortBolt: null
+
+auth:
+  username: neo4j
+  # Note: Neo4j does not allow 'neo4j' as password
+  password: changeme
+
+# Neo4j plugins to install (JSON array format)
+# Required for Federated Catalogue: apoc, graph-data-science, n10s (neosemantics)
+plugins: '["apoc", "graph-data-science", "n10s"]'
+
+# Memory settings (must fit within resources.limits.memory)
+memory:
+  heapInitial: "256m"
+  heapMax: "512m"
+  pagecache: "128m"
+
+persistence:
+  enabled: false
+  size: 8Gi
+  accessModes:
+    - ReadWriteOnce
+
+resources: {}

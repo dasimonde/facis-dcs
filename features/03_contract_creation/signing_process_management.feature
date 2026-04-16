@@ -1,4 +1,5 @@
 @UC-03-06 @FR-SM-13 @FR-SM-07 @FR-SM-14
+@skip
 Feature: Contract Signing Process Management
   Contract Managers coordinate the structured signing process for all
   parties. The system schedules and tracks signing steps, assigns

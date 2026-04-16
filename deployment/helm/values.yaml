@@ -1,0 +1,152 @@
+replicaCount: 1
+
+image:
+  repository: "[registry]"
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+
+dockerRegistry:
+  create: false
+  secretName: "docker-registry"
+  server: ""
+  username: ""
+  password: ""
+
+serviceAccount:
+  create: true
+  automount: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 8991
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  pathType: Prefix
+  hosts: []
+  tls: []
+
+# Istio VirtualService (optional)
+istio:
+  enabled: false
+  hosts: []
+  gateways: []
+
+resources: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+volumes: []
+volumeMounts: []
+
+customCA:
+  enabled: false
+  configMapName: ""
+
+hostAliases: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []
+extraEnvFrom: []
+
+# Route and path configuration
+route:
+  basePath: "/digital-contracting-service"
+
+# Override individual paths (derived from route.basePath if not set)
+paths:
+  api: ""
+  ui: ""
+
+# OIDC / authentication
+# issuerURL is derived from keycloak.route.path + istio/ingress host when not set explicitly
+oidc:
+  issuerURL: ""
+  clientID: "[oidc-client-id]"
+  redirectURI: "[oidc-redirect-uri]"
+  logoutRedirectURI: "[oidc-logout-redirect-uri]"
+  realm: "gaia-x"
+  keycloakScheme: "https"
+  issuerURLSecretRef:
+    name: ""
+    key: "OIDC_ISSUER_URL"
+
+# Database connection – derived from the postgresql sub-chart when not set explicitly
+database:
+  url: ""
+  port: 5432
+  user: ""
+  password: ""
+  name: ""
+  sslmode: "disable"
+  secretRef:
+    name: ""
+    key: "DATABASE_URL"
+
+# NATS connection – derived from the nats sub-chart when not set explicitly
+messaging:
+  natsURL: ""
+  natsPort: 4222
+  secretRef:
+    name: ""
+    key: "NATS_URL"
+
+# Service discovery overrides – all auto-wired when the sub-charts below are enabled
+serviceDiscovery:
+  postgresqlHost: ""
+  keycloakHost: ""
+  natsHost: ""
+  keycloakPort: ""
+
+# ---- Co-deployed dependencies ----------------------------------------
+# Each sub-chart owns its full set of configurable values.
+# Only fields referenced by the parent chart's helpers are listed here.
+# All other sub-chart options (images, resources, persistence, etc.) can
+# be set directly in your values override file.
+
+postgresql:
+  enabled: false
+  auth:
+    username: dcs
+    password: dcs
+    database: dcs
+
+keycloak:
+  enabled: false
+  service:
+    port: 8080
+  route:
+    path: ""
+
+nats:
+  enabled: false
+
+neo4j:
+  enabled: false
+
+# XFSC Federated Catalogue (requires neo4j, keycloak, postgresql with "fc" database)
+# See charts/federated-catalogue/values.yaml for all configurable fields.
+federatedCatalogue:
+  enabled: false
+  # URL the DCS backend uses to reach the Federated Catalogue API
+  apiURL: ""
+  secretRef:
+    name: ""
+    key: "FEDERATED_CATALOGUE_API_URL"

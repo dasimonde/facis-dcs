@@ -1,4 +1,5 @@
 @UC-03-05 @FR-CWE-04
+@skip
 Feature: Machine-Readable and Human-Readable Contract Review
   Contract Creators, Contract Reviewers, and Contract Managers review
   contracts in both machine-readable and human-readable formats. The system

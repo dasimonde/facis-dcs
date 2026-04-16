@@ -31,6 +31,7 @@ type MetadataItem struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	MetaData        datatype.JSON
+	CreatedBy       string
 }
 
 type ReviewTaskItem struct {
@@ -133,6 +134,7 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 			State:           state,
 			Name:            data.Name,
 			Description:     data.Description,
+			CreatedBy:       data.CreatedBy,
 			CreatedAt:       data.CreatedAt,
 			UpdatedAt:       data.UpdatedAt,
 		}

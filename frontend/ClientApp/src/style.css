@@ -1,4 +1,6 @@
 @import "tailwindcss";
- @plugin "daisyui" {
-   themes: nord --default, dark --prefersdark;
- }
+@plugin "daisyui" {
+  themes: nord --default, dark --prefersdark;
+}
+
+@source inline("alert-{error,info}");

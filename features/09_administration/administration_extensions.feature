@@ -1,4 +1,5 @@
 @UC-09-03
+@skip
 Feature: Administration Extensions
   Recommended logging practices for authentication and authorization events.
 

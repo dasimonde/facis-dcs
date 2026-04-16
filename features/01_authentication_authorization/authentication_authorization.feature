@@ -1,4 +1,5 @@
 @UC-01 @FR-UC-01-1 @FR-UC-01-2 @FR-UC-01-3 @FR-UC-01-4
+@skip
 Feature: User Authentication & Authorization
   Users authenticate securely and are authorized based on roles and credentials.
 

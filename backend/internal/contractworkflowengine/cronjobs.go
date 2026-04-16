@@ -2,7 +2,6 @@ package contractworkflowengine
 
 import (
 	"context"
-	"digital-contracting-service/internal/contractworkflowengine/conf"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"fmt"
 	"log"
@@ -18,7 +17,7 @@ type CronJob struct {
 }
 
 func (j CronJob) Start() {
-	go startExpiryScheduler(j.DB, j.Ctx, j.CRepo, conf.ExpirationCronJobTimeOut())
+	// go startExpiryScheduler(j.DB, j.Ctx, j.CRepo, conf.ExpirationCronJobTimeOut())
 }
 
 func startExpiryScheduler(db *sqlx.DB, ctx context.Context, repo db.ContractRepo, interval time.Duration) {

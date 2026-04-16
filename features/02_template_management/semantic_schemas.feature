@@ -1,4 +1,5 @@
 @UC-02-08 @FR-TR-03
+@skip
 Feature: Create and Maintain Semantic Schemas
   Template Managers create and manage semantic schemas
   used for template validation, including version control

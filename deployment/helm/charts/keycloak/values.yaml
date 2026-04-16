@@ -1,0 +1,44 @@
+image:
+  repository: quay.io/keycloak/keycloak
+  tag: "26.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+  nodePort: null
+  annotations: {}
+  loadBalancerIP: ""
+  externalTrafficPolicy: ""
+
+# Route path when Keycloak is behind a reverse proxy at a subpath (e.g., "/auth").
+# Sets KC_HTTP_RELATIVE_PATH automatically.
+route:
+  path: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  path: "/"
+  pathType: Prefix
+  tls: []
+
+auth:
+  adminUser: admin
+  adminPassword: admin
+
+extraEnv: []
+
+# Realm import configuration.
+# When enabled, imports the gaia-x realm with pre-configured clients (federated-catalogue, dcs-client) and roles on startup.
+realm:
+  import: false
+  dcsClient:
+    redirectUris:
+      - "*"
+    webOrigins:
+      - "*"
+
+resources: {}

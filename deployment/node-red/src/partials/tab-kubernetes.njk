@@ -1,0 +1,4 @@
+{% from "partials/macros.njk" import field_file, tab %}
+{% call tab("tab2") %}
+{{ field_file("kubeconfig", "Kubeconfig", "kubeconfigContent") }}
+{% endcall %}

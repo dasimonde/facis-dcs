@@ -1,0 +1,101 @@
+{{- $keycloakInternalUrl := .Values.keycloak.internalUrl | default (printf "http://%s-keycloak:%d" .Release.Name (.Values.keycloak.port | default 8080 | int)) }}
+{{- $keycloakIssuerUrl := "" }}
+{{- if .Values.keycloak.issuerUrl }}
+{{- $keycloakIssuerUrl = .Values.keycloak.issuerUrl }}
+{{- else if .Values.keycloak.hostname }}
+{{- $keycloakIssuerUrl = printf "%s://%s" (.Values.keycloak.issuerScheme | default "https") .Values.keycloak.hostname }}
+{{- else }}
+{{- $keycloakIssuerUrl = $keycloakInternalUrl }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-federated-catalogue
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: federated-catalogue
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: federated-catalogue
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: fc-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            # Neo4j / Graph Store
+            - name: GRAPHSTORE_URI
+              value: {{ .Values.neo4j.uri | default (printf "bolt://%s-neo4j:%d" .Release.Name (7687 | int)) | quote }}
+            - name: GRAPHSTORE_USER
+              value: {{ .Values.neo4j.username | default "neo4j" | quote }}
+            - name: GRAPHSTORE_PASSWORD
+              value: {{ .Values.neo4j.password | default "changeme" | quote }}
+            - name: GRAPHSTORE_QUERY_TIMEOUT_IN_SECONDS
+              value: "5"
+            # PostgreSQL
+            {{- if .Values.database.url }}
+            - name: SPRING_DATASOURCE_URL
+              value: {{ .Values.database.url | quote }}
+            {{- else }}
+            - name: SPRING_DATASOURCE_URL
+              value: {{ printf "jdbc:postgresql://%s-postgresql:5432/%s" .Release.Name (.Values.database.name | default "fc") | quote }}
+            {{- end }}
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ .Values.database.username | default "dcs" | quote }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: {{ .Values.database.password | default "dcs" | quote }}
+            # Keycloak
+            - name: KEYCLOAK_ENABLED
+              value: {{ .Values.security.enabled | toString | quote }}
+            {{- if .Values.security.enabled }}
+            - name: KEYCLOAK_AUTH_SERVER_URL
+              value: {{ $keycloakInternalUrl | quote }}
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
+              value: {{ printf "%s/realms/%s" $keycloakIssuerUrl (.Values.keycloak.realm | default "gaia-x") | quote }}
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+              value: {{ printf "%s/realms/%s/protocol/openid-connect/certs" $keycloakInternalUrl (.Values.keycloak.realm | default "gaia-x") | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.keycloak.realm | default "gaia-x" | quote }}
+            - name: KEYCLOAK_RESOURCE
+              value: {{ .Values.keycloak.clientId | default "federated-catalogue" | quote }}
+            - name: KEYCLOAK_CREDENTIALS_SECRET
+              value: {{ .Values.keycloak.clientSecret | default "federated-catalogue-secret" | quote }}
+            {{- end }}
+            # FC Service config
+            - name: FEDERATED_CATALOGUE_VERIFICATION_SIGNATURES
+              value: {{ .Values.verifySignatures | default "false" | quote }}
+            - name: DATASTORE_FILE_PATH
+              value: "/var/lib/fc-service/filestore"
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+              value: "health,info,metrics"
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+              value: "always"
+            {{- if .Values.route.path }}
+            - name: SERVER_SERVLET_CONTEXT_PATH
+              value: {{ .Values.route.path | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.route.path | default "" }}/actuator/health
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.route.path | default "" }}/actuator/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

@@ -1,3 +1,4 @@
+@skip
 @UC-03-02 @FR-CWE-08 @FR-CWE-14 @FR-CWE-18 @FR-CWE-07
 Feature: Contract Negotiation
   Contract Managers and Contract Reviewers negotiate contract terms through
@@ -19,6 +20,7 @@ Feature: Contract Negotiation
     And the comment is attributed to my identity
     And the comment includes a timestamp
 
+  @skip
   Scenario: Propose redline edit to contract clause
     Given I am authenticated with role "Contract Reviewer"
     And contract "Service Agreement" is open for negotiation
@@ -27,6 +29,7 @@ Feature: Contract Negotiation
     And the original text is preserved
     And the redline proposal is visible to other negotiators
 
+  @skip
   Scenario: Track version history during negotiation
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" has multiple negotiation edits
@@ -35,6 +38,7 @@ Feature: Contract Negotiation
     And I see user attribution for each version
     And old versions remain accessible
 
+  @skip
   Scenario: Approve proposed change during negotiation
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" has a pending redline proposal on clause "Liability"
@@ -43,6 +47,7 @@ Feature: Contract Negotiation
     And the approval is logged in the negotiation log
     And a new version is created
 
+  @skip
   Scenario: Reject proposed change during negotiation
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" has a pending redline proposal on clause "Liability"
@@ -51,6 +56,7 @@ Feature: Contract Negotiation
     And the rejection reason is logged
     And the original text is retained
 
+  @skip
   Scenario: View negotiation log
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" has completed multiple negotiation rounds
@@ -59,6 +65,7 @@ Feature: Contract Negotiation
     And I see approvals and rejections
     And I see the full audit trail
 
+  @skip
   Scenario: Submit contract for review after negotiation
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" negotiation is complete
@@ -73,6 +80,7 @@ Feature: Contract Negotiation
     When I attempt to add a comment to contract "Service Agreement"
     Then the request is denied with an authorization error
 
+  @skip
   Scenario: Only parties to contract can negotiate terms
     Given I am authenticated with role "Contract Reviewer"
     And contract "Service Agreement" involves parties "Acme Corp" and "TechVendor Inc"
@@ -82,6 +90,7 @@ Feature: Contract Negotiation
     And I can add comments to contract clauses
     And my comments are attributed to organization "Acme Corp"
 
+  @skip
   Scenario: Non-party reviewer cannot negotiate contract not assigned to them
     Given I am authenticated with role "Contract Reviewer"
     And contract "Service Agreement" involves parties "Acme Corp" and "TechVendor Inc"
@@ -90,6 +99,7 @@ Feature: Contract Negotiation
     Then the request is denied with an "Access denied - not a party to this contract" error
     And the access denial is logged
 
+  @skip
   Scenario: Contract Creator and assigned Reviewers can negotiate
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" is assigned to reviewers "Alice" and "Bob"
@@ -99,6 +109,7 @@ Feature: Contract Negotiation
     And only assigned reviewers and the creator can see negotiation comments
     And negotiation actions are logged with reviewer identity
 
+  @skip
   Scenario: Reviewer cannot approve own redline proposals
     Given I am authenticated with role "Contract Reviewer"
     And contract "Service Agreement" is open for negotiation

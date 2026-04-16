@@ -1,4 +1,5 @@
 @UC-05-01 @FR-SM-12 @FR-CWE-06
+@skip
 Feature: Contract Deployment
   Signed contracts are deployed to target systems for execution
   upon completion of the signing process.

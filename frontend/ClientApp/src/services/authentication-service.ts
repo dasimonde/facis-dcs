@@ -1,13 +1,11 @@
 import authHttp from '@/api/auth-http'
-import type { AuthCallbackResponse } from '@/models/responses/auth-callback-response'
-import type { LoginResponse } from '@/models/responses/login-response'
-import type { LogoutResponse } from '@/models/responses/logout-response'
-import type { AuthenticationService as AuthService } from '@/models/services/authentication-service'
+import type { AuthCallbackResponse, LoginResponse, LogoutResponse } from '@/models/responses/auth-response'
+import type { AuthenticationService } from '@/models/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 
-export const AuthenticationService: AuthService = {
-  async getLoginPath() {
+export const authenticationService: AuthenticationService = {
+  async loginPath() {
     return await authHttp
       .get<LoginResponse>('/auth/login')
       .then((res) => res.data.auth_url)
@@ -22,11 +20,12 @@ export const AuthenticationService: AuthService = {
       .post<AuthCallbackResponse>('/auth/refresh')
       .then((res) => {
         const authTokenStore = useAuthTokenStore()
-        const resp = res.data
-        authTokenStore.setTokens(resp.token_type, resp.access_token)
+        authTokenStore.setTokens(res.data.token_type, res.data.access_token)
         const authStore = useAuthStore()
-        authStore.setUser(resp.access_token)
-        return res.data
+        const userId = authTokenStore.getUserId
+        if (!userId) throw new Error('JWT Error')
+        authStore.setUser(userId)
+        return true
       })
       .catch((err) => {
         if (err && err.status === 401) {
@@ -35,7 +34,7 @@ export const AuthenticationService: AuthService = {
           const authTokenStore = useAuthTokenStore()
           authTokenStore.remove()
         }
-        return Promise.reject(err)
+        return false
       })
   },
 

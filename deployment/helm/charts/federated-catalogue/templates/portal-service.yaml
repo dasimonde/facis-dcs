@@ -1,0 +1,22 @@
+{{- if .Values.portal.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-federated-catalogue-portal
+  labels:
+    app.kubernetes.io/name: federated-catalogue-portal
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.portal.service.type | default "ClusterIP" }}
+  ports:
+    - name: http
+      port: {{ .Values.portal.service.port | default 8088 }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (eq (.Values.portal.service.type | default "ClusterIP") "NodePort") .Values.portal.service.nodePort }}
+      nodePort: {{ .Values.portal.service.nodePort }}
+      {{- end }}
+  selector:
+    app.kubernetes.io/name: federated-catalogue-portal
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

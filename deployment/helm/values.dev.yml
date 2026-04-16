@@ -1,0 +1,100 @@
+# Dev values: co-deploy all dependencies, skip the DCS app itself.
+# Run the backend locally with `air` and the frontend with `vite`.
+#
+# Install:
+#   helm install dcs ./deployment/helm -f ./deployment/helm/values.dev.yml
+#
+# Upgrade (after chart changes):
+#   helm upgrade dcs ./deployment/helm -f ./deployment/helm/values.dev.yml
+#
+# Services exposed on localhost via NodePort (Rancher Desktop forwards these automatically):
+#   PostgreSQL : localhost:30432
+#   Keycloak   : localhost:30080  →  realm: http://localhost:30080/realms/gaia-x
+#   NATS       : localhost:30422
+#   Neo4j HTTP : localhost:30474
+#   Neo4j Bolt : localhost:30687
+#   FC service : localhost:30081
+
+# In development, don't deploy the DCS container since we run it locally
+replicaCount: 0
+
+# No private registry needed for local dev (all dep images are public)
+imagePullSecrets: []
+dockerRegistry:
+  create: false
+
+postgresql:
+  enabled: true
+  auth:
+    username: dcs
+    password: dcs
+    database: dcs
+  additionalDatabases: ["fc"]
+  persistence:
+    enabled: false
+  service:
+    type: NodePort
+    nodePort: 30432
+
+keycloak:
+  enabled: true
+  service:
+    type: NodePort
+    port: 8080
+    nodePort: 30080
+  auth:
+    adminUser: admin
+    adminPassword: admin
+  realm:
+    import: true
+    dcsClient:
+      redirectUris:
+        - "http://localhost:5173/api/auth/callback"
+        - "http://localhost:5173/api/auth/logout-complete"
+      webOrigins:
+        - "http://localhost:5173"
+  extraEnv:
+    - name: KC_HOSTNAME
+      value: "localhost"
+    - name: KC_HOSTNAME_PORT
+      value: "30080"
+    - name: KC_HOSTNAME_STRICT_HTTPS
+      value: "false"
+    - name: KC_HTTP_ENABLED
+      value: "true"
+
+nats:
+  enabled: true
+  service:
+    type: NodePort
+    nodePort: 30422
+
+neo4j:
+  enabled: true
+  persistence:
+    enabled: false
+  service:
+    type: NodePort
+    nodePortHttp: 30474
+    nodePortBolt: 30687
+
+federatedCatalogue:
+  enabled: true
+  service:
+    type: NodePort
+    nodePort: 30081
+  keycloak:
+    hostname: "localhost:30080"
+    issuerScheme: "http"
+
+# OIDC / route values below are not used when replicaCount=0,
+# but kept here as documentation for the backend .env.dev file.
+oidc:
+  clientID: "dcs-client"
+  redirectURI: "http://localhost:5173/api/auth/callback"
+  logoutRedirectURI: "http://localhost:5173/api/auth/logout-complete"
+  realm: "gaia-x"
+  keycloakScheme: "http"
+
+route:
+  basePath: "/api"

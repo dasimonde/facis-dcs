@@ -1,0 +1,29 @@
+# BDD test values: used by tests/bdd/Makefile kind_deploy target (kind cluster).
+# Uses Keycloak's built-in master realm, no realm import needed.
+# Assumes release name "dcs" (HELM_RELEASE default in the Makefile).
+
+postgresql:
+  enabled: true
+
+keycloak:
+  enabled: true
+  realm:
+    import: true
+  extraEnv:
+    - name: KC_HOSTNAME
+      value: "dcs-keycloak"
+    - name: KC_HOSTNAME_PORT
+      value: "8080"
+    - name: KC_HOSTNAME_STRICT
+      value: "false"
+
+nats:
+  enabled: true
+
+oidc:
+  issuerURL: "http://dcs-keycloak:8080/realms/gaia-x"
+  clientID: "dcs-client"
+  keycloakScheme: "http"
+
+route:
+  basePath: "/digital-contracting-service"

@@ -1,0 +1,29 @@
+apiVersion: v2
+name: digital-contracting-service
+description: A Helm chart for Kubernetes
+
+type: application
+version: 0.2.2
+appVersion: "1.16.0"
+dependencies:
+  - name: postgresql
+    version: "0.1.0"
+    repository: "file://charts/postgresql"
+    condition: postgresql.enabled
+  - name: keycloak
+    version: "0.1.0"
+    repository: "file://charts/keycloak"
+    condition: keycloak.enabled
+  - name: nats
+    version: "0.1.0"
+    repository: "file://charts/nats"
+    condition: nats.enabled
+  - name: neo4j
+    version: "0.1.0"
+    repository: "file://charts/neo4j"
+    condition: neo4j.enabled
+  - name: federated-catalogue
+    version: "0.1.0"
+    repository: "file://charts/federated-catalogue"
+    condition: federatedCatalogue.enabled
+    alias: federatedCatalogue

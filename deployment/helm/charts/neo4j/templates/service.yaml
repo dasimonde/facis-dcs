@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-neo4j
+spec:
+  type: {{ .Values.service.type | default "ClusterIP" }}
+  ports:
+    - name: http
+      port: {{ .Values.service.httpPort }}
+      targetPort: http
+      {{- if and (eq (.Values.service.type | default "ClusterIP") "NodePort") .Values.service.nodePortHttp }}
+      nodePort: {{ .Values.service.nodePortHttp }}
+      {{- end }}
+    - name: bolt
+      port: {{ .Values.service.boltPort }}
+      targetPort: bolt
+      {{- if and (eq (.Values.service.type | default "ClusterIP") "NodePort") .Values.service.nodePortBolt }}
+      nodePort: {{ .Values.service.nodePortBolt }}
+      {{- end }}
+  selector:
+    app.kubernetes.io/name: neo4j
+    app.kubernetes.io/instance: {{ .Release.Name }}

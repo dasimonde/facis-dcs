@@ -5,6 +5,7 @@ go 1.25.7
 require (
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/jmoiron/sqlx v1.4.0
+	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.11.1
 	github.com/nats-io/nats.go v1.49.0
 	github.com/stretchr/testify v1.11.1

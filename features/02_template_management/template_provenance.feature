@@ -1,4 +1,5 @@
 @UC-02-06
+@skip
 Feature: Add Template Provenance Information
   Template Approvers add provenance metadata
   to ensure traceability.

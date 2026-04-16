@@ -156,10 +156,11 @@ var ContractTemplateItem = Type("ContractTemplateItem", func() {
 	Attribute("template_type", String, "The type of the template")
 	Attribute("name", String, "Name")
 	Attribute("description", String, "Description")
+	Attribute("created_by", String, "Created by")
 	Attribute("created_at", String, "Created at")
 	Attribute("updated_at", String, "Updated at")
 
-	Required("did", "state", "template_type", "created_at", "updated_at")
+	Required("did", "state", "template_type", "created_by", "created_at", "updated_at")
 })
 
 var ReviewTaskItem = Type("ReviewTaskItem", func() {
@@ -696,6 +697,7 @@ var _ = Service("TemplateRepository", func() {
 
 		HTTP(func() {
 			GET("/template/audit")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

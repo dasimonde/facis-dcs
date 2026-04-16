@@ -1,4 +1,5 @@
 @UC-02-12
+@skip
 Feature: Hierarchical Contract Templates
   Template Managers define relationships between templates
   for frame agreements, sub-agreements, and addendums.

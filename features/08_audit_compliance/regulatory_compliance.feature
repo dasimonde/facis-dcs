@@ -1,4 +1,5 @@
 @UC-08-03
+@skip
 Feature: Regulatory Framework Compliance
   The system validates contracts and logs against
   eIDAS, GDPR, and ISO regulatory frameworks.

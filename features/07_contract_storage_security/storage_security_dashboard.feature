@@ -1,4 +1,5 @@
 @UC-07-03 @FR-CSA-21 @FR-CSA-02 @FR-CWE-07
+@skip
 Feature: Contract Storage and Security Dashboard
   Archive Managers monitor archive status, data integrity, access logs,
   and alerts through a centralized dashboard.

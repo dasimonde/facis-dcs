@@ -319,6 +319,7 @@ func (s *templateRepositorysrvc) Retrieve(ctx context.Context, req *templaterepo
 			TemplateType:   item.TemplateType.String(),
 			Name:           item.Name,
 			Description:    item.Description,
+			CreatedBy:      item.CreatedBy,
 			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:      item.UpdatedAt.Format(time.RFC3339),
 		})

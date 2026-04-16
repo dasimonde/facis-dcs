@@ -1,0 +1,41 @@
+{% from "partials/macros.njk" import field_text, field_password, field_checkbox, tab %}
+{% call tab("tab5") %}
+
+  <div class="dep-section">
+    {{ field_checkbox("depPostgresql", "PostgreSQL") }}
+    <div class="dep-config" id="dep-config-postgresql" style="display:none; padding-left:20px;">
+      {{ field_text    ("depPgUser",     "Username",      "dcs") }}
+      {{ field_password("depPgPassword", "Password",      "dcs") }}
+      {{ field_text    ("depPgDatabase", "Database",      "dcs") }}
+      {{ field_checkbox("depPgPersist",  "Persistence") }}
+    </div>
+  </div>
+
+  <hr style="border:none; border-top:1px solid #eee; margin:8px 0;">
+
+  <div class="dep-section">
+    {{ field_checkbox("depKeycloak", "Keycloak") }}
+    <div class="dep-config" id="dep-config-keycloak" style="display:none; padding-left:20px;">
+      {{ field_text    ("depKcAdminUser",     "Admin User",     "admin") }}
+      {{ field_password("depKcAdminPassword", "Admin Password", "admin") }}
+      {{ field_checkbox("depKcRealmImport",   "Import gaia-x realm") }}
+    </div>
+  </div>
+
+  <hr style="border:none; border-top:1px solid #eee; margin:8px 0;">
+
+  <div class="dep-section">
+    {{ field_checkbox("depNats", "NATS") }}
+  </div>
+
+  <hr style="border:none; border-top:1px solid #eee; margin:8px 0;">
+
+  <div class="dep-section">
+    {{ field_checkbox("depNeo4j", "Neo4j") }}
+    <div class="dep-config" id="dep-config-neo4j" style="display:none; padding-left:20px;">
+      {{ field_password("depNeo4jPassword", "Password",    "changeme") }}
+      {{ field_checkbox("depNeo4jPersist",  "Persistence") }}
+    </div>
+  </div>
+
+{% endcall %}

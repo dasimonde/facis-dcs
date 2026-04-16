@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-neo4j
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: neo4j
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: neo4j
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: neo4j
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 7474
+            - name: bolt
+              containerPort: 7687
+          env:
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-neo4j
+                  key: neo4j-auth
+            # Memory config for low-resource dev environments
+            - name: NEO4J_server_memory_heap_initial__size
+              value: {{ .Values.memory.heapInitial | default "256m" | quote }}
+            - name: NEO4J_server_memory_heap_max__size
+              value: {{ .Values.memory.heapMax | default "512m" | quote }}
+            - name: NEO4J_server_memory_pagecache_size
+              value: {{ .Values.memory.pagecache | default "128m" | quote }}
+            {{- if .Values.plugins }}
+            - name: NEO4J_PLUGINS
+              value: {{ .Values.plugins | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-neo4j
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

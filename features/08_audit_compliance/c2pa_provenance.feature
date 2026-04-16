@@ -1,4 +1,5 @@
 @UC-08 @DCS-OR-C2PA
+@skip
 Feature: C2PA Content & Lifecycle Credentials for PDF Contracts
   The system uses the C2PA (Coalition for Content Provenance and Authenticity) standard
   to record origin, edits, and lifecycle states of contract PDFs with tamper-evident

@@ -1,0 +1,54 @@
+  <style>
+      .tab-container {
+          display: flex;
+          border-bottom: 1px solid #ccc;
+      }
+      .tab-link {
+          display: inline-block;
+          padding: 8px 16px;
+          cursor: pointer;
+          border: 1px solid #ccc;
+          border-bottom: none;
+          background: #eee;
+          color: #555;
+          text-decoration: none;
+          font-weight: normal;
+      }
+      .tab-link.active {
+          background: #fff;
+          color: #000;
+          font-weight: bold;
+          border-bottom: 1px solid #fff;
+      }
+      .tab-content {
+          border: 1px solid #ccc;
+          border-top: none;
+          border-radius: 0 4px 4px 4px;
+          padding: 10px;
+          background: #fff;
+      }
+      .form-row {
+          display: flex;
+          align-items: center;
+          margin-bottom: 10px;
+      }
+      .form-row label {
+          width: 120px!important;
+          margin-right: 10px;
+          font-weight: normal;
+          color: #333;
+          text-align: right;
+      }
+      .form-row input[type="text"],
+      .form-row input[type="file"],
+      .form-row input[type="password"],
+      .form-row select,
+      .form-row textarea {
+          flex: 1;
+      }
+      #node-input-customScript {
+          width: 100%;
+          min-height: 250px;
+          resize: vertical;
+      }
+  </style>

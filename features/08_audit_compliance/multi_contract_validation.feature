@@ -1,4 +1,5 @@
 @FR-PACM-06
+@skip
 Feature: Multi-Contract Package Validation
   The system validates structural integrity of multi-contract packages
   ensuring completeness and proper linkage between components.

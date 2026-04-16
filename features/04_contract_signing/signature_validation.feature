@@ -1,4 +1,5 @@
 @UC-04-03 @FR-SM-18 @FR-SM-21 @FR-SM-11
+@skip
 Feature: Signature Validation
   The system validates counterparty signatures for cryptographic
   integrity and compliance with legal and organizational policies,

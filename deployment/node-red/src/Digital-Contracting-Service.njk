@@ -1,0 +1,20 @@
+<!-- Editor UI for Digital-Contracting-Service node -->
+<script type="text/x-red" data-template-name="Digital-Contracting-Service">
+{% include "partials/styles.njk" %}
+
+  <div class="form-row tab-container">
+      <a href="#" class="tab-link active" data-tab="tab1">Instance</a>
+      <a href="#" class="tab-link" data-tab="tab2">Kubernetes</a>
+      <a href="#" class="tab-link" data-tab="tab3">Domain</a>
+      <a href="#" class="tab-link" data-tab="tab4">OIDC</a>
+      <a href="#" class="tab-link" data-tab="tab5">Dependencies</a>
+  </div>
+
+{% include "partials/tab-instance.njk" %}
+{% include "partials/tab-kubernetes.njk" %}
+{% include "partials/tab-domain.njk" %}
+{% include "partials/tab-oidc.njk" %}
+{% include "partials/tab-dependencies.njk" %}
+</script>
+
+<!-- EDITOR_SCRIPT_PLACEHOLDER -->

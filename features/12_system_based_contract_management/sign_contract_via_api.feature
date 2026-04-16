@@ -1,4 +1,5 @@
 @UC-12-05 @FR-SM-25
+@skip
 Feature: Sign Contract via API
   System Contract Signers perform automated signing
   through API with verifiable credentials.

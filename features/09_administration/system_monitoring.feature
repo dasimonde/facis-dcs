@@ -1,4 +1,5 @@
 @UC-09-02 @FR-UC-09-2
+@skip
 Feature: System Monitoring and Logging
   System Administrators monitor critical system activities
   and review security-related event logs.

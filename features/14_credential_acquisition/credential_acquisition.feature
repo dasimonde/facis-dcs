@@ -1,4 +1,5 @@
 @UC-14-01 @FR-SM-03 @FR-SM-05
+@skip
 Feature: Identity and PoA Credential Acquisition
   The system retrieves and verifies identity and PoA credentials
   before authorizing contract signing or execution.

@@ -3,6 +3,7 @@ import { PageLayout } from '@core/layouts/page'
 import { useSyncPageTitle } from '@core/composables/useSyncPageTitle'
 import { RouterView, useRoute } from 'vue-router'
 import { computed } from 'vue'
+import ErrorToast from './components/ErrorToast.vue'
 
 useSyncPageTitle()
 
@@ -13,4 +14,5 @@ const isBlankLayout = computed(() => route.meta.layout === 'blank')
 <template>
   <RouterView v-if="isBlankLayout" />
   <PageLayout v-else />
+  <ErrorToast />
 </template>

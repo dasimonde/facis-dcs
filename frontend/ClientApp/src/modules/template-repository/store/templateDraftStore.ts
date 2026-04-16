@@ -2,8 +2,8 @@ import { defineStore } from 'pinia'
 import type { TemplateDraftState, AddBlockPayload, AddBlockOptions } from "@template-repository/models/template-draft-store"
 import type { DocumentOutline, DocumentOutlineBlock, DocumentBlock, TemplateTypeValue, SemanticCondition, MetaData } from "@template-repository/models/contract-templace"
 import { DocumentBlockType, TemplateType, isClauseBlock, isSectionBlock, isApprovedTemplateBlock } from "@template-repository/models/contract-templace"
+import type { ContractTemplate, SubTemplateSnapshot } from '@/models/contract-template'
 import type { ContractTemplateCreateRequest, ContractTemplateUpdateRequest } from '@/models/requests/template-request'
-import { TemplateState } from '@/types/contract-template-state'
 
 const storeId = "templateDraft"
 const defaultState: Readonly<TemplateDraftState> = {
@@ -14,10 +14,13 @@ const defaultState: Readonly<TemplateDraftState> = {
   documentBlocks: [],
   semanticConditions: [],
   customMetaData: [],
+  subTemplateSnapshots: [],
   templateType: TemplateType.subContract,
   state: null,
   document_number: null,
   version: null,
+  updated_at: null,
+  created_by: '',
 }
 
 export const useTemplateDraftStore = defineStore(storeId, {
@@ -39,12 +42,15 @@ export const useTemplateDraftStore = defineStore(storeId, {
           documentBlocks: this.documentBlocks,
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
+          subTemplateSnapshots: this.subTemplateSnapshots,
         }
       }
     },
     templateUpdateRequestData(): ContractTemplateUpdateRequest | null {
-      if (!this.did || this.version === null || this.document_number === null) return null
+      if (!this.did || !this.updated_at) return null
       return {
+        did: this.did,
+        updated_at: this.updated_at,
         name: this.name,
         description: this.description,
         template_data: {
@@ -52,17 +58,9 @@ export const useTemplateDraftStore = defineStore(storeId, {
           documentBlocks: this.documentBlocks,
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
+          subTemplateSnapshots: this.subTemplateSnapshots,
         },
-        updated_at: new Date().toISOString(),
-        version: this.version,
-        document_number: this.document_number,
-        did: this.did,
       }
-    },
-    isEditable(): boolean {
-      if (!this.state) return true
-      const uneditableStates = [TemplateState.approved].map((s) => s.toLowerCase())
-      return !(uneditableStates.includes(this.state.toLowerCase()))
     }
   },
   actions: {
@@ -193,6 +191,23 @@ export const useTemplateDraftStore = defineStore(storeId, {
     },
     updateDescription(description: string): void {
       this.description = description
+    },
+    addSubTemplateSnapshot(template: ContractTemplate): void {
+      const snapshot:SubTemplateSnapshot = {
+        did: template.did,
+        version: template.version,
+        document_number: template.document_number,
+        name: template.name,
+        description: template.description,
+        template_data: template.template_data,
+      }
+      this.subTemplateSnapshots = [
+        ... this.subTemplateSnapshots.filter((item) => !isSameTemplate(item, snapshot)),
+        snapshot
+      ]
+    },
+    removeSubTemplateSnapshot(template: { did: string, version?: number, document_number?: string }): void {
+      this.subTemplateSnapshots = this.subTemplateSnapshots.filter((item) => !isSameTemplate(item, template))
     },
     reset(overrides?: Partial<TemplateDraftState>) {
       Object.assign(this, getInitialState())
@@ -348,7 +363,7 @@ function createBlockFromPayload(blockId: string, payload: AddBlockPayload): Docu
         text,
         templateId: payload.templateId ?? '',
         version: payload.version ?? 1,
-        document_number: payload.document_number ?? 1,
+        document_number: payload.document_number ?? '',
       }
     default:
       throw new Error(`Unknown blockType: ${payload.blockType}`)
@@ -384,5 +399,13 @@ function getInitialState(): TemplateDraftState {
     documentBlocks: [...defaultState.documentBlocks],
     semanticConditions: [...defaultState.semanticConditions],
     customMetaData: [...defaultState.customMetaData],
+    subTemplateSnapshots: [...defaultState.subTemplateSnapshots],
   }
+}
+
+function isSameTemplate(
+  t1: { did: string, version?: number, document_number?: string },
+  t2: { did: string, version?: number, document_number?: string }
+): boolean {
+  return t1.did === t2.did && t1.version === t2.version && t1.document_number === t2.document_number
 }

@@ -83,6 +83,19 @@ export OIDC_LOGOUT_REDIRECT_URI="http://localhost:8991/api/auth/logout-complete"
 go run ./cmd/dcs
 ```
 
+### Development with Live Reload
+To enable live reloading during development, install and use [air](https://github.com/cosmtrek/air):
+
+```bash
+# Install air (one-time)
+go install github.com/cosmtrek/air@latest
+
+# Run backend with live reload
+air
+```
+
+Air watches for file changes in the backend and automatically rebuilds and restarts the service. Configuration is defined in `.air.toml`.
+
 #### Example Request
 ```bash
 curl http://0.0.0.0:8991/template/search

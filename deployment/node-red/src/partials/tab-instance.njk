@@ -1,0 +1,5 @@
+{% from "partials/macros.njk" import field_text, tab %}
+{% call tab("tab1", active=true) %}
+{{ field_text("instanceName", "Instance Name", "Instance name") }}
+{{ field_text("name", "Name", "Node name") }}
+{% endcall %}

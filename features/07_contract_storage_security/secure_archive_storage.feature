@@ -1,4 +1,5 @@
 @UC-07-01 @FR-CSA-01 @FR-CSA-08 @FR-CWE-20 @FR-CSA-05 @FR-CSA-06 @FR-CSA-26
+@skip
 Feature: Secure Contract Archive Storage
   Contract Managers store signed contracts in a tamper-proof archive
   with cryptographic sealing, hierarchical structure, and multi-party

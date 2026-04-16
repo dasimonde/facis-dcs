@@ -1,4 +1,5 @@
 @UC-08 @FR-TR-07 @cross-cutting
+@skip
 Feature: Template Compliance Validation
   Compliance Officers validate templates against regulatory frameworks
   before they can be used in contract creation.

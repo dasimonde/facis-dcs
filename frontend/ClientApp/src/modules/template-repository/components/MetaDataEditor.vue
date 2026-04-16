@@ -13,7 +13,7 @@
           <!-- Add row -->
           <MetaDataRow :key="addRowKey" :initial-name="draft.name" :initial-value="draft.value" :all-names="allNames"
             :is-new="true" :is-active="activeIndex === -1" @confirm="createMeta" @cancel="resetDraft"
-            @delete="resetDraft" @row-focus="setActiveIndex(-1)" :is-editable="store.isEditable" />
+            @delete="resetDraft" @row-focus="setActiveIndex(-1)" :is-editable="uiStore.isTemplateEditable" />
 
           <!-- Small visual gap between add row and existing rows -->
           <tr v-if="customMetaData.length">
@@ -24,7 +24,7 @@
           <MetaDataRow v-for="(meta, index) in customMetaData" :key="index" :initial-name="meta.name"
             :initial-value="meta.value" :all-names="allNames" :index="index" :is-active="activeIndex === index"
             @confirm="updateMeta(index, $event)" @delete="deleteMeta(index)" @row-focus="setActiveIndex(index)"
-            :is-editable="store.isEditable" />
+            :is-editable="uiStore.isTemplateEditable" />
         </tbody>
       </table>
     </div>
@@ -36,8 +36,10 @@ import { computed, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import MetaDataRow from '@template-repository/components/meta-data/MetaDataRow.vue'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 
 const store = useTemplateDraftStore()
+const uiStore = useTemplateEditorUiStore()
 const { customMetaData } = storeToRefs(store)
 
 const allNames = computed(() => customMetaData.value.map((m) => m.name ?? ''))

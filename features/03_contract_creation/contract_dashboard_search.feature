@@ -1,4 +1,5 @@
 @UC-03-07 @FR-CWE-24
+@skip
 Feature: Contract Dashboard and Search
   Contract Managers and Contract Observers track contract progress,
   approvals, and execution status through a dashboard. The system

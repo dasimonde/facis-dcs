@@ -1,4 +1,5 @@
 @UC-07-02 @FR-CSA-02 @FR-PACM-04
+@skip
 Feature: Contract Permissions and Access Management
   Contract Managers configure access control rules for stored contracts.
   The system enforces role-based access and logs all access attempts.

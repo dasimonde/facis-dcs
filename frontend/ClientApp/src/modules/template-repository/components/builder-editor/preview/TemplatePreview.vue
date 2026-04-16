@@ -3,7 +3,7 @@
   <template v-if="!hasBlockId" v-for="id in rootChildren" :key="id">
     <TemplatePreview :block-id="id" :section-level="sectionLevel" :document-outline="documentOutline"
       :document-blocks="documentBlocks" :semantic-conditions="semanticConditions"
-      :approved-sub-templates="approvedSubTemplates" />
+      :sub-template-snapshots="subTemplateSnapshots" />
   </template>
   <!-- Nested blocks -->
   <template v-else>
@@ -13,7 +13,7 @@
         <template v-for="childId in childrenIds" :key="childId">
           <TemplatePreview :block-id="childId" :section-level="sectionLevel + 1" :document-outline="documentOutline"
             :document-blocks="documentBlocks" :semantic-conditions="semanticConditions"
-            :approved-sub-templates="approvedSubTemplates" />
+            :sub-template-snapshots="subTemplateSnapshots" />
         </template>
       </PreviewSectionBlock>
     </ConditionalWrapper>
@@ -24,15 +24,14 @@
       :semantic-conditions="semanticConditions" />
     <!-- Approved template block -->
     <ConditionalWrapper v-else-if="block && isApprovedTemplate" :enabled="hasApprovedTemplateChildren">
-      <TemplatePreview v-if="approvedSubTemplate?.template_data"
-        :document-outline="approvedSubTemplate.template_data.documentOutline"
-        :document-blocks="approvedSubTemplate.template_data.documentBlocks"
-        :semantic-conditions="approvedSubTemplate.template_data.semanticConditions"
-        :approved-sub-templates="approvedSubTemplates" :section-level="sectionLevel" />
+      <TemplatePreview v-if="subTemplate?.template_data" :document-outline="subTemplate.template_data.documentOutline"
+        :document-blocks="subTemplate.template_data.documentBlocks"
+        :semantic-conditions="subTemplate.template_data.semanticConditions"
+        :sub-template-snapshots="subTemplateSnapshots" :section-level="sectionLevel" />
       <template v-for="childId in childrenIds" :key="childId">
         <TemplatePreview :block-id="childId" :section-level="sectionLevel + 1" :document-outline="documentOutline"
           :document-blocks="documentBlocks" :semantic-conditions="semanticConditions"
-          :approved-sub-templates="approvedSubTemplates" />
+          :sub-template-snapshots="subTemplateSnapshots" />
       </template>
     </ConditionalWrapper>
 
@@ -48,7 +47,7 @@ import type {
   SemanticCondition,
 } from '@template-repository/models/contract-templace'
 import { isSectionBlock, isTextBlock, isClauseBlock, isApprovedTemplateBlock } from '@template-repository/models/contract-templace'
-import type { ContractTemplate } from '@/models/contract-template'
+import type { SubTemplateSnapshot } from '@/models/contract-template'
 import ConditionalWrapper from '@/core/components/ConditionalWrapper.vue'
 import PreviewSectionBlock from './PreviewSectionBlock.vue'
 import PreviewTextBlock from './PreviewTextBlock.vue'
@@ -65,7 +64,7 @@ const props = withDefaults(
     documentOutline: DocumentOutline
     documentBlocks: DocumentBlock[]
     semanticConditions: SemanticCondition[]
-    approvedSubTemplates?: ContractTemplate[]
+    subTemplateSnapshots?: SubTemplateSnapshot[]
   }>(),
   { sectionLevel: 1 }
 )
@@ -103,10 +102,10 @@ const sectionTitle = computed(() => {
 })
 
 const sectionLevel = computed(() => props.sectionLevel ?? 1)
-const approvedSubTemplate = computed((): ContractTemplate | undefined => {
+const subTemplate = computed((): SubTemplateSnapshot | undefined => {
   const b = block.value
-  if (!b || !isApprovedTemplateBlock(b) || !props.approvedSubTemplates?.length) return undefined
-  return props.approvedSubTemplates.find((t) => t.did === b.templateId)
+  if (!b || !isApprovedTemplateBlock(b) || !props.subTemplateSnapshots?.length) return undefined
+  return props.subTemplateSnapshots.find((t) => t.did === b.templateId)
 })
 const hasApprovedTemplateChildren = computed(() => isApprovedTemplate.value && childrenIds.value.length > 0)
 </script>

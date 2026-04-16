@@ -1,26 +1,20 @@
 <script setup lang="ts">
-import { AuthenticationService } from '@/services/authentication-service'
+import { authenticationService } from '@/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
+import { ArrowLeftStartOnRectangleIcon } from '@heroicons/vue/24/outline'
 import { storeToRefs } from 'pinia'
-import { onMounted, ref } from 'vue'
 
 const authStore = useAuthStore()
 const { isAuthenticated } = storeToRefs(authStore)
 
-const loginPath = ref('')
-
-onMounted(async () => {
-  loginPath.value = await AuthenticationService.getLoginPath()
-})
-
-function logout() {
-  AuthenticationService.logout()
-}
+const logout = () => authenticationService.logout()
 </script>
 
 <template>
   <div>
-    <a v-if="!isAuthenticated" :href="loginPath" class="btn btn-block btn-accent flex-1 text-center">Single Sign On</a>
-    <button v-else class="btn btn-block btn-accent flex-1 text-center" @click="logout">Logout</button>
+    <button v-if="isAuthenticated" @click="logout" class="btn btn-ghost btn-sm gap-2">
+      <ArrowLeftStartOnRectangleIcon class="size-4" />
+      Log out
+    </button>
   </div>
 </template>

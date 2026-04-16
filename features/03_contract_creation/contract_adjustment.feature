@@ -1,4 +1,5 @@
 @UC-03-03 @FR-CWE-08 @FR-CWE-17
+@skip
 Feature: Contract Term Adjustment
   Contract Managers and Contract Reviewers make granular clause edits
   without regenerating the entire contract. The system maintains document

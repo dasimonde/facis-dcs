@@ -58,16 +58,16 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { ContractTemplate } from '@/models/contract-template'
+import type { SubTemplateSnapshot } from '@/models/contract-template'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 
 const props = defineProps<{
-  templates: ContractTemplate[]
+  templates: SubTemplateSnapshot[]
   referenceCountByDid?: Record<string, number>
 }>()
 
 const emit = defineEmits<{
-  (e: 'select', template: ContractTemplate): void
+  (e: 'select', template: SubTemplateSnapshot): void
 }>()
 
 const expandedTemplateId = ref<string | null>(null)

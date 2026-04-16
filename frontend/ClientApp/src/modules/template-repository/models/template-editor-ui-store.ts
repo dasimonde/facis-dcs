@@ -39,6 +39,8 @@ interface TemplateEditorUiState {
   clausePlaceholderHighlight: ClausePlaceholderHighlight
   /** When true: builder preview dialog is open */
   isPreviewDialogOpen: boolean
+  /** Whether the current template is in an editable state */
+  isTemplateEditable: boolean
 }
 
 export type { TemplateEditorUiState }

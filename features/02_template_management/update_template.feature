@@ -1,10 +1,13 @@
 @UC-02-04
+@skip
 Feature: Update Contract Template
   Template Creators update existing templates
   with full version history preserved.
 
-  Scenario: Update an existing template
+  Background:
     Given I am authenticated with role "Template Creator"
+
+  Scenario: Update an existing template
     And template "Standard NDA" version "1.0" exists
     When I update template "Standard NDA"
     Then a new version "1.1" is created

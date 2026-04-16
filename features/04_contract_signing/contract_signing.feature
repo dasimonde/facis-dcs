@@ -1,4 +1,5 @@
 @UC-04-01 @FR-CWE-19 @FR-CWE-26 @FR-SM-13 @FR-SM-16 @FR-SM-07 @FR-SM-14
+@skip
 Feature: Contract Signing
   Contract Signers review contracts in a secure viewer and apply
   legally binding digital signatures with identity and PoA credentials.

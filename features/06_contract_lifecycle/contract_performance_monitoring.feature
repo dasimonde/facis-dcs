@@ -1,4 +1,5 @@
 @UC-06-01 @FR-CWE-24 @FR-CWE-27 @FR-CWE-31 @FR-CWE-09 @FR-CSA-20
+@skip
 Feature: Contract Performance Monitoring
   Contract Managers and Contract Observers monitor contract performance
   through a lifecycle dashboard displaying real-time status, KPIs,

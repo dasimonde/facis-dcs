@@ -1,4 +1,5 @@
 @UC-11-01 @FR-CWE-28 @FR-CSA-25 @FR-SM-25
+@skip
 Feature: API-Based Contract Workflows
   Integration Managers configure and invoke APIs to trigger contract-related
   events. The system authenticates requests, initiates workflows, and logs

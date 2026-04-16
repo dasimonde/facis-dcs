@@ -1,0 +1,66 @@
+{{- if .Values.istio.enabled -}}
+# Istio VirtualService for routing traffic to DCS and co-deployed services.
+# Attaches to an externally-managed Gateway (e.g., provisioned via Terraform).
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  hosts:
+    {{- range .Values.istio.hosts }}
+    - {{ . | quote }}
+    {{- end }}
+  gateways:
+    {{- range .Values.istio.gateways }}
+    - {{ . | quote }}
+    {{- end }}
+  http:
+    {{- /* Keycloak route when enabled with route.path */}}
+    {{- if and .Values.keycloak.enabled .Values.keycloak.route.path }}
+    - name: keycloak
+      match:
+        - uri:
+            prefix: {{ include "digital-contracting-service.keycloakRoutePath" . }}
+      route:
+        - destination:
+            host: {{ .Release.Name }}-keycloak
+            port:
+              number: {{ .Values.keycloak.service.port | int }}
+    {{- end }}
+    {{- /* Federated Catalogue Portal route when enabled with route.path */}}
+    {{- if and .Values.federatedCatalogue.enabled .Values.federatedCatalogue.portal.enabled .Values.federatedCatalogue.portal.route.path }}
+    - name: federated-catalogue-portal
+      match:
+        - uri:
+            prefix: {{ .Values.federatedCatalogue.portal.route.path }}
+      route:
+        - destination:
+            host: {{ .Release.Name }}-federated-catalogue-portal
+            port:
+              number: {{ .Values.federatedCatalogue.portal.service.port | default 8088 | int }}
+    {{- end }}
+    {{- /* Federated Catalogue API route when enabled with route.path */}}
+    {{- if and .Values.federatedCatalogue.enabled .Values.federatedCatalogue.route.path }}
+    - name: federated-catalogue
+      match:
+        - uri:
+            prefix: {{ .Values.federatedCatalogue.route.path }}
+      route:
+        - destination:
+            host: {{ .Release.Name }}-federated-catalogue
+            port:
+              number: {{ .Values.federatedCatalogue.service.port | int }}
+    {{- end }}
+    {{- /* DCS application route */}}
+    - name: dcs
+      match:
+        - uri:
+            prefix: {{ include "digital-contracting-service.baseRoutePath" . }}
+      route:
+        - destination:
+            host: {{ include "digital-contracting-service.fullname" . }}
+            port:
+              number: {{ .Values.service.port | int }}
+{{- end }}

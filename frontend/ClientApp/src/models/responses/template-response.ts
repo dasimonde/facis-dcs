@@ -1,32 +1,40 @@
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { TemplateType } from '@/types/template-type'
-import type { PartialContractTemplate } from '../contract-template'
+import type { ContractTemplateData, PartialContractTemplate } from '../contract-template'
 import type { ContractTemplateReviewTask } from '../contract-template-review-task'
 import type { ContractTemplateApprovalTask } from '../contract-template-approval-task'
 
-interface ContractTemplateBaseResponse {
+export interface ContractTemplateCreateResponse {
   did: string
-  document_number: number
-  version: number
 }
 
-export interface ContractTemplateCreateResponse extends ContractTemplateBaseResponse {}
+export interface ContractTemplateSubmitResponse {
+  did: string
+}
 
-export interface ContractTemplateSubmitResponse extends ContractTemplateBaseResponse {}
+export interface ContractTemplateUpdateResponse {
+  did: string
+}
 
-export interface ContractTemplateUpdateResponse extends ContractTemplateBaseResponse {}
+export interface ContractTemplateUpdateManageResponse {
+  did: string
+  document_number?: string
+  version?: number
+}
 
-export interface ContractTemplateSearchResponseItem extends ContractTemplateBaseResponse {
+interface ContractTemplateSearchResponseItem {
+  did: string
+  document_number?: string
+  version?: string
   state: ContractTemplateState
+  template_type: TemplateType
   name?: string
   description?: string
   created_at: string
   updated_at: string
 }
 
-export interface ContractTemplateSearchResponse {
-  search_results: ContractTemplateSearchResponseItem[]
-}
+export type ContractTemplateSearchResponse = ContractTemplateSearchResponseItem[]
 
 export interface ContractTemplateRetrieveResponse {
   contract_templates: PartialContractTemplate[]
@@ -34,18 +42,42 @@ export interface ContractTemplateRetrieveResponse {
   approval_tasks: ContractTemplateApprovalTask[]
 }
 
-export interface ContractTemplateRetrieveByIdResponse extends ContractTemplateBaseResponse {
+export interface ContractTemplateRetrieveByIdResponse {
+  did: string
+  document_number?: string
+  version?: number
   state: ContractTemplateState
+  template_type: TemplateType
   name?: string
   description?: string
-  template_type?: TemplateType
   created_by: string
   created_at: string
   updated_at: string
   /** The template data of the contract template */
-  template_data: any
+  template_data: ContractTemplateData
 }
 
-export interface ContractTemplateApproveResponse extends ContractTemplateBaseResponse {}
+export interface ContractTemplateApproveResponse {
+  did: string
+}
 
-export interface ContractTemplateRejectResponse extends ContractTemplateBaseResponse {}
+export interface ContractTemplateRejectResponse {
+  did: string
+}
+
+export interface ContractTemplateVerifyResponse {
+  did: string
+  findings: string[]
+}
+
+export interface ContractTemplateArchiveResponse {
+  did: string
+}
+
+export interface ContractTemplateRegisterResponse {
+  did: string
+}
+
+export interface ContractTemplateAuditResponse {
+  did: string
+}

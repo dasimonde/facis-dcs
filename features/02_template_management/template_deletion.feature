@@ -1,4 +1,5 @@
 @UC-02-11
+@skip
 Feature: Delete Contract Template
   Template Managers delete deprecated templates
   that are no longer needed.

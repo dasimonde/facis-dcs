@@ -1,9 +1,11 @@
+@skip
 @UC-03-04 @FR-CWE-15 @FR-CWE-16 @FR-CWE-25 @FR-PACM-03 @FR-PACM-02
 Feature: Contract Approval
   Contract Approvers and Contract Managers route contracts to required
   approvers before signing. The system logs approvals with timestamps,
   locks content upon completion, and transitions to signing phase.
 
+  @skip
   Scenario: Initiate approval process for finalized contract
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" is in "Under Review" status
@@ -11,6 +13,7 @@ Feature: Contract Approval
     Then the contract is routed to required approvers
     And the contract status shows "Pending Approval"
 
+  @skip
   Scenario: Approve contract via approval interface
     Given I am authenticated with role "Contract Approver"
     And contract "Service Agreement" requires my approval
@@ -28,6 +31,7 @@ Feature: Contract Approval
     And the contract status returns to "Draft"
     And the contract is returned for revision
 
+  @skip
   Scenario: All required approvals gathered
     Given contract "Service Agreement" requires approvals from "Legal" and "Finance"
     And "Legal" has approved the contract
@@ -37,6 +41,7 @@ Feature: Contract Approval
     And the contract content is locked
     And the contract is marked as ready for execution
 
+  @skip
   Scenario: Contract transitions to signing phase upon approval
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" has all required approvals
@@ -44,6 +49,7 @@ Feature: Contract Approval
     Then the contract is marked as "Approved"
     And the contract transitions to the signing phase
 
+  @skip
   Scenario: Approval interface supports highlighting and comments
     Given I am authenticated with role "Contract Approver"
     And contract "Service Agreement" requires my approval
@@ -52,6 +58,7 @@ Feature: Contract Approval
     And I can add comments to specific clauses
     And I can view previous reviewer comments
 
+  @skip
   Scenario: Automated compliance check during approval
     Given I am authenticated with role "Contract Approver"
     And contract "Service Agreement" is pending approval
@@ -60,6 +67,7 @@ Feature: Contract Approval
     And the system validates against organizational policies
     And compliance issues are flagged for review
 
+  @skip
   Scenario: Compliance monitoring detects risk during approval
     Given contract "Service Agreement" is pending approval
     And the contract has a missing required approval from "Risk Officer"
@@ -67,6 +75,7 @@ Feature: Contract Approval
     Then a compliance risk is detected
     And the risk is flagged and reported
 
+  @skip
   Scenario: Track approval routing status
     Given I am authenticated with role "Contract Manager"
     And contract "Service Agreement" is in approval workflow

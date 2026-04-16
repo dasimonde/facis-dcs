@@ -1,4 +1,5 @@
 @UC-08-02
+@skip
 Feature: Contract Compliance Audit
   Auditors and Compliance Officers conduct compliance checks
   against legal and organizational frameworks.

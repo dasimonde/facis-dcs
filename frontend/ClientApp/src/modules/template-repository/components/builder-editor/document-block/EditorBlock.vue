@@ -9,12 +9,12 @@
       <template v-if="block && isSectionBlock(block)">
         <label class="text-[10px] uppercase font-bold opacity-60">Section</label>
         <input v-model="localTitle" type="text" class="input input-sm input-ghost w-full font-semibold mt-0.5"
-          placeholder="Section title" :disabled="!draftStore.isEditable" />
+          placeholder="Section title" :disabled="!uiStore.isTemplateEditable" />
       </template>
       <!-- Text: textarea -->
       <template v-else-if="block && isTextBlock(block)">
         <label class="text-[10px] uppercase font-bold opacity-60">Text</label>
-        <textarea v-model="localText" :disabled="!draftStore.isEditable"
+        <textarea v-model="localText" :disabled="!uiStore.isTemplateEditable"
           class="textarea textarea-ghost textarea-sm w-full mt-0.5 text-sm min-h-[2.5rem] resize-y"
           placeholder="Text content" rows="2" />
       </template>
@@ -52,7 +52,8 @@
             <TemplatePreview v-if="approvedTemplate?.template_data"
               :document-outline="approvedTemplate.template_data.documentOutline"
               :document-blocks="approvedTemplate.template_data.documentBlocks"
-              :semantic-conditions="approvedTemplate.template_data.semanticConditions" />
+              :semantic-conditions="approvedTemplate.template_data.semanticConditions"
+              :sub-template-snapshots="subTemplateSnapshots" />
             <p v-else class="text-xs text-base-content/60 italic">
               No template data available.
             </p>
@@ -60,7 +61,7 @@
         </div>
       </template>
     </div>
-    <div v-if="draftStore.isEditable" :class="[
+    <div v-if="uiStore.isTemplateEditable" :class="[
       'pt-2 pr-2 pb-2 flex-shrink-0 transition-opacity',
       toolbarVisibilityClass,
     ]">
@@ -88,9 +89,8 @@ import BlockToolbar from '@template-repository/components/builder-editor/toolbar
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import { parseSegments, getPlaceholderLabelFromConditions, type Segment } from '@template-repository/composables/useClauseTextChips'
 import ClauseSegmentsPreview from '@template-repository/components/clauses-editor/ClauseSegmentsPreview.vue'
-import { useApprovedSubTemplateStore } from '@template-repository/store/approvedSubTemplateStore'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import type { ContractTemplate } from '@/models/contract-template'
+import type { SubTemplateSnapshot } from '@/models/contract-template'
 
 const props = defineProps<{
   item: EnrichedBlockItem
@@ -111,9 +111,8 @@ const emit = defineEmits<{
 
 const uiStore = useTemplateEditorUiStore()
 const draftStore = useTemplateDraftStore()
-const subTemplateStore = useApprovedSubTemplateStore()
 const { selectedBlockId } = storeToRefs(uiStore)
-const { semanticConditions } = storeToRefs(draftStore)
+const { semanticConditions, subTemplateSnapshots } = storeToRefs(draftStore)
 const { isSwapPreviewTarget } = useBlockMovementPreview()
 
 const clauseSegments = computed(() => {
@@ -142,10 +141,10 @@ const toolbarVisibilityClass = computed(() => {
 
 const block = computed(() => props.item.block)
 
-const approvedTemplate = computed<ContractTemplate | undefined>(() => {
+const approvedTemplate = computed<SubTemplateSnapshot | undefined>(() => {
   const b = block.value
   if (!b || !isApprovedTemplateBlock(b)) return undefined
-  return subTemplateStore.templates.find((t) => t.did === b.templateId)
+  return subTemplateSnapshots.value.find((t) => t.did === b.templateId)
 })
 
 const approvedTemplateName = computed(() => approvedTemplate.value?.name ?? '')

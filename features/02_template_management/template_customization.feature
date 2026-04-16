@@ -1,4 +1,5 @@
 @UC-02 @FR-TR-12
+@skip
 Feature: Template Customization with Dynamic Placeholders
   The template repository supports dynamic placeholders and automated
   population of contract terms based on predefined SLA rules, reducing

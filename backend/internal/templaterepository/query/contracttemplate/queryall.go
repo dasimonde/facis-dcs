@@ -30,6 +30,7 @@ type MetadataItem struct {
 	TemplateType   contracttemplatetype.ContractTemplateType
 	Name           *string
 	Description    *string
+	CreatedBy      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	MetaData       datatype.JSON
@@ -129,6 +130,7 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 			TemplateType:   templateType,
 			Name:           data.Name,
 			Description:    data.Description,
+			CreatedBy:      data.CreatedBy,
 			CreatedAt:      data.CreatedAt,
 			UpdatedAt:      data.UpdatedAt,
 		}

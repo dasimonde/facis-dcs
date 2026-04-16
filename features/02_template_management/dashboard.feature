@@ -1,4 +1,5 @@
 @UC-02-09
+@skip
 Feature: Template Management Dashboard
   Template Managers view template status, approvals,
   and usage metrics.

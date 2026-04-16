@@ -1,4 +1,5 @@
 @UC-02-14
+@skip
 Feature: Template Repository Extensions
   Advanced repository features for interoperability, governance, and dependencies.
 

@@ -29,7 +29,7 @@ export default defineConfig(({ mode, command }) => {
     // during build, use relative paths such that we respect <base href>
     base: command === 'build' ? './' : basePath,
     plugins: [baseHrefPlugin, vue(), tailwindcss()],
-    envPrefix: 'DCS',
+    envPrefix: 'DCS_',
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src/', import.meta.url)),

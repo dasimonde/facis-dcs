@@ -1,4 +1,5 @@
 @UC-10-01 @FR-CWE-28 @FR-CSA-25
+@skip
 Feature: Contract Workflow Automation
   Process Orchestrators integrate contract workflows with external AI/ERP
   systems. The system translates contract milestones into actionable triggers

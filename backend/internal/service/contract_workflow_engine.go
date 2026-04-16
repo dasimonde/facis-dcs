@@ -202,6 +202,7 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 			State:           item.State.String(),
 			Name:            item.Name,
 			Description:     item.Description,
+			CreatedBy:       item.CreatedBy,
 			CreatedAt:       item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:       item.UpdatedAt.Format(time.RFC3339),
 		})

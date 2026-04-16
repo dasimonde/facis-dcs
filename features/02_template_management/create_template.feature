@@ -3,8 +3,10 @@ Feature: Create Contract Template
   Template Creators create reusable contract templates
   that serve as the basis for contract generation.
 
-  Scenario: Create a new contract template
+  Background:
     Given I am authenticated with role "Template Creator"
+
+  Scenario: Create a new contract template
     When I create a template "Standard NDA" in category "Legal"
     Then the template is created in "Draft" status
     And the template is assigned version "1.0"

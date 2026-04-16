@@ -1,0 +1,83 @@
+replicaCount: 1
+
+image:
+  repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/catalogue/fc-service-server
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8081
+  nodePort: null
+
+route:
+  path: ""
+
+# Neo4j connection.
+# uri: if empty, auto-wired to bolt://{{ .Release.Name }}-neo4j:7687
+neo4j:
+  uri: ""
+  username: ""    # falls back to "neo4j"
+  password: ""    # falls back to "changeme"
+
+# PostgreSQL connection.
+# database.url: if empty, auto-wired to the co-deployed postgresql sub-chart
+database:
+  url: ""
+  name: "fc"
+  username: ""    # falls back to "dcs"
+  password: ""    # falls back to "dcs"
+
+# Keycloak connection.
+# internalUrl: if empty, auto-wired to http://{{ .Release.Name }}-keycloak:8080
+# hostname:    set to KC_HOSTNAME when Keycloak is behind a reverse proxy;
+#              used to build the JWT issuer URL visible to clients
+# issuerUrl:   explicit override for SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
+#              (takes precedence over hostname-based derivation)
+keycloak:
+  internalUrl: ""
+  hostname: ""
+  issuerUrl: ""
+  issuerScheme: "https"   # scheme used when building issuer URL from hostname
+  realm: "gaia-x"
+  clientId: "federated-catalogue"
+  clientSecret: "federated-catalogue-secret"
+
+security:
+  enabled: true
+
+verifySignatures: false
+extraEnv: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+portal:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/catalogue/fc-demo-portal
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8088
+    nodePort: null
+  route:
+    path: ""
+  keycloak:
+    clientId: ""
+    clientSecret: ""
+  extraEnv: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi

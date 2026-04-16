@@ -20,7 +20,7 @@ function sortItemsBy(key: string) {
 </script>
 
 <template>
-  <button id="list-btn-sort" class="btn btn-neutral m-2" popovertarget="list-popover-sort">
+  <button id="list-btn-sort" class="btn btn-neutral m-2" :class="$attrs.class" popovertarget="list-popover-sort">
     <span>Sort by</span> <ChevronUpDownIcon class="w-6 h-6" />
   </button>
   <ul

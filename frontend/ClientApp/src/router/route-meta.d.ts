@@ -1,3 +1,4 @@
+import type { UserRole } from '@/types/user-role'
 import type { FunctionalComponent, HTMLAttributes, VNodeProps } from 'vue'
 import 'vue-router'
 
@@ -12,5 +13,7 @@ declare module 'vue-router' {
     /** This is used for setting the page title in useSyncPageTitle composable */
     title: string
     layout?: 'blank'
+    order?: number
+    roles?: UserRole[]
   }
 }

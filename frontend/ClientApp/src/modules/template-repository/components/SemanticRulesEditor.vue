@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- Section 1: New rule -->
-    <section v-if="store.isEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+    <section v-if="uiStore.isTemplateEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
       <h3 class="text-sm font-semibold text-base-content/80 mb-4">New rule</h3>
       <div class="space-y-4">
         <div>
@@ -113,7 +113,7 @@
               </div>
             </div>
           </div>
-          <button v-if="store.isEditable" type="button"
+          <button v-if="uiStore.isTemplateEditable" type="button"
             class="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
             aria-label="Delete rule" @click="deleteRule(condition.conditionId)">
             ✕
@@ -135,8 +135,10 @@ import {
   isClauseBlock,
 } from '@template-repository/models/contract-templace'
 import RequiredIndicator from '@core/components/RequiredIndicator.vue'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 
 const store = useTemplateDraftStore()
+const uiStore = useTemplateEditorUiStore()
 const { semanticConditions, documentBlocks } = storeToRefs(store)
 
 /** Number of clause blocks that reference each conditionId. */

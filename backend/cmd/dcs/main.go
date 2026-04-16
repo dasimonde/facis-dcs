@@ -35,6 +35,11 @@ import (
 )
 
 func main() {
+	if err := loadDotenvIfPresent(); err != nil {
+		fmt.Fprintf(os.Stderr, "startup configuration error: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Define command line flags, add any other flag required to configure the
 	// service.
 	var (

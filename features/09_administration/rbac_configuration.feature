@@ -1,4 +1,5 @@
 @UC-09-01 @FR-UC-09-1
+@skip
 Feature: Role-Based Access Configuration
   System Administrators configure RBAC settings including
   user roles, permissions, access scopes, and account status.

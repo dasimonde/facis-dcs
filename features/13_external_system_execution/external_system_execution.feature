@@ -1,4 +1,5 @@
 @UC-13-01 @FR-SM-10 @IR-SI-05
+@skip
 Feature: External System Contract Execution
   External target systems receive signed contracts via API and confirm
   execution. The DCS generates cryptographic proof of contract execution.

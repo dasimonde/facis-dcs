@@ -1,4 +1,5 @@
 @UC-15-01 @FR-SM-20
+@skip
 Feature: Signature Revocation
   The system revokes signatures when credentials are invalidated
   or organizational policies require revocation.

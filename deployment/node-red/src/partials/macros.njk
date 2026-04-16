@@ -1,0 +1,36 @@
+{% macro field_text(name, label, placeholder='') %}
+  <div class="form-row">
+      <label for="node-input-{{ name }}">{{ label }}</label>
+      <input type="text" id="node-input-{{ name }}" placeholder="{{ placeholder }}">
+  </div>
+{% endmacro %}
+
+{% macro field_password(name, label, placeholder='') %}
+  <div class="form-row">
+      <label for="node-input-{{ name }}">{{ label }}</label>
+      <input type="password" id="node-input-{{ name }}" placeholder="{{ placeholder }}">
+  </div>
+{% endmacro %}
+
+{# hiddenName defaults to name + "Content" — the Node-RED convention for file uploads #}
+{% macro field_file(name, label, hiddenName='') %}
+  <div class="form-row">
+      <label for="node-input-{{ name }}">{{ label }}</label>
+      <input type="file" id="node-input-{{ name }}">
+      <input type="hidden" id="node-input-{{ hiddenName or (name + 'Content') }}">
+  </div>
+{% endmacro %}
+
+{% macro field_checkbox(name, label) %}
+  <div class="form-row">
+      <label for="node-input-{{ name }}">{{ label }}</label>
+      <input type="checkbox" id="node-input-{{ name }}" style="width:auto;">
+  </div>
+{% endmacro %}
+
+{# Usage: {% call tab("tab1", active=true) %} ... fields ... {% endcall %} #}
+{% macro tab(id, active=false) %}
+  <div id="{{ id }}" class="tab-content"{% if not active %} style="display: none;"{% endif %}>
+      {{ caller() }}
+  </div>
+{% endmacro %}

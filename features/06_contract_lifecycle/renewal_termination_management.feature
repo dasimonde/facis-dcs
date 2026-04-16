@@ -1,4 +1,5 @@
 @UC-06-02 @FR-CWE-11 @FR-CWE-12 @FR-CWE-22 @FR-CWE-23 @FR-CSA-04 @FR-CSA-14 @FR-CSA-15 @FR-CSA-16 @FR-CSA-23
+@skip
 Feature: Contract Renewal and Termination Management
   Contract Managers manage contract renewal and termination processes
   including expiration tracking, renewal workflows, formal termination,

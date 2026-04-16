@@ -1,0 +1,5 @@
+{% from "partials/macros.njk" import field_text, tab %}
+{% call tab("tab4") %}
+{{ field_text("oidcIssuerUrl", "Issuer URL", "https://keycloak.example.com/realms/gaia-x") }}
+{{ field_text("clientId", "Client ID", "digital-contracting-service") }}
+{% endcall %}

@@ -1,0 +1,6 @@
+{% from "partials/macros.njk" import field_text, field_file, tab %}
+{% call tab("tab3") %}
+{{ field_text("domainAddress", "Domain", "example.com") }}
+{{ field_file("privateKey", "Private Key", "privateKeyContent") }}
+{{ field_file("certificate", "Certificate", "certificateContent") }}
+{% endcall %}

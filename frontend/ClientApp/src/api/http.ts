@@ -1,37 +1,34 @@
-import { AuthenticationService } from '@/services/authentication-service'
-import { useAuthTokenStore } from '@/stores/auth-token-store'
-import axios from 'axios'
-import { storeToRefs } from 'pinia'
 import { getConfig } from '@/config'
+import { authenticationService } from '@/services/authentication-service'
+import { useAuthTokenStore } from '@/stores/auth-token-store'
+import { useErrorStore } from '@/stores/error-store'
+import axios, { AxiosError } from 'axios'
 
 const http = axios.create({
   baseURL: getConfig().API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 })
 
-http.interceptors.request.use(
-  (config) => {
-    const tokenStore = useAuthTokenStore()
-    const { isAuthSet, getAuthenticationHeader } = storeToRefs(tokenStore)
-    if (isAuthSet.value) {
-      config.headers.Authorization = getAuthenticationHeader.value
-    } else {
-      delete config.headers.Authorization
-    }
-    return config
-  },
-  (err) => Promise.reject(err),
-)
+http.interceptors.request.use((config) => {
+  const tokenStore = useAuthTokenStore()
+  config.headers.Authorization = tokenStore.isAuthSet ? tokenStore.getAuthenticationHeader : undefined
+  return config
+})
 
 http.interceptors.response.use(
   (resp) => resp,
-  async (err) => {
-    if (err.status === 401) {
-      const res = await AuthenticationService.refresh()
-      if (res) {
-        return http(err.config)
+  async (err: Error | AxiosError) => {
+    const errorStore = useErrorStore()
+    if (axios.isAxiosError(err)) {
+      if (err.status === 401 && err.config) {
+        const isRefreshed = await authenticationService.refresh()
+        if (isRefreshed) {
+          return http(err.config)
+        }
       }
     }
+    const message = axios.isAxiosError(err) ? err.response?.data?.message || err.message : err.message
+    errorStore.add(String(message))
     return Promise.reject(err)
   },
 )

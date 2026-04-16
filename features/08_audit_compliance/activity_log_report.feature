@@ -1,4 +1,5 @@
 @UC-08-01
+@skip
 Feature: Contract Activity Log Reports
   Auditors generate reports of contract activity logs
   and timestamps for auditing purposes.

@@ -1,0 +1,11 @@
+image:
+  repository: nats
+  tag: "2.10-alpine"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 4222
+  nodePort: null
+
+resources: {}
