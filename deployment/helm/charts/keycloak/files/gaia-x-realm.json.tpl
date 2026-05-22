@@ -152,6 +152,14 @@
       }
     },
     {
+      "username": "service-account-dcs-fc-client",
+      "enabled": true,
+      "serviceAccountClientId": "dcs-fc-client",
+      "realmRoles": [
+        "default-roles-gaia-x-1"
+      ]
+    },
+    {
       "username": "test",
       "enabled": true,
       "email": "test@gaia-x.local",
@@ -600,6 +608,71 @@
       "optionalClientScopes": [
         "offline_access"
       ]
+    },
+    {
+      "clientId": "dcs-fc-client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dcs-fc-client-secret",
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "backchannel.logout.session.required": "true"
+      },
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "Client IP Address",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "clientAddress",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "clientAddress",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "Client ID",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "client_id",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "client_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "Client Host",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "clientHost",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "clientHost",
+            "jsonType.label": "String"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "dcs-fc-audience"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ]
     }
   ],
   "clientScopes": [
@@ -784,6 +857,27 @@
       "attributes": {
         "include.in.token.scope": "true"
       }
+    },
+    {
+      "name": "dcs-fc-audience",
+      "description": "Allows dcs-fc-client tokens to access federated-catalogue APIs",
+      "protocol": "openid-connect",
+      "attributes": {
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "fc-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "federated-catalogue",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
     }
   ]
 }
