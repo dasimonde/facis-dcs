@@ -150,6 +150,13 @@ federatedCatalogue:
   secretRef:
     name: ""
     key: "FEDERATED_CATALOGUE_API_URL"
+  # Keycloak client_credentials for outbound FC API calls
+  oauth:
+    clientID: "dcs-fc-client"
+    clientSecret: ""
+    clientSecretSecretRef:
+      name: ""
+      key: "FEDERATED_CATALOGUE_CLIENT_SECRET"
   resources:
     requests:
       cpu: 100m

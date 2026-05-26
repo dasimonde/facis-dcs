@@ -149,9 +149,19 @@ func main() {
 
 	// Initialize the Federated Catalogue client.
 	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
+	fcClientID := os.Getenv("FEDERATED_CATALOGUE_CLIENT_ID")
+	fcClientSecret := os.Getenv("FEDERATED_CATALOGUE_CLIENT_SECRET")
 	var templateCatalogueClient *fcclient.FederatedCatalogueClient
-	if fcURL != "" {
-		templateCatalogueClient = fcclient.NewFederatedCatalogueClient(fcURL)
+	if fcURL != "" && fcClientID != "" && fcClientSecret != "" {
+		templateCatalogueClient, err = fcclient.NewFederatedCatalogueClient(fcclient.Config{
+			APIURL:           fcURL,
+			KeycloakRealmURL: oidcIssuerURL,
+			ClientID:         fcClientID,
+			ClientSecret:     fcClientSecret,
+		})
+		if err != nil {
+			log.Fatalf(ctx, err, "failed to initialize Federated Catalogue client")
+		}
 	}
 
 	// Initialize the webhook platform (ORCE integration).

@@ -157,7 +157,16 @@
       "serviceAccountClientId": "dcs-fc-client",
       "realmRoles": [
         "default-roles-gaia-x-1"
-      ]
+      ],
+      "clientRoles": {
+        "federated-catalogue": [
+          "Ro-MU-A",
+          "Ro-SD-A",
+          "Ro-PA-A",
+          "Ro-MU-CA",
+          "uma_protection"
+        ]
+      }
     },
     {
       "username": "test",
@@ -668,6 +677,7 @@
         }
       ],
       "defaultClientScopes": [
+        "roles",
         "dcs-fc-audience"
       ],
       "optionalClientScopes": [

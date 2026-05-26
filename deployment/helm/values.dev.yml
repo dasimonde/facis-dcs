@@ -87,6 +87,9 @@ federatedCatalogue:
   keycloak:
     hostname: "localhost:30080"
     issuerScheme: "http"
+  oauth:
+    clientID: "dcs-fc-client"
+    clientSecret: "dcs-fc-client-secret"
 
 # OIDC / route values below are not used when replicaCount=0,
 # but kept here as documentation for the backend .env.dev file.

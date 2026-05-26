@@ -91,6 +91,17 @@ spec:
               {{- else }}
               value: {{ .Values.federatedCatalogue.apiURL | quote }}
               {{- end }}
+            - name: FEDERATED_CATALOGUE_CLIENT_ID
+              value: {{ .Values.federatedCatalogue.oauth.clientID | quote }}
+            - name: FEDERATED_CATALOGUE_CLIENT_SECRET
+              {{- if .Values.federatedCatalogue.oauth.clientSecretSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.federatedCatalogue.oauth.clientSecretSecretRef.name | quote }}
+                  key: {{ .Values.federatedCatalogue.oauth.clientSecretSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.federatedCatalogue.oauth.clientSecret | quote }}
+              {{- end }}
             - name: DCS_API_PATH
               value: {{ include "digital-contracting-service.apiPath" . | quote }}
             - name: DCS_UI_PATH

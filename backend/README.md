@@ -70,6 +70,8 @@ export API_PATH_PREFIX="/api"
 
 # Federated Catalogue
 export FEDERATED_CATALOGUE_API_URL="http://localhost:8081"
+export FEDERATED_CATALOGUE_CLIENT_ID="dcs-fc-client"
+export FEDERATED_CATALOGUE_CLIENT_SECRET="dcs-fc-client-secret"
 
 # OIDC/Keycloak Authentication
 export OIDC_ISSUER_URL="https://keycloak.example.com/realms/yourrealm"

@@ -58,8 +58,11 @@ type fcErrorBody struct {
 
 // FederatedCatalogueClient handles outbound requests to Federated Catalogue.
 type FederatedCatalogueClient struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL      string
+	tokenURL     string
+	clientID     string
+	clientSecret string
+	httpClient   *http.Client
 }
 
 const ParticipantsEndpointPath = "/participants"
@@ -70,13 +73,33 @@ const QueryEndpointPath = "/query/search"
 const VerificationEndpointPath = "/verification"
 
 // NewFederatedCatalogueClient creates a Federated Catalogue client.
-func NewFederatedCatalogueClient(apiURL string) *FederatedCatalogueClient {
+func NewFederatedCatalogueClient(cfg Config) (*FederatedCatalogueClient, error) {
+	apiURL := normalizeBaseURL(cfg.APIURL)
+	if apiURL == "" {
+		return nil, nil
+	}
+
+	realmURL := strings.TrimSpace(cfg.KeycloakRealmURL)
+	clientID := strings.TrimSpace(cfg.ClientID)
+	clientSecret := strings.TrimSpace(cfg.ClientSecret)
+	if realmURL == "" || clientID == "" || clientSecret == "" {
+		return nil, fmt.Errorf("federated catalogue client requires KeycloakRealmURL, ClientID, and ClientSecret when APIURL is set")
+	}
+
+	tokenURL, err := clientCredentialsTokenURL(realmURL)
+	if err != nil {
+		return nil, err
+	}
+
 	return &FederatedCatalogueClient{
-		baseURL: normalizeBaseURL(apiURL),
+		baseURL:      apiURL,
+		tokenURL:     tokenURL,
+		clientID:     clientID,
+		clientSecret: clientSecret,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-	}
+	}, nil
 }
 
 // BaseURL returns the normalized configured API URL.
@@ -86,7 +109,7 @@ func (c *FederatedCatalogueClient) BaseURL() string {
 
 // Post sends a POST request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Post(ctx context.Context, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
-	return c.doRequest(ctx, http.MethodPost, path, bearerToken, query, body)
+	return c.doRequest(ctx, http.MethodPost, path, query, body)
 }
 
 // Query sends an FC /query request and decodes the JSON response.
@@ -136,22 +159,27 @@ func (c *FederatedCatalogueClient) GetSelfDescriptions(ctx context.Context, bear
 
 // Put sends a PUT request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Put(ctx context.Context, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
-	return c.doRequest(ctx, http.MethodPut, path, bearerToken, query, body)
+	return c.doRequest(ctx, http.MethodPut, path, query, body)
 }
 
 // Get sends a GET request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, bearerToken string, query url.Values) (*Response, error) {
-	return c.doRequest(ctx, http.MethodGet, path, bearerToken, query, nil)
+	return c.doRequest(ctx, http.MethodGet, path, query, nil)
 }
 
 // Delete sends a DELETE request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Delete(ctx context.Context, path string, bearerToken string, query url.Values) (*Response, error) {
-	return c.doRequest(ctx, http.MethodDelete, path, bearerToken, query, nil)
+	return c.doRequest(ctx, http.MethodDelete, path, query, nil)
 }
 
-func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
+func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string, path string, query url.Values, body []byte) (*Response, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("federated catalogue api url is empty")
+	}
+
+	token, err := c.FetchAccessToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	requestURL, err := url.Parse(c.baseURL + path)
@@ -167,10 +195,7 @@ func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string,
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	token := strings.TrimSpace(bearerToken)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
