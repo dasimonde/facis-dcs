@@ -11,7 +11,6 @@ import (
 
 type GetOtherParticipantsQry struct {
 	ParticipantID string
-	Token         string
 }
 
 type GetOtherParticipantsHandler struct {
@@ -51,7 +50,7 @@ func (h *GetOtherParticipantsHandler) Handle(qry GetOtherParticipantsQry) ([]*te
 		},
 	}
 
-	queryResp, err := h.FCClient.Query(h.Ctx, qry.Token, reqBody)
+	queryResp, err := h.FCClient.Query(h.Ctx, reqBody)
 	if err != nil {
 		return nil, err
 	}

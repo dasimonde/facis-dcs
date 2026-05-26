@@ -13,7 +13,6 @@ import (
 )
 
 type CreateCmd struct {
-	Token       string
 	Participant selfdescription.ParticipantSdInput
 }
 
@@ -40,7 +39,6 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	}
 	existsResp, err := existsHandler.Handle(participantquery.ParticipantExistsQry{
 		ParticipantID: cmd.Participant.ParticipantID,
-		Token:         cmd.Token,
 	})
 	if err != nil {
 		return err
@@ -57,7 +55,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		return fmt.Errorf("marshal participant template payload failed: %w", err)
 	}
 
-	resp, err := h.FCClient.Post(h.Ctx, client.ParticipantsEndpointPath, cmd.Token, nil, body)
+	resp, err := h.FCClient.Post(h.Ctx, client.ParticipantsEndpointPath, nil, body)
 	if err != nil {
 		return err
 	}

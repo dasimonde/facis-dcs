@@ -23,7 +23,6 @@ type RegisterCmd struct {
 	UpdatedAt     time.Time
 	RegisteredBy  string
 	ParticipantID string
-	Token         string
 }
 
 type Registrar struct {
@@ -100,9 +99,6 @@ func (h *Registrar) publishTemplateResourceToFC(ctx context.Context, cmd Registe
 	if h.FCClient == nil {
 		return fmt.Errorf("federated catalogue client is nil")
 	}
-	if cmd.Token == "" {
-		return fmt.Errorf("federated catalogue token is empty")
-	}
 	if cmd.ParticipantID == "" {
 		return fmt.Errorf("participant id is empty")
 	}
@@ -139,7 +135,7 @@ func (h *Registrar) publishTemplateResourceToFC(ctx context.Context, cmd Registe
 		return fmt.Errorf("marshal template resource self-description failed: %w", err)
 	}
 
-	resp, err := h.FCClient.Post(ctx, fcclient.SelfDescriptionsEndpointPath, cmd.Token, nil, body)
+	resp, err := h.FCClient.Post(ctx, fcclient.SelfDescriptionsEndpointPath, nil, body)
 	if err != nil {
 		return fmt.Errorf("publish template resource failed: %w", err)
 	}

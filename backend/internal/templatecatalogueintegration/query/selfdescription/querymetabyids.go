@@ -9,8 +9,7 @@ import (
 
 // GetSelfDescriptionsMetaByIDsQry fetches FC /self-descriptions metadata (meta.sdHash) by SelfDescription ids.
 type GetSelfDescriptionsMetaByIDsQry struct {
-	IDs   []string
-	Token string
+	IDs []string
 }
 
 type GetSelfDescriptionsMetaByIDsResult struct {
@@ -32,7 +31,7 @@ func (h *GetSelfDescriptionsMetaByIDsHandler) Handle(qry GetSelfDescriptionsMeta
 		return nil, fmt.Errorf("self-description ids is empty")
 	}
 
-	resp, err := h.FCClient.GetSelfDescriptions(h.Ctx, qry.Token, client.GetSelfDescriptionsRequest{
+	resp, err := h.FCClient.GetSelfDescriptions(h.Ctx, client.GetSelfDescriptionsRequest{
 		IDs: qry.IDs,
 	})
 	if err != nil {

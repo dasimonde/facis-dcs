@@ -13,8 +13,7 @@ import (
 )
 
 type GetTemplateDataByDIDQry struct {
-	Token string
-	DID   string
+	DID string
 }
 
 type GetTemplateDataByDIDHandler struct {
@@ -87,11 +86,7 @@ func (h *GetTemplateDataByDIDHandler) getFrameContractTemplateDataFromDB(ctx con
 }
 
 func (h *GetTemplateDataByDIDHandler) getTemplateDataFromFC(qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-	if strings.TrimSpace(qry.Token) == "" {
-		return nil, fmt.Errorf("template data not found in DB and federated catalogue token is empty")
-	}
-
-	resp, err := h.FCClient.Query(h.Ctx, qry.Token, fcclient.QueryRequest{
+	resp, err := h.FCClient.Query(h.Ctx, fcclient.QueryRequest{
 		Statement: getTemplateDataJSONByDIDStatement,
 		Parameters: map[string]string{
 			"did": qry.DID,

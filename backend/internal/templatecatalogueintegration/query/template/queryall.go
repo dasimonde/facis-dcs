@@ -10,7 +10,6 @@ import (
 )
 
 type GetAllMetadataQry struct {
-	Token  string
 	Offset int
 	Limit  int
 }
@@ -54,7 +53,7 @@ func (h *GetAllMetadataHandler) Handle(qry GetAllMetadataQry) (*templatecatalogu
 		return nil, fmt.Errorf("limit must be > 0")
 	}
 
-	countResp, err := h.FCClient.Query(h.Ctx, qry.Token, client.QueryRequest{
+	countResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
 		Statement:  retrieveTemplatesCountStatement,
 		Parameters: map[string]string{},
 	})
@@ -65,7 +64,7 @@ func (h *GetAllMetadataHandler) Handle(qry GetAllMetadataQry) (*templatecatalogu
 	totalCount := countResp.TotalCount
 
 	statement := fmt.Sprintf(retrieveTemplatesStatementTemplate, qry.Offset, qry.Limit)
-	dataResp, err := h.FCClient.Query(h.Ctx, qry.Token, client.QueryRequest{
+	dataResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
 		Statement:  statement,
 		Parameters: map[string]string{},
 	})

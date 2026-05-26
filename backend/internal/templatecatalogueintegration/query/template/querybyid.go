@@ -10,8 +10,7 @@ import (
 )
 
 type GetByIDQry struct {
-	Token string
-	DID   string
+	DID string
 }
 
 type GetByIDHandler struct {
@@ -58,7 +57,7 @@ func (h *GetByIDHandler) Handle(qry GetByIDQry) (*templatecatalogueintegration.T
 		return nil, fmt.Errorf("did is empty")
 	}
 
-	resp, err := h.FCClient.Query(h.Ctx, qry.Token, client.QueryRequest{
+	resp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
 		Statement: retrieveTemplateByIDStatement,
 		Parameters: map[string]string{
 			"did": qry.DID,

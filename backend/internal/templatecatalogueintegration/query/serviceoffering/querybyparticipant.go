@@ -11,7 +11,6 @@ import (
 // GetByParticipantQry fetches a service offering by participant-id.
 type GetByParticipantQry struct {
 	ParticipantID string
-	Token         string
 }
 
 type GetByParticipantResult struct {
@@ -57,7 +56,7 @@ func (h *GetByParticipantHandler) Handle(qry GetByParticipantQry) (*GetByPartici
 		},
 	}
 
-	queryResp, err := h.FCClient.Query(h.Ctx, qry.Token, reqBody)
+	queryResp, err := h.FCClient.Query(h.Ctx, reqBody)
 	if err != nil {
 		return nil, err
 	}

@@ -68,8 +68,7 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 	}
 
 	qry := contracttemplatequery.GetTemplateDataByDIDQry{
-		Token: *req.Token,
-		DID:   req.Did,
+		DID: req.Did,
 	}
 	queryHandler := contracttemplatequery.GetTemplateDataByDIDHandler{
 		Ctx:      ctx,

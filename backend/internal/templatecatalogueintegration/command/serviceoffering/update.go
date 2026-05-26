@@ -12,7 +12,6 @@ import (
 )
 
 type UpdateCmd struct {
-	Token              string
 	ParticipantID      string
 	EndPointURL        string
 	TermsAndConditions string
@@ -69,7 +68,7 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) (*UpdateResult, err
 	}
 
 	// Federated Catalogue will overwrite the existing self-description if the id is the same.
-	resp, err := h.FCClient.Post(h.Ctx, client.SelfDescriptionsEndpointPath, cmd.Token, nil, body)
+	resp, err := h.FCClient.Post(h.Ctx, client.SelfDescriptionsEndpointPath, nil, body)
 	if err != nil {
 		return nil, err
 	}

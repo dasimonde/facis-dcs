@@ -10,7 +10,6 @@ import (
 // ParticipantExistsQry checks whether a participant exists in the FC graph.
 type ParticipantExistsQry struct {
 	ParticipantID string
-	Token         string
 }
 
 type ParticipantExistsResult struct {
@@ -46,7 +45,7 @@ func (h *ParticipantExistsHandler) Handle(qry ParticipantExistsQry) (*Participan
 		},
 	}
 
-	queryResp, err := h.FCClient.Query(h.Ctx, qry.Token, reqBody)
+	queryResp, err := h.FCClient.Query(h.Ctx, reqBody)
 	if err != nil {
 		return nil, err
 	}

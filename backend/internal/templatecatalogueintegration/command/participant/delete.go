@@ -10,8 +10,7 @@ import (
 )
 
 type DeleteCmd struct {
-	ID    string
-	Token string
+	ID string
 }
 
 // DeleteParticipant handler deletes a participant from the Federated Catalogue.
@@ -28,12 +27,12 @@ func (h *Deleter) Handle(ctx context.Context, cmd DeleteCmd) error {
 		return fmt.Errorf("participant id is empty")
 	}
 	// The participant graph node won't be deleted if other SDs depend on it.
-	if err := h.deleteOtherSelfDescriptionsByIDs(cmd.Token, cmd.ID); err != nil {
+	if err := h.deleteOtherSelfDescriptionsByIDs(cmd.ID); err != nil {
 		return err
 	}
 	path := fcclient.ParticipantsEndpointPath + "/" + url.PathEscape(cmd.ID)
 
-	resp, err := h.FCClient.Delete(h.Ctx, path, cmd.Token, nil)
+	resp, err := h.FCClient.Delete(h.Ctx, path, nil)
 	if err != nil {
 		return err
 	}
@@ -48,8 +47,8 @@ func (h *Deleter) Handle(ctx context.Context, cmd DeleteCmd) error {
 }
 
 // deleteOtherSelfDescriptionsByIDs deletes all SDs except the participant's own SD.
-func (h *Deleter) deleteOtherSelfDescriptionsByIDs(token string, participantID string) error {
-	sdResp, err := h.FCClient.GetSelfDescriptions(h.Ctx, token, fcclient.GetSelfDescriptionsRequest{
+func (h *Deleter) deleteOtherSelfDescriptionsByIDs(participantID string) error {
+	sdResp, err := h.FCClient.GetSelfDescriptions(h.Ctx, fcclient.GetSelfDescriptionsRequest{
 		WithContent: false,
 	})
 	if err != nil {
@@ -66,7 +65,7 @@ func (h *Deleter) deleteOtherSelfDescriptionsByIDs(token string, participantID s
 		}
 
 		path := fcclient.SelfDescriptionsEndpointPath + "/" + url.PathEscape(sdHash)
-		delResp, err := h.FCClient.Delete(h.Ctx, path, token, nil)
+		delResp, err := h.FCClient.Delete(h.Ctx, path, nil)
 		if err != nil {
 			return err
 		}

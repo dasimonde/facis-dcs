@@ -11,7 +11,6 @@ import (
 // GetCurrentParticipantQry represents the input required to fetch the current participant projection.
 type GetCurrentParticipantQry struct {
 	ParticipantID string
-	Token         string
 }
 
 type AddressResult struct {
@@ -81,7 +80,7 @@ func (h *GetCurrentParticipantHandler) Handle(qry GetCurrentParticipantQry) (*Ge
 		},
 	}
 
-	queryResp, err := h.FCClient.Query(h.Ctx, qry.Token, reqBody)
+	queryResp, err := h.FCClient.Query(h.Ctx, reqBody)
 	if err != nil {
 		return nil, err
 	}

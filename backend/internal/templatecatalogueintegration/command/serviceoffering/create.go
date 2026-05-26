@@ -14,7 +14,6 @@ import (
 )
 
 type CreateCmd struct {
-	Token              string
 	ParticipantID      string
 	EndPointURL        string
 	TermsAndConditions string
@@ -60,7 +59,6 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) (*CreateResult, err
 	}
 	existsResp, err := existsHandler.Handle(serviceofferingquery.ServiceOfferingExistsQry{
 		ServiceOfferingID: serviceOfferingID,
-		Token:             cmd.Token,
 	})
 	if err != nil {
 		return nil, err
@@ -83,7 +81,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) (*CreateResult, err
 		return nil, fmt.Errorf("marshal service offering payload failed: %w", err)
 	}
 
-	resp, err := h.FCClient.Post(h.Ctx, client.SelfDescriptionsEndpointPath, cmd.Token, nil, body)
+	resp, err := h.FCClient.Post(h.Ctx, client.SelfDescriptionsEndpointPath, nil, body)
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,6 @@ import (
 )
 
 type UpdateCmd struct {
-	Token       string
 	Participant selfdescription.ParticipantSdInput
 }
 
@@ -38,7 +37,7 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	}
 
 	path := client.ParticipantsEndpointPath + "/" + url.PathEscape(cmd.Participant.ParticipantID)
-	resp, err := h.FCClient.Put(h.Ctx, path, cmd.Token, nil, body)
+	resp, err := h.FCClient.Put(h.Ctx, path, nil, body)
 	if err != nil {
 		return err
 	}

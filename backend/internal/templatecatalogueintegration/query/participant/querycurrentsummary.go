@@ -11,7 +11,6 @@ import (
 
 type GetCurrentParticipantSummaryQry struct {
 	ParticipantID string
-	Token         string
 }
 
 type GetCurrentParticipantSummaryHandler struct {
@@ -52,7 +51,7 @@ func (h *GetCurrentParticipantSummaryHandler) Handle(qry GetCurrentParticipantSu
 		},
 	}
 
-	queryResp, err := h.FCClient.Query(h.Ctx, qry.Token, reqBody)
+	queryResp, err := h.FCClient.Query(h.Ctx, reqBody)
 	if err != nil {
 		return nil, err
 	}

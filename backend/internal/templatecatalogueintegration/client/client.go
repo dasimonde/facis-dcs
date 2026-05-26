@@ -108,18 +108,18 @@ func (c *FederatedCatalogueClient) BaseURL() string {
 }
 
 // Post sends a POST request to Federated Catalogue.
-func (c *FederatedCatalogueClient) Post(ctx context.Context, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
+func (c *FederatedCatalogueClient) Post(ctx context.Context, path string, query url.Values, body []byte) (*Response, error) {
 	return c.doRequest(ctx, http.MethodPost, path, query, body)
 }
 
 // Query sends an FC /query request and decodes the JSON response.
-func (c *FederatedCatalogueClient) Query(ctx context.Context, bearerToken string, req QueryRequest) (*QueryResults, error) {
+func (c *FederatedCatalogueClient) Query(ctx context.Context, req QueryRequest) (*QueryResults, error) {
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal /query request failed: %w", err)
 	}
 
-	resp, err := c.Post(ctx, QueryEndpointPath, bearerToken, nil, bodyBytes)
+	resp, err := c.Post(ctx, QueryEndpointPath, nil, bodyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (c *FederatedCatalogueClient) Query(ctx context.Context, bearerToken string
 	return &results, nil
 }
 
-func (c *FederatedCatalogueClient) GetSelfDescriptions(ctx context.Context, bearerToken string, req GetSelfDescriptionsRequest) (*GetSelfDescriptionsResponse, error) {
+func (c *FederatedCatalogueClient) GetSelfDescriptions(ctx context.Context, req GetSelfDescriptionsRequest) (*GetSelfDescriptionsResponse, error) {
 	query := url.Values{}
 	if len(req.IDs) > 0 {
 		query.Set("ids", strings.Join(req.IDs, ","))
@@ -142,7 +142,7 @@ func (c *FederatedCatalogueClient) GetSelfDescriptions(ctx context.Context, bear
 	}
 	query.Set("withMeta", "true")
 
-	resp, err := c.Get(ctx, SelfDescriptionsEndpointPath, bearerToken, query)
+	resp, err := c.Get(ctx, SelfDescriptionsEndpointPath, query)
 	if err != nil {
 		return nil, err
 	}
@@ -158,17 +158,17 @@ func (c *FederatedCatalogueClient) GetSelfDescriptions(ctx context.Context, bear
 }
 
 // Put sends a PUT request to Federated Catalogue.
-func (c *FederatedCatalogueClient) Put(ctx context.Context, path string, bearerToken string, query url.Values, body []byte) (*Response, error) {
+func (c *FederatedCatalogueClient) Put(ctx context.Context, path string, query url.Values, body []byte) (*Response, error) {
 	return c.doRequest(ctx, http.MethodPut, path, query, body)
 }
 
 // Get sends a GET request to Federated Catalogue.
-func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, bearerToken string, query url.Values) (*Response, error) {
+func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, query url.Values) (*Response, error) {
 	return c.doRequest(ctx, http.MethodGet, path, query, nil)
 }
 
 // Delete sends a DELETE request to Federated Catalogue.
-func (c *FederatedCatalogueClient) Delete(ctx context.Context, path string, bearerToken string, query url.Values) (*Response, error) {
+func (c *FederatedCatalogueClient) Delete(ctx context.Context, path string, query url.Values) (*Response, error) {
 	return c.doRequest(ctx, http.MethodDelete, path, query, nil)
 }
 
