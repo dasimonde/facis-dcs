@@ -1,0 +1,12 @@
+# DCS schemas synced to Federated Catalogue on startup.
+# 
+# - Put TTL files in `schemas/` (any path under that directory; `file` is relative to `schemas/`).
+# - Match remote FC shapes by `prefixes` (prefix name -> namespace IRI).
+# - Do not remove old versions from the mapping; FC schemas are never deleted by DCS.
+# - Unknown remote shapes are ignored.
+types:
+  template:
+    - version: 1
+      file: template_schema_v1.ttl
+      prefixes:
+        dcs-template: "https://argo.asd-stack.eu/facis/dcs-semantic/template/v1#"

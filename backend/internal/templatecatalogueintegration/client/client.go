@@ -53,8 +53,14 @@ type GetSelfDescriptionsRequest struct {
 }
 
 type fcErrorBody struct {
+	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+const (
+	JSONContentType   = "application/json"
+	RDFXMLContentType = "application/rdf+xml"
+)
 
 // FederatedCatalogueClient handles outbound requests to Federated Catalogue.
 type FederatedCatalogueClient struct {
@@ -67,6 +73,7 @@ type FederatedCatalogueClient struct {
 
 const ParticipantsEndpointPath = "/participants"
 const SelfDescriptionsEndpointPath = "/self-descriptions"
+const SchemaEndpointPath = "/schemas"
 
 // Use distributed search query in the Federated Catalogue API
 const QueryEndpointPath = "/query/search"
@@ -109,7 +116,12 @@ func (c *FederatedCatalogueClient) BaseURL() string {
 
 // Post sends a POST request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Post(ctx context.Context, path string, query url.Values, body []byte) (*Response, error) {
-	return c.doRequest(ctx, http.MethodPost, path, query, body)
+	return c.doRequest(ctx, http.MethodPost, path, query, JSONContentType, body)
+}
+
+// PostRaw sends a POST with an explicit Content-Type.
+func (c *FederatedCatalogueClient) PostRaw(ctx context.Context, path string, query url.Values, contentType string, body []byte) (*Response, error) {
+	return c.doRequest(ctx, http.MethodPost, path, query, contentType, body)
 }
 
 // Query sends an FC /query request and decodes the JSON response.
@@ -159,20 +171,25 @@ func (c *FederatedCatalogueClient) GetSelfDescriptions(ctx context.Context, req 
 
 // Put sends a PUT request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Put(ctx context.Context, path string, query url.Values, body []byte) (*Response, error) {
-	return c.doRequest(ctx, http.MethodPut, path, query, body)
+	return c.doRequest(ctx, http.MethodPut, path, query, JSONContentType, body)
+}
+
+// PutRaw sends a PUT with an explicit Content-Type.
+func (c *FederatedCatalogueClient) PutRaw(ctx context.Context, path string, query url.Values, contentType string, body []byte) (*Response, error) {
+	return c.doRequest(ctx, http.MethodPut, path, query, contentType, body)
 }
 
 // Get sends a GET request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, query url.Values) (*Response, error) {
-	return c.doRequest(ctx, http.MethodGet, path, query, nil)
+	return c.doRequest(ctx, http.MethodGet, path, query, JSONContentType, nil)
 }
 
 // Delete sends a DELETE request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Delete(ctx context.Context, path string, query url.Values) (*Response, error) {
-	return c.doRequest(ctx, http.MethodDelete, path, query, nil)
+	return c.doRequest(ctx, http.MethodDelete, path, query, JSONContentType, nil)
 }
 
-func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string, path string, query url.Values, body []byte) (*Response, error) {
+func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string, path string, query url.Values, contentType string, body []byte) (*Response, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("federated catalogue api url is empty")
 	}
@@ -194,7 +211,10 @@ func (c *FederatedCatalogueClient) doRequest(ctx context.Context, method string,
 	if err != nil {
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if contentType == "" {
+		contentType = JSONContentType
+	}
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(req)
@@ -229,4 +249,27 @@ func (c *FederatedCatalogueClient) ExtractErrorMessage(body []byte) string {
 		return ""
 	}
 	return errBody.Message
+}
+
+// ExtractErrorCode tries to extract the FC error code from a response body.
+func (c *FederatedCatalogueClient) ExtractErrorCode(body []byte) string {
+	_ = c
+	var errBody fcErrorBody
+	if err := json.Unmarshal(body, &errBody); err != nil {
+		return ""
+	}
+	return errBody.Code
+}
+
+// SchemaHTTPError formats a failed FC /schemas HTTP response as an error.
+func (c *FederatedCatalogueClient) SchemaHTTPError(action string, resp *Response) error {
+	code := c.ExtractErrorCode(resp.Body)
+	msg := c.ExtractErrorMessage(resp.Body)
+	if code != "" && msg != "" {
+		return fmt.Errorf("%s failed with status %d: %s: %s", action, resp.StatusCode, code, msg)
+	}
+	if msg != "" {
+		return fmt.Errorf("%s failed with status %d: %s", action, resp.StatusCode, msg)
+	}
+	return fmt.Errorf("%s failed with status %d", action, resp.StatusCode)
 }
