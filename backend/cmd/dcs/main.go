@@ -163,7 +163,7 @@ func main() {
 		if err != nil {
 			log.Fatalf(ctx, err, "failed to initialize Federated Catalogue client")
 		}
-		if err := fcschemas.Sync(ctx, templateCatalogueClient); err != nil {
+		if err := fcschemas.SyncWithRetry(ctx, templateCatalogueClient); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
 	}

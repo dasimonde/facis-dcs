@@ -47,6 +47,9 @@ security:
   enabled: true
 
 verifySignatures: false
+# VP/VC signature verification on self-description ingest.
+verificationVpSignature: false
+verificationVcSignature: false
 extraEnv: []
 
 resources:

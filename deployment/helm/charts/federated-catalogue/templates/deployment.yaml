@@ -72,6 +72,10 @@ spec:
             # FC Service config
             - name: FEDERATED_CATALOGUE_VERIFICATION_SIGNATURES
               value: {{ .Values.verifySignatures | default "false" | quote }}
+            - name: FEDERATED_CATALOGUE_VERIFICATION_VP_SIGNATURE
+              value: {{ .Values.verificationVpSignature | toString | quote }}
+            - name: FEDERATED_CATALOGUE_VERIFICATION_VC_SIGNATURE
+              value: {{ .Values.verificationVcSignature | toString | quote }}
             - name: DATASTORE_FILE_PATH
               value: "/var/lib/fc-service/filestore"
             - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE

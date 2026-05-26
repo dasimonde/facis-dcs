@@ -90,6 +90,9 @@ federatedCatalogue:
   oauth:
     clientID: "dcs-fc-client"
     clientSecret: "dcs-fc-client-secret"
+  # Allow POSTing self-descriptions without signature verification in dev
+  verificationVpSignature: false
+  verificationVcSignature: false
 
 # OIDC / route values below are not used when replicaCount=0,
 # but kept here as documentation for the backend .env.dev file.
