@@ -54,7 +54,7 @@ func (s *templateCatalogueIntegrationsrvc) RetrieveTemplateByID(ctx context.Cont
 		return nil, templatecatalogueintegration.MakeInternalError(err)
 	}
 	if result == nil {
-		return nil, templatecatalogueintegration.MakeNotFound(fmt.Errorf("template not found"))
+		return nil, nil
 	}
 
 	return result, nil

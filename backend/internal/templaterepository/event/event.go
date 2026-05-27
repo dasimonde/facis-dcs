@@ -289,3 +289,22 @@ func (e AuditEvt) EventType() string {
 func (e AuditEvt) GetDID() string {
 	return e.DID
 }
+
+// PublishEvent is emitted when template data is published to the Federated Catalogue.
+type PublishEvent struct {
+	DID            string    `json:"did"`
+	DocumentNumber *string   `json:"document_number,omitempty"`
+	Version        int       `json:"version"`
+	PublishedBy    string    `json:"published_by"`
+	OccurredAt     time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e PublishEvent) EventType() string {
+	return eventtype.Publish.String()
+}
+
+// GetDID implements the Event interface.
+func (e PublishEvent) GetDID() string {
+	return e.DID
+}

@@ -8,21 +8,17 @@ import (
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
-	"digital-contracting-service/internal/templaterepository/selfdescription"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
 type RegisterCmd struct {
-	DID           string
-	UpdatedAt     time.Time
-	RegisteredBy  string
-	ParticipantID string
+	DID          string
+	UpdatedAt    time.Time
+	RegisteredBy string
 }
 
 type Registrar struct {
@@ -54,17 +50,6 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) error {
 		return errors.New("invalid contract template state")
 	}
 
-	fullTemplate, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
-	if err != nil {
-		return fmt.Errorf("could not read template data: %w", err)
-	}
-
-	if h.FCClient != nil {
-		if err := h.publishTemplateResourceToFC(ctx, cmd, processData, fullTemplate); err != nil {
-			return fmt.Errorf("could not publish template to Federated Catalogue: %w", err)
-		}
-	}
-
 	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Registered.String())
 	if err != nil {
 		return fmt.Errorf("could not update state: %w", err)
@@ -93,58 +78,4 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) error {
 	}
 
 	return tx.Commit()
-}
-
-func (h *Registrar) publishTemplateResourceToFC(ctx context.Context, cmd RegisterCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
-	if h.FCClient == nil {
-		return fmt.Errorf("federated catalogue client is nil")
-	}
-	if cmd.ParticipantID == "" {
-		return fmt.Errorf("participant id is empty")
-	}
-	documentNumber := ""
-	if processData.DocumentNumber != nil && *processData.DocumentNumber != "" {
-		documentNumber = *processData.DocumentNumber
-	}
-
-	templateType := fullTemplate.TemplateType
-	name := ""
-	description := ""
-	if fullTemplate.Name != nil {
-		name = *fullTemplate.Name
-	}
-	if fullTemplate.Description != nil {
-		description = *fullTemplate.Description
-	}
-
-	sd := selfdescription.BuildTemplateResourceSelfDescription(selfdescription.TemplateResourceInput{
-		ParticipantID:  cmd.ParticipantID,
-		DID:            cmd.DID,
-		DocumentNumber: documentNumber,
-		Version:        processData.Version,
-		TemplateType:   templateType,
-		Name:           name,
-		Description:    description,
-		CreatedAt:      fullTemplate.CreatedAt,
-		UpdatedAt:      fullTemplate.UpdatedAt,
-		TemplateData:   fullTemplate.TemplateData,
-	})
-
-	body, err := json.Marshal(sd)
-	if err != nil {
-		return fmt.Errorf("marshal template resource self-description failed: %w", err)
-	}
-
-	resp, err := h.FCClient.Post(ctx, fcclient.SelfDescriptionsEndpointPath, nil, body)
-	if err != nil {
-		return fmt.Errorf("publish template resource failed: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusCreated {
-		if message := h.FCClient.ExtractErrorMessage(resp.Body); message != "" {
-			return fmt.Errorf("publish template resource failed: %s", message)
-		}
-		return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
-	}
-	return nil
 }

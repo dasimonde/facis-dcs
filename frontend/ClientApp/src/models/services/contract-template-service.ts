@@ -5,6 +5,7 @@ import type {
   ContractTemplateAuditRequest,
   ContractTemplateCopyRequest,
   ContractTemplateCreateRequest,
+  ContractTemplatePublishRequest,
   ContractTemplateRegisterRequest,
   ContractTemplateRejectRequest,
   ContractTemplateRetrieveByIdRequest,
@@ -20,6 +21,7 @@ import type {
   ContractTemplateAuditResponse,
   ContractTemplateCopyResponse,
   ContractTemplateCreateResponse,
+  ContractTemplatePublishResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
   ContractTemplateRetrieveResponse,
@@ -43,4 +45,5 @@ export interface ContractTemplateService {
   archive: (request: ContractTemplateArchiveRequest) => Promise<ContractTemplateArchiveResponse>
   register: (request: ContractTemplateRegisterRequest) => Promise<ContractTemplateRegisterResponse>
   audit: (request: ContractTemplateAuditRequest) => Promise<ContractTemplateAuditResponse>
+  publish: (request: ContractTemplatePublishRequest) => Promise<ContractTemplatePublishResponse>
 }

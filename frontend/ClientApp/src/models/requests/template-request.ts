@@ -95,3 +95,9 @@ export interface ContractTemplateAuditRequest {
   did: string
   updated_at: string
 }
+
+export interface ContractTemplatePublishRequest {
+  did: string
+  updated_at: string
+}
+

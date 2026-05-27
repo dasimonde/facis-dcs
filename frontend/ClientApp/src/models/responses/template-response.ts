@@ -99,3 +99,7 @@ export interface ContractTemplateAuditResponseItem {
 }
 
 export type ContractTemplateAuditResponse = ContractTemplateAuditResponseItem[]
+
+export interface ContractTemplatePublishResponse {
+  did: string
+}

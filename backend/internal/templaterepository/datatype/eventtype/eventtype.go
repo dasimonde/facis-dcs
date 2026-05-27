@@ -21,6 +21,7 @@ const (
 	Archive      EventType = "ARCHIVE_CONTRACT_TEMPLATE"
 	Register     EventType = "REGISTER_CONTRACT_TEMPLATE"
 	Audit        EventType = "AUDIT_CONTRACT_TEMPLATE"
+	Publish      EventType = "PUBLISH_CONTRACT_TEMPLATE"
 )
 
 var validStates = map[EventType]bool{
@@ -36,6 +37,7 @@ var validStates = map[EventType]bool{
 	Archive:      true,
 	Register:     true,
 	Audit:        true,
+	Publish:      true,
 }
 
 func NewEventType(s string) (EventType, error) {
