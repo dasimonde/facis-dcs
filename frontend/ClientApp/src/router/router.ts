@@ -16,7 +16,8 @@ import NewContractView from '@/views/contract/NewContractView.vue'
 import ReviewContractView from '@/views/contract/ReviewContractView.vue'
 import ViewContractView from '@/views/contract/ViewContractView.vue'
 import TaskListView from '@/views/task/TaskListView.vue'
-import TemplateCatalogueAdminView from '@/views/template-repository/TemplateCatalogueAdminView.vue'
+import TemplateCatalogueListView from '@/modules/template-catalogue/views/TemplateCatalogueListView.vue'
+import TemplateCatalogueView from '@/modules/template-catalogue/views/TemplateCatalogueView.vue'
 import {
   ArrowsRightLeftIcon,
   CheckCircleIcon,
@@ -43,7 +44,8 @@ const ROUTES = {
     NEGOTIATIONS: 'tasks.negotiations',
   },
   TEMPLATE_CATALOGUES: {
-    ADMIN: 'template.catalogues.admin',
+    LIST: 'template.catalogues.list',
+    VIEW: 'template.catalogues.view',
   },
   AUTH: {
     SUCCESS: 'auth.success',
@@ -179,16 +181,29 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: '/catalogues/admin',
-    name: ROUTES.TEMPLATE_CATALOGUES.ADMIN,
-    component: TemplateCatalogueAdminView,
+    path: '/catalogues/templates',
+    name: ROUTES.TEMPLATE_CATALOGUES.LIST,
+    component: TemplateCatalogueListView,
     meta: {
-      name: 'Template Catalogue Admin',
+      name: 'Template Catalogue',
       icon: DocumentTextIcon,
       requiresAuth: true,
-      title: 'DCS - Template Catalogue Admin',
+      title: 'DCS - Template Catalogue',
       order: 4,
-      roles: ['SYSTEM_ADMINISTRATOR'],
+      roles: ['TEMPLATE_MANAGER'],
+    },
+  },
+  {
+    path: '/catalogues/templates/view/:did',
+    name: ROUTES.TEMPLATE_CATALOGUES.VIEW,
+    component: TemplateCatalogueView,
+    props: true,
+    meta: {
+      name: 'Template Catalogue View',
+      hideInSidebar: true,
+      requiresAuth: true,
+      title: 'DCS - Template Catalogue View',
+      roles: ['TEMPLATE_MANAGER'],
     },
   },
   {

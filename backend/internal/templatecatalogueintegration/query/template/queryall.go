@@ -49,9 +49,6 @@ func (h *GetAllMetadataHandler) Handle(qry GetAllMetadataQry) (*templatecatalogu
 	if qry.Offset < 0 {
 		return nil, fmt.Errorf("offset must be >= 0")
 	}
-	if qry.Limit <= 0 {
-		return nil, fmt.Errorf("limit must be > 0")
-	}
 
 	countResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
 		Statement:  retrieveTemplatesCountStatement,
@@ -63,7 +60,12 @@ func (h *GetAllMetadataHandler) Handle(qry GetAllMetadataQry) (*templatecatalogu
 
 	totalCount := countResp.TotalCount
 
-	statement := fmt.Sprintf(retrieveTemplatesStatementTemplate, qry.Offset, qry.Limit)
+	limit := qry.Limit
+	if limit < 1 {
+		limit = totalCount
+	}
+
+	statement := fmt.Sprintf(retrieveTemplatesStatementTemplate, qry.Offset, limit)
 	dataResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
 		Statement:  statement,
 		Parameters: map[string]string{},

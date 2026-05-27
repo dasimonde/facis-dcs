@@ -60,6 +60,7 @@ var TemplateCatalogueRetrieveByIdResponse = Type("TemplateCatalogueRetrieveByIdR
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
 	Attribute("schema_version", Int, "Schema version of the contract template")
+	Attribute("template_data", Any, "The template data of the contract template")
 	// Optional participant summary
 	Attribute("participant", TemplateCatalogueParticipantSummary, "Participant summary")
 	Attribute("created_at", String, "The timestamp when the contract template was created")

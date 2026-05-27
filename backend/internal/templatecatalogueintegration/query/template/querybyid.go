@@ -3,7 +3,9 @@ package template
 import (
 	"context"
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templatecatalogueintegration/internal/ptr"
@@ -29,6 +31,7 @@ RETURN {
   document_number: ct.documentNumber,
   version: ct.version,
   schema_version: ct.schemaVersion,
+  template_data_json: ct.templateDataJSON,
   name: ct.name,
   description: ct.description,
   template_type: ct.templateType,
@@ -81,11 +84,17 @@ func (h *GetByIDHandler) Handle(qry GetByIDQry) (*templatecatalogueintegration.T
 		return nil, fmt.Errorf("query projection missing projected map for did=%s", qry.DID)
 	}
 
+	templateData, err := parseTemplateDataJSON(ptr.StringFromMap(n, "template_data_json"))
+	if err != nil {
+		return nil, err
+	}
+
 	return &templatecatalogueintegration.TemplateCatalogueRetrieveByIDResponse{
 		Did:            ptr.StringFromMap(n, "did"),
 		DocumentNumber: ptr.Ref(ptr.StringFromMap(n, "document_number")),
 		Version:        ptr.Ref(ptr.IntFromMap(n, "version")),
 		SchemaVersion:  ptr.Ref(ptr.IntFromMap(n, "schema_version")),
+		TemplateData:   templateData,
 		Name:           ptr.Ref(ptr.StringFromMap(n, "name")),
 		Description:    ptr.Ref(ptr.StringFromMap(n, "description")),
 		TemplateType:   ptr.Ref(ptr.StringFromMap(n, "template_type")),
@@ -93,6 +102,19 @@ func (h *GetByIDHandler) Handle(qry GetByIDQry) (*templatecatalogueintegration.T
 		CreatedAt:      ptr.Ref(ptr.StringFromMap(n, "created_at")),
 		UpdatedAt:      ptr.Ref(ptr.StringFromMap(n, "updated_at")),
 	}, nil
+}
+
+func parseTemplateDataJSON(templateDataJSON string) (any, error) {
+	if strings.TrimSpace(templateDataJSON) == "" {
+		return nil, nil
+	}
+
+	var templateData map[string]interface{}
+	if err := json.Unmarshal([]byte(templateDataJSON), &templateData); err != nil {
+		return nil, fmt.Errorf("unmarshal templateDataJSON failed: %w", err)
+	}
+
+	return templateData, nil
 }
 
 func mapTemplateParticipantSummary(n map[string]interface{}) *templatecatalogueintegration.TemplateCatalogueParticipantSummary {
