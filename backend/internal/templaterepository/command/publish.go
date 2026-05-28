@@ -5,7 +5,6 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
-	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
@@ -66,10 +65,6 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		return errors.New("federated catalogue is not configured")
 	}
 
-	if err := h.ensureTemplateNotInFC(ctx, cmd.DID); err != nil {
-		return err
-	}
-
 	// Exclude remote calls from the transaction to avoid a long-running transaction.
 	if err := h.publishTemplateResourceToFC(ctx, cmd, processData, fullTemplate); err != nil {
 		return err
@@ -86,8 +81,18 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
 
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
-		return errors.New("contract template was updated elsewhere, please reload")
+	// State may already be published when a previous FC publish succeeded but local
+	// state transition/event transaction failed.
+	if processData.State == contracttemplatestate.Published.String() {
+		return nil
+	}
+	if processData.State != contracttemplatestate.Approved.String() {
+		return errors.New("contract template must be in approved state to publish")
+	}
+
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Published.String())
+	if err != nil {
+		return fmt.Errorf("could not update state: %w", err)
 	}
 
 	evt := templateevents.PublishEvent{
@@ -103,21 +108,6 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	return tx.Commit()
-}
-
-func (h *Publisher) ensureTemplateNotInFC(ctx context.Context, did string) error {
-	queryHandler := templatequery.GetByIDHandler{
-		Ctx:      ctx,
-		FCClient: h.FCClient,
-	}
-	existing, err := queryHandler.Handle(templatequery.GetByIDQry{DID: did})
-	if err != nil {
-		return fmt.Errorf("could not check template in Federated Catalogue: %w", err)
-	}
-	if existing != nil {
-		return errors.New("template already exists in Federated Catalogue")
-	}
-	return nil
 }
 
 func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd PublishCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
@@ -162,11 +152,25 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		return fmt.Errorf("publish template resource failed: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusCreated {
-		if message := h.FCClient.ExtractErrorMessage(resp.Body); message != "" {
+	if resp.StatusCode == http.StatusCreated {
+		return nil
+	}
+
+	// FC duplicate self-descriptions return conflict_error
+	if resp.StatusCode == http.StatusConflict {
+		code := h.FCClient.ExtractErrorCode(resp.Body)
+		message := h.FCClient.ExtractErrorMessage(resp.Body)
+		// The template SD already exists in the FC
+		if code == "conflict_error" {
+			return nil
+		}
+		if message != "" {
 			return fmt.Errorf("publish template resource failed: %s", message)
 		}
 		return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
 	}
-	return nil
+	if message := h.FCClient.ExtractErrorMessage(resp.Body); message != "" {
+		return fmt.Errorf("publish template resource failed: %s", message)
+	}
+	return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
 }

@@ -71,7 +71,7 @@ watch(isEditMode, (isEdit) => {
                     draftStore.reset()
                     return
                 }
-                const uneditableStates = [TemplateState.approved, TemplateState.deleted, TemplateState.deprecated, TemplateState.registered].map((s) => s.toLowerCase())
+                const uneditableStates = [TemplateState.approved, TemplateState.deleted, TemplateState.deprecated, TemplateState.published].map((s) => s.toLowerCase())
                 templateEditorUiStore.setTemplateEditable(!(uneditableStates.includes(template.state.toLowerCase())))
 
                 draftStore.reset({

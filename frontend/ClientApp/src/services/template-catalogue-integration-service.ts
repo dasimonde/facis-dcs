@@ -138,7 +138,14 @@ export const templateCatalogueIntegrationService = {
     request: TemplateCatalogueRetrieveByIdRequest,
   ): Promise<TemplateCatalogueRetrieveByIdResponse | null> {
     return http
-      .get<TemplateCatalogueRetrieveByIdResponse | null>(`/catalogue/template/retrieve/${encodeURIComponent(request.did)}`)
+      .get<TemplateCatalogueRetrieveByIdResponse | null>(
+        `/catalogue/template/retrieve/${request.did}`,
+        {
+          params: {
+            version: request.version,
+          },
+        },
+      )
       .then((res) => res.data ?? null)
   },
 }

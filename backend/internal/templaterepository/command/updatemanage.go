@@ -54,7 +54,7 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 
-	if oldData.State == contracttemplatestate.Registered.String() ||
+	if oldData.State == contracttemplatestate.Published.String() ||
 		oldData.State == contracttemplatestate.Deleted.String() ||
 		oldData.State == contracttemplatestate.Deprecated.String() ||
 		oldData.State == contracttemplatestate.Approved.String() {

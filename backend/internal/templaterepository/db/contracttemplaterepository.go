@@ -5,11 +5,14 @@ import (
 	"database/sql/driver"
 	"digital-contracting-service/internal/base/datatype"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
+
+var ErrContractTemplateNotFound = errors.New("template not found")
 
 type ResponsiblePersons struct {
 	Creator   string   `json:"creator"`

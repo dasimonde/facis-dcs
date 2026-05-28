@@ -49,7 +49,7 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 		return errors.New("invalid contract template state")
 	}
 
-	if processData.State == contracttemplatestate.Approved.String() || processData.State == contracttemplatestate.Registered.String() {
+	if processData.State == contracttemplatestate.Approved.String() || processData.State == contracttemplatestate.Published.String() {
 
 		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Deprecated.String())
 		if err != nil {

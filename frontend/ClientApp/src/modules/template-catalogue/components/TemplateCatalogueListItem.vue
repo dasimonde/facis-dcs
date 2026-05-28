@@ -31,7 +31,13 @@ const props = defineProps<{
           </div>
           <div class="card-actions justify-end">
             <RouterLink
-              :to="{ name: ROUTES.TEMPLATE_CATALOGUES.VIEW, params: { did: template.did } }"
+              :to="{
+                name: ROUTES.TEMPLATE_CATALOGUES.VIEW,
+                params: { did: template.did },
+                query: {
+                  version: template.version,
+                },
+              }"
               class="btn btn-sm btn-primary"
             >
               View

@@ -25,7 +25,7 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
             $1,
             document_number,
             CASE 
-                WHEN state IN ('APPROVED', 'REGISTERED') THEN version + 1
+                WHEN state IN ('APPROVED', 'PUBLISHED') THEN version + 1
                 ELSE 1
             END,
             'DRAFT', template_type, name, description, created_by, NOW(), NOW(), 
@@ -106,7 +106,7 @@ func (r *PostgresContractTemplateRepo) ReadDataByID(ctx context.Context, tx *sql
 	err := tx.GetContext(ctx, &ct, query, did)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("contract template with DID %s not found", did)
+			return nil, fmt.Errorf("%w: did=%s", db.ErrContractTemplateNotFound, did)
 		}
 		return nil, err
 	}

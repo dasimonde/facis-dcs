@@ -12,6 +12,7 @@ export interface TemplateCatalogueRetrieveRequest {
 
 export interface TemplateCatalogueRetrieveByIdRequest {
   did: string
+  version: number
 }
 
 // ---- Participant management ----

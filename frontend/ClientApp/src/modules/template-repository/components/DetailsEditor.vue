@@ -169,7 +169,7 @@ const isSelected = (t: SubcontractKey) =>
 
 const filteredSubcontractTemplates = computed(() => {
     const q = subcontractSearchQuery.value.toLowerCase()
-    const selectableStates = new Set<string>([TemplateState.approved, TemplateState.registered])
+    const selectableStates = new Set<string>([TemplateState.approved, TemplateState.published])
     return allTemplates.value.filter(t =>
         !isSelected(t) && selectableStates.has(t.state) && t.template_type === TemplateType.subContract &&
         (q === '' || (t.name ?? '').toLowerCase().includes(q) || t.did.toLowerCase().includes(q))

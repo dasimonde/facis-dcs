@@ -48,7 +48,8 @@ func (s *templateCatalogueIntegrationsrvc) RetrieveTemplateByID(ctx context.Cont
 	}
 
 	result, err := queryHandler.Handle(templatequery.GetByIDQry{
-		DID: req.Did,
+		DID:     req.Did,
+		Version: req.Version,
 	})
 	if err != nil {
 		return nil, templatecatalogueintegration.MakeInternalError(err)

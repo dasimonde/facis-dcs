@@ -373,10 +373,9 @@ var ContractTemplateRegisterRequest = Type("ContractTemplateRegisterRequest", fu
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
+	Attribute("version", Int, "The version of the contract template")
 
-	Attribute("updated_at", String, "The timestamp when the contract template was updated")
-
-	Required("did", "updated_at")
+	Required("did", "version")
 })
 
 var ContractTemplateRegisterResponse = Type("ContractTemplateRegisterResponse", func() {

@@ -435,7 +435,7 @@ func TestUpdate_UpdateContractTemplateDataInDraftPublishedState(t *testing.T) {
 
 	repo := NewTestRepo()
 
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Registered, creator)
+	createContractTemplate(t, db, repo, did, contracttemplatestate.Published, creator)
 
 	templateData := map[string]interface{}{
 		"test": "update",

@@ -309,7 +309,7 @@ func TestArchive_ArchiveContractTemplateDataInApprovedState(t *testing.T) {
 	assert.Equal(t, contracttemplatestate.Deprecated, contractTemplate.State)
 }
 
-func TestArchive_ArchiveContractTemplateDataInRegisteredState(t *testing.T) {
+func TestArchive_ArchiveContractTemplateDataInPublishedState(t *testing.T) {
 
 	db := setupTestDB(t)
 
@@ -327,7 +327,7 @@ func TestArchive_ArchiveContractTemplateDataInRegisteredState(t *testing.T) {
 
 	repo := NewTestRepo()
 
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Registered, creator)
+	createContractTemplate(t, db, repo, did, contracttemplatestate.Published, creator)
 
 	cmd := command.ArchiveCmd{
 		DID:        *did,

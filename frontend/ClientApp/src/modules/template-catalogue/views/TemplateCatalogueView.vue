@@ -68,7 +68,6 @@ import { useTemplateDraftStore } from '@template-repository/store/templateDraftS
 import CatalogueTemplateDetailsInfo from '@/modules/template-catalogue/components/CatalogueTemplateDetailsInfo.vue'
 import CatalogueTemplateMetaDataInfo from '@/modules/template-catalogue/components/CatalogueTemplateMetaDataInfo.vue'
 import CatalogueTemplatePreviewInfo from '@/modules/template-catalogue/components/CatalogueTemplatePreviewInfo.vue'
-import { isSameTemplateDataRef } from '@template-repository/utils/template-data-ref'
 import { TemplateState } from '@/types/contract-template-state'
 import { ROUTES } from '@/router/router'
 import { storeToRefs } from 'pinia'
@@ -80,6 +79,11 @@ const route = useRoute()
 const authStore = useAuthStore()
 
 const did = computed(() => (typeof route.params.did === 'string' ? route.params.did : ''))
+const version = computed(() => {
+  const raw = route.query.version
+  const value = typeof raw === 'string' ? Number(raw) : NaN
+  return Number.isFinite(value) ? value : null
+})
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -102,45 +106,33 @@ const templatesStore = useContractTemplatesStore()
 const { contractTemplates, loading: localTemplatesLoading } = storeToRefs(templatesStore)
 const templateManager = computed(() => authStore.user?.roles?.includes('TEMPLATE_MANAGER') ?? false)
 
-// TODO: backend may need to provide a more direct way to check if the catalogue template is already registered locally
-const hasLocalTemplate = computed(() => {
-  if (!catalogue.value) return false
-
-  const catalogueRef = {
-    templateId: catalogue.value.did,
-    version: catalogue.value.version,
-    document_number: catalogue.value.document_number,
-  }
-
-  return contractTemplates.value.some((t) =>
-    isSameTemplateDataRef(catalogueRef, {
-      templateId: t.did,
-      version: t.version,
-      document_number: t.document_number,
-    }),
-  )
-})
-
 const isRegisterDisabled = computed(() => {
   if (!templateManager.value) return true
   if (localTemplatesLoading.value) return true
   if (!catalogue.value) return true
-  if (!catalogue.value.updated_at) return true
-  return hasLocalTemplate.value || registerLoading.value
+  if (catalogue.value.version == null) return true
+  return registerLoading.value
 })
 
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 watch(
-  () => did.value,
+  () => [did.value, version.value] as const,
   async () => {
-    if (!did.value) return
+    if (!did.value || version.value == null) {
+      error.value = 'Missing required URL query: version'
+      catalogue.value = null
+      return
+    }
     loading.value = true
     error.value = null
     activeTab.value = 'details'
 
     try {
-      const data = await templateCatalogueIntegrationService.retrieve_template_by_id({ did: did.value })
+      const data = await templateCatalogueIntegrationService.retrieve_template_by_id({
+        did: did.value,
+        version: version.value,
+      })
       if (!data) {
         error.value = 'No catalogue template found'
         catalogue.value = null
@@ -194,7 +186,7 @@ function setActiveTab(tabId: CatalogueTabId) {
 }
 
 async function registerTemplate() {
-  if (!catalogue.value?.updated_at) return
+  if (!catalogue.value || catalogue.value.version == null) return
 
   try {
     if (!confirmationModal.value) return
@@ -202,13 +194,13 @@ async function registerTemplate() {
     if (isCanceled) return
 
     registerLoading.value = true
-    await contractTemplateService.register({
+    const registered = await contractTemplateService.register({
       did: catalogue.value.did,
-      updated_at: catalogue.value.updated_at,
+      version: catalogue.value.version,
     })
 
     await templatesStore.loadTemplates()
-    router.push({ name: ROUTES.TEMPLATES.VIEW, params: { did: catalogue.value.did } })
+    router.push({ name: ROUTES.TEMPLATES.VIEW, params: { did: registered.did } })
   } catch (e: any) {
     error.value = e?.message || 'Registration failed'
   } finally {

@@ -118,9 +118,21 @@ export interface ContractTemplateArchiveEvent {
 
 export interface ContractTemplateRegisterEvent {
   did: string
+  registered_by: string
+  updated_at: string
+  name?: string
+  description?: string
+  template_data?: ContractTemplateData
+  source_did: string
+  source_version: number
+  occurred_at: string
+}
+
+export interface ContractTemplatePublishEvent {
+  did: string
   document_number?: string
   version: number
-  registered_by: string
+  published_by: string
   occurred_at: string
 }
 
@@ -144,4 +156,5 @@ export type ContractTemplateEvent =
   | ContractTemplateRetrieveByIDEvent
   | ContractTemplateArchiveEvent
   | ContractTemplateRegisterEvent
+  | ContractTemplatePublishEvent
   | ContractTemplateAuditEvent

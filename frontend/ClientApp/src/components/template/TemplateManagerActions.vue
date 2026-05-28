@@ -53,10 +53,6 @@ const canArchive = computed(() => {
   return isManager.value && !archiveStates.includes(props.template.state)
 })
 
-const canRegister = computed(() => {
-  return isManager.value && props.template.state === TemplateState.approved
-})
-
 const showPublishButton = computed(() => {
   return isManager.value && props.template.state === TemplateState.approved
 })
@@ -65,6 +61,7 @@ const checkTemplatePublishedInFederatedCatalogue = async (): Promise<boolean> =>
   try {
     const template = await templateCatalogueIntegrationService.retrieve_template_by_id({
       did: props.template.did,
+      version: props.template.version,
     })
     return template !== null
   } catch (err) {
@@ -74,6 +71,11 @@ const checkTemplatePublishedInFederatedCatalogue = async (): Promise<boolean> =>
 }
 
 const refreshPublishedState = async () => {
+  if (props.template.state !== TemplateState.approved) {
+    isPublished.value = false
+    isPublishedLoading.value = false
+    return
+  }
   isPublishedLoading.value = true
   try {
     isPublished.value = await checkTemplatePublishedInFederatedCatalogue()
@@ -83,7 +85,10 @@ const refreshPublishedState = async () => {
 }
 
 onMounted(refreshPublishedState)
-watch(() => props.template.did, refreshPublishedState)
+watch(
+  () => [props.template.did, props.template.version, props.template.state] as const,
+  refreshPublishedState,
+)
 
 const archive = async () => {
   try {
@@ -95,19 +100,6 @@ const archive = async () => {
     }
   } catch (err) {
     console.error('Archiving failed:', err)
-  }
-}
-
-const register = async () => {
-  try {
-    if (!confirmationModal.value) return
-    const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with registration?' })
-    if (!isCanceled) {
-      await contractTemplateService.register({ did: props.template.did, updated_at: props.template.updated_at })
-      router.push({ name: ROUTES.TEMPLATES.LIST })
-    }
-  } catch (err) {
-    console.error('Registration failed:', err)
   }
 }
 
@@ -141,7 +133,6 @@ const exportPdf = async () => {
 
 <template>
   <button :class="$attrs.class" @click="exportPdf">Export PDF</button>
-  <button v-if="canRegister" :class="$attrs.class" @click="register">Register</button>
   <button
     v-if="showPublishButton"
     :class="$attrs.class"

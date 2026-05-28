@@ -105,7 +105,7 @@ func TestSearch_SearchContractTemplatesByDID(t *testing.T) {
 
 	qry := contracttemplate.GetAllMetadataByFilterQry{
 		RetrievedBy: creator,
-		DID:         did,
+		DID:         *did,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     db,
@@ -161,7 +161,7 @@ func TestSearch_SearchContractTemplatesByName(t *testing.T) {
 	searchName := "Test 2." // The search is case-insensitive
 	qry := contracttemplate.GetAllMetadataByFilterQry{
 		RetrievedBy: creator,
-		Name:        &searchName,
+		Name:        searchName,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     db,
@@ -211,7 +211,7 @@ func TestSearch_SearchContractTemplatesByDescript(t *testing.T) {
 	searchDescription := "Test2." // The search is case-insensitive
 	qry := contracttemplate.GetAllMetadataByFilterQry{
 		RetrievedBy: creator,
-		Description: &searchDescription,
+		Description: searchDescription,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     db,
@@ -283,7 +283,7 @@ func TestSearch_SearchContractTemplatesByTemplateData(t *testing.T) {
 	templateDataFilter := "Test2.2" // The search is case-insensitive
 	qry := contracttemplate.GetAllMetadataByFilterQry{
 		RetrievedBy:  creator,
-		TemplateData: &templateDataFilter,
+		TemplateData: templateDataFilter,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     db,

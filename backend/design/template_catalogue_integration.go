@@ -42,12 +42,13 @@ var TemplateCatalogueRetrieveResponse = Type("TemplateCatalogueRetrieveResponse"
 })
 
 var TemplateCatalogueRetrieveByIdRequest = Type("TemplateCatalogueRetrieveByIdRequest", func() {
-	Description("Retrieve a template catalogue by did")
+	Description("Retrieve a template catalogue by did and version")
 
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Required("did")
+	Attribute("version", Int, "The version of the contract template")
+	Required("did", "version")
 })
 
 var TemplateCatalogueRetrieveByIdResponse = Type("TemplateCatalogueRetrieveByIdResponse", func() {
@@ -324,6 +325,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		HTTP(func() {
 			GET("/catalogue/template/retrieve/{did}")
 			Param("did")
+			Param("version")
 			Response(StatusOK)
 		})
 	})

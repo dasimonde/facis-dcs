@@ -20,7 +20,7 @@ func (r *PostgresContractTemplateRepo) ReadFrameContractTemplateDataByID(ctx con
         WHERE
             did = $1
             AND template_type = 'FRAME_CONTRACT'
-            AND (state = 'APPROVED' OR state = 'REGISTERED')
+            AND (state = 'APPROVED' OR state = 'PUBLISHED')
         LIMIT 1
     `
 	var templateData datatype.JSON

@@ -5,6 +5,7 @@ import (
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
@@ -12,7 +13,8 @@ import (
 )
 
 type GetByIDQry struct {
-	DID string
+	DID     string
+	Version int
 }
 
 type GetByIDHandler struct {
@@ -22,7 +24,7 @@ type GetByIDHandler struct {
 
 const retrieveTemplateByIDStatement = `
 MATCH (ct:ContractTemplate)
-WHERE ct.did = $did
+WHERE ct.did = $did AND ct.version = $version
 OPTIONAL MATCH (ct)-[:operatedBy]->(p:Participant)
 OPTIONAL MATCH (p)-[:headquarterAddress]->(hq)
 OPTIONAL MATCH (p)-[:TermsAndConditions]->(tc)
@@ -59,11 +61,15 @@ func (h *GetByIDHandler) Handle(qry GetByIDQry) (*templatecatalogueintegration.T
 	if qry.DID == "" {
 		return nil, fmt.Errorf("did is empty")
 	}
+	if qry.Version < 1 {
+		return nil, fmt.Errorf("version must be greater than 0")
+	}
 
 	resp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
 		Statement: retrieveTemplateByIDStatement,
 		Parameters: map[string]string{
-			"did": qry.DID,
+			"did":     qry.DID,
+			"version": strconv.Itoa(qry.Version),
 		},
 	})
 	if err != nil {
@@ -81,7 +87,7 @@ func (h *GetByIDHandler) Handle(qry GetByIDQry) (*templatecatalogueintegration.T
 		}
 	}
 	if n == nil {
-		return nil, fmt.Errorf("query projection missing projected map for did=%s", qry.DID)
+		return nil, fmt.Errorf("query projection missing projected map for did=%s version=%d", qry.DID, qry.Version)
 	}
 
 	templateData, err := parseTemplateDataJSON(ptr.StringFromMap(n, "template_data_json"))

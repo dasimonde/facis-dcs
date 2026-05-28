@@ -4,6 +4,7 @@ import type {
   ContractTemplateAuditEvent,
   ContractTemplateCreateEvent,
   ContractTemplateCopyEvent,
+  ContractTemplatePublishEvent,
   ContractTemplateRegisterEvent,
   ContractTemplateRejectEvent,
   ContractTemplateRetrieveAllEvent,
@@ -88,6 +89,12 @@ export function useContractTemplateEventType() {
     return event.event_type === 'REGISTER_CONTRACT_TEMPLATE'
   }
 
+  const isPublishEvent = (
+    event: ContractTemplateAuditResponseItem,
+  ): event is ContractTemplateAuditResponseItem & { event_data: ContractTemplatePublishEvent } => {
+    return event.event_type === 'PUBLISH_CONTRACT_TEMPLATE'
+  }
+
   const isAuditEvent = (
     event: ContractTemplateAuditResponseItem,
   ): event is ContractTemplateAuditResponseItem & { event_data: ContractTemplateAuditEvent } => {
@@ -107,6 +114,7 @@ export function useContractTemplateEventType() {
     isRetrieveByIDEvent,
     isArchiveEvent,
     isRegisterEvent,
+    isPublishEvent,
     isAuditEvent,
   }
 }

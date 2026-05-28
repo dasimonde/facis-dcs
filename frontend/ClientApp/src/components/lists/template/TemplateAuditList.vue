@@ -66,6 +66,9 @@ const eventType = useContractTemplateEventType()
         <div v-else-if="eventType.isRegisterEvent(audit)">
           <div>Registered by: {{ audit.event_data.registered_by }}</div>
         </div>
+        <div v-else-if="eventType.isPublishEvent(audit)">
+          <div>Published by: {{ audit.event_data.published_by }}</div>
+        </div>
         <div v-else-if="eventType.isAuditEvent(audit)">
           <div>Audited by: {{ audit.event_data.audited_by }}</div>
         </div>
