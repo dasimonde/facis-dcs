@@ -17,7 +17,7 @@ const defaultState: Readonly<TemplateEditorUiState> = {
     { id: 'clauses', label: 'Clauses' },
     { id: 'builder', label: 'Builder' },
     { id: 'meta', label: 'Meta Data' },
-    { id: 'audit', label: 'Audit History'},
+    { id: 'audit', label: 'Audit History' },
   ],
   addBlockModalContext: null,
   blockMovementPreview: null,
@@ -57,9 +57,9 @@ export const useTemplateEditorUiStore = defineStore(storeId, {
     },
     availableTabs(templateType: TemplateTypeValue) {
       const isManager = useAuthStore().user?.roles?.includes('TEMPLATE_MANAGER') ?? false
-      const tabs = this.tabs.filter(tab => tab.id !== 'audit' || isManager)
+      const tabs = this.tabs.filter((tab) => tab.id !== 'audit' || isManager)
       if (templateType === TemplateType.subContract) return tabs
-      return tabs.filter(tab => !['semantic', 'clauses'].includes(tab.id))
+      return tabs.filter((tab) => !['semantic', 'clauses'].includes(tab.id))
     },
     setTemplateEditable(isEditable: boolean) {
       this.isTemplateEditable = isEditable
@@ -67,13 +67,13 @@ export const useTemplateEditorUiStore = defineStore(storeId, {
     reset(overrides?: Partial<TemplateEditorUiState>) {
       Object.assign(this, getInitialState())
       if (overrides) Object.assign(this, overrides)
-    }
-  }
+    },
+  },
 })
 
 function getInitialState(): TemplateEditorUiState {
   return {
     ...defaultState,
-    tabs: [...defaultState.tabs]
+    tabs: [...defaultState.tabs],
   }
 }

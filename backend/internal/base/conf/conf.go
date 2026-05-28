@@ -17,3 +17,11 @@ func EventBusTopic() string {
 func GlobalAuditTrailName() string {
 	return "GLOBAL_AUDIT_TRAIL"
 }
+
+func LoginAttemptsThresholdInDuration() int {
+	return 5
+}
+
+func LoginLockoutDuration() time.Duration {
+	return 15 * time.Minute
+}

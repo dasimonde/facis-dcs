@@ -3,7 +3,7 @@ import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headl
 import { computed, ref, useTemplateRef, type Ref } from 'vue'
 
 type FilterLabelConfig<T> = Partial<Record<keyof T, string>>
-type SearchFunction<T> = (request: Record<string, any>) => Promise<T[]>
+type SearchFunction<T> = (request: Record<string, unknown>) => Promise<T[]>
 
 const props = defineProps<{
   items: T[]
@@ -24,10 +24,8 @@ type FilterLabels = typeof props.filterLabels
 type FilterLabelKey = keyof FilterLabels
 type FilterLabelValue = FilterLabels[FilterLabelKey]
 
-const selectedFilter = ref<FilterLabelValue>(
-  (Object.values(props.filterLabels)[0] as FilterLabelValue) ?? ('' as FilterLabelValue),
-)
-const filterPopover = useTemplateRef('filterPopover')
+const selectedFilter = ref<FilterLabelValue>(Object.values(props.filterLabels)[0] ?? '')
+const filterPopover = useTemplateRef('filter-popover')
 const searchResults: Ref<T[]> = ref([])
 
 const selectedOption: Ref<T | null> = ref(null)
@@ -97,9 +95,9 @@ async function onComboboxFocus() {
   await searchRequest()
 }
 
-function onSearchChange(event: Event) {
+async function onSearchChange(event: Event) {
   searchQuery.value = (event.target as HTMLInputElement).value
-  searchRequest()
+  await searchRequest()
 }
 
 function onComboboxUpdate(item: T) {
@@ -121,17 +119,17 @@ function onFilterSelect(label: FilterLabelValue) {
       <button
         id="list-btn-search"
         type="button"
-        class="select select-secondary w-full rounded-t-md rounded-b-none sm:rounded-l-md sm:rounded-tr-none"
+        class="select w-full rounded-t-md rounded-b-none select-secondary sm:rounded-l-md sm:rounded-tr-none"
         popovertarget="list-popover-search"
         :class="{ 'btn-disabled': Object.entries(filterLabels).length === 1 }"
       >
         {{ selectedFilter }}
       </button>
       <ul
-        ref="filterPopover"
-        class="dropdown dropdown-start menu w-52 rounded-box bg-base-300 shadow-sm"
-        popover
         id="list-popover-search"
+        ref="filter-popover"
+        class="menu dropdown dropdown-start w-52 rounded-box bg-base-300 shadow-sm"
+        popover
       >
         <li class="menu-title">
           <span class="menu-disabled pointer-events-none select-none">Select search filter</span>
@@ -146,21 +144,21 @@ function onFilterSelect(label: FilterLabelValue) {
       </ul>
     </div>
     <div class="relative grow">
-      <Combobox v-model="selectedOption" @update:model-value="onComboboxUpdate" nullable>
-        <label class="input input-secondary join-item w-full rounded-none -mt-px ms-0 sm:mt-0 sm:-ms-px">
+      <Combobox v-model="selectedOption" nullable @update:model-value="onComboboxUpdate">
+        <label class="input join-item ms-0 -mt-px w-full rounded-none input-secondary sm:-ms-px sm:mt-0">
           <ComboboxInput
-            @change="onSearchChange"
-            @focus="onComboboxFocus"
-            @keydown.enter="searchList"
             :display-value="(item) => getDisplayValue(item as T | null)"
             :placeholder="placeholder || 'Search'"
             class="w-full bg-transparent"
+            @change="onSearchChange"
+            @focus="onComboboxFocus"
+            @keydown.enter="searchList"
           />
         </label>
 
         <ComboboxOptions
           v-if="searchQuery.length > 0"
-          class="absolute left-0 right-0 top-full z-10 rounded-lg border border-base-300 bg-base-100 shadow-lg"
+          class="absolute top-full right-0 left-0 z-10 rounded-lg border border-base-300 bg-base-100 shadow-lg"
         >
           <ComboboxOption :value="inputValue" class="hidden"></ComboboxOption>
 
@@ -169,9 +167,9 @@ function onFilterSelect(label: FilterLabelValue) {
             <ComboboxOption
               v-for="item in searchedItems"
               :key="item.did"
+              v-slot="{ active, selected }"
               :value="item"
               as="template"
-              v-slot="{ active, selected }"
             >
               <li v-if="searchKey" :class="autocompleteOptionClasses(active, selected)">
                 <span class="block truncate">{{ item[searchKey] }}</span>
@@ -184,8 +182,8 @@ function onFilterSelect(label: FilterLabelValue) {
       </Combobox>
     </div>
     <button
+      class="btn join-item ms-0 -mt-px rounded-t-none rounded-b-md btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
       @click="searchList"
-      class="btn btn-secondary join-item rounded-b-md rounded-t-none sm:rounded-r-md sm:rounded-bl-none -mt-px ms-0 sm:mt-0 sm:-ms-px"
     >
       Search
     </button>

@@ -10,7 +10,6 @@ const store = useTemplateDraftStore()
 const editorStore = useTemplateEditorUiStore()
 const data: Ref<ContractTemplateAuditResponse> = ref([])
 
-
 const isLoading = ref(false)
 
 const loadAudit = async () => {
@@ -39,7 +38,7 @@ watch(
 </script>
 
 <template>
-  <div v-if="isLoading" class="loading loading-spinner loading-sm"></div>
+  <div v-if="isLoading" class="loading loading-sm loading-spinner"></div>
   <div v-else-if="data.length < 1">No audit data</div>
   <TemplateAuditList v-else :audits="data" />
 </template>

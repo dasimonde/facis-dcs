@@ -15,7 +15,7 @@ const copyTemplate = async () => {
 
   const response = await contractTemplateService.copy({ did: draftStore.did })
   if (response.did) {
-    router.push({ name: ROUTES.TEMPLATES.EDIT, params: { did: response.did } })
+    await router.push({ name: ROUTES.TEMPLATES.EDIT, params: { did: response.did } })
   }
 }
 </script>

@@ -1,212 +1,186 @@
 {
-    "id": "ab5393e9-f7a4-47cd-9956-7249beb7445a",
-    "version": "v1",
-    "status": "draft",
-    "title": "Apartment Lease (DE) – Standard",
-    "description": "Standard lease template for residential apartment in Germany",
-    "jurisdiction": {},
-    "type": "subContract",
-    "documentOutline": [
+  "id": "ab5393e9-f7a4-47cd-9956-7249beb7445a",
+  "version": "v1",
+  "status": "draft",
+  "title": "Apartment Lease (DE) – Standard",
+  "description": "Standard lease template for residential apartment in Germany",
+  "jurisdiction": {},
+  "type": "subContract",
+  "documentOutline": [
+    {
+      "blockId": "root",
+      "isRoot": true,
+      "children": ["sec-1", "sec-2"]
+    },
+    {
+      "blockId": "sec-1",
+      "children": ["sec-1-1", "sec-1-2", "sec-1-3"]
+    },
+    {
+      "blockId": "sec-1-1",
+      "children": ["cl-validity-text", "sn-validity"]
+    },
+    {
+      "blockId": "sec-1-2",
+      "children": ["cl-payment-text", "sn-payment"]
+    },
+    {
+      "blockId": "sec-1-3",
+      "children": ["cl-access-text", "sn-access"]
+    },
+    {
+      "blockId": "sec-2",
+      "children": ["cl-other-text"]
+    }
+  ],
+  "semanticConditions": [
+    {
+      "conditionId": "sc-001",
+      "conditionName": "validityPeriod",
+      "schemaVersion": "v1",
+      "parameters": [
         {
-            "blockId": "root",
-            "isRoot": true,
-            "children": [
-                "sec-1",
-                "sec-2"
-            ]
+          "parameterName": "start date",
+          "type": "date",
+          "isRequired": true,
+          "operators": [],
+          "value": null
         },
         {
-            "blockId": "sec-1",
-            "children": [
-                "sec-1-1",
-                "sec-1-2",
-                "sec-1-3"
-            ]
-        },
-        {
-            "blockId": "sec-1-1",
-            "children": [
-                "cl-validity-text",
-                "sn-validity"
-            ]
-        },
-        {
-            "blockId": "sec-1-2",
-            "children": [
-                "cl-payment-text",
-                "sn-payment"
-            ]
-        },
-        {
-            "blockId": "sec-1-3",
-            "children": [
-                "cl-access-text",
-                "sn-access"
-            ]
-        },
-        {
-            "blockId": "sec-2",
-            "children": [
-                "cl-other-text"
-            ]
+          "parameterName": "end date",
+          "type": "date",
+          "isRequired": false,
+          "operators": [
+            {
+              "operate": "lessThanOrEqual",
+              "targets": ["{{sc-001.start date}}"]
+            }
+          ],
+          "value": null
         }
-    ],
-    "semanticConditions": [
+      ]
+    },
+    {
+      "conditionId": "sc-002",
+      "conditionName": "paymentTerms",
+      "schemaVersion": "v1",
+      "parameters": [
         {
-            "conditionId": "sc-001",
-            "conditionName": "validityPeriod",
-            "schemaVersion": "v1",
-            "parameters": [
-                {
-                    "parameterName": "start date",
-                    "type": "date",
-                    "isRequired": true,
-                    "operators": [],
-                    "value": null
-                },
-                {
-                    "parameterName": "end date",
-                    "type": "date",
-                    "isRequired": false,
-                    "operators": [
-                        {
-                            "operate": "lessThanOrEqual",
-                            "targets": [
-                                "{{sc-001.start date}}"
-                            ]
-                        }
-                    ],
-                    "value": null
-                }
-            ]
+          "parameterName": "rentAmount",
+          "type": "decimal",
+          "isRequired": true,
+          "operators": [],
+          "value": null
         },
         {
-            "conditionId": "sc-002",
-            "conditionName": "paymentTerms",
-            "schemaVersion": "v1",
-            "parameters": [
-                {
-                    "parameterName": "rentAmount",
-                    "type": "decimal",
-                    "isRequired": true,
-                    "operators": [],
-                    "value": null
-                },
-                {
-                    "parameterName": "currency",
-                    "type": "string",
-                    "isRequired": true,
-                    "operators": [],
-                    "value": null
-                },
-                {
-                    "parameterName": "dueDayOfMonth",
-                    "type": "integer",
-                    "isRequired": true,
-                    "operators": [],
-                    "value": null
-                }
-            ]
+          "parameterName": "currency",
+          "type": "string",
+          "isRequired": true,
+          "operators": [],
+          "value": null
         },
         {
-            "conditionId": "sc-003",
-            "conditionName": "dataAccessScope",
-            "schemaVersion": "v1",
-            "parameters": [
-                {
-                    "parameterName": "region",
-                    "type": "string",
-                    "isRequired": true,
-                    "operators": [],
-                    "value": null
-                }
-            ]
+          "parameterName": "dueDayOfMonth",
+          "type": "integer",
+          "isRequired": true,
+          "operators": [],
+          "value": null
         }
-    ],
-    "documentBlocks": [
+      ]
+    },
+    {
+      "conditionId": "sc-003",
+      "conditionName": "dataAccessScope",
+      "schemaVersion": "v1",
+      "parameters": [
         {
-            "blockId": "sec-1",
-            "type": "SECTION",
-            "title": "General Terms",
-            "text": ""
-        },
-        {
-            "blockId": "sec-2",
-            "type": "SECTION",
-            "title": "Other Terms",
-            "text": ""
-        },
-        {
-            "blockId": "sec-1-1",
-            "type": "SECTION",
-            "title": "Validity",
-            "text": ""
-        },
-        {
-            "blockId": "cl-validity-text",
-            "type": "TEXT",
-            "text": "The lease is valid for the agreed term unless terminated under applicable law."
-        },
-        {
-            "blockId": "sn-validity",
-            "type": "CLAUSE",
-            "conditionIds": [
-                "sc-001"
-            ],
-            "text": "The term runs from {{sc-001.start date}} to {{sc-001.end date}}."
-        },
-        {
-            "blockId": "sec-1-2",
-            "type": "SECTION",
-            "title": "Payment",
-            "text": ""
-        },
-        {
-            "blockId": "cl-payment-text",
-            "type": "TEXT",
-            "text": "The tenant pays rent monthly in advance."
-        },
-        {
-            "blockId": "sn-payment",
-            "type": "CLAUSE",
-            "conditionIds": [
-                "sc-002"
-            ],
-            "text": "Rent of {{sc-002.rentAmount}} {{sc-002.currency}} is due on the {{sc-002.dueDayOfMonth}} of each month."
-        },
-        {
-            "blockId": "sec-1-3",
-            "type": "SECTION",
-            "title": "Data & Access",
-            "text": ""
-        },
-        {
-            "blockId": "cl-access-text",
-            "type": "TEXT",
-            "text": "Access is limited to the agreed scope."
-        },
-        {
-            "blockId": "sn-access",
-            "type": "CLAUSE",
-            "conditionIds": [
-                "sc-003"
-            ],
-            "text": "Data may be accessed only within {{sc-003.region}}."
-        },
-        {
-            "blockId": "cl-other-text",
-            "type": "TEXT",
-            "text": "Any matters not covered herein shall be governed by the laws of the jurisdiction stated in the lease."
+          "parameterName": "region",
+          "type": "string",
+          "isRequired": true,
+          "operators": [],
+          "value": null
         }
-    ],
-    "customMetaData": [
-        {
-            "name": "author",
-            "value": ""
-        },
-        {
-            "name": "version",
-            "value": ""
-        }
-    ]
+      ]
+    }
+  ],
+  "documentBlocks": [
+    {
+      "blockId": "sec-1",
+      "type": "SECTION",
+      "title": "General Terms",
+      "text": ""
+    },
+    {
+      "blockId": "sec-2",
+      "type": "SECTION",
+      "title": "Other Terms",
+      "text": ""
+    },
+    {
+      "blockId": "sec-1-1",
+      "type": "SECTION",
+      "title": "Validity",
+      "text": ""
+    },
+    {
+      "blockId": "cl-validity-text",
+      "type": "TEXT",
+      "text": "The lease is valid for the agreed term unless terminated under applicable law."
+    },
+    {
+      "blockId": "sn-validity",
+      "type": "CLAUSE",
+      "conditionIds": ["sc-001"],
+      "text": "The term runs from {{sc-001.start date}} to {{sc-001.end date}}."
+    },
+    {
+      "blockId": "sec-1-2",
+      "type": "SECTION",
+      "title": "Payment",
+      "text": ""
+    },
+    {
+      "blockId": "cl-payment-text",
+      "type": "TEXT",
+      "text": "The tenant pays rent monthly in advance."
+    },
+    {
+      "blockId": "sn-payment",
+      "type": "CLAUSE",
+      "conditionIds": ["sc-002"],
+      "text": "Rent of {{sc-002.rentAmount}} {{sc-002.currency}} is due on the {{sc-002.dueDayOfMonth}} of each month."
+    },
+    {
+      "blockId": "sec-1-3",
+      "type": "SECTION",
+      "title": "Data & Access",
+      "text": ""
+    },
+    {
+      "blockId": "cl-access-text",
+      "type": "TEXT",
+      "text": "Access is limited to the agreed scope."
+    },
+    {
+      "blockId": "sn-access",
+      "type": "CLAUSE",
+      "conditionIds": ["sc-003"],
+      "text": "Data may be accessed only within {{sc-003.region}}."
+    },
+    {
+      "blockId": "cl-other-text",
+      "type": "TEXT",
+      "text": "Any matters not covered herein shall be governed by the laws of the jurisdiction stated in the lease."
+    }
+  ],
+  "customMetaData": [
+    {
+      "name": "author",
+      "value": ""
+    },
+    {
+      "name": "version",
+      "value": ""
+    }
+  ]
 }

@@ -1,4 +1,4 @@
-import type { NegotiationTaskState } from "@/types/negotiation-task-state"
+import type { NegotiationTaskState } from '@/types/negotiation-task-state'
 
 export interface ContractNegotiationTask {
   type: 'contract'

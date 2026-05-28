@@ -1,13 +1,39 @@
 <template>
   <span class="tooltip tooltip-top inline-flex items-baseline" :data-tip="tipText">
-    <input v-if="type === 'string'" v-model="stringValue" type="text" @input="emitStringValue"
-      :class="inputClass" :aria-label="label" />
-    <input v-else-if="type === 'integer'" v-model="numberValue" type="text" inputmode="numeric" @keydown="onIntegerKeyDown" @input="emitIntegerValue"
-      :class="inputClass" :aria-label="label" />
-    <input v-else-if="type === 'decimal'" v-model="numberValue" type="number" @input="emitDecimalValue"
-      :class="inputClass" :aria-label="label" />
-    <input v-else-if="type === 'date'" v-model="dateValue" type="date" @input="emitDateValue"
-      :class="inputClass" :aria-label="label" />
+    <input
+      v-if="type === 'string'"
+      v-model="stringValue"
+      type="text"
+      :class="inputClass"
+      :aria-label="label"
+      @input="emitStringValue"
+    />
+    <input
+      v-else-if="type === 'integer'"
+      v-model="numberValue"
+      type="text"
+      inputmode="numeric"
+      :class="inputClass"
+      :aria-label="label"
+      @keydown="onIntegerKeyDown"
+      @input="emitIntegerValue"
+    />
+    <input
+      v-else-if="type === 'decimal'"
+      v-model="numberValue"
+      type="number"
+      :class="inputClass"
+      :aria-label="label"
+      @input="emitDecimalValue"
+    />
+    <input
+      v-else-if="type === 'date'"
+      v-model="dateValue"
+      type="date"
+      :class="inputClass"
+      :aria-label="label"
+      @input="emitDateValue"
+    />
   </span>
 </template>
 
@@ -22,16 +48,15 @@ const props = defineProps<{
   isInvalid?: boolean
   invalidTip?: string
 }>()
-const emit = defineEmits<{
-  (e: 'update:value', value: string | number): void
-}>()
+const emit = defineEmits<(e: 'update:value', value: string | number) => void>()
 
 const stringValue = ref('')
 const numberValue = ref('')
 const dateValue = ref('')
-const tipText = computed(() => props.invalidTip || props.label || '')
-const inputClass = computed(() =>
-  `border-b bg-transparent text-sm leading-relaxed px-0.5 outline-none ${props.isInvalid ? 'border-error text-error' : 'border-base-400'}`,
+const tipText = computed(() => props.invalidTip ?? props.label ?? '')
+const inputClass = computed(
+  () =>
+    `border-b bg-transparent text-sm leading-relaxed px-0.5 outline-none ${props.isInvalid ? 'border-error text-error' : 'border-base-400'}`,
 )
 
 watch(
@@ -40,7 +65,7 @@ watch(
     stringValue.value = ''
     numberValue.value = ''
     dateValue.value = ''
-  }
+  },
 )
 
 watch(
@@ -60,7 +85,7 @@ function emitStringValue(event: Event) {
 }
 
 function emitIntegerValue(event: Event) {
-  const next =  getIntegerInput((event.target as HTMLInputElement | null)?.value ?? '')
+  const next = getIntegerInput((event.target as HTMLInputElement | null)?.value ?? '')
   if (next === '' || next === '-') {
     emit('update:value', '')
     return
@@ -95,7 +120,15 @@ function getIntegerInput(value: string): string {
 
 function onIntegerKeyDown(event: KeyboardEvent) {
   const allowedControlKeys = new Set([
-    'Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End',
+    'Backspace',
+    'Delete',
+    'Tab',
+    'Escape',
+    'Enter',
+    'ArrowLeft',
+    'ArrowRight',
+    'Home',
+    'End',
   ])
   if (allowedControlKeys.has(event.key) || event.metaKey || event.ctrlKey) return
   if (event.key === '-') {

@@ -7,11 +7,11 @@ export const useNavStore = defineStore('nav', () => {
   const previousRoute: Ref<RouteLocationNormalized | null> = ref(null)
   const router = useRouter()
 
-  function goToPreviousRoute() {
+  async function goToPreviousRoute() {
     if (!previousRoute.value) {
-      router.push({ name: ROUTES.HOME })
+      await router.push({ name: ROUTES.HOME })
     } else {
-      router.push(previousRoute.value)
+      await router.push(previousRoute.value)
     }
   }
 

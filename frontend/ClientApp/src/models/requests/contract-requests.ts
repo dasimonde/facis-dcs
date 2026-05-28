@@ -11,7 +11,7 @@ export interface ContractCreateRequest {
 export interface ContractUpdateRequest {
   did: string
   updated_at: string
-  exp_notice_period?: number,
+  exp_notice_period?: number
   exp_policy?: ExpirationPolicy
   name?: string
   description?: string
@@ -29,7 +29,7 @@ export interface ContractSubmitRequest {
   negotiators?: string[]
 }
 
-export interface ContractRetrieveRequest {}
+export type ContractRetrieveRequest = Record<string, unknown>
 
 export interface ContractRetrieveByIdRequest {
   did: string

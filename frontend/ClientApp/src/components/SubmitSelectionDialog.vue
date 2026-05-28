@@ -72,7 +72,7 @@ async function openModal() {
         } else {
           acc.push(role)
         }
-        return [... new Set(acc)]
+        return [...new Set(acc)]
       }, []) ?? [],
   }))
 
@@ -83,7 +83,7 @@ function onModalSubmit() {
   if (isSubmitDisabled.value) return
   const result = users.value
     .filter((user) => selectedUsers.value[user.id] && selectedRole.value[user.id])
-    .map(({ availableRoles, ...user }): SelectedUserRole => ({ user: user, role: selectedRole.value[user.id]! }))
+    .map(({ availableRoles: _, ...user }): SelectedUserRole => ({ user: user, role: selectedRole.value[user.id]! }))
   emit('submit', result)
   onModalClose()
 }
@@ -117,30 +117,30 @@ const roleInfoText = computed(() => {
 
 <template>
   <button :="$attrs" @click="openModal">Submit</button>
-  <dialog ref="user-selection-modal" class="modal modal-bottom sm:modal-middle transition-none" @close="onModalClose">
-    <div class="modal-box flex flex-col max-h-2/3">
+  <dialog ref="user-selection-modal" class="modal modal-bottom transition-none sm:modal-middle" @close="onModalClose">
+    <div class="modal-box flex max-h-2/3 flex-col">
       <h3 class="text-lg font-bold">
         User Selection for {{ dialogType === 'template' ? 'Template' : 'Contract' }} Submission
       </h3>
-      <p class="text-sm py-4">
+      <p class="py-4 text-sm">
         {{ roleInfoText }}
       </p>
-      <div class="overflow-y-auto grow">
+      <div class="grow overflow-y-auto">
         <div v-if="isLoading">Loading...</div>
         <ul v-else class="list">
-          <li v-for="user in users" :key="user.id" class="list-row border border-secondary mb-1 py-2">
-            <label class="label list-col-grow">
+          <li v-for="user in users" :key="user.id" class="list-row mb-1 border border-secondary py-2">
+            <label class="list-col-grow label">
               <input
                 v-model="selectedUsers[user.id]"
-                @change="onCheckboxChange($event, user.id)"
                 type="checkbox"
-                class="checkbox checkbox-primary mr-4"
+                class="checkbox mr-4 checkbox-primary"
+                @change="onCheckboxChange($event, user.id)"
               />
               {{ `${user.firstName} ${user.lastName}` }}
             </label>
             <select
               v-model="selectedRole[user.id]"
-              class="select select-sm sm:select-md select-primary"
+              class="select select-sm select-primary sm:select-md"
               :disabled="!selectedUsers[user.id]"
             >
               <option selected :value="selectedRole['']">No role</option>
@@ -157,13 +157,13 @@ const roleInfoText = computed(() => {
         </ul>
       </div>
       <div class="modal-action">
-        <div v-if="isSubmitDisabled" class="text-sm text-error flex items-center">
+        <div v-if="isSubmitDisabled" class="flex items-center text-sm text-error">
           <span v-if="!hasSelectedUsers">Select at least one user</span>
           <span v-else-if="!allSelectedUsersHaveRoles">Assign a role to all selected users</span>
           <span v-else>{{ roleInfoText }}</span>
         </div>
-        <button @click="onModalClose" class="btn btn-outline">Cancel</button>
-        <button @click="onModalSubmit" :disabled="isSubmitDisabled" class="btn btn-primary">Apply</button>
+        <button class="btn btn-outline" @click="onModalClose">Cancel</button>
+        <button :disabled="isSubmitDisabled" class="btn btn-primary" @click="onModalSubmit">Apply</button>
       </div>
     </div>
   </dialog>

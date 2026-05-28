@@ -1,58 +1,70 @@
 <template>
   <div>
-    <p class="text-sm text-base-content/70 mb-2">{{ title }}</p>
+    <p class="mb-2 text-sm text-base-content/70">{{ title }}</p>
 
-    <div v-if="templates.length" class="flex flex-col gap-2 max-h-64 overflow-y-auto">
-      <div v-for="t in templates" :key="`${t.did}-${t.version}-${t.document_number}`"
-        class="border border-base-300 rounded-lg bg-base-100">
-        <div class="flex items-stretch px-3 py-2 cursor-pointer hover:bg-base-200 transition-colors">
+    <div v-if="templates.length" class="flex max-h-64 flex-col gap-2 overflow-y-auto">
+      <div
+        v-for="t in templates"
+        :key="`${t.did}-${t.version}-${t.document_number}`"
+        class="rounded-lg border border-base-300 bg-base-100"
+      >
+        <div class="flex cursor-pointer items-stretch px-3 py-2 transition-colors hover:bg-base-200">
           <!-- Collapse toggle icon on the left -->
-          <button type="button"
-            class="flex items-center justify-center w-8 mr-3 text-base-content/60 hover:text-base-content hover:bg-base-200/70 rounded-md transition-colors cursor-pointer"
-            @click.stop="togglePreview(t.did)">
-            <svg class="w-3 h-3 transition-transform duration-200"
-              :class="expandedTemplateId === t.did ? 'rotate-180' : ''" xmlns="http://www.w3.org/2000/svg" fill="none"
-              viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <button
+            type="button"
+            class="mr-3 flex w-8 cursor-pointer items-center justify-center rounded-md text-base-content/60 transition-colors hover:bg-base-200/70 hover:text-base-content"
+            @click.stop="togglePreview(t.did)"
+          >
+            <svg
+              class="h-3 w-3 transition-transform duration-200"
+              :class="expandedTemplateId === t.did ? 'rotate-180' : ''"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
 
           <!-- Vertical divider -->
-          <div class="w-px bg-base-300 mr-3" aria-hidden="true" />
+          <div class="mr-3 w-px bg-base-300" aria-hidden="true" />
 
-        <div class="flex-1 min-w-0" @click="$emit('select', t)">
-            <p class="text-sm font-medium text-base-content truncate">
+          <div class="min-w-0 flex-1" @click="$emit('select', t)">
+            <p class="truncate text-sm font-medium text-base-content">
               {{ t.name }}
             </p>
-            <p class="text-xs text-base-content/70 mt-0.5 line-clamp-2">
+            <p class="mt-0.5 line-clamp-2 text-xs text-base-content/70">
               {{ t.description }}
             </p>
           </div>
           <!-- Reference count -->
-          <span v-if="referenceCountByDid !== undefined"
-            class="text-xs text-base-content/60 badge badge-ghost badge-sm shrink-0 self-center ml-2">
+          <span
+            v-if="referenceCountByDid !== undefined"
+            class="ml-2 badge shrink-0 self-center badge-ghost text-xs badge-sm text-base-content/60"
+          >
             {{ usedInTemplateLabel(t.did) }}
           </span>
         </div>
 
         <!-- Preview panel -->
         <div v-if="expandedTemplateId === t.did" class="border-t border-base-200 bg-base-200/60 px-3 py-3">
-          <p class="text-xs font-medium text-base-content/70 mb-1.5">Preview template</p>
-          <div class="max-h-64 overflow-auto bg-base-100 rounded-md border border-base-300 px-3 py-2">
-            <TemplatePreview v-if="t.template_data" :document-outline="t.template_data.documentOutline"
+          <p class="mb-1.5 text-xs font-medium text-base-content/70">Preview template</p>
+          <div class="max-h-64 overflow-auto rounded-md border border-base-300 bg-base-100 px-3 py-2">
+            <TemplatePreview
+              v-if="t.template_data"
+              :document-outline="t.template_data.documentOutline"
               :document-blocks="t.template_data.documentBlocks"
-              :semantic-conditions="t.template_data.semanticConditions" />
-            <p v-else class="text-xs text-base-content/60 italic">
-              No template data available.
-            </p>
+              :semantic-conditions="t.template_data.semanticConditions"
+            />
+            <p v-else class="text-xs text-base-content/60 italic">No template data available.</p>
           </div>
         </div>
       </div>
     </div>
 
-    <p v-else class="text-xs text-base-content/60 italic">
-      No approved sub-templates available.
-    </p>
+    <p v-else class="text-xs text-base-content/60 italic">No approved sub-templates available.</p>
   </div>
 </template>
 
@@ -61,17 +73,18 @@ import { ref } from 'vue'
 import type { SubTemplateSnapshot } from '@/models/contract-template'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 
-const props = withDefaults(defineProps<{
-  templates: SubTemplateSnapshot[]
-  referenceCountByDid?: Record<string, number>
-  title?: string
-}>(), {
-  title: 'Approved sub-templates:',
-})
+const props = withDefaults(
+  defineProps<{
+    templates: SubTemplateSnapshot[]
+    referenceCountByDid?: Record<string, number>
+    title?: string
+  }>(),
+  {
+    title: 'Approved sub-templates:',
+  },
+)
 
-const emit = defineEmits<{
-  (e: 'select', template: SubTemplateSnapshot): void
-}>()
+defineEmits<(e: 'select', template: SubTemplateSnapshot) => void>()
 
 const expandedTemplateId = ref<string | null>(null)
 

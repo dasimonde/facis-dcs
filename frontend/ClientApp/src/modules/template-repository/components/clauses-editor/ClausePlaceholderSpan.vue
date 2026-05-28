@@ -1,6 +1,7 @@
 <template>
   <span
-    class="clause-placeholder-slot inline-block border-b-2 border-dashed border-primary/50 bg-primary/5 text-primary px-1 rounded-sm font-medium cursor-default">
+    class="clause-placeholder-slot inline-block cursor-default rounded-sm border-b-2 border-dashed border-primary/50 bg-primary/5 px-1 font-medium text-primary"
+  >
     {{ label }}
   </span>
 </template>

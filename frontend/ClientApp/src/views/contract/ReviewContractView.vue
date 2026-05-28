@@ -6,9 +6,7 @@ import type { Contract } from '@/models/contract/contract'
 import AuditView from '@/modules/contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
 import { useContractDataPreprocess } from '@/modules/contract-workflow-engine/composables/useContractDataPreprocess'
-import {
-  useSemanticValueVerification,
-} from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
+import { useSemanticValueVerification } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
 import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
 import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
@@ -37,7 +35,6 @@ const templateEditorUiStore = useTemplateEditorUiStore()
 const { hasConditionParameterForValue, verifySemanticValue } = useSemanticValueVerification()
 const { preprocessContractData } = useContractDataPreprocess()
 const { activeTab } = storeToRefs(contractEditorUiStore)
-const { setActiveTab } = contractEditorUiStore
 const contractContentValuesStore = useContractContentValuesStore()
 
 const confirmationDialog = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-dialog')
@@ -49,8 +46,11 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
     contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue })
 })
 
-const isAuditingAuthorized = computed(() => 
-  (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some(role => authStore.user?.roles?.includes(role)) ?? false
+const isAuditingAuthorized = computed(
+  () =>
+    (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
+      authStore.user?.roles?.includes(role),
+    ) ?? false,
 )
 
 const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
@@ -83,7 +83,7 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Failed to load contract', err)
       }
     }
@@ -112,19 +112,19 @@ watch(
   { deep: true },
 )
 
-const verifyContract = async () => {
+const verifyContract = () => {
   if (!contract.value || !verificationResult?.value?.isValid) {
-    verificationResult?.value?.errors.forEach(error => errorStore.add(error.message))
-    setActiveTab('content')
+    verificationResult?.value?.errors.forEach((error) => errorStore.add(error.message))
+    contractEditorUiStore.setActiveTab('content')
   } else {
-    errorStore.add("Contract is valid", 'info')
+    errorStore.add('Contract is valid', 'info')
   }
 }
 
 const forwardToApproval = async () => {
   if (!contract.value || !verificationResult?.value?.isValid) {
-    verificationResult?.value?.errors.forEach(error => errorStore.add(error.message))
-    setActiveTab('content')
+    verificationResult?.value?.errors.forEach((error) => errorStore.add(error.message))
+    contractEditorUiStore.setActiveTab('content')
     return
   }
 
@@ -142,7 +142,7 @@ const forwardToApproval = async () => {
       comments: comment ? [comment] : [],
     })
     if (response.did) {
-      navStore.goToPreviousRoute()
+      await navStore.goToPreviousRoute()
     }
   } catch (err) {
     console.error('Failed to submit', err)
@@ -165,7 +165,7 @@ const returnToNegotiation = async () => {
       comments: comment ? [comment] : [],
     })
     if (response.did) {
-      navStore.goToPreviousRoute()
+      await navStore.goToPreviousRoute()
     }
   } catch (err) {
     console.error('Failed to return to negotiation', err)
@@ -201,25 +201,24 @@ function applyContractDataToDraft(contractData?: unknown) {
   })
   contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
 }
-
 </script>
 
 <template>
-  <div class="flex flex-col min-h-full -mx-4 md:-mx-8 -my-4 md:-my-8">
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
     <div v-if="!!contract">
-      <div class="flex-1 flex flex-col">
+      <div class="flex flex-1 flex-col">
         <!-- Tabs -->
-        <div class="sticky top-0 z-10 shrink-0 bg-base-100 border-b border-base-300">
-          <div class="max-w-4xl mx-auto px-6 pt-3">
-            <p class="text-xs font-black uppercase tracking-widest text-base-content/40 mb-2">Review Contract</p>
-            <div role="tablist" class="tabs tabs-border tabs-lg">
+        <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
+          <div class="mx-auto max-w-4xl px-6 pt-3">
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">Review Contract</p>
+            <div role="tablist" class="tabs-border tabs tabs-lg">
               <a
                 v-for="tab in tabs"
                 :key="tab.id"
                 role="tab"
                 class="tab"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
-                @click="setActiveTab(tab.id)"
+                @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
                 {{ tab.label }}
               </a>
@@ -227,15 +226,15 @@ function applyContractDataToDraft(contractData?: unknown) {
           </div>
         </div>
         <!-- Tab content -->
-        <div class="grow mt-5">
-          <div class="max-w-4xl mx-auto p-6">
+        <div class="mt-5 grow">
+          <div class="mx-auto max-w-4xl p-6">
             <div class="grid grid-cols-1 gap-4">
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor :contract="contract" disabled />
               </div>
 
               <div v-show="activeTab === 'content'">
-                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
                     <div>
                       <TemplatePreview
@@ -254,7 +253,7 @@ function applyContractDataToDraft(contractData?: unknown) {
 
               <template v-if="isAuditingAuthorized">
                 <div v-show="activeTab === 'audit'">
-                  <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card border border-base-300 bg-base-100 shadow-sm">
                     <div class="card-body">
                       <h2 class="card-title text-sm">Audit History</h2>
                       <AuditView />
@@ -268,36 +267,36 @@ function applyContractDataToDraft(contractData?: unknown) {
       </div>
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
-      <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Cancel</button>
         <button
           v-if="contract?.state === ContractState.submitted"
-          class="btn btn-primary flex-1"
+          class="btn flex-1 btn-primary"
           :disabled="isSubmitting"
           @click="verifyContract"
         >
-          <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Verify
         </button>
         <button
           v-if="contract?.state === ContractState.submitted"
-          @click="returnToNegotiation"
-          class="btn btn-primary flex-1"
+          class="btn flex-1 btn-primary"
           :disabled="isSubmitting"
+          @click="returnToNegotiation"
         >
-          <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
         </button>
         <button
           v-if="contract?.state === ContractState.submitted"
-          class="btn btn-primary flex-1"
+          class="btn flex-1 btn-primary"
           :disabled="isSubmitting || !verificationResult.isValid"
           @click="forwardToApproval"
         >
-          <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Approve
         </button>
-        <ContractManagerActions v-if="contract" :contract="contract" class="btn btn-primary flex-1" />
+        <ContractManagerActions v-if="contract" :contract="contract" class="btn flex-1 btn-primary" />
       </div>
       <ConfirmationModal ref="confirmation-dialog" />
     </div>

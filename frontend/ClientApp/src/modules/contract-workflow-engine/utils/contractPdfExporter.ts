@@ -1,7 +1,12 @@
 import pdfMake from 'pdfmake/build/pdfmake'
 import pdfFonts from 'pdfmake/build/vfs_fonts'
 import type { Attachment, ContentText, TDocumentDefinitions } from 'pdfmake/interfaces'
-import { ContractPdfArchiveFileNames, PdfArchiveMediaTypes, type ContractPdfArchive, type PdfArchiveMediaType } from '@/types/contract-pdf-archive'
+import {
+  ContractPdfArchiveFileNames,
+  PdfArchiveMediaTypes,
+  type ContractPdfArchive,
+  type PdfArchiveMediaType,
+} from '@/types/contract-pdf-archive'
 import type { PdfDataResult } from './contractPdfConverter'
 
 type PdfMakeWithVfs = typeof pdfMake & {
@@ -31,37 +36,45 @@ function configurePdfMake(): void {
   isPdfMakeConfigured = true
 }
 
-function toPdfDocumentDefinition(pdfData: PdfDataResult, title = 'Contract Document', options?: ExportOptions): TDocumentDefinitions {
+function toPdfDocumentDefinition(
+  pdfData: PdfDataResult,
+  title = 'Contract Document',
+  options?: ExportOptions,
+): TDocumentDefinitions {
   const displayTitleInContent = options?.displayTitleInContent ?? false
   const content = displayTitleInContent ? [getTitleNode(title), ...pdfData.content] : pdfData.content
   return {
     content: content,
     styles: pdfData.styles,
     info: {
-      title
+      title,
     },
     version: pdfData.version,
     subset: pdfData.subset,
     tagged: pdfData.tagged,
     displayTitle: pdfData.displayTitle,
-    files: options?.archive ? getAttachments(options.archive) : undefined
+    files: options?.archive ? getAttachments(options.archive) : undefined,
   }
 }
 
-export function downloadContractPdf(pdfData: PdfDataResult, filename = 'contract.pdf', title?: string, options?: ExportOptions): void {
+export function downloadContractPdf(
+  pdfData: PdfDataResult,
+  filename = 'contract.pdf',
+  title?: string,
+  options?: ExportOptions,
+): void {
   configurePdfMake()
 
   const documentDefinition = toPdfDocumentDefinition(pdfData, title, options)
-  pdfMake.createPdf(documentDefinition).download(filename)
+  void pdfMake.createPdf(documentDefinition).download(filename)
 }
-
 
 function getTitleNode(title: string): ContentText {
   return {
     text: title,
     style: 'docTitle',
     alignment: 'center',
-    margin: [0, 0, 0, 12]
+    margin: [0, 0, 0, 12],
   }
 }
 /**

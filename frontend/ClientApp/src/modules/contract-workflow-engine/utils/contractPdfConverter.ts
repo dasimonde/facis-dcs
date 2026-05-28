@@ -18,7 +18,7 @@ export interface PdfDataResult {
 /** Do not strip leading, trailing, or repeated spaces */
 const preserveWhitespace: Style = {
   preserveLeadingSpaces: true,
-  preserveTrailingSpaces: true
+  preserveTrailingSpaces: true,
 } as const
 
 const pdfStyles: PdfStyles = {
@@ -27,27 +27,27 @@ const pdfStyles: PdfStyles = {
     bold: true,
     color: '#1f2937',
     margin: [0, 0, 0, 6],
-    ...preserveWhitespace
+    ...preserveWhitespace,
   },
   section2: {
     fontSize: 14,
     bold: true,
     color: '#1f2937',
     margin: [0, 0, 0, 6],
-    ...preserveWhitespace
+    ...preserveWhitespace,
   },
   section3: {
     fontSize: 12,
     bold: true,
     color: '#1f2937',
     margin: [0, 0, 0, 6],
-    ...preserveWhitespace
+    ...preserveWhitespace,
   },
   text: {
     fontSize: 12,
     color: '#374151',
     margin: [0, 0, 0, 6],
-    ...preserveWhitespace
+    ...preserveWhitespace,
   },
 }
 
@@ -58,7 +58,7 @@ export function toPdfData(blocks: ContractPlainTextBlock[]): PdfDataResult {
     if (isSectionPlainTextBlock(block)) {
       content.push({
         text: block.text ?? '',
-        style: getSectionStyle(block.level)
+        style: getSectionStyle(block.level),
       })
       continue
     }
@@ -66,7 +66,7 @@ export function toPdfData(blocks: ContractPlainTextBlock[]): PdfDataResult {
     if (isTextPlainTextBlock(block)) {
       content.push({
         text: block.text ?? '',
-        style: 'text'
+        style: 'text',
       })
     }
   }
@@ -77,7 +77,7 @@ export function toPdfData(blocks: ContractPlainTextBlock[]): PdfDataResult {
     version: '1.7ext3',
     subset: 'PDF/A-3a',
     tagged: true,
-    displayTitle: true
+    displayTitle: true,
   }
 }
 

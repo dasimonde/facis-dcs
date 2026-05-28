@@ -45,12 +45,12 @@ const searchableItems = computed(() => {
     seenDids.add(task.did)
 
     if (task.type === 'template') {
-      const template = templatesStore.contractTemplates.find((t) => t.did === task.did)
+      const template = templatesStore.findTemplateByDid(task.did)
       if (template) {
         items.push(template)
       }
     } else {
-      const contract = contractsStore.contracts.find((c) => c.did === task.did)
+      const contract = contractsStore.findContractByDid(task.did)
       if (contract) {
         items.push(contract)
       }
@@ -59,14 +59,16 @@ const searchableItems = computed(() => {
   return items
 })
 
-const search = async (request: Record<string, any>): Promise<Searchable[]> => {
-  if (!request.name) return searchableItems.value
+const search = (request: Record<string, unknown>): Promise<Searchable[]> => {
+  if (!request.name) return Promise.resolve(searchableItems.value)
 
-  const query = String(request.name).toLowerCase()
-  return searchableItems.value.filter((item) => {
-    const name = item.name ? String(item.name).toLowerCase() : ''
-    return name.includes(query)
-  })
+  const query = (typeof request.name === 'string' ? request.name : '').toLowerCase()
+  return Promise.resolve(
+    searchableItems.value.filter((item) => {
+      const name = item.name ? String(item.name).toLowerCase() : ''
+      return name.includes(query)
+    }),
+  )
 }
 
 const handleSearchResult = (searchResults: Searchable[]) => {

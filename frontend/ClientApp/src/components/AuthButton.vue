@@ -12,7 +12,7 @@ const logout = () => authenticationService.logout()
 
 <template>
   <div>
-    <button v-if="isAuthenticated" @click="logout" class="btn btn-outline btn-sm gap-2">
+    <button v-if="isAuthenticated" class="btn gap-2 btn-outline btn-sm" @click="logout">
       <ArrowLeftStartOnRectangleIcon class="size-4" />
       Log out
     </button>

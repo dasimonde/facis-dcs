@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 
+defineOptions({
+  name: 'AppPagination',
+})
+
 const emit = defineEmits<{
   pageChange: [value: number]
 }>()

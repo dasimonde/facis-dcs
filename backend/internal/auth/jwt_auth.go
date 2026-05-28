@@ -2,8 +2,12 @@ package auth
 
 import (
 	"context"
+	"digital-contracting-service/internal/auth/db"
+	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/middleware"
+	"time"
 
+	"github.com/jmoiron/sqlx"
 	goa "goa.design/goa/v3/pkg"
 	"goa.design/goa/v3/security"
 )
@@ -19,36 +23,50 @@ import (
 //	}
 type JWTAuthenticator struct {
 	Validator *middleware.OIDCValidator
+	DB        *sqlx.DB
+	LARepo    db.LoginAttemptRepo
+	LockRepo  db.IPLockoutRepo
 }
 
 // NewJWTAuthenticator returns a JWTAuthenticator backed by the given OIDC
 // validator.
-func NewJWTAuthenticator(v *middleware.OIDCValidator) JWTAuthenticator {
-	return JWTAuthenticator{Validator: v}
+func NewJWTAuthenticator(v *middleware.OIDCValidator, db *sqlx.DB, laRepo db.LoginAttemptRepo, lockRepo db.IPLockoutRepo) JWTAuthenticator {
+	return JWTAuthenticator{Validator: v, DB: db, LARepo: laRepo, LockRepo: lockRepo}
 }
 
 // JWTAuth validates a JWT token via the OIDC provider and checks that the
 // caller possesses at least one of the required scopes (Keycloak realm roles).
 // It returns an enriched context with the caller's roles on success.
 func (a JWTAuthenticator) JWTAuth(ctx context.Context, token string, scheme *security.JWTScheme) (context.Context, error) {
+	ip := middleware.IPFromContext(ctx)
+
 	if token == "" {
+		a.logAttempt(ctx, ip, nil, false)
 		return ctx, goa.PermanentError("unauthorized", "missing JWT token")
 	}
 
-	// Validate the token, check azp, and extract roles + username.
 	info, err := a.Validator.ValidateToken(ctx, token)
 	if err != nil {
+		a.logAttempt(ctx, ip, nil, false)
+		if err := a.checkAndLock(ctx, ip); err != nil {
+			return ctx, err
+		}
 		return ctx, goa.PermanentError("unauthorized", "invalid token: %s", err)
 	}
 
-	// If the endpoint declares required scopes, enforce at least one match.
 	if len(scheme.RequiredScopes) > 0 {
 		if !hasAnyRole(info.Roles, scheme.RequiredScopes) {
+			a.logAttempt(ctx, ip, &info.Username, false)
+			if err := a.checkAndLock(ctx, ip); err != nil {
+				return ctx, err
+			}
 			return ctx, goa.PermanentError("forbidden", "insufficient permissions: requires one of %v", scheme.RequiredScopes)
 		}
 	}
 
-	// Inject the validated identity into the context for downstream use.
+	a.logAttempt(ctx, ip, &info.Username, true)
+	a.clearLock(ctx, ip)
+
 	ctx = middleware.InjectAuthContext(ctx, info.Roles, info.Username, info.ParticipantID)
 	return ctx, nil
 }
@@ -65,4 +83,57 @@ func hasAnyRole(roles []string, required []string) bool {
 		}
 	}
 	return false
+}
+
+// logAttempt writes a login attempt – errors are ignored so that a DB issue
+// does not block the login flow.
+func (a JWTAuthenticator) logAttempt(ctx context.Context, ip string, attemptBy *string, success bool) {
+
+	tx, err := a.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	_ = a.LARepo.Create(ctx, tx, db.LoginAttempt{
+		IPAddress:   ip,
+		AttemptBy:   attemptBy,
+		AttemptedAt: time.Now(),
+		Success:     success,
+		Service:     ctx.Value(goa.ServiceKey).(string),
+		Method:      ctx.Value(goa.MethodKey).(string),
+	})
+
+	_ = tx.Commit()
+}
+
+func (a JWTAuthenticator) checkAndLock(ctx context.Context, ip string) error {
+	tx, err := a.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil
+	}
+	defer tx.Rollback()
+
+	count, err := a.LARepo.CountFailedAttemptsByIP(ctx, tx, ip, time.Now().Add(-conf.LoginLockoutDuration()))
+
+	if err == nil && count >= conf.LoginAttemptsThresholdInDuration() {
+		lockUntil := time.Now().Add(conf.LoginLockoutDuration())
+		_ = a.LockRepo.SetLockout(ctx, tx, ip, lockUntil)
+		_ = tx.Commit()
+		return goa.PermanentError("unauthorized", "too many failed attempts, locked until %s", lockUntil.Format(time.RFC3339))
+	}
+
+	_ = tx.Commit()
+	return nil
+}
+
+func (a JWTAuthenticator) clearLock(ctx context.Context, ip string) {
+	tx, err := a.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	_ = a.LockRepo.ClearLockout(ctx, tx, ip)
+	_ = tx.Commit()
 }

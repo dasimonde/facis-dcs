@@ -8,9 +8,7 @@ export interface TemplateDataRef {
 
 export function isSameTemplateDataRef(a: TemplateDataRef, b: TemplateDataRef): boolean {
   return (
-    a.templateId === b.templateId &&
-    a.version  === b.version &&
-    (a.document_number ?? '') === (b.document_number ?? '')
+    a.templateId === b.templateId && a.version === b.version && (a.document_number ?? '') === (b.document_number ?? '')
   )
 }
 

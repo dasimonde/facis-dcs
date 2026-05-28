@@ -14,7 +14,7 @@ window.addEventListener('unhandledrejection', (event) => {
 
 app.config.errorHandler = (err, _instance, _info) => {
   const errorStore = useErrorStore()
-  const message = err instanceof Error ? err.message : `Error: ${err ? String(err) : 'unknown'}`
+  const message = err instanceof Error ? err.message : `Error: ${err ? JSON.stringify(err) : 'unknown'}`
   errorStore.add(message)
 }
 

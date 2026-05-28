@@ -1,1 +1,1 @@
-export type ContractActionFlag = 'APPROVAL' | 'REJECT';
+export type ContractActionFlag = 'APPROVAL' | 'REJECT'

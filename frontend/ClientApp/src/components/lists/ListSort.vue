@@ -7,7 +7,7 @@ const props = defineProps<{
   disabled?: boolean
 }>()
 
-const sortPopover = useTemplateRef('sortPopover')
+const sortPopover = useTemplateRef('sort-popover')
 
 const sortBy = defineModel<string>('sortBy', { required: true })
 const sortOrder = defineModel<number>('sortOrder', { required: true })
@@ -23,28 +23,29 @@ function sortItemsBy(key: string) {
 <template>
   <button
     id="list-btn-sort"
-    class="btn btn-primary m-2"
+    class="btn m-2 btn-primary"
     :class="[$attrs.class, !!disabled ? 'btn-disabled' : '']"
     popovertarget="list-popover-sort"
     :disabled="!!disabled"
   >
-    <span>Sort by</span> <ChevronUpDownIcon class="w-6 h-6" />
+    <span>Sort by</span>
+    <ChevronUpDownIcon class="h-6 w-6" />
   </button>
   <ul
-    ref="sortPopover"
-    class="dropdown dropdown-end menu w-52 rounded-box bg-base-300 shadow-sm"
+    id="list-popover-sort"
+    ref="sort-popover"
+    class="menu dropdown dropdown-end w-52 rounded-box bg-base-300 shadow-sm"
     popover
     anchor="sort-btn"
-    id="list-popover-sort"
   >
     <template v-for="[key, item] in sorter.entries()" :key="key">
       <li>
-        <a @click="sortItemsBy(key)" class="flex justify-between w-full"
-          ><span>{{ item }}</span
-          ><ChevronUpDownIcon v-if="key !== sortBy" class="w-6 h-6" /><BarsArrowUpIcon
-            v-else-if="sortOrder === 1"
-            class="w-6 h-6" /><BarsArrowDownIcon v-else class="w-6 h-6"
-        /></a>
+        <a class="flex w-full justify-between" @click="sortItemsBy(key)">
+          <span>{{ item }}</span>
+          <ChevronUpDownIcon v-if="key !== sortBy" class="h-6 w-6" />
+          <BarsArrowUpIcon v-else-if="sortOrder === 1" class="h-6 w-6" />
+          <BarsArrowDownIcon v-else class="h-6 w-6" />
+        </a>
       </li>
     </template>
   </ul>

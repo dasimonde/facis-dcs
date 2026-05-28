@@ -1,5 +1,4 @@
-export type ApprovalTaskState =
-  (typeof ApprovalTaskState)[keyof typeof ApprovalTaskState]
+export type ApprovalTaskState = (typeof ApprovalTaskState)[keyof typeof ApprovalTaskState]
 
 export const ApprovalTaskState = {
   open: 'OPEN',

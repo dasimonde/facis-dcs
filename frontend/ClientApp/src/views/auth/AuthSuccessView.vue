@@ -11,15 +11,15 @@ onMounted(async () => {
   const result = await authenticationService.refresh()
   // Redirect to templates list on success
   if (result) {
-    router.replace({ name: ROUTES.TEMPLATES.LIST })
+    await router.replace({ name: ROUTES.TEMPLATES.LIST })
   } else {
-    router.replace({ name: ROUTES.HOME })
+    await router.replace({ name: ROUTES.HOME })
   }
 })
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-base-200">
-    <span class="loading loading-spinner loading-lg" />
+  <div class="flex min-h-screen items-center justify-center bg-base-200">
+    <span class="loading loading-lg loading-spinner" />
   </div>
 </template>

@@ -9,7 +9,7 @@ import { ref, type Ref } from 'vue'
 export const userService: UserService = {
   async getAllUsers(_request?: UserAllRequest) {
     return Promise.resolve<AxiosResponse<UserAllResponse>>({
-      data: { totalCount: users.value.length, items: users.value } as UserAllResponse,
+      data: { totalCount: users.value.length, items: users.value },
       status: 200,
       statusText: 'OK',
       headers: {},
@@ -85,7 +85,7 @@ const mockUsers: UserProfile[] = [
       'CONTRACT_REVIEWER',
       'CONTRACT_APPROVER',
       'CONTRACT_MANAGER',
-      'AUDITOR'
+      'AUDITOR',
     ],
     id: 'user-000',
     username: 'test',
@@ -95,7 +95,15 @@ const mockUsers: UserProfile[] = [
     firstName: 'John',
     lastName: 'Doe',
     email: 'john.doe@example.com',
-    roleIds: ['TEMPLATE_APPROVER', 'TEMPLATE_CREATOR', 'TEMPLATE_MANAGER', 'TEMPLATE_REVIEWER', 'CONTRACT_CREATOR', 'CONTRACT_APPROVER', 'CONTRACT_REVIEWER'],
+    roleIds: [
+      'TEMPLATE_APPROVER',
+      'TEMPLATE_CREATOR',
+      'TEMPLATE_MANAGER',
+      'TEMPLATE_REVIEWER',
+      'CONTRACT_CREATOR',
+      'CONTRACT_APPROVER',
+      'CONTRACT_REVIEWER',
+    ],
     id: 'user-001',
     username: 'johndoe',
   },

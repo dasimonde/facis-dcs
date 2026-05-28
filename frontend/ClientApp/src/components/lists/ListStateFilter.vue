@@ -24,7 +24,7 @@ const storeMap = {
 
 type StoreType = keyof typeof storeMap
 
-type FilterMap = {
+interface FilterMap {
   templates: ContractTemplateState
   contracts: ContractState
   reviewTasks: ReviewTaskState
@@ -78,14 +78,14 @@ const isSelected = (type: FilterMap[typeof props.storeType]) => {
   <button
     id="popover-btn"
     popovertarget="filter-popover"
-    class="select select-secondary w-fit gap-2 m-2"
+    class="select m-2 w-fit gap-2 select-secondary"
     :class="{ 'btn-disabled': disabled }"
     :disabled="!!disabled"
   >
     Filter
   </button>
-  <ul id="filter-popover" popover class="dropdown menu rounded-box rounded-md bg-base-300 shadow-sm">
-    <li class="menu-title pointer-events-none">
+  <ul id="filter-popover" popover class="menu dropdown rounded-box rounded-md bg-base-300 shadow-sm">
+    <li class="pointer-events-none menu-title">
       <label class="label">{{ label }}</label>
     </li>
     <ul>
@@ -95,11 +95,11 @@ const isSelected = (type: FilterMap[typeof props.storeType]) => {
         class="flex justify-between transition-colors"
         @click="setFilter(filter)"
       >
-        <label class="label flex-1" :class="{ 'bg-primary text-primary-content mt-1': isSelected(filter) }">{{
-          filter
-        }}</label>
+        <label class="label flex-1" :class="{ 'mt-1 bg-primary text-primary-content': isSelected(filter) }">
+          {{ filter }}
+        </label>
       </li>
-      <li v-if="hasFilters" class="text-sm w-full opacity-60 px-4 py-2 border-t border-base-300">
+      <li v-if="hasFilters" class="w-full border-t border-base-300 px-4 py-2 text-sm opacity-60">
         <label class="link cursor-pointer" @click="showAll = !showAll">
           <div v-if="!showAll">See all</div>
           <div v-else>See less</div>

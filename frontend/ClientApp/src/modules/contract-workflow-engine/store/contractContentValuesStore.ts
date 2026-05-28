@@ -45,10 +45,5 @@ function getInitialState(): ContractContentValuesState {
 }
 
 function buildConditionValueKey(value: SemanticConditionValue): string {
-  return [
-    value.blockId,
-    value.conditionId,
-    value.parameterName,
-    String(value.parameterValue),
-  ].join(SEPARATOR)
+  return [value.blockId, value.conditionId, value.parameterName, String(value.parameterValue)].join(SEPARATOR)
 }

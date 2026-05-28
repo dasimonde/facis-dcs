@@ -33,5 +33,5 @@ Feature: Search and Retrieve Contract Templates
 
   Scenario: Retrieve unauthorized
     Given I am authenticated with roles: "Contract Creator"
-    When I retrieve template "Standard NDA"
+    When I search for templates whats template_data contains keyword "2-2"
     Then the request is denied with an authorization error

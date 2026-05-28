@@ -1,7 +1,12 @@
 <template>
-  <li class="flex items-center gap-1.5 rounded px-1 py-0.5 -mx-1" :class="rowClass" @click="$emit('click')">
-    <span class="font-mono border border-base-300 rounded px-1" @mouseenter="$emit('mouseenter')"
-      @mouseleave="$emit('mouseleave')">{{ param.parameterName }}</span>
+  <li class="-mx-1 flex items-center gap-1.5 rounded px-1 py-0.5" :class="rowClass" @click="$emit('click')">
+    <span
+      class="rounded border border-base-300 px-1 font-mono"
+      @mouseenter="$emit('mouseenter')"
+      @mouseleave="$emit('mouseleave')"
+    >
+      {{ param.parameterName }}
+    </span>
     <span class="text-base-content/50">{{ param.isRequired ? 'required' : 'optional' }}</span>
     <span class="text-base-content/40">({{ param.type }})</span>
   </li>

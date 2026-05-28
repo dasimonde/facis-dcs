@@ -11,6 +11,19 @@ from steps.support.api_client import (
     template_retrieve_by_id_url,
 )
 
+@when('I try to create a template "{template_name}" in category "{category}"')
+def step_when_create_template(context, template_name, category):
+    payload = {
+        "template_type": TemplateService.template_type_for_category(category),
+        "name": template_name,
+        "description": "BDD executable template creation",
+        "template_data": {
+            "title": template_name,
+            "clauses": [{"id": "c1", "text": "Confidentiality clause"}],
+        },
+    }
+    context.requests_response = post_json(context, template_create_url(context), payload)
+
 
 @when('I create a template "{template_name}" in category "{category}"')
 def step_when_create_template(context, template_name, category):

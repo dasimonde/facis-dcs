@@ -1,22 +1,22 @@
 <template>
-  <div class="flex flex-col min-h-full -mx-4 md:-mx-8 -my-4 md:-my-8">
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
     <TemplateEditors title="View Template" />
 
     <!-- Pinned Footer -->
     <div v-if="$route.params.did === did" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
-      <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
-        <CopyTemplateButton v-if="isCreator || isManager" class="btn btn-primary flex-1" />
+        <CopyTemplateButton v-if="isCreator || isManager" class="btn flex-1 btn-primary" />
         <template v-if="isCreator">
           <SubmitSelectionDialog
             v-if="state === TemplateState.draft"
             dialog-type="template"
+            class="btn flex-1 btn-primary"
             @submit="submitTemplate"
-            class="btn btn-primary flex-1"
           />
           <button
             v-if="state === TemplateState.rejected"
-            class="btn btn-primary flex-1"
+            class="btn flex-1 btn-primary"
             @click="submitRejectedTemplate"
           >
             Submit
@@ -25,7 +25,7 @@
         <TemplateManagerActions
           v-if="contractTemplate && isManager"
           :template="contractTemplate"
-          class="btn btn-primary flex-1"
+          class="btn flex-1 btn-primary"
         />
       </div>
     </div>
@@ -101,7 +101,7 @@ watch(
           responsible_persons: template.responsible_persons ?? null,
         })
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.error('Failed to load template for editing', error)
       })
   },
@@ -112,7 +112,7 @@ const submitTemplate = async (result: SelectedUserRole[]) => {
   try {
     if (!draftStore.did || !draftStore.updated_at) return
     const reviewers = result.filter((user) => user.role === 'TEMPLATE_REVIEWER').map((user) => user.user.username)
-    const approver = result.find((user) => user.role === 'TEMPLATE_APPROVER')?.user.username!
+    const approver = result.find((user) => user.role === 'TEMPLATE_APPROVER')!.user.username
     const response = await contractTemplateService.submit({
       did: draftStore.did,
       updated_at: draftStore.updated_at,
@@ -120,7 +120,7 @@ const submitTemplate = async (result: SelectedUserRole[]) => {
       approver: approver,
     })
     if (response?.did) {
-      navStore.goToPreviousRoute()
+      await navStore.goToPreviousRoute()
     }
   } catch (error) {
     console.error('Template Submission failed', error)
@@ -135,7 +135,7 @@ const submitRejectedTemplate = async () => {
       updated_at: draftStore.updated_at,
     })
     if (response.did) {
-      navStore.goToPreviousRoute()
+      await navStore.goToPreviousRoute()
     }
   } catch (error) {
     console.error('Template Submission failed', error)

@@ -27,7 +27,7 @@ const negotiations = computed(() => {
 })
 
 const sortedNegotiations = computed(() =>
-  negotiations.value.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+  negotiations.value.slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
 )
 
 const sortedDecisions = (decisions: ContractNegotiationDecision[]) => {
@@ -115,7 +115,7 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
 <template>
   <ul class="list">
     <li v-for="negotiation in sortedNegotiations" :key="negotiation.id" class="list-row px-0">
-      <div class="card bg-base-100 shadow-sm card-border border-base-content/10">
+      <div class="card border-base-content/10 bg-base-100 shadow-sm card-border">
         <div class="card-body">
           <h2 class="card-title">Change proposal by: {{ negotiation.created_by }}</h2>
           <ul class="list">
@@ -140,7 +140,7 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
               :disabled="isSubmitting || isBtnDisabled(negotiation)"
               @click="acceptNegotiation(negotiation)"
             >
-              <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+              <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
               Accept
             </button>
             <button
@@ -149,10 +149,10 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
               :disabled="isSubmitting || isBtnDisabled(negotiation)"
               @click="rejectNegotiation(negotiation)"
             >
-              <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+              <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
               Reject
             </button>
-            <button class="btn btn-primary btn-sm" @click="handleShowBtn(negotiation)">
+            <button class="btn btn-sm btn-primary" @click="handleShowBtn(negotiation)">
               {{ !isNegotiationShown.get(negotiation.id) ? 'Show' : 'Hide' }}
             </button>
           </div>

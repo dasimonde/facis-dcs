@@ -11,7 +11,7 @@ onMounted(async () => {
   // Keycloak kann je nach Konfiguration auch auf '/' zurückleiten.
   // In dem Fall direkt zu auth.success forwarden, ohne beforeEach zu involvieren.
   if (route.query.session_state && route.query.code && route.query.iss) {
-    router.replace({ name: ROUTES.AUTH.SUCCESS, query: route.query })
+    await router.replace({ name: ROUTES.AUTH.SUCCESS, query: route.query })
     return
   }
 
@@ -23,7 +23,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-base-200">
-    <span class="loading loading-spinner loading-lg" />
+  <div class="flex min-h-screen items-center justify-center bg-base-200">
+    <span class="loading loading-lg loading-spinner" />
   </div>
 </template>

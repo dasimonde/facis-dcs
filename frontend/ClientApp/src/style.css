@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 
-@plugin "daisyui/theme" {
+@plugin 'daisyui/theme' {
   name: 'facis';
   default: true;
 
@@ -62,14 +62,14 @@
   --space-6: 32px;
 }
 
-@plugin "daisyui" {
+@plugin 'daisyui' {
   themes:
     dark --prefersdark,
     facis --default;
   root: true;
 }
 
-@source inline("alert-{error,info}");
+@source inline('alert-{error,info}');
 
 @layer utilities {
   /* Padding */

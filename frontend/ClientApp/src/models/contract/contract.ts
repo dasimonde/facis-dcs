@@ -29,7 +29,6 @@ export interface Contract {
   negotiations?: ContractNegotiation[]
 }
 
-export type ContractChangeRequest = Pick<
-  Contract,
-  'name' | 'description' | 'exp_notice_period' | 'exp_policy'
-> & { contract_data?: Partial<Contract['contract_data']> }
+export type ContractChangeRequest = Pick<Contract, 'name' | 'description' | 'exp_notice_period' | 'exp_policy'> & {
+  contract_data?: Partial<Contract['contract_data']>
+}

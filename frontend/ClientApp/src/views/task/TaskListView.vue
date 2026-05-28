@@ -18,7 +18,7 @@ const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
 
 const loading = computed(() => templatesStore.loading || contractsStore.loading)
-const error = computed(() => templatesStore.error || contractsStore.error)
+const error = computed(() => templatesStore.error ?? contractsStore.error)
 
 const reviewTasks = computed(() => {
   return route.name === ROUTES.TASKS.REVIEWS ? [...templatesStore.reviewTasks, ...contractsStore.reviewTasks] : []
@@ -41,14 +41,7 @@ const hasTemplateRole = computed(() => {
 const hasContractRole = computed(() => {
   return (
     authStore.user?.roles?.some((role) =>
-      (
-        [
-          'CONTRACT_CREATOR',
-          'CONTRACT_REVIEWER',
-          'CONTRACT_APPROVER',
-          'CONTRACT_MANAGER',
-        ] as UserRole[]
-      ).includes(role),
+      (['CONTRACT_CREATOR', 'CONTRACT_REVIEWER', 'CONTRACT_APPROVER', 'CONTRACT_MANAGER'] as UserRole[]).includes(role),
     ) ?? false
   )
 })
@@ -70,7 +63,9 @@ watch(
 </script>
 
 <template>
-  <h2 class="bg-base-100 border-b border-base-content/10 text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight p-4 mb-4">
+  <h2
+    class="mb-4 border-b border-base-content/10 bg-base-100 p-4 text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight"
+  >
     {{ $route.meta.name }}
   </h2>
 

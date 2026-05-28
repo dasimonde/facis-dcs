@@ -1,18 +1,26 @@
 <template>
-  <div class="flex justify-between p-4 mb-4">
+  <div class="mb-4 flex justify-between p-4">
     <h2 class="text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight">
       {{ $route.meta.name }}
     </h2>
   </div>
 
-  <div class="max-w-4xl mx-auto">
-    <div role="tablist" class="tabs tabs-lift tabs-lg">
-      <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'participant' }"
-        @click="activeTab = 'participant'">
+  <div class="mx-auto max-w-4xl">
+    <div role="tablist" class="tabs-lift tabs tabs-lg">
+      <a
+        role="tab"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'participant' }"
+        @click="activeTab = 'participant'"
+      >
         Participant
       </a>
-      <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'serviceOffering' }"
-        @click="activeTab = 'serviceOffering'">
+      <a
+        role="tab"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'serviceOffering' }"
+        @click="activeTab = 'serviceOffering'"
+      >
         Service Offering
       </a>
     </div>

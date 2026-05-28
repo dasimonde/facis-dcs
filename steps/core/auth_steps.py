@@ -7,6 +7,10 @@ from behave import given
 from steps.support.services.template_service import TemplateService
 from support.services.auth_service import AuthService
 
+@given('I hold an expired credential with roles: "{roles}"')
+def step_given_expired_credential_with_roles(context, roles):
+    role_list = [role.strip() for role in roles.split(",")]
+    AuthService.set_headers_for_roles(context, role_list, use_expired_jwt=True)
 
 @given('I am authenticated with roles: "{roles}"')
 def step_given_authenticated_with_roles(context, roles):

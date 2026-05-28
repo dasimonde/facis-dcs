@@ -59,21 +59,21 @@ const filteredTasks = computed(() => {
 })
 
 const getTemplateName = (task: ContractTemplateReviewTask) => {
-  return templatesStore.contractTemplates.find((template) => template.did === task.did)?.name ?? 'Nameless Template'
+  return templatesStore.findTemplateByDid(task.did)?.name ?? 'Nameless Template'
 }
 
 const getContractName = (task: ContractReviewTask) => {
-  return contractsStore.contracts.find((contract) => contract.did === task.did)?.name ?? 'Nameless Contract'
+  return contractsStore.findContractByDid(task.did)?.name ?? 'Nameless Contract'
 }
 
 const getContractState = (task: ContractReviewTask) => {
-  return contractsStore.contracts.find((contract) => contract.did === task.did)?.state
+  return contractsStore.findContractByDid(task.did)?.state
 }
 
 const canEdit = (task: ReviewTask) => {
   if (task.type === 'contract') return false
 
-  const template = templatesStore.contractTemplates.find((template) => template.did === task.did)
+  const template = templatesStore.findTemplateByDid(task.did)
   const state = template?.state
   return (
     (template?.created_by === authStore.user?.username &&
@@ -106,14 +106,14 @@ onUnmounted(() => stateFilterStore.reset())
 
 <template>
   <ul class="list">
-    <li class="tracking-wide w-full px-4 flex justify-end flex-col sm:flex-row">
+    <li class="flex w-full flex-col justify-end px-4 tracking-wide sm:flex-row">
       <TaskListSearch class="flex-1" :tasks="tasks" @search-result="applySearchResult" />
       <ListStateFilter label="Review Task" :filters="reviewTaskStates" store-type="reviewTasks" :disabled="!hasTasks" />
-      <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :disabled="!hasTasks" />
+      <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
     </li>
     <template v-if="filteredTasks.length > 0">
       <li v-for="task in filteredTasks" :key="task.did" class="list-row">
-        <div class="list-col-grow card bg-base-100 card-border hover:bg-base-300 border-base-content/10">
+        <div class="list-col-grow card border-base-content/10 bg-base-100 card-border hover:bg-base-300">
           <div class="card-body">
             <h2 class="card-title flex-wrap justify-between">
               <div v-if="task.type === 'template'">Review Task for Template: {{ getTemplateName(task) }}</div>
@@ -149,7 +149,7 @@ onUnmounted(() => stateFilterStore.reset())
                     name: ROUTES.TEMPLATES.EDIT,
                     params: { did: task.did },
                   }"
-                  class="btn btn-sm btn-primary gap-2"
+                  class="btn gap-2 btn-sm btn-primary"
                 >
                   Edit
                 </RouterLink>

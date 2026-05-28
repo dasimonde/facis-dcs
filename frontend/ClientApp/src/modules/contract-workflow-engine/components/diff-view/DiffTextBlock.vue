@@ -1,11 +1,7 @@
 <template>
   <p class="m-0 leading-6 whitespace-pre-wrap text-base-content/90">
     <template v-if="highlightSegments && hasSegments">
-      <span
-        v-for="(segment, index) in segments"
-        :key="`text-segment-${index}`"
-        :class="getSegmentClass(segment.type)"
-      >
+      <span v-for="(segment, index) in segments" :key="`text-segment-${index}`" :class="getSegmentClass(segment.type)">
         {{ segment.text }}
       </span>
     </template>
@@ -21,14 +17,17 @@ import type { TextDiffSegment } from '@/modules/contract-workflow-engine/composa
 import type { ContractPlainTextLine } from '@/modules/contract-workflow-engine/composables/useContractPlainTextConverter'
 import { computed } from 'vue'
 
-const props = withDefaults(defineProps<{
-  block: ContractPlainTextLine
-  segments?: TextDiffSegment[]
-  highlightSegments?: boolean
-}>(), {
-  segments: () => [],
-  highlightSegments: false
-})
+const props = withDefaults(
+  defineProps<{
+    block: ContractPlainTextLine
+    segments?: TextDiffSegment[]
+    highlightSegments?: boolean
+  }>(),
+  {
+    segments: () => [],
+    highlightSegments: false,
+  },
+)
 
 const hasSegments = computed(() => props.segments.length > 0)
 

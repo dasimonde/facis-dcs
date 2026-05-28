@@ -1,29 +1,31 @@
 <template>
-  <div class="flex flex-col min-h-full -mx-4 md:-mx-8 -my-4 md:-my-8">
-
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
     <TemplateEditors title="Review Template" />
 
     <!-- Pinned Footer -->
     <div v-if="hasDid" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <!-- Comments container -->
       <ConfirmationModal ref="comment-dialog" />
-      <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="router.back()">Cancel</button>
-        <CopyTemplateButton v-if="isCreator || isManager" class="btn btn-primary flex-1" />
+        <CopyTemplateButton v-if="isCreator || isManager" class="btn flex-1 btn-primary" />
         <!-- Return to draft / request changes -->
-        <button @click="returnToDraft" class="btn btn-primary flex-1" :disabled="isSubmitting">
-          <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+        <button class="btn flex-1 btn-primary" :disabled="isSubmitting" @click="returnToDraft">
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
         </button>
         <!-- Complete review (verify then forward to approval) -->
-        <button @click="forwardToApproval" class="btn btn-primary flex-1" :disabled="isSubmitting">
-          <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+        <button class="btn flex-1 btn-primary" :disabled="isSubmitting" @click="forwardToApproval">
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Approve
         </button>
-        <TemplateManagerActions v-if="contractTemplate && isManager" :template="contractTemplate" class="btn btn-primary flex-1" />
+        <TemplateManagerActions
+          v-if="contractTemplate && isManager"
+          :template="contractTemplate"
+          class="btn flex-1 btn-primary"
+        />
       </div>
     </div>
-
   </div>
 </template>
 
@@ -58,44 +60,48 @@ const isManager = computed(() => hasDid.value && isManagerBase.value)
 
 const contractTemplate: Ref<PartialContractTemplate | null> = ref(null)
 
-watch(hasDid, (hasDidVal) => {
-  templateEditorUiStore.reset()
-  if (!hasDidVal) return
+watch(
+  hasDid,
+  (hasDidVal) => {
+    templateEditorUiStore.reset()
+    if (!hasDidVal) return
 
-  hasChosenType.value = true
-  const did = `${route.params.did}`
-  contractTemplateService.retrieveById({ did })
-    .then(template => {
-      if (!template) {
-        draftStore.reset()
-        return
-      }
-      templateEditorUiStore.setTemplateEditable(false)
-      contractTemplate.value = template
+    hasChosenType.value = true
+    const did = String(route.params.did ?? '')
+    contractTemplateService
+      .retrieveById({ did })
+      .then((template) => {
+        if (!template) {
+          draftStore.reset()
+          return
+        }
+        templateEditorUiStore.setTemplateEditable(false)
+        contractTemplate.value = template
 
-      draftStore.reset({
-        did: template.did,
-        name: template.name,
-        description: template.description,
-        templateDataVersion: template.template_data?.templateDataVersion ?? 1,
-        documentOutline: template.template_data?.documentOutline ?? [],
-        documentBlocks: template.template_data?.documentBlocks ?? [],
-        semanticConditions: template.template_data?.semanticConditions ?? [],
-        customMetaData: template.template_data?.customMetaData ?? [],
-        subTemplateSnapshots: template.template_data?.subTemplateSnapshots ?? [],
-        templateType: template.template_type,
-        state: template.state,
-        version: template.version ?? null,
-        document_number: template.document_number ?? null,
-        updated_at: template.updated_at ?? null,
-        responsible_persons: template.responsible_persons ?? null,
+        draftStore.reset({
+          did: template.did,
+          name: template.name,
+          description: template.description,
+          templateDataVersion: template.template_data?.templateDataVersion ?? 1,
+          documentOutline: template.template_data?.documentOutline ?? [],
+          documentBlocks: template.template_data?.documentBlocks ?? [],
+          semanticConditions: template.template_data?.semanticConditions ?? [],
+          customMetaData: template.template_data?.customMetaData ?? [],
+          subTemplateSnapshots: template.template_data?.subTemplateSnapshots ?? [],
+          templateType: template.template_type,
+          state: template.state,
+          version: template.version ?? null,
+          document_number: template.document_number ?? null,
+          updated_at: template.updated_at ?? null,
+          responsible_persons: template.responsible_persons ?? null,
+        })
       })
-    })
-    .catch(error => {
-      console.error('Failed to load template for editing', error)
-    })
-
-}, { immediate: true })
+      .catch((error: unknown) => {
+        console.error('Failed to load template for editing', error)
+      })
+  },
+  { immediate: true },
+)
 
 const isSubmitting = ref(false)
 const comment = ref<string>('')
@@ -111,7 +117,7 @@ const forwardToApproval = async () => {
   try {
     const commentResult = await commentDialog.value?.reveal({
       message: 'Add comment?',
-      editor: { requiredText: false }
+      editor: { requiredText: false },
     })
     if (commentResult?.isCanceled) {
       return
@@ -119,7 +125,7 @@ const forwardToApproval = async () => {
       comment.value = commentResult.data
     }
     await contractTemplateService.verify({
-      did
+      did,
     })
     await contractTemplateService.submit({
       did,
@@ -129,7 +135,7 @@ const forwardToApproval = async () => {
       approver: '',
       reviewers: [],
     })
-    navStore.goToPreviousRoute()
+    await navStore.goToPreviousRoute()
   } catch (error) {
     console.error('Submission failed', error)
   } finally {
@@ -148,7 +154,7 @@ const returnToDraft = async () => {
   try {
     const commentResult = await commentDialog.value?.reveal({
       message: 'Add comment?',
-      editor: { requiredText: false }
+      editor: { requiredText: false },
     })
     if (commentResult?.isCanceled) {
       return
@@ -163,7 +169,7 @@ const returnToDraft = async () => {
       approver: '',
       reviewers: [],
     })
-    navStore.goToPreviousRoute()
+    await navStore.goToPreviousRoute()
   } catch (error) {
     console.error('Rejection failed', error)
   } finally {

@@ -14,21 +14,19 @@ export type BlockMovementPreview =
  * - conditionId only: highlight all placeholders for that semantic rule
  * - conditionId + parameterName: highlight placeholders for that param
  */
-export type ClausePlaceholderHighlight =
-  | { conditionId: string; parameterName?: string }
-  | null
+export type ClausePlaceholderHighlight = { conditionId: string; parameterName?: string } | null
 
 /** UI state for template create/edit page */
 interface TemplateEditorUiState {
   activeTab: TemplateEditorTabId
   tabs: [
-    { id: 'details', label: string },
-    { id: 'semantic', label: string },
-    { id: 'clauses', label: string },
-    { id: 'builder', label: string },
-    { id: 'meta', label: string },
-    { id: 'audit', label: string },
-  ],
+    { id: 'details'; label: string },
+    { id: 'semantic'; label: string },
+    { id: 'clauses'; label: string },
+    { id: 'builder'; label: string },
+    { id: 'meta'; label: string },
+    { id: 'audit'; label: string },
+  ]
   /**
    * When non-null: add-block modal is open
    */

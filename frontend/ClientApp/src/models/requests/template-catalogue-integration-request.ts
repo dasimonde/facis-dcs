@@ -17,9 +17,9 @@ export interface TemplateCatalogueRetrieveByIdRequest {
 
 // ---- Participant management ----
 
-export interface TemplateCatalogueGetCurrentParticipantRequest { }
-export interface TemplateCatalogueGetCurrentParticipantSummaryRequest { }
-export interface TemplateCatalogueGetOtherParticipantsRequest { }
+export type TemplateCatalogueGetCurrentParticipantRequest = Record<string, unknown>
+export type TemplateCatalogueGetCurrentParticipantSummaryRequest = Record<string, unknown>
+export type TemplateCatalogueGetOtherParticipantsRequest = Record<string, unknown>
 export interface TemplateCatalogueCreateParticipantRequest {
   legal_name: string
   registration_number: string
@@ -30,13 +30,13 @@ export interface TemplateCatalogueCreateParticipantRequest {
   terms_and_conditions: string
 }
 
-export interface TemplateCatalogueUpdateParticipantRequest extends TemplateCatalogueCreateParticipantRequest { }
+export type TemplateCatalogueUpdateParticipantRequest = TemplateCatalogueCreateParticipantRequest
 
-export interface TemplateCatalogueDeleteParticipantRequest { }
+export type TemplateCatalogueDeleteParticipantRequest = Record<string, unknown>
 
 // ---- Service offering management ----
 
-export interface TemplateCatalogueGetCurrentServiceOfferingRequest { }
+export type TemplateCatalogueGetCurrentServiceOfferingRequest = Record<string, unknown>
 export interface TemplateCatalogueCreateServiceOfferingRequest {
   keywords: string[]
   description: string
@@ -44,7 +44,6 @@ export interface TemplateCatalogueCreateServiceOfferingRequest {
   terms_and_conditions: string
 }
 
-export interface TemplateCatalogueUpdateServiceOfferingRequest extends TemplateCatalogueCreateServiceOfferingRequest { }
+export type TemplateCatalogueUpdateServiceOfferingRequest = TemplateCatalogueCreateServiceOfferingRequest
 
-export interface TemplateCatalogueDeleteServiceOfferingRequest { }
-
+export type TemplateCatalogueDeleteServiceOfferingRequest = Record<string, unknown>

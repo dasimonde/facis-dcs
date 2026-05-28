@@ -1,0 +1,46 @@
+grafana:
+  adminPassword: YourStrongPassword
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 5Gi
+  service:
+    type: NodePort
+    nodePort: 30092
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+  service:
+    type: NodePort
+    nodePort: 30090
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+  service:
+    type: NodePort
+    nodePort: 30093
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

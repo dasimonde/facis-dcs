@@ -1,24 +1,15 @@
 <template>
   <div class="space-y-6">
     <!-- Section 1: New rule -->
-    <section
-      v-if="uiStore.isTemplateEditable"
-      class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm"
-    >
-      <SemanticRuleForm
-        :existing-conditions="conditions"
-        @add-rule="handleAddRule"
-      />
+    <section v-if="uiStore.isTemplateEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+      <SemanticRuleForm :existing-conditions="conditions" @add-rule="handleAddRule" />
     </section>
 
     <!-- Section 2: Existing rules -->
     <section class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
-      <h3 class="text-sm font-semibold text-base-content/80 mb-4">Existing rules</h3>
+      <h3 class="mb-4 text-sm font-semibold text-base-content/80">Existing rules</h3>
       <div class="space-y-2">
-        <template
-          v-for="rule in conditionItems"
-          :key="rule.condition.conditionId"
-        >
+        <template v-for="rule in conditionItems" :key="rule.condition.conditionId">
           <div
             v-if="editingConditionId === rule.condition.conditionId"
             class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm"
@@ -49,10 +40,7 @@
 import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import {
-  type SemanticCondition,
-  isClauseBlock,
-} from '@template-repository/models/contract-templace'
+import { type SemanticCondition, isClauseBlock } from '@template-repository/models/contract-templace'
 import type { SubTemplateReference } from '@template-repository/models/template-draft-store'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import SemanticRuleForm from '@template-repository/components/semantic-rules-editor/SemanticRuleForm.vue'
@@ -64,14 +52,16 @@ const { semanticConditions: mainSemanticConditions, documentBlocks, subTemplateS
 const editingConditionId = ref<string | null>(null)
 
 type NewConditionPayload = Omit<SemanticCondition, 'conditionId'>
-type SemanticItem = {
+interface SemanticItem {
   condition: SemanticCondition
   usedInClauseCount: number
   subTemplateRef?: SubTemplateReference
 }
 
 const allBlocks = computed(() => {
-  const subTemplateBlocks = subTemplateSnapshots.value.flatMap((subTemplate) => subTemplate.template_data?.documentBlocks ?? [])
+  const subTemplateBlocks = subTemplateSnapshots.value.flatMap(
+    (subTemplate) => subTemplate.template_data?.documentBlocks ?? [],
+  )
   return [...documentBlocks.value, ...subTemplateBlocks]
 })
 
@@ -142,6 +132,4 @@ function startEdit(conditionId: string) {
 function stopEdit() {
   editingConditionId.value = null
 }
-
-
 </script>

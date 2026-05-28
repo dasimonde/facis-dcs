@@ -1,6 +1,6 @@
 <template>
   <p
-    class="m-0 leading-6 font-semibold text-base-content whitespace-pre-wrap break-words"
+    class="m-0 leading-6 font-semibold wrap-break-word whitespace-pre-wrap text-base-content"
     :class="sectionTextClass"
   >
     <template v-if="highlightSegments && hasSegments">
@@ -24,14 +24,17 @@ import type { TextDiffSegment } from '@/modules/contract-workflow-engine/composa
 import type { ContractPlainTextSection } from '@/modules/contract-workflow-engine/composables/useContractPlainTextConverter'
 import { computed } from 'vue'
 
-const props = withDefaults(defineProps<{
-  block: ContractPlainTextSection
-  segments?: TextDiffSegment[]
-  highlightSegments?: boolean
-}>(), {
-  segments: () => [],
-  highlightSegments: false
-})
+const props = withDefaults(
+  defineProps<{
+    block: ContractPlainTextSection
+    segments?: TextDiffSegment[]
+    highlightSegments?: boolean
+  }>(),
+  {
+    segments: () => [],
+    highlightSegments: false,
+  },
+)
 
 const sectionTextClass = computed(() => {
   if (props.block.level <= 1) return 'text-lg'

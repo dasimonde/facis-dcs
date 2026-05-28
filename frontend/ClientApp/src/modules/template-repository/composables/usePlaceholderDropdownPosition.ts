@@ -3,7 +3,8 @@ import type { Ref } from 'vue'
 
 export type PlaceholderDropdownMode = 'anchor' | 'caret'
 
-const ANCHOR_CLASS = 'absolute left-0 right-0 mt-1 z-20 bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-48 overflow-y-auto'
+const ANCHOR_CLASS =
+  'absolute left-0 right-0 mt-1 z-20 bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-48 overflow-y-auto'
 const CARET_BASE_CLASS = 'z-20 bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-48 overflow-y-auto'
 
 const CARET_OFFSET_PX = 4
@@ -12,10 +13,7 @@ const CARET_OFFSET_PX = 4
  * Encapsulates placeholder suggestions dropdown positioning so you can switch
  * between 'anchor' (below editor, current behavior) and 'caret' (below cursor).
  */
-export function usePlaceholderDropdownPosition(
-  editorRef: Ref<HTMLDivElement | null>,
-  mode: PlaceholderDropdownMode
-) {
+export function usePlaceholderDropdownPosition(editorRef: Ref<HTMLDivElement | null>, mode: PlaceholderDropdownMode) {
   const dropdownStyle = ref<Record<string, string>>({})
   const dropdownClass = mode === 'anchor' ? ANCHOR_CLASS : CARET_BASE_CLASS
 

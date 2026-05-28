@@ -1,7 +1,4 @@
-import type {
-  TemplateResource,
-  TemplateResourcesItem,
-} from '@/modules/template-catalogue/models/template-resource'
+import type { TemplateResource, TemplateResourcesItem } from '@/modules/template-catalogue/models/template-resource'
 import type {
   ParticipantHeadquarterAddress,
   ParticipantLegalAddress,
@@ -15,7 +12,7 @@ export interface TemplateCatalogueRetrieveResponse {
   items: TemplateResourcesItem[]
 }
 
-export interface TemplateCatalogueRetrieveByIdResponse extends TemplateResource { }
+export type TemplateCatalogueRetrieveByIdResponse = TemplateResource
 
 // ---- Participant management ----
 
@@ -64,4 +61,3 @@ export interface TemplateCatalogueUpdateServiceOfferingResponse {
 export interface TemplateCatalogueDeleteServiceOfferingResponse {
   id: string
 }
-

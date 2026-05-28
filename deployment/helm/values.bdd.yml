@@ -18,3 +18,21 @@ oidc:
 
 route:
   basePath: "/digital-contracting-service"
+
+monitoring:
+  enabled: true
+
+grafana:
+  enabled: true
+
+prometheus:
+  enabled: true
+
+alertmanager:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

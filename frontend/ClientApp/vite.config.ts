@@ -8,7 +8,6 @@ export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), 'DCS_')
   const basePath = env.DCS_UI_PATH || '/ui/'
 
-  
   // Plugin to inject base href in dev mode
   const baseHrefPlugin: Plugin = {
     name: 'base-href-inject',
@@ -21,8 +20,8 @@ export default defineConfig(({ mode, command }) => {
         }
         // In build mode, leave the placeholder for inject-config.sh to handle
         return html
-      }
-    }
+      },
+    },
   }
 
   return {
@@ -41,7 +40,7 @@ export default defineConfig(({ mode, command }) => {
       proxy: {
         '/api': {
           target: env.DCS_API_TARGET || 'http://localhost:8991',
-          changeOrigin: true
+          changeOrigin: true,
         },
       },
     },

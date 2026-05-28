@@ -44,5 +44,4 @@ export const useTemplateStateFilterStore = createFilterStore<ContractTemplateSta
 export const useContractStateFilterStore = createFilterStore<ContractState>('contractStateFilter')
 export const useReviewTaskStateFilterStore = createFilterStore<ReviewTaskState>('reviewTaskStateFilter')
 export const useApprovalTaskStateFilterStore = createFilterStore<ApprovalTaskState>('approvalTaskStateFilter')
-export const useNegotiationTaskStateFilterStore =
-  createFilterStore<NegotiationTaskState>('negotiationTaskStateFilter')
+export const useNegotiationTaskStateFilterStore = createFilterStore<NegotiationTaskState>('negotiationTaskStateFilter')

@@ -1,32 +1,50 @@
 <template>
   <Teleport to="body">
-    <div v-if="addBlockModalContext !== null" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      role="dialog" aria-modal="true" aria-labelledby="add-block-title" @click.self="handleCancel">
+    <div
+      v-if="addBlockModalContext !== null"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-block-title"
+      @click.self="handleCancel"
+    >
       <div
-        class="bg-base-100 rounded-2xl shadow-xl w-full max-w-2xl mx-4 flex flex-col gap-4 p-6 max-h-[85vh] overflow-y-auto"
-        @click.stop>
+        class="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-2xl bg-base-100 p-6 shadow-xl"
+        @click.stop
+      >
         <h2 id="add-block-title" class="text-lg font-bold">Add block</h2>
         <template v-if="!isContractWorkflow && isFrameContract">
-          <ApprovedSubTemplatePicker :templates="subTemplateSnapshots" @select="handleAddApprovedTemplate"
-            :reference-count-by-did="referenceCountByDid" />
+          <ApprovedSubTemplatePicker
+            :templates="subTemplateSnapshots"
+            :reference-count-by-did="referenceCountByDid"
+            @select="handleAddApprovedTemplate"
+          />
         </template>
         <template v-else>
           <div>
-            <p class="text-sm text-base-content/70 mb-2">Common:</p>
+            <p class="mb-2 text-sm text-base-content/70">Common:</p>
             <div class="flex flex-col gap-2">
-              <BlockPaletteItem v-for="item in paletteBlockTypes" :key="item.blockType" :label="item.label"
-                @select="handleAddBlock(item.blockType)" />
+              <BlockPaletteItem
+                v-for="item in paletteBlockTypes"
+                :key="item.blockType"
+                :label="item.label"
+                @select="handleAddBlock(item.blockType)"
+              />
             </div>
           </div>
 
           <div v-if="unusedClauses.length" class="border-t border-base-300 pt-4">
-            <p class="text-sm text-base-content/70 mb-2">Unused Clauses:</p>
-            <div class="flex flex-col gap-2 max-h-64 overflow-y-auto">
-              <button v-for="clause in unusedClauses" :key="clause.blockId" type="button"
-                class="text-left min-h-11 flex flex-col justify-center select-none rounded-lg border border-base-300 bg-base-100 px-3 py-2 cursor-pointer hover:bg-base-200 transition-colors"
-                @click="handleAddClause(clause.blockId)">
+            <p class="mb-2 text-sm text-base-content/70">Unused Clauses:</p>
+            <div class="flex max-h-64 flex-col gap-2 overflow-y-auto">
+              <button
+                v-for="clause in unusedClauses"
+                :key="clause.blockId"
+                type="button"
+                class="flex min-h-11 cursor-pointer flex-col justify-center rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-left transition-colors select-none hover:bg-base-200"
+                @click="handleAddClause(clause.blockId)"
+              >
                 <span class="text-sm font-medium text-base-content">{{ clause.title || 'Untitled clause' }}</span>
-                <p class="text-xs text-base-content/70 mt-0.5 leading-relaxed line-clamp-2">
+                <p class="mt-0.5 line-clamp-2 text-xs leading-relaxed text-base-content/70">
                   <ClauseSegmentsPreview :segments="getSegments(clause)" :get-placeholder-label="getPlaceholderLabel" />
                 </p>
               </button>
@@ -47,10 +65,20 @@ import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import { DocumentBlockType, isClauseBlock, isApprovedTemplateBlock, TemplateType, type ClauseBlock } from '@template-repository/models/contract-templace'
+import {
+  DocumentBlockType,
+  isClauseBlock,
+  isApprovedTemplateBlock,
+  TemplateType,
+  type ClauseBlock,
+} from '@template-repository/models/contract-templace'
 import type { SubTemplateSnapshot } from '@/models/contract-template'
 import BlockPaletteItem from './document-block/BlockPaletteItem.vue'
-import { parseSegments, getPlaceholderLabelFromConditions, type Segment } from '@template-repository/composables/useClauseTextChips'
+import {
+  parseSegments,
+  getPlaceholderLabelFromConditions,
+  type Segment,
+} from '@template-repository/composables/useClauseTextChips'
 import ClauseSegmentsPreview from '@template-repository/components/clauses-editor/ClauseSegmentsPreview.vue'
 import ApprovedSubTemplatePicker from '@template-repository/components/builder-editor/preview/ApprovedSubTemplatePicker.vue'
 

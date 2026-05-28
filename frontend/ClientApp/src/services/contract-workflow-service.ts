@@ -8,7 +8,6 @@ import type {
   ContractNegotiationRespondRequest,
   ContractRejectRequest,
   ContractRetrieveByIdRequest,
-  ContractRetrieveRequest,
   ContractReviewRequest,
   ContractSearchRequest,
   ContractStoreRequest,
@@ -60,18 +59,18 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http.get<ContractReviewResponse>('/contract/review', { params: request }).then((res) => res.data)
   },
 
-  async retrieve(_request?: ContractRetrieveRequest) {
+  async retrieve() {
     return http
       .get<ContractRetrieveResponse>('/contract/retrieve')
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Retrieve Error:', err)
         return {
           contracts: [],
           review_tasks: [],
           approval_tasks: [],
           negotiation_tasks: [],
-        } as ContractRetrieveResponse
+        }
       })
   },
 
@@ -79,7 +78,7 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http
       .get<ContractRetrieveByIdResponse>(`/contract/retrieve/${request.did}`)
       .then((res) => ({ ...res.data }))
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Retrieve ID Error:', err)
         return null
       })
@@ -89,7 +88,7 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http
       .get<ContractSearchResponse>('/contract/search', { params: request })
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Search Error:', err)
         return []
       })
@@ -115,7 +114,7 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http
       .post<ContractAuditResponse>('/contract/audit', request)
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Audit Error:', err)
         return []
       })
@@ -125,7 +124,7 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http
       .get<ContractHistoryResponse>(`/contract/history/${request.did}`)
       .then((res) => res.data ?? [])
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Retrieve Error:', err)
         return []
       })

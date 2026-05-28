@@ -9,7 +9,7 @@ import { contractTemplateService } from '@/services/contract-template-service'
 import { templateCatalogueIntegrationService } from '@/services/template-catalogue-integration-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { TemplateState, type ContractTemplateState } from '@/types/contract-template-state'
-import { computed, onMounted, ref, useAttrs, useTemplateRef, watch } from 'vue'
+import { computed, normalizeClass, onMounted, ref, useAttrs, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 defineOptions({
@@ -19,8 +19,8 @@ defineOptions({
 const attrs = useAttrs()
 const { convertContractToPlainTextBlocks } = useContractPlainTextConverter()
 
-const filteredClass = computed(() =>
-  String(attrs.class || '')
+const filteredClass = computed(() => {
+  return normalizeClass(attrs.class)
     .split(' ')
     .filter(
       (cls) =>
@@ -28,8 +28,8 @@ const filteredClass = computed(() =>
           cls,
         ),
     )
-    .join(' '),
-)
+    .join(' ')
+})
 
 const props = defineProps<{
   template: PartialContractTemplate
@@ -96,7 +96,7 @@ const archive = async () => {
     const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with archiving?' })
     if (!isCanceled) {
       await contractTemplateService.archive({ did: props.template.did, updated_at: props.template.updated_at })
-      router.push({ name: ROUTES.TEMPLATES.LIST })
+      await router.push({ name: ROUTES.TEMPLATES.LIST })
     }
   } catch (err) {
     console.error('Archiving failed:', err)

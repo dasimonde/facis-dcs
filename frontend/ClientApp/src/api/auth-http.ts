@@ -11,9 +11,9 @@ http.interceptors.response.use(
   (resp) => resp,
   (err) => {
     const errorStore = useErrorStore()
-    const message = axios.isAxiosError(err) ? err.response?.data.message || err.message : err.message
+    const message = axios.isAxiosError(err) ? (err.response?.data.message ?? err.message) : err.message
     errorStore.add(String(message))
-    return Promise.reject(err)
+    return Promise.reject(err instanceof Error ? err : new Error(err))
   },
 )
 

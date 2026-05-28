@@ -11,10 +11,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import {
-  PREVIEW_TEXT_CLASS,
-  PREVIEW_NEWLINE_SPAN_CLASS,
-} from './preview-classes'
+import { PREVIEW_TEXT_CLASS, PREVIEW_NEWLINE_SPAN_CLASS } from './preview-classes'
 
 const props = defineProps<{
   text: string

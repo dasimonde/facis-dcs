@@ -373,6 +373,16 @@ def step_when_search_templates(context, keyword):
         timeout=context.http_timeout_seconds,
     )
 
+@when('I try to search for templates with name "{name}" "{count}"')
+def step_when_search_templates(context, name, count):
+    for _ in range(int(count)):
+        context.requests_response = requests.get(
+            template_search_url(context),
+            params={"name": name},
+            headers=getattr(context, "headers", {}),
+            timeout=context.http_timeout_seconds,
+        )
+
 @when('I search for templates with name "{name}"')
 def step_when_search_templates(context, name):
     context.requests_response = requests.get(
@@ -398,19 +408,6 @@ def step_when_search_templates(context, title):
         params={"template_data": title},
         headers=getattr(context, "headers", {}),
         timeout=context.http_timeout_seconds,
-    )
-
-
-@when('I retrieve template "{name}"')
-def step_when_retrieve_template(context, name):
-    t = TemplateService.named(context, name)
-    if not t or not t.get("did"):
-        # No Given seeded this template; auto-create as test data.
-        did, updated_at = TemplateService.create_fresh_template(context)
-        TemplateService.store_named(context, name, did, updated_at)
-        t = TemplateService.named(context, name)
-    context.requests_response = get_with_headers(
-        context, template_retrieve_by_id_url(context, t["did"])
     )
 
 

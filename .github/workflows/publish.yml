@@ -10,7 +10,7 @@ jobs:
     uses: eclipse-xfsc/dev-ops/.github/workflows/dockerbuild.yml@main
     secrets: inherit
     with: 
-      dockerfile: "backend/Dockerfile"
+      dockerfile: "deployment/docker/Dockerfile"
       harbor_config: "deployment/harbor.config"
   # helm:
   #   uses: eclipse-xfsc/dev-ops/.github/workflows/helm.yml@main

@@ -41,29 +41,27 @@ export interface TextDiffSegment {
 
 /**
  * [leftStart, leftEnd) indicates a range to delete from leftComparable
- * 
+ *
  * [rightStart, rightEnd) indicates a range from rightComparable to replace the deleted material with
- * 
+ *
  * Simple deletions are indicated when rightStart === rightEnd
- * 
+ *
  * Simple insertions when leftStart === leftEnd
  */
-type Patch = [
-  leftStart: number,
-  leftEnd: number,
-  rightStart: number,
-  rightEnd: number
-];
+type Patch = [leftStart: number, leftEnd: number, rightStart: number, rightEnd: number]
 
 export function useContractBlockDiff() {
-  function buildContractBlockDiff(leftBlocks: ContractPlainTextBlock[], rightBlocks: ContractPlainTextBlock[]): ContractDiffDocument {
+  function buildContractBlockDiff(
+    leftBlocks: ContractPlainTextBlock[],
+    rightBlocks: ContractPlainTextBlock[],
+  ): ContractDiffDocument {
     const leftRows: ContractDiffRow[] = []
     const rightRows: ContractDiffRow[] = []
     const summary: ContractDiffSummary = {
       unchangedCount: 0,
       addedCount: 0,
       removedCount: 0,
-      modifiedCount: 0
+      modifiedCount: 0,
     }
 
     const leftComparable = leftBlocks.map(getComparableBlockText)
@@ -71,21 +69,29 @@ export function useContractBlockDiff() {
     const patches: Patch[] = Array.from(diff(leftComparable, rightComparable))
 
     for (const patch of patches) {
-      const isModified = updateBothSideRowsIfIsModifiedBlock(patch, leftBlocks, rightBlocks, leftRows, rightRows, summary)
+      const isModified = updateBothSideRowsIfIsModifiedBlock(
+        patch,
+        leftBlocks,
+        rightBlocks,
+        leftRows,
+        rightRows,
+        summary,
+      )
       if (isModified) continue
       updateLeftRowIfIsDeletedBlock(patch, leftBlocks, leftRows, summary)
       updateRightRowIfIsAddedBlock(patch, rightBlocks, rightRows, summary)
     }
 
-    summary.unchangedCount = Math.max(leftBlocks.length, rightBlocks.length)
-      - summary.addedCount
-      - summary.removedCount
-      - summary.modifiedCount
+    summary.unchangedCount =
+      Math.max(leftBlocks.length, rightBlocks.length) -
+      summary.addedCount -
+      summary.removedCount -
+      summary.modifiedCount
 
     return {
       summary,
       leftRows,
-      rightRows
+      rightRows,
     }
   }
 
@@ -103,7 +109,7 @@ const PUNCTUATION_RE = String.raw`[^\p{L}\p{N}\s]+`
 const WHITESPACE_RE = String.raw`\s+`
 const TOKEN_RE = new RegExp(
   `(${WORD_RE}|${NUMBER_RE}|${PUNCTUATION_RE}|${WHITESPACE_RE})`,
-  "gu" // find all matches
+  'gu', // find all matches
 )
 function tokenizeWords(text: string): string[] {
   return text.match(TOKEN_RE) ?? []
@@ -111,7 +117,7 @@ function tokenizeWords(text: string): string[] {
 
 function buildWordDiffSegments(
   leftText: string,
-  rightText: string
+  rightText: string,
 ): { leftSegments?: TextDiffSegment[]; rightSegments?: TextDiffSegment[] } {
   const leftTokens = tokenizeWords(leftText)
   const rightTokens = tokenizeWords(rightText)
@@ -157,18 +163,14 @@ function buildWordDiffSegments(
 
   return {
     leftSegments: leftSegments.length > 0 ? leftSegments : undefined,
-    rightSegments: rightSegments.length > 0 ? rightSegments : undefined
+    rightSegments: rightSegments.length > 0 ? rightSegments : undefined,
   }
 }
 
-function appendSegment(
-  segments: TextDiffSegment[],
-  type: TextDiffSegmentType,
-  text: string
-): void {
+function appendSegment(segments: TextDiffSegment[], type: TextDiffSegmentType, text: string): void {
   if (text.length === 0) return
   const last = segments[segments.length - 1]
-  if (last && last.type === type) {
+  if (last?.type === type) {
     last.text += text
     return
   }
@@ -181,7 +183,7 @@ function updateBothSideRowsIfIsModifiedBlock(
   rightBlocks: ContractPlainTextBlock[],
   leftRows: ContractDiffRow[],
   rightRows: ContractDiffRow[],
-  summary: ContractDiffSummary
+  summary: ContractDiffSummary,
 ): boolean {
   const [leftStart, leftEnd, rightStart, rightEnd] = patch
   const leftCount = leftEnd - leftStart
@@ -204,14 +206,14 @@ function updateBothSideRowsIfIsModifiedBlock(
       type: 'modified',
       lineNumber: leftIndex + 1,
       block: leftBlock,
-      segments: wordDiffSegments.leftSegments
+      segments: wordDiffSegments.leftSegments,
     })
     rightRows.push({
       id: `right-${rightIndex + 1}`,
       type: 'modified',
       lineNumber: rightIndex + 1,
       block: rightBlock,
-      segments: wordDiffSegments.rightSegments
+      segments: wordDiffSegments.rightSegments,
     })
     summary.modifiedCount += 1
   }
@@ -225,7 +227,7 @@ function updateBothSideRowsIfIsModifiedBlock(
       id: `left-${leftIndex + 1}`,
       type: 'removed',
       lineNumber: leftIndex + 1,
-      block: leftBlock
+      block: leftBlock,
     })
     summary.removedCount += 1
   }
@@ -239,7 +241,7 @@ function updateBothSideRowsIfIsModifiedBlock(
       id: `right-${rightIndex + 1}`,
       type: 'added',
       lineNumber: rightIndex + 1,
-      block: rightBlock
+      block: rightBlock,
     })
     summary.addedCount += 1
   }
@@ -251,7 +253,7 @@ function updateLeftRowIfIsDeletedBlock(
   patch: Patch,
   leftBlocks: ContractPlainTextBlock[],
   leftRows: ContractDiffRow[],
-  summary: ContractDiffSummary
+  summary: ContractDiffSummary,
 ): void {
   if (!isDeletedBlock(patch)) return
 
@@ -266,7 +268,7 @@ function updateLeftRowIfIsDeletedBlock(
       id: `left-${leftIndex + 1}`,
       type: 'removed',
       lineNumber: leftIndex + 1,
-      block: leftBlock
+      block: leftBlock,
     })
     summary.removedCount += 1
   }
@@ -276,7 +278,7 @@ function updateRightRowIfIsAddedBlock(
   patch: Patch,
   rightBlocks: ContractPlainTextBlock[],
   rightRows: ContractDiffRow[],
-  summary: ContractDiffSummary
+  summary: ContractDiffSummary,
 ): void {
   if (!isAddedBlock(patch)) return
 
@@ -290,7 +292,7 @@ function updateRightRowIfIsAddedBlock(
       id: `right-${rightIndex + 1}`,
       type: 'added',
       lineNumber: rightIndex + 1,
-      block: rightBlock
+      block: rightBlock,
     })
     summary.addedCount += 1
   }

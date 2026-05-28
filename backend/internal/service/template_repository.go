@@ -296,13 +296,13 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 
 	qry := contracttemplate.GetAllMetadataByFilterQry{
 		RetrievedBy:    middleware.GetUsername(ctx),
-		DID:            *req.Did,
-		DocumentNumber: *req.DocumentNumber,
-		Version:        *req.Version,
+		DID:            derefString(req.Did),
+		DocumentNumber: derefString(req.DocumentNumber),
+		Version:        derefInt(req.Version),
 		State:          state,
-		Name:           *req.Name,
-		Description:    *req.Description,
-		TemplateData:   *req.TemplateData,
+		Name:           derefString(req.Name),
+		Description:    derefString(req.Description),
+		TemplateData:   derefString(req.TemplateData),
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     s.DB,
@@ -697,4 +697,11 @@ func (s *templateRepositorysrvc) Publish(ctx context.Context, req *templaterepos
 	return &templaterepository.ContractTemplatePublishResponse{
 		Did: req.Did,
 	}, nil
+}
+
+func derefInt(i *int) int {
+	if i != nil {
+		return *i
+	}
+	return 0
 }

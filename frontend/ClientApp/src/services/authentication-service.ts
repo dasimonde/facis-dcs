@@ -3,13 +3,14 @@ import type { AuthCallbackResponse, LoginResponse, LogoutResponse } from '@/mode
 import type { AuthenticationService } from '@/models/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
+import axios from 'axios'
 
 export const authenticationService: AuthenticationService = {
   async loginPath() {
     return await authHttp
       .get<LoginResponse>('/auth/login')
       .then((res) => res.data.auth_url)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Login Error:', err)
         return ''
       })
@@ -27,8 +28,8 @@ export const authenticationService: AuthenticationService = {
         authStore.setUser(userId)
         return true
       })
-      .catch((err) => {
-        if (err && err.status === 401) {
+      .catch((err: unknown) => {
+        if (axios.isAxiosError(err) && err?.status === 401) {
           const authStore = useAuthStore()
           authStore.remove()
           const authTokenStore = useAuthTokenStore()
@@ -51,7 +52,7 @@ export const authenticationService: AuthenticationService = {
       .then((res) => {
         window.location.href = res.data.logout_url
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Logout Error:', err)
         // Fallback to home if logout fails
         window.location.href = '/'

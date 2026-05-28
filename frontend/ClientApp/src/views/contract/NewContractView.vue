@@ -5,7 +5,10 @@ import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
-import { useSemanticValueVerification, type VerificationResult } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
+import {
+  useSemanticValueVerification,
+  type VerificationResult,
+} from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
 import { useContractDataPreprocess } from '@/modules/contract-workflow-engine/composables/useContractDataPreprocess'
 import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
@@ -40,8 +43,6 @@ const templateEditorUiStore = useTemplateEditorUiStore()
 const { hasConditionParameterForValue } = useSemanticValueVerification()
 const { preprocessContractData } = useContractDataPreprocess()
 const { activeTab } = storeToRefs(contractEditorUiStore)
-const { setActiveTab } = contractEditorUiStore
-const { togglePreviewDialog } = templateEditorUiStore
 
 const did = ref<string | null>(null)
 const isEditMode = computed(() => !!route.params.did || !!did.value)
@@ -51,7 +52,9 @@ const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const contract: Ref<Contract | null> = ref(null)
 
-const canSubmit = computed(() => isEditMode.value || hasApprovedOrPublishedTemplates.value && selectedTemplate.value !== null)
+const canSubmit = computed(
+  () => isEditMode.value || (hasApprovedOrPublishedTemplates.value && selectedTemplate.value !== null),
+)
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   if (!isEditMode.value) return null
@@ -59,7 +62,7 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
     contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue })
 })
 
-const tabs = computed(()=> contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
+const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
 const submit = async () => {
   isSubmitting.value = true
@@ -86,7 +89,7 @@ const submit = async () => {
         description: contract.value.description,
         contract_data: contractData,
       })
-      router.push({ name: ROUTES.CONTRACTS.LIST })
+      await router.push({ name: ROUTES.CONTRACTS.LIST })
     }
   } catch (error) {
     console.error('Submission failed', error)
@@ -100,15 +103,16 @@ watch(
   async (value) => {
     if (value) {
       try {
-        const id = did.value || route.params.did
+        const id = did.value ?? route.params.did
         if (id && !Array.isArray(id)) {
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           const uneditableStates = [ContractState.approved, ContractState.terminated].map((s) => s.toLowerCase())
-          templateEditorUiStore.setTemplateEditable(!uneditableStates.includes(contract.value?.state.toLowerCase() ?? ''))
-          
+          templateEditorUiStore.setTemplateEditable(
+            !uneditableStates.includes(contract.value?.state.toLowerCase() ?? ''),
+          )
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Failed to load contract', err)
       }
     } else if (!hasApprovedOrPublishedTemplates.value) {
@@ -126,12 +130,13 @@ watch(
   ],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
-      (conditionValue) => !hasConditionParameterForValue(
-        conditionValue,
-        templateDraftStore.documentBlocks,
-        templateDraftStore.semanticConditions,
-        templateDraftStore.subTemplateSnapshots,
-      ),
+      (conditionValue) =>
+        !hasConditionParameterForValue(
+          conditionValue,
+          templateDraftStore.documentBlocks,
+          templateDraftStore.semanticConditions,
+          templateDraftStore.subTemplateSnapshots,
+        ),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },
@@ -153,7 +158,7 @@ onUnmounted(() => {
 // Contract data includes the template data used to fill the contract template
 function applyContractDataToDraft(contractData?: unknown) {
   if (contractData == null) {
-    templateDraftStore.reset({workflow: 'contract'})
+    templateDraftStore.reset({ workflow: 'contract' })
     contractContentValuesStore.reset()
     verificationResult.value = null
     return
@@ -187,43 +192,53 @@ onBeforeRouteLeave(() => {
 </script>
 
 <template>
-  <div class="flex flex-col min-h-full -mx-4 md:-mx-8 -my-4 md:-my-8">
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
     <div v-if="!isEditMode" class="px-6 py-12">
       <div class="flex justify-center">
-      <select v-model="selectedTemplate" class="select" :disabled="!hasApprovedOrPublishedTemplates">
-        <option :value="null" disabled selected>{{ hasApprovedOrPublishedTemplates ? 'Pick a template' : 'No templates available' }}</option>
-        <option v-for="template in approvedOrPublishedTemplates" :key="template.did" :value="template">{{ template.name }}</option>
-      </select>
+        <select v-model="selectedTemplate" class="select" :disabled="!hasApprovedOrPublishedTemplates">
+          <option :value="null" disabled selected>
+            {{ hasApprovedOrPublishedTemplates ? 'Pick a template' : 'No templates available' }}
+          </option>
+          <option v-for="template in approvedOrPublishedTemplates" :key="template.did" :value="template">
+            {{ template.name }}
+          </option>
+        </select>
       </div>
       <div v-if="selectedTemplate" class="pt-10">
         <ViewContractTemplateView :did="selectedTemplate.did" />
       </div>
     </div>
     <div v-else-if="!!contract">
-      <div class="flex-1 flex flex-col">
+      <div class="flex flex-1 flex-col">
         <!-- Tabs -->
-        <div class="sticky top-0 z-10 shrink-0 bg-base-100 border-b border-base-300">
-          <div class="max-w-4xl mx-auto px-6 pt-3">
-            <p class="text-xs font-black uppercase tracking-widest text-base-content/40 mb-2">
+        <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
+          <div class="mx-auto max-w-4xl px-6 pt-3">
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">
               {{ isEditMode ? 'Update Contract' : 'Create Contract' }}
             </p>
-            <div role="tablist" class="tabs tabs-border tabs-lg">
-              <a v-for="tab in tabs" :key="tab.id" role="tab" class="tab"
-                :class="{ 'tab-active text-primary': activeTab === tab.id }" @click="setActiveTab(tab.id)">
+            <div role="tablist" class="tabs-border tabs tabs-lg">
+              <a
+                v-for="tab in tabs"
+                :key="tab.id"
+                role="tab"
+                class="tab"
+                :class="{ 'tab-active text-primary': activeTab === tab.id }"
+                @click="contractEditorUiStore.setActiveTab(tab.id)"
+              >
                 {{ tab.label }}
               </a>
             </div>
           </div>
         </div>
         <!-- Tab content -->
-        <div class="grow mt-5">
-          <div class="max-w-4xl mx-auto p-6">
+        <div class="mt-5 grow">
+          <div class="mx-auto max-w-4xl p-6">
             <div class="grid grid-cols-1 gap-4">
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor :contract="contract" />
               </div>
               <div v-show="activeTab === 'content'">
-                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
                     <div>
                       <TemplatePreview
@@ -241,7 +256,7 @@ onBeforeRouteLeave(() => {
               </div>
               <!-- SEMANTIC RULES TAB -->
               <div v-show="activeTab === 'semantic'">
-                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
                     <SemanticRulesEditor />
                   </div>
@@ -250,7 +265,7 @@ onBeforeRouteLeave(() => {
 
               <!-- CLAUSES TAB -->
               <div v-show="activeTab === 'clauses'">
-                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
                     <ClausesEditor />
                   </div>
@@ -259,11 +274,15 @@ onBeforeRouteLeave(() => {
 
               <!-- BUILDER TAB -->
               <div v-show="activeTab === 'builder'">
-                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body">
-                    <div class="flex items-center justify-between mb-2">
+                    <div class="mb-2 flex items-center justify-between">
                       <h2 class="card-title text-sm">Builder</h2>
-                      <button type="button" class="btn btn-sm btn-secondary" @click="togglePreviewDialog">
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        @click="templateEditorUiStore.togglePreviewDialog"
+                      >
                         Preview
                       </button>
                     </div>
@@ -273,17 +292,16 @@ onBeforeRouteLeave(() => {
                 <AddBlockModal />
                 <BuilderPreviewDialog />
               </div>
-
             </div>
           </div>
         </div>
       </div>
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
-      <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Cancel</button>
-        <button @click="submit" class="btn btn-primary flex-1" :disabled="isSubmitting || !canSubmit">
-          <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+        <button class="btn flex-1 btn-primary" :disabled="isSubmitting || !canSubmit" @click="submit">
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           {{ isEditMode ? 'Update' : 'Create' }}
         </button>
       </div>

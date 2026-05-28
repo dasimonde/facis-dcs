@@ -29,6 +29,9 @@ service:
   type: ClusterIP
   port: 8991
 
+serviceMonitor:
+  enabled: false
+
 ingress:
   enabled: false
   className: ""
@@ -164,3 +167,48 @@ federatedCatalogue:
     limits:
       cpu: 500m
       memory: 1Gi
+
+# ---- Optional monitoring stack (Prometheus, Grafana, Alertmanager) ----------------
+monitoring:
+  enabled: false
+
+grafana:
+  enabled: false
+  adminPassword: YourStrongPassword
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 5Gi
+
+prometheus:
+  enabled: false
+  prometheusSpec:
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    serviceMonitorSelectorNilUsesHelmValues: true
+    podMonitorSelectorNilUsesHelmValues: true
+
+alertmanager:
+  enabled: false
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+
+nodeExporter:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false

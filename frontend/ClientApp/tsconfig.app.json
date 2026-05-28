@@ -9,7 +9,6 @@
       "@template-repository/*": ["./src/modules/template-repository/*"]
     },
 
-
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,

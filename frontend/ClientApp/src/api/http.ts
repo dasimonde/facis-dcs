@@ -27,7 +27,7 @@ http.interceptors.response.use(
         }
       }
     }
-    const message = axios.isAxiosError(err) ? err.response?.data?.message || err.message : err.message
+    const message = axios.isAxiosError(err) ? (err.response?.data?.message ?? err.message) : err.message
     errorStore.add(String(message))
     return Promise.reject(err)
   },

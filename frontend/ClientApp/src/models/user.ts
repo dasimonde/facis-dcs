@@ -1,4 +1,4 @@
-import type { UserRole } from "@/types/user-role"
+import type { UserRole } from '@/types/user-role'
 
 export interface UserProfile {
   participantId: string

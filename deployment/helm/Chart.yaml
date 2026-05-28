@@ -27,3 +27,7 @@ dependencies:
     repository: "file://charts/federated-catalogue"
     condition: federatedCatalogue.enabled
     alias: federatedCatalogue
+  - name: kube-prometheus-stack
+    version: "85.2.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: monitoring.enabled

@@ -27,6 +27,7 @@ import type {
   TemplateCatalogueGetCurrentServiceOfferingResponse,
   TemplateCatalogueUpdateServiceOfferingResponse,
 } from '@/models/responses/template-catalogue-integration-response'
+import axios from 'axios'
 
 // Template Catalogue Integration Service (TR <-> XFSC Catalogue)
 export const templateCatalogueIntegrationService = {
@@ -34,7 +35,9 @@ export const templateCatalogueIntegrationService = {
   async create_participant(
     request: TemplateCatalogueCreateParticipantRequest,
   ): Promise<TemplateCatalogueCreateParticipantResponse> {
-    return http.post<TemplateCatalogueCreateParticipantResponse>('/catalogue/participant/create', request).then((res) => res.data)
+    return http
+      .post<TemplateCatalogueCreateParticipantResponse>('/catalogue/participant/create', request)
+      .then((res) => res.data)
   },
 
   async get_current_participant(
@@ -43,8 +46,8 @@ export const templateCatalogueIntegrationService = {
     return http
       .get<TemplateCatalogueGetCurrentParticipantResponse>('/catalogue/participant/current')
       .then((res) => res.data)
-      .catch((err: any) => {
-        if (err?.response?.status === 404) {
+      .catch((err: unknown) => {
+        if (axios.isAxiosError(err) && err?.response?.status === 404) {
           return null
         }
         throw err
@@ -57,8 +60,8 @@ export const templateCatalogueIntegrationService = {
     return http
       .get<TemplateCatalogueGetCurrentParticipantSummaryResponse>('/catalogue/participant/current/summary')
       .then((res) => res.data)
-      .catch((err: any) => {
-        if (err?.response?.status === 404) {
+      .catch((err: unknown) => {
+        if (axios.isAxiosError(err) && err?.response?.status === 404) {
           return null
         }
         throw err
@@ -76,13 +79,17 @@ export const templateCatalogueIntegrationService = {
   async update_participant(
     request: TemplateCatalogueUpdateParticipantRequest,
   ): Promise<TemplateCatalogueUpdateParticipantResponse> {
-    return http.put<TemplateCatalogueUpdateParticipantResponse>('/catalogue/participant/update', request).then((res) => res.data)
+    return http
+      .put<TemplateCatalogueUpdateParticipantResponse>('/catalogue/participant/update', request)
+      .then((res) => res.data)
   },
 
   async delete_participant(
     _request: TemplateCatalogueDeleteParticipantRequest = {},
   ): Promise<TemplateCatalogueDeleteParticipantResponse> {
-    return http.delete<TemplateCatalogueDeleteParticipantResponse>('/catalogue/participant/delete').then((res) => res.data)
+    return http
+      .delete<TemplateCatalogueDeleteParticipantResponse>('/catalogue/participant/delete')
+      .then((res) => res.data)
   },
 
   // ---- Service offering ----
@@ -100,8 +107,8 @@ export const templateCatalogueIntegrationService = {
     return http
       .get<TemplateCatalogueGetCurrentServiceOfferingResponse>('/catalogue/service-offering/current')
       .then((res) => res.data)
-      .catch((err: any) => {
-        if (err?.response?.status === 404) {
+      .catch((err: unknown) => {
+        if (axios.isAxiosError(err) && err?.response?.status === 404) {
           return null
         }
         throw err
@@ -125,13 +132,11 @@ export const templateCatalogueIntegrationService = {
   },
 
   // ---- Template ----
-  async retrieve_template(
-    request: TemplateCatalogueRetrieveRequest,
-  ): Promise<TemplateCatalogueRetrieveResponse> {
+  async retrieve_template(request: TemplateCatalogueRetrieveRequest): Promise<TemplateCatalogueRetrieveResponse> {
     return http
       .get<TemplateCatalogueRetrieveResponse>('/catalogue/template/retrieve', { params: request })
       .then((res) => res.data)
-      .catch(() => ({ totalCount: 0, items: [] } as TemplateCatalogueRetrieveResponse))
+      .catch(() => ({ totalCount: 0, items: [] }))
   },
 
   async retrieve_template_by_id(
@@ -149,4 +154,3 @@ export const templateCatalogueIntegrationService = {
       .then((res) => res.data ?? null)
   },
 }
-

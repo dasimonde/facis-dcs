@@ -14,5 +14,8 @@ dependencies:
 - name: federated-catalogue
   repository: file://charts/federated-catalogue
   version: 0.1.0
-digest: sha256:be19e2048b3eb531035c887599d76e4040265fc970dd52a508038edc11954db4
-generated: "2026-04-15T14:30:10.508704702+02:00"
+- name: kube-prometheus-stack
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 85.2.0
+digest: sha256:5d2d638158e3288fbac7acc3ac6ed00d5292060bd29135a3398d1c0128f1efd2
+generated: "2026-05-21T15:21:53.710407968+02:00"

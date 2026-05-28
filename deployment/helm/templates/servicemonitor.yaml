@@ -1,0 +1,20 @@
+{{- if .Values.serviceMonitor.enabled }}
+  apiVersion: monitoring.coreos.com/v1
+  kind: ServiceMonitor
+  metadata:
+    name: {{ include "digital-contracting-service.fullname" . }}
+    namespace: dcs-bdd
+    labels:
+      release: prometheus  # muss so heißen damit kube-prometheus-stack ihn erkennt
+  spec:
+    namespaceSelector:
+      matchNames:
+        - dcs-bdd
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: {{ include "digital-contracting-service.name" . }}
+    endpoints:
+      - port: http
+        path: /metrics
+        interval: 15s
+{{- end }}

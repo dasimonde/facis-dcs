@@ -1,5 +1,5 @@
-import type { ContractTemplateState } from "@/types/contract-template-state"
-import type { SubTemplateSnapshot } from "@/models/contract-template"
+import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { SubTemplateSnapshot } from '@/models/contract-template'
 import type {
   DocumentOutline,
   DocumentBlock,
@@ -7,8 +7,8 @@ import type {
   MetaData,
   TemplateTypeValue,
   DocumentBlockType,
-} from "@template-repository/models/contract-templace"
-import type { ContractTemplateResponsiblePersons } from "@/models/contract-template-responsible-persons"
+} from '@template-repository/models/contract-templace'
+import type { ContractTemplateResponsiblePersons } from '@/models/contract-template-responsible-persons'
 
 export const TEMPLATE_DATA_VERSIONS = [1] as const
 export type TemplateDataVersion = (typeof TEMPLATE_DATA_VERSIONS)[number]

@@ -5,7 +5,7 @@ import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { ContractState } from '@/types/contract-state'
-import { computed, useAttrs, useTemplateRef } from 'vue'
+import { computed, normalizeClass, useAttrs, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 
 defineOptions({
@@ -14,8 +14,8 @@ defineOptions({
 
 const attrs = useAttrs()
 
-const filteredClass = computed(() =>
-  String(attrs.class || '')
+const filteredClass = computed(() => {
+  return normalizeClass(attrs.class)
     .split(' ')
     .filter(
       (cls) =>
@@ -23,8 +23,8 @@ const filteredClass = computed(() =>
           cls,
         ),
     )
-    .join(' '),
-)
+    .join(' ')
+})
 
 const props = defineProps<{
   contract: Contract
@@ -40,7 +40,7 @@ const isManager = computed(() => {
 })
 
 const canTerminate = computed(() => {
-  return isManager && props.contract.state !== ContractState.terminated
+  return isManager.value && props.contract.state !== ContractState.terminated
 })
 
 const terminate = async () => {
@@ -61,7 +61,7 @@ const terminate = async () => {
         reason: reason,
       })
       if (response.did) {
-        router.push({ name: ROUTES.CONTRACTS.LIST })
+        await router.push({ name: ROUTES.CONTRACTS.LIST })
       }
     }
   } catch (err) {

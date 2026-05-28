@@ -1,12 +1,17 @@
 import type { ContractData } from '@/models/contract-data'
 import type { SubTemplateSnapshot } from '@/models/contract-template'
-import type { ApprovedTemplateBlock, DocumentBlock, DocumentOutlineBlock } from '@template-repository/models/contract-templace'
-import { DocumentBlockType, isApprovedTemplateBlock, isMergedApprovedTemplateBlock } from '@template-repository/models/contract-templace'
-import { buildMergedChildBlockId, isSameTemplateDataRef } from '@template-repository/utils/template-data-ref'
+import type {
+  ApprovedTemplateBlock,
+  DocumentBlock,
+  DocumentOutlineBlock,
+} from '@template-repository/models/contract-templace'
 import {
-  TEMPLATE_DATA_VERSIONS,
-  type TemplateDataVersion,
-} from '@template-repository/models/template-draft-store'
+  DocumentBlockType,
+  isApprovedTemplateBlock,
+  isMergedApprovedTemplateBlock,
+} from '@template-repository/models/contract-templace'
+import { buildMergedChildBlockId, isSameTemplateDataRef } from '@template-repository/utils/template-data-ref'
+import { TEMPLATE_DATA_VERSIONS, type TemplateDataVersion } from '@template-repository/models/template-draft-store'
 
 const CURRENT_TEMPLATE_DATA_VERSION: TemplateDataVersion = TEMPLATE_DATA_VERSIONS[0]
 
@@ -30,11 +35,13 @@ export function useContractDataPreprocess() {
     const approvedBlocks = contractData.documentBlocks.filter(isApprovedTemplateBlock)
     if (approvedBlocks.length === 0) return contractData
     for (const approvedBlock of approvedBlocks) {
-      const subTemplateData = findSnapshotByApprovedBlock(contractData.subTemplateSnapshots, approvedBlock)?.template_data
+      const subTemplateData = findSnapshotByApprovedBlock(
+        contractData.subTemplateSnapshots,
+        approvedBlock,
+      )?.template_data
       const approvedOutlineNode = contractData.documentOutline.find((b) => b.blockId === approvedBlock.blockId)
       const subRootOutlineBlock = subTemplateData?.documentOutline.find((b) => b.isRoot)
       if (!subTemplateData || !approvedOutlineNode || !subRootOutlineBlock) continue
-
 
       /**
        * APPROVED_TEMPLATE blocks may point to the same template. Use an
@@ -65,7 +72,10 @@ export function useContractDataPreprocess() {
       // Update main outline
       approvedOutlineNode.children = [...mergedChildIds, ...approvedOutlineNode.children]
       contractData.documentOutline.push(...mergedOutline)
-      contractData.documentOutline = removeMergedApprovedChildrenRefs(contractData.documentOutline, contractData.documentBlocks)
+      contractData.documentOutline = removeMergedApprovedChildrenRefs(
+        contractData.documentOutline,
+        contractData.documentBlocks,
+      )
 
       ensureOutlineNodesExist(contractData.documentOutline, approvedOutlineNode.children)
     }
@@ -75,20 +85,20 @@ export function useContractDataPreprocess() {
   return { preprocessContractData }
 }
 
-function removeMergedApprovedChildrenRefs(outlineBlocks: DocumentOutlineBlock[], documentBlocks: DocumentBlock[]): DocumentOutlineBlock[] {
-  let rebuiltOutline: DocumentOutlineBlock[]
+function removeMergedApprovedChildrenRefs(
+  outlineBlocks: DocumentOutlineBlock[],
+  documentBlocks: DocumentBlock[],
+): DocumentOutlineBlock[] {
   // MERGED_APPROVED_TEMPLATE nodes should never appear in any parent.children.
   // Replace each merged child reference with its descendants recursively.
   const mergedApprovedBlockIds = new Set(
-    documentBlocks
-      .filter((b) => isMergedApprovedTemplateBlock(b))
-      .map((b) => b.blockId)
+    documentBlocks.filter((b) => isMergedApprovedTemplateBlock(b)).map((b) => b.blockId),
   )
   if (mergedApprovedBlockIds.size === 0) return outlineBlocks
 
-  rebuiltOutline = outlineBlocks.map((b) => ({
+  const rebuiltOutline: DocumentOutlineBlock[] = outlineBlocks.map((b) => ({
     ...b,
-    children: [...b.children]
+    children: [...b.children],
   }))
   const outlineByBlockId = new Map(rebuiltOutline.map((o) => [o.blockId, o]))
   // key: blockId, value: children
@@ -147,21 +157,23 @@ function normalizeTemplateDataVersion(version: unknown): TemplateDataVersion {
   return CURRENT_TEMPLATE_DATA_VERSION
 }
 
-function findSnapshotByApprovedBlock(subTemplates: SubTemplateSnapshot[], approvedBlock: ApprovedTemplateBlock): SubTemplateSnapshot | undefined {
-  const exact = subTemplates.find(
-    (snapshot) =>
-      isSameTemplateDataRef(
-        {
-          templateId: snapshot.did,
-          version: snapshot.version,
-          document_number: snapshot.document_number,
-        },
-        {
-          templateId: approvedBlock.templateId,
-          version: approvedBlock.version,
-          document_number: approvedBlock.document_number,
-        }
-      ),
+function findSnapshotByApprovedBlock(
+  subTemplates: SubTemplateSnapshot[],
+  approvedBlock: ApprovedTemplateBlock,
+): SubTemplateSnapshot | undefined {
+  const exact = subTemplates.find((snapshot) =>
+    isSameTemplateDataRef(
+      {
+        templateId: snapshot.did,
+        version: snapshot.version,
+        document_number: snapshot.document_number,
+      },
+      {
+        templateId: approvedBlock.templateId,
+        version: approvedBlock.version,
+        document_number: approvedBlock.document_number,
+      },
+    ),
   )
   if (exact) return exact
   return subTemplates.find((snapshot) => snapshot.did === approvedBlock.templateId)
@@ -190,10 +202,7 @@ function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-function ensureOutlineNodesExist(
-  outline: DocumentOutlineBlock[],
-  blockIds: string[],
-) {
+function ensureOutlineNodesExist(outline: DocumentOutlineBlock[], blockIds: string[]) {
   const existing = new Set(outline.map((block) => block.blockId))
   for (const blockId of blockIds) {
     if (existing.has(blockId)) continue

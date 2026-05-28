@@ -20,62 +20,58 @@ func mountFrontend(mux goahttp.Muxer) {
 
 	apiPathPrefix := pathutil.NormalizePath(os.Getenv("DCS_API_PATH"), "", false)
 	uiBasePath := pathutil.NormalizePath(os.Getenv("DCS_UI_PATH"), "/ui/", true)
-	apiPrefixPath := strings.TrimSuffix(apiPathPrefix, "/")
-	if apiPrefixPath == "" {
-		apiPrefixPath = "/"
+
+	mountRedirects(mux, apiPathPrefix, uiBasePath)
+	mountStaticHandler(mux, staticDir, uiBasePath)
+}
+
+// mountRedirects registers redirect handlers so that requests to the API root
+// or to the bare UI prefix (without trailing slash) are sent to uiBasePath.
+func mountRedirects(mux goahttp.Muxer, apiPathPrefix, uiBasePath string) {
+	redirect := func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, uiBasePath, http.StatusMovedPermanently)
 	}
 
-	apiRoot := apiPathPrefix
-	if apiRoot == "" {
-		apiRoot = "/"
-	}
+	apiRoot := strings.TrimSuffix(apiPathPrefix, "/")
 
-	if uiBasePath != apiRoot {
-		if apiPathPrefix == "" {
-			mux.Handle("GET", "/", func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, uiBasePath, http.StatusMovedPermanently)
-			})
+	// Redirect API root → UI, unless they already point to the same place.
+	if uiBasePath != apiPathPrefix {
+		if apiRoot == "" {
+			mux.Handle("GET", "/", redirect)
 		} else {
-			mux.Handle("GET", apiPrefixPath, func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, uiBasePath, http.StatusMovedPermanently)
-			})
-			mux.Handle("GET", apiPrefixPath+"/", func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, uiBasePath, http.StatusMovedPermanently)
-			})
+			mux.Handle("GET", apiRoot, redirect)
+			mux.Handle("GET", apiRoot+"/", redirect)
 		}
 	}
 
+	// Redirect bare UI prefix (without trailing slash) → uiBasePath.
 	uiPrefix := strings.TrimSuffix(uiBasePath, "/")
-	if uiPrefix == "" {
-		uiPrefix = "/"
-	}
-
-	if uiPrefix != "/" {
-		mux.Handle("GET", uiPrefix, func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, uiBasePath, http.StatusMovedPermanently)
-		})
-	}
-
-	pattern := uiPrefix + "/*"
-	if uiPrefix == "/" {
-		pattern = "/*"
-	}
-
-	mux.Handle("GET", pattern, func(w http.ResponseWriter, r *http.Request) {
-		serveFrontend(w, r, staticDir, uiPrefix)
-	})
-
-	if uiPrefix == "/" {
-		mux.Handle("GET", "/", func(w http.ResponseWriter, r *http.Request) {
-			serveFrontend(w, r, staticDir, uiPrefix)
-		})
+	if uiPrefix != "" && uiPrefix != "/" {
+		mux.Handle("GET", uiPrefix, redirect)
 	}
 }
 
-func serveFrontend(w http.ResponseWriter, r *http.Request, staticDir, uiBasePath string) {
+// mountStaticHandler registers the catch-all handler that serves the built
+// frontend assets and falls back to index.html for client-side routing.
+func mountStaticHandler(mux goahttp.Muxer, staticDir, uiBasePath string) {
+	uiPrefix := strings.TrimSuffix(uiBasePath, "/")
+
+	serve := func(w http.ResponseWriter, r *http.Request) {
+		serveFrontend(w, r, staticDir, uiPrefix)
+	}
+
+	if uiPrefix == "" || uiPrefix == "/" {
+		mux.Handle("GET", "/", serve)
+		mux.Handle("GET", "/*", serve)
+	} else {
+		mux.Handle("GET", uiPrefix+"/*", serve)
+	}
+}
+
+func serveFrontend(w http.ResponseWriter, r *http.Request, staticDir, uiPrefix string) {
 	path := r.URL.Path
-	if uiBasePath != "/" {
-		path = strings.TrimPrefix(path, uiBasePath)
+	if uiPrefix != "" && uiPrefix != "/" {
+		path = strings.TrimPrefix(path, uiPrefix)
 	}
 	if path == "" {
 		path = "/"
@@ -115,24 +111,4 @@ func serveFrontend(w http.ResponseWriter, r *http.Request, staticDir, uiBasePath
 	}
 
 	http.NotFound(w, r)
-}
-
-func normalizeBasePath(value, fallback string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		trimmed = fallback
-	}
-	if trimmed == "" {
-		return ""
-	}
-	if !strings.HasPrefix(trimmed, "/") {
-		trimmed = "/" + trimmed
-	}
-	if trimmed != "/" && !strings.HasSuffix(trimmed, "/") {
-		trimmed += "/"
-	}
-	if trimmed == "/" {
-		return "/"
-	}
-	return trimmed
 }

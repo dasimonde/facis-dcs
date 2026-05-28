@@ -370,6 +370,7 @@ var _ = Service("SignatureManagement", func() {
 
 		HTTP(func() {
 			GET("/signature/audit")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

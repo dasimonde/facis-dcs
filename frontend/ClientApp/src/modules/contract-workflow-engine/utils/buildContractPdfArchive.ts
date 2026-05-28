@@ -57,9 +57,7 @@ async function sha256Hex(text: string): Promise<string> {
   const bytes = encodeUtf8(text)
   // crypto.subtle only works in secure contexts (https or localhost)
   const digest = await crypto.subtle.digest('SHA-256', toArrayBuffer(bytes))
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function encodeUtf8(text: string): Uint8Array {

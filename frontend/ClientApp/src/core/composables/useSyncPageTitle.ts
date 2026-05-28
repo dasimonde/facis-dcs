@@ -5,9 +5,9 @@ export function useSyncPageTitle() {
 
   function setPageTitle() {
     const route = router.currentRoute.value
-    document.title = (route.meta?.title as string) ?? 'DCS'
+    document.title = route.meta?.title ?? 'DCS'
   }
 
-  router.isReady().then(setPageTitle)
+  void router.isReady().then(setPageTitle)
   router.afterEach(setPageTitle)
 }

@@ -57,19 +57,19 @@ const filteredTasks = computed(() => {
 })
 
 const getTemplateName = (task: ContractTemplateApprovalTask) => {
-  return templatesStore.contractTemplates.find((template) => template.did === task.did)?.name ?? 'Nameless Template'
+  return templatesStore.findTemplateByDid(task.did)?.name ?? 'Nameless Template'
 }
 
 const getContractName = (task: ContractApprovalTask) => {
-  return contractsStore.contracts.find((contract) => contract.did === task.did)?.name ?? 'Nameless Contract'
+  return contractsStore.findContractByDid(task.did)?.name ?? 'Nameless Contract'
 }
 
 const getTemplateState = (task: ContractTemplateApprovalTask) => {
-  return templatesStore.contractTemplates.find((template) => template.did === task.did)?.state
+  return templatesStore.findTemplateByDid(task.did)?.state
 }
 
 const getContractState = (task: ContractApprovalTask) => {
-  return contractsStore.contracts.find((contract) => contract.did === task.did)?.state
+  return contractsStore.findContractByDid(task.did)?.state
 }
 
 const canApprove = (task: ContractTemplateApprovalTask) => {
@@ -100,7 +100,7 @@ onUnmounted(() => stateFilterStore.reset())
 
 <template>
   <ul class="list">
-    <li class="tracking-wide px-4 flex justify-end flex-col sm:flex-row">
+    <li class="flex flex-col justify-end px-4 tracking-wide sm:flex-row">
       <TaskListSearch class="flex-1" :tasks="tasks" @search-result="applySearchResult" />
       <ListStateFilter
         label="Approval Task"
@@ -108,11 +108,11 @@ onUnmounted(() => stateFilterStore.reset())
         store-type="approvalTasks"
         :disabled="!hasTasks"
       />
-      <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :disabled="!hasTasks" />
+      <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
     </li>
     <template v-if="filteredTasks.length > 0">
       <li v-for="task in filteredTasks" :key="task.did" class="list-row">
-        <div class="list-col-grow card bg-base-100 card-border hover:bg-base-300 border-base-content/10">
+        <div class="list-col-grow card border-base-content/10 bg-base-100 card-border hover:bg-base-300">
           <div class="card-body">
             <h2 class="card-title flex-wrap justify-between">
               <div v-if="task.type === 'template'">Approval Task for Template: {{ getTemplateName(task) }}</div>

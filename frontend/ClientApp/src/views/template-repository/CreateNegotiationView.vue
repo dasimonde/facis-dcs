@@ -1,17 +1,21 @@
 <template>
-  <div class="flex flex-col min-h-full -mx-4 md:-mx-8 -my-4 md:-my-8">
-    <div class="sticky top-0 z-10 shrink-0 bg-base-200 border-b border-base-300">
-      <div class="max-w-4xl mx-auto px-6 pt-3">
-        <p class="text-xs font-black uppercase tracking-widest text-base-content/40 mb-2">
-          Create Negotiation
-        </p>
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
+    <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-200">
+      <div class="mx-auto max-w-4xl px-6 pt-3">
+        <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">Create Negotiation</p>
         <!-- tabs -->
-        <div role="tablist" class="tabs tabs-lift tabs-lg">
+        <div role="tablist" class="tabs-lift tabs tabs-lg">
           <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'parties' }" @click="activeTab = 'parties'">
             Parties
           </a>
-          <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'contractFilling' }"
-            @click="activeTab = 'contractFilling'"> Contract Filling </a>
+          <a
+            role="tab"
+            class="tab"
+            :class="{ 'tab-active': activeTab === 'contractFilling' }"
+            @click="activeTab = 'contractFilling'"
+          >
+            Contract Filling
+          </a>
           <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'preview' }" @click="activeTab = 'preview'">
             Preview
           </a>
@@ -19,17 +23,22 @@
       </div>
     </div>
 
-    <div class="grow mt-5">
-      <div class="max-w-4xl mx-auto p-6">
+    <div class="mt-5 grow">
+      <div class="mx-auto max-w-4xl p-6">
         <section v-if="activeTab === 'parties'" class="space-y-4">
           <div v-if="initiatorLoading || loading" class="py-4">Loading...</div>
           <div v-else-if="initiatorError || error" class="alert flex items-start justify-between gap-4">
             <div class="text-sm">Unable to load parties information right now.</div>
-            <button type="button" class="btn btn-sm self-start" @click="retryLoadParties">Retry</button>
+            <button type="button" class="btn self-start btn-sm" @click="retryLoadParties">Retry</button>
           </div>
-          <NegotiationPartiesTabView v-else :initiator="initiator" :participants="participants"
-            :selected-responder-indexes="selectedResponderIndexes" :selected-responders="selectedResponders"
-            @toggle-participant="toggleParticipant" />
+          <NegotiationPartiesTabView
+            v-else
+            :initiator="initiator"
+            :participants="participants"
+            :selected-responder-indexes="selectedResponderIndexes"
+            :selected-responders="selectedResponders"
+            @toggle-participant="toggleParticipant"
+          />
         </section>
 
         <section v-else-if="activeTab === 'contractFilling'" class="rounded-xl border border-base-300 p-4">
@@ -43,9 +52,9 @@
     </div>
 
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
-      <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
-        <button class="btn btn-primary flex-1" disabled>Create</button>
+        <button class="btn flex-1 btn-primary" disabled>Create</button>
       </div>
     </div>
   </div>
@@ -77,8 +86,8 @@ const selectedResponders = computed(() =>
 )
 
 function retryLoadParties() {
-  loadInitiator()
-  loadParticipants()
+  void loadInitiator()
+  void loadParticipants()
 }
 
 function toggleParticipant(index: number) {
@@ -94,8 +103,8 @@ async function loadParticipants() {
   error.value = null
   try {
     participants.value = await templateCatalogueIntegrationService.get_other_participants()
-  } catch (e: any) {
-    error.value = e?.message || 'Error loading participants'
+  } catch (e: unknown) {
+    error.value = e instanceof Error && e.message ? e?.message : 'Error loading participants'
     participants.value = []
   } finally {
     loading.value = false
@@ -107,14 +116,14 @@ async function loadInitiator() {
   initiatorError.value = null
   try {
     initiator.value = await templateCatalogueIntegrationService.get_current_participant_summary()
-  } catch (e: any) {
-    initiatorError.value = e?.message || 'Error loading initiator'
+  } catch (e: unknown) {
+    initiatorError.value = e instanceof Error && e.message ? e?.message : 'Error loading initiator'
     initiator.value = null
   } finally {
     initiatorLoading.value = false
   }
 }
 
-loadInitiator()
-loadParticipants()
+void loadInitiator()
+void loadParticipants()
 </script>

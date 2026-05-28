@@ -1,8 +1,12 @@
 <template>
-  <div class="border-2 border-dashed border-base-300 rounded-2xl p-8 text-center bg-base-200/50">
-    <p class="text-base-content/70 mb-4">No blocks yet. Add your first block.</p>
-    <button type="button" class="btn btn-sm bg-base-content text-base-100 border-0 shadow-lg hover:opacity-90"
-      @click="openAddBlockAtRoot" :disabled="!uiStore.isTemplateEditable">
+  <div class="rounded-2xl border-2 border-dashed border-base-300 bg-base-200/50 p-8 text-center">
+    <p class="mb-4 text-base-content/70">No blocks yet. Add your first block.</p>
+    <button
+      type="button"
+      class="btn border-0 bg-base-content text-base-100 shadow-lg btn-sm hover:opacity-90"
+      :disabled="!uiStore.isTemplateEditable"
+      @click="openAddBlockAtRoot"
+    >
       Add block
     </button>
   </div>

@@ -2,22 +2,17 @@
   <div class="space-y-4">
     <!-- tool bar -->
     <div class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
-      <p class="text-sm font-medium text-base-content mb-1">Comparing changes</p>
-      <p class="text-xs text-base-content/50 mb-3"> Choose two versions to see what's changed. </p>
+      <p class="mb-1 text-sm font-medium text-base-content">Comparing changes</p>
+      <p class="mb-3 text-xs text-base-content/50">Choose two versions to see what's changed.</p>
       <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <label class="form-control w-full md:flex-1">
           <span class="label-text text-xs text-base-content/70">Left</span>
           <select
             v-model="leftPick"
-            class="select select-bordered select-sm w-full"
+            class="select-bordered select w-full select-sm"
             :disabled="loading || compareOptions.length < 2"
           >
-            <option
-              v-for="opt in compareOptions"
-              :key="`L-${opt.id}`"
-              :value="opt.id"
-              :disabled="opt.id === rightPick"
-            >
+            <option v-for="opt in compareOptions" :key="`L-${opt.id}`" :value="opt.id" :disabled="opt.id === rightPick">
               {{ opt.label }}
             </option>
           </select>
@@ -26,15 +21,10 @@
           <span class="label-text text-xs text-base-content/70">Right</span>
           <select
             v-model="rightPick"
-            class="select select-bordered select-sm w-full"
+            class="select-bordered select w-full select-sm"
             :disabled="loading || compareOptions.length < 2"
           >
-            <option
-              v-for="opt in compareOptions"
-              :key="`R-${opt.id}`"
-              :value="opt.id"
-              :disabled="opt.id === leftPick"
-            >
+            <option v-for="opt in compareOptions" :key="`R-${opt.id}`" :value="opt.id" :disabled="opt.id === leftPick">
               {{ opt.label }}
             </option>
           </select>
@@ -47,46 +37,27 @@
           class="flex cursor-pointer items-center gap-3 text-sm text-base-content/80"
         >
           <span class="select-none">Line numbers</span>
-          <input
-            id="contract-diff-line-numbers"
-            v-model="showLineNumbers"
-            type="checkbox"
-            class="checkbox mt-1"
-          />
+          <input id="contract-diff-line-numbers" v-model="showLineNumbers" type="checkbox" class="checkbox mt-1" />
         </label>
         <label
           for="contract-diff-highlight"
           class="flex cursor-pointer items-center gap-3 text-sm text-base-content/80"
         >
           <span class="select-none">Highlight changes</span>
-          <input
-            id="contract-diff-highlight"
-            v-model="highlightDiff"
-            type="checkbox"
-            class="checkbox mt-1"
-          />
+          <input id="contract-diff-highlight" v-model="highlightDiff" type="checkbox" class="checkbox mt-1" />
         </label>
       </div>
 
-      <p
-        v-if="loading"
-        class="mt-3 text-sm text-base-content/60"
-      >Loading history…</p>
-      <p
-        v-else-if="loadError"
-        class="mt-3 text-sm text-error"
-      >{{ loadError }}</p>
-      <p
-        v-else-if="compareOptions.length < 2"
-        class="mt-3 text-sm text-base-content/60"
-      >
+      <p v-if="loading" class="mt-3 text-sm text-base-content/60">Loading history…</p>
+      <p v-else-if="loadError" class="mt-3 text-sm text-error">{{ loadError }}</p>
+      <p v-else-if="compareOptions.length < 2" class="mt-3 text-sm text-base-content/60">
         Add at least one saved history entry to compare versions.
       </p>
     </div>
 
     <DiffView
-      :leftContractData="leftContractData"
-      :rightContractData="rightContractData"
+      :left-contract-data="leftContractData"
+      :right-contract-data="rightContractData"
       :show-line-numbers="showLineNumbers"
       :highlight-diff="highlightDiff"
     />
@@ -120,7 +91,7 @@ const rightPick = ref(DRAFT_ID)
 const showLineNumbers = ref(true)
 const highlightDiff = ref(true)
 
-type CompareOption = {
+interface CompareOption {
   id: string
   label: string
   kind: 'draft' | 'history'
@@ -181,22 +152,16 @@ function formatDateTime(iso?: string): string {
 
   const pad = (value: number) => String(value).padStart(2, '0')
 
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-  ].join('-') + ' ' + [
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-    pad(date.getSeconds()),
-  ].join(':')
+  return (
+    [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join('-') +
+    ' ' +
+    [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(':')
+  )
 }
 
 function formatHistoryOptionLabel(item: ContractHistoryItem): string {
   const when = formatDateTime(item.updated_at)
-  return when
-      ? `${when} (version ${item.contract_version})`
-      : `(version ${item.contract_version})`
+  return when ? `${when} (version ${item.contract_version})` : `(version ${item.contract_version})`
 }
 
 function resolveData(id: string): ContractData | undefined {
@@ -204,7 +169,7 @@ function resolveData(id: string): ContractData | undefined {
   const row = sortedHistory.value.find((item) => historyOptionId(item) === id)
   const raw = row?.contract_data
   if (!raw) return undefined
-  return preprocessContractData(raw as ContractData)
+  return preprocessContractData(raw)
 }
 
 const leftContractData = computed((): ContractData | undefined => resolveData(leftPick.value))
@@ -252,15 +217,13 @@ function normalizePicksAfterHistoryChange() {
   const optionIds = new Set(opts.map((o) => o.id))
 
   if (opts.length < 2) {
-    leftPick.value = opts[0]?.id ?? DRAFT_ID 
+    leftPick.value = opts[0]?.id ?? DRAFT_ID
     rightPick.value = opts[0]?.id ?? DRAFT_ID
     return
   }
 
   const picksValid =
-    optionIds.has(leftPick.value) &&
-    optionIds.has(rightPick.value) &&
-    leftPick.value !== rightPick.value
+    optionIds.has(leftPick.value) && optionIds.has(rightPick.value) && leftPick.value !== rightPick.value
 
   if (!picksValid) {
     const draft = opts.find((o) => o.id === DRAFT_ID)

@@ -1,17 +1,19 @@
 <template>
   <!-- Root-level blocks -->
-  <template v-if="!hasBlockId" v-for="id in rootChildren" :key="id">
-    <TemplatePreview
-      :block-id="id"
-      :section-level="sectionLevel"
-      :document-outline="documentOutline"
-      :document-blocks="documentBlocks"
-      :semantic-conditions="semanticConditions"
-      :sub-template-snapshots="subTemplateSnapshots"
-      :semantic-condition-values="semanticConditionValues"
-      :verification-result="verificationResult"
-      :set-semantic-condition-value="setSemanticConditionValue"
-    />
+  <template v-if="!hasBlockId">
+    <template v-for="id in rootChildren" :key="id">
+      <TemplatePreview
+        :block-id="id"
+        :section-level="sectionLevel"
+        :document-outline="documentOutline"
+        :document-blocks="documentBlocks"
+        :semantic-conditions="semanticConditions"
+        :sub-template-snapshots="subTemplateSnapshots"
+        :semantic-condition-values="semanticConditionValues"
+        :verification-result="verificationResult"
+        :set-semantic-condition-value="setSemanticConditionValue"
+      />
+    </template>
   </template>
   <!-- Nested blocks -->
   <template v-else>
@@ -87,7 +89,13 @@ import type {
   SectionBlock,
   SemanticCondition,
 } from '@template-repository/models/contract-templace'
-import { isSectionBlock, isTextBlock, isClauseBlock, isApprovedTemplateBlock, isMergedApprovedTemplateBlock } from '@template-repository/models/contract-templace'
+import {
+  isSectionBlock,
+  isTextBlock,
+  isClauseBlock,
+  isApprovedTemplateBlock,
+  isMergedApprovedTemplateBlock,
+} from '@template-repository/models/contract-templace'
 import type { SubTemplateSnapshot } from '@/models/contract-template'
 import ConditionalWrapper from '@/core/components/ConditionalWrapper.vue'
 import PreviewSectionBlock from './PreviewSectionBlock.vue'
@@ -115,7 +123,7 @@ const props = withDefaults(
     verificationResult?: VerificationResult | null
     setSemanticConditionValue?: SemanticConditionValueSetter
   }>(),
-  { sectionLevel: 1, semanticConditionValues: () => [], verificationResult: null, setSemanticConditionValue: null }
+  { sectionLevel: 1, semanticConditionValues: () => [], verificationResult: null, setSemanticConditionValue: null },
 )
 const hasBlockId = computed(() => props.blockId != null)
 
@@ -160,7 +168,7 @@ const sectionTitle = computed(() => {
 const sectionLevel = computed(() => props.sectionLevel ?? 1)
 const subTemplate = computed((): SubTemplateSnapshot | undefined => {
   const b = block.value
-  if(!b) return
+  if (!b) return
   if (!props.subTemplateSnapshots?.length) return undefined
   if (isMergedApprovedTemplateBlock(b)) {
     return props.subTemplateSnapshots.find((snapshot) =>
@@ -215,6 +223,4 @@ const subTemplate = computed((): SubTemplateSnapshot | undefined => {
   )
 })
 const hasApprovedTemplateChildren = computed(() => isApprovedTemplate.value && childrenIds.value.length > 0)
-
-
 </script>

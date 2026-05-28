@@ -1,5 +1,5 @@
 <template>
-  <div class="grid grid-cols-1 gap-4 min-h-[32rem] lg:grid-cols-2">
+  <div class="grid min-h-128 grid-cols-1 gap-4 lg:grid-cols-2">
     <DiffPane
       :title="leftPaneTitle"
       :blocks="leftBlocks"
@@ -22,7 +22,7 @@
 import type { ContractData } from '@/models/contract-data'
 import {
   type ContractPlainTextBlock,
-  useContractPlainTextConverter
+  useContractPlainTextConverter,
 } from '@/modules/contract-workflow-engine/composables/useContractPlainTextConverter'
 import { useContractBlockDiff } from '@/modules/contract-workflow-engine/composables/useContractBlockDiff'
 import DiffPane from '@/modules/contract-workflow-engine/components/diff-view/DiffPane.vue'
@@ -61,5 +61,4 @@ const rightBlocks = computed<ContractPlainTextBlock[]>(() => {
 })
 
 const contractDiffDocument = computed(() => buildContractBlockDiff(leftBlocks.value, rightBlocks.value))
-
 </script>

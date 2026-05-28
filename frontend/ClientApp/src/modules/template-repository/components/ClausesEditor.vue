@@ -1,10 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- Section 1: New clause -->
-    <section
-      v-if="uiStore.isTemplateEditable"
-      class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm"
-    >
+    <section v-if="uiStore.isTemplateEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
       <ClauseEditorForm
         mode="create"
         initial-title=""
@@ -16,17 +13,17 @@
 
     <!-- Section 2: Existing clauses -->
     <section class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
-      <h3 class="text-sm font-semibold text-base-content/80 mb-4">Existing clauses</h3>
+      <h3 class="mb-4 text-sm font-semibold text-base-content/80">Existing clauses</h3>
       <ExistingClausesList
         :clause-blocks="clauseBlocks"
         :semantic-conditions="semanticConditions"
-        @delete="deleteClause"
         :block-ids-in-outline="store.blockIdsInOutline"
         :editing-block-id="editingBlockId"
+        :editable="uiStore.isTemplateEditable"
+        @delete="deleteClause"
         @edit="startEditClause"
         @save="saveEditedClause"
         @cancel-edit="cancelEdit"
-        :editable="uiStore.isTemplateEditable"
       />
     </section>
   </div>

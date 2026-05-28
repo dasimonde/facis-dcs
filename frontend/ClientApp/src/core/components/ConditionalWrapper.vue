@@ -8,7 +8,7 @@ withDefaults(
     /** Class(es) applied to the wrapper when enabled. Supports string, array, or object (same as Vue :class). */
     wrapperClass?: string | string[] | Record<string, boolean | undefined>
   }>(),
-  { tag: 'div' }
+  { tag: 'div' },
 )
 </script>
 

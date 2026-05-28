@@ -9,7 +9,6 @@ import type {
   ContractTemplateRegisterRequest,
   ContractTemplateRejectRequest,
   ContractTemplateRetrieveByIdRequest,
-  ContractTemplateRetrieveRequest,
   ContractTemplateSearchRequest,
   ContractTemplateSubmitRequest,
   ContractTemplateUpdateRequest,
@@ -39,7 +38,7 @@ export const contractTemplateService: ContractTemplateService = {
     return http
       .post<ContractTemplateCreateResponse>('/template/create', request)
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Create Error:', err)
         throw err
       })
@@ -49,7 +48,7 @@ export const contractTemplateService: ContractTemplateService = {
     return http
       .post<ContractTemplateCopyResponse>('/template/copy', request)
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Copy Error:', err)
         throw err
       })
@@ -59,7 +58,7 @@ export const contractTemplateService: ContractTemplateService = {
     return http
       .post<ContractTemplateSubmitResponse>('/template/submit', request)
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Submit Error:', err)
         throw err
       })
@@ -69,7 +68,7 @@ export const contractTemplateService: ContractTemplateService = {
     return http
       .put<ContractTemplateUpdateResponse>('/template/update', request)
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Update Error:', err)
         throw err
       })
@@ -81,19 +80,19 @@ export const contractTemplateService: ContractTemplateService = {
       .then((res) => {
         return res.data
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Search Error:', err)
         return []
       })
   },
 
-  async retrieve(_request?: ContractTemplateRetrieveRequest) {
+  async retrieve() {
     return http
       .get<ContractTemplateRetrieveResponse>('/template/retrieve')
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Retrieve Error:', err)
-        return { contract_templates: [], approval_tasks: [], review_tasks: [] } as ContractTemplateRetrieveResponse
+        return { contract_templates: [], approval_tasks: [], review_tasks: [] }
       })
   },
 
@@ -103,7 +102,7 @@ export const contractTemplateService: ContractTemplateService = {
       .then((res) => {
         return { ...res.data }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Retrieve ID Error:', err)
         return null
       })
@@ -133,7 +132,7 @@ export const contractTemplateService: ContractTemplateService = {
     return http
       .get<ContractTemplateAuditResponse>('/template/audit', { params: request })
       .then((res) => res.data)
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Audit Error:', err)
         return []
       })

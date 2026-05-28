@@ -17,6 +17,8 @@ export const useContractsStore = defineStore('contracts', () => {
 
   const hasContracts = computed(() => contracts.value.length > 0)
 
+  const findContractByDid = (did: string) => contracts.value.find((contract) => contract.did === did)
+
   async function loadContracts() {
     loading.value = true
     error.value = null
@@ -26,8 +28,8 @@ export const useContractsStore = defineStore('contracts', () => {
       reviewTasks.value = data.review_tasks.map((task) => ({ ...task, type: 'contract' }))
       approvalTasks.value = data.approval_tasks.map((task) => ({ ...task, type: 'contract' }))
       negotiationTasks.value = data.negotiation_tasks.map((task) => ({ ...task, type: 'contract' }))
-    } catch (err: any) {
-      error.value = err.message || 'Error loading the contracts'
+    } catch (err: unknown) {
+      error.value = err instanceof Error && err.message ? err.message : 'Error loading the contracts'
     } finally {
       loading.value = false
     }
@@ -51,6 +53,7 @@ export const useContractsStore = defineStore('contracts', () => {
     approvalTasks,
     negotiationTasks,
     hasContracts,
+    findContractByDid,
     loadContracts,
     loading,
     error,

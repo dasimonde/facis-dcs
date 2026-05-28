@@ -26,13 +26,20 @@ export const useContractEditorUiStore = defineStore(storeId, {
       this.activeTab = tab
     },
     availableTabs(contractState: ContractStateType) {
-      const isAuditingAuthorized = (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some(role => useAuthStore().user?.roles?.includes(role)) ?? false
+      const isAuditingAuthorized =
+        (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
+          useAuthStore().user?.roles?.includes(role),
+        ) ?? false
 
       switch (contractState) {
         case ContractState.negotiation:
-          return this.tabs.filter((tab) => ['details', 'content', 'diff'].includes(tab.id) || isAuditingAuthorized && tab.id === 'audit')
+          return this.tabs.filter(
+            (tab) => ['details', 'content', 'diff'].includes(tab.id) || (isAuditingAuthorized && tab.id === 'audit'),
+          )
         default:
-          return this.tabs.filter(tab => ['details', 'content'].includes(tab.id) || isAuditingAuthorized && tab.id === 'audit')
+          return this.tabs.filter(
+            (tab) => ['details', 'content'].includes(tab.id) || (isAuditingAuthorized && tab.id === 'audit'),
+          )
       }
     },
     reset(overrides?: Partial<ContractEditorUiState>) {

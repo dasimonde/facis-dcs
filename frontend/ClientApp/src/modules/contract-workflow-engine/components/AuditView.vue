@@ -36,7 +36,7 @@ watch(
 </script>
 
 <template>
-  <div v-if="isLoading" class="loading loading-spinner loading-sm"></div>
+  <div v-if="isLoading" class="loading loading-sm loading-spinner"></div>
   <div v-else-if="data.length < 1">No audit data</div>
   <ContractAuditList v-else :audits="data" />
 </template>

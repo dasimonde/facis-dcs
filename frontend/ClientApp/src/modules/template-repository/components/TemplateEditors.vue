@@ -1,13 +1,18 @@
 <template>
-
-  <div class="sticky top-0 z-10 shrink-0 bg-base-100 border-b border-base-300">
-    <div class="max-w-4xl mx-auto px-6 pt-3">
-      <p class="text-xs font-black uppercase tracking-widest text-base-content/40 mb-2">
+  <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
+    <div class="mx-auto max-w-4xl px-6 pt-3">
+      <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">
         {{ title }}
       </p>
-      <div role="tablist" class="tabs tabs-border tabs-lg">
-        <a v-for="(tab, _index) in tabs" :key="tab.id" role="tab" class="tab"
-          :class="{ 'tab-active text-primary': activeTab === tab.id }" @click="setActiveTab(tab.id)">
+      <div role="tablist" class="tabs-border tabs tabs-lg">
+        <a
+          v-for="(tab, _index) in tabs"
+          :key="tab.id"
+          role="tab"
+          class="tab"
+          :class="{ 'tab-active text-primary': activeTab === tab.id }"
+          @click="templateEditorUiStore.setActiveTab(tab.id)"
+        >
           {{ tab.label }}
         </a>
       </div>
@@ -15,17 +20,17 @@
   </div>
 
   <!-- Tab content -->
-  <div class="grow mt-5">
-    <div class="max-w-4xl mx-auto p-6">
+  <div class="mt-5 grow">
+    <div class="mx-auto max-w-4xl p-6">
       <div class="grid grid-cols-1 gap-4">
-
         <!-- DETAILS TAB -->
         <div v-show="activeTab === 'details'">
-          <div class="card bg-base-100 border border-base-300 shadow-sm">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
             <div class="card-body gap-5">
-              <h2 class="card-title text-sm justify-between">
+              <h2 class="card-title justify-between text-sm">
                 <div class="flex gap-2">
-                  <span class="badge badge-sm badge-primary w-8">0{{ currentTabNumber }}</span> Template Details
+                  <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                  Template Details
                 </div>
                 <div v-if="state" class="badge badge-sm badge-secondary">{{ state }}</div>
               </h2>
@@ -36,23 +41,24 @@
 
         <!-- SEMANTIC RULES TAB -->
         <div v-show="activeTab === 'semantic'">
-          <div class="card bg-base-100 border border-base-300 shadow-sm">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
             <div class="card-body gap-5">
               <h2 class="card-title text-sm">
-                <span class="badge badge-sm badge-primary w-8">0{{ currentTabNumber }}</span> Semantic Rules
+                <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                Semantic Rules
               </h2>
               <SemanticRulesEditor />
             </div>
           </div>
-
         </div>
 
         <!-- CLAUSES TAB -->
         <div v-show="activeTab === 'clauses'">
-          <div class="card bg-base-100 border border-base-300 shadow-sm">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
             <div class="card-body gap-5">
               <h2 class="card-title text-sm">
-                <span class="badge badge-sm badge-primary w-8">0{{ currentTabNumber }}</span> Clauses
+                <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                Clauses
               </h2>
               <ClausesEditor />
             </div>
@@ -61,13 +67,18 @@
 
         <!-- BUILDER TAB -->
         <div v-show="activeTab === 'builder'">
-          <div class="card bg-base-100 border border-base-300 shadow-sm">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
             <div class="card-body">
-              <div class="flex items-start justify-between mb-2">
+              <div class="mb-2 flex items-start justify-between">
                 <h2 class="card-title text-sm">
-                  <span class="badge badge-sm badge-primary w-8">0{{ currentTabNumber }}</span> Builder
+                  <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                  Builder
                 </h2>
-                <button type="button" class="btn btn-sm btn-secondary" @click="togglePreviewDialog">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-secondary"
+                  @click="templateEditorUiStore.togglePreviewDialog"
+                >
                   Preview
                 </button>
               </div>
@@ -80,10 +91,11 @@
 
         <!-- META TAB -->
         <div v-show="activeTab === 'meta'">
-          <div class="card bg-base-100 border border-base-300 shadow-sm">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
             <div class="card-body">
               <h2 class="card-title text-sm">
-                <span class="badge badge-sm badge-primary w-8">0{{ currentTabNumber }}</span> Meta Data
+                <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                Meta Data
               </h2>
               <MetaDataEditor />
             </div>
@@ -92,21 +104,20 @@
 
         <template v-if="isManager">
           <div v-show="activeTab === 'audit'">
-            <div class="card bg-base-100 border border-base-300 shadow-sm">
+            <div class="card border border-base-300 bg-base-100 shadow-sm">
               <div class="card-body">
                 <h2 class="card-title text-sm">
-                  <span class="badge badge-sm badge-primary w-8">0{{ currentTabNumber }}</span> Audit History
+                  <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                  Audit History
                 </h2>
                 <AuditView />
               </div>
             </div>
           </div>
         </template>
-
       </div>
     </div>
   </div>
-
 </template>
 
 <script setup lang="ts">
@@ -125,11 +136,11 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AuditView from './AuditView.vue'
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     title: string
   }>(),
-  {}
+  {},
 )
 
 const route = useRoute()
@@ -138,7 +149,6 @@ const templateEditorUiStore = useTemplateEditorUiStore()
 const draftStore = useTemplateDraftStore()
 const { activeTab } = storeToRefs(templateEditorUiStore)
 const { state, templateType } = storeToRefs(draftStore)
-const { setActiveTab, togglePreviewDialog } = templateEditorUiStore
 const tabs = computed(() => {
   return templateEditorUiStore.availableTabs(templateType.value).filter((tab) => {
     return tab.id !== 'audit' || !!route.params.did

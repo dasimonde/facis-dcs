@@ -24,7 +24,7 @@ function flattenOutline(outline: DocumentOutline): FlattenedOutlineItem[] {
     parentBlockId: string,
     siblingIndex: number,
     depthLevel: number,
-    sectionNumberPath: number[]
+    sectionNumberPath: number[],
   ) {
     result.push({ blockId, parentBlockId, siblingIndex, sectionNumberPath, depthLevel })
     const outlineBlock = outlineByBlockId.get(blockId)

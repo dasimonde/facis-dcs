@@ -82,8 +82,8 @@ function expirationMessage(timeUtil: TimeUntil): string {
 </script>
 
 <template>
-  <li class="list-row min-w-0 w-full">
-    <div class="list-col-grow card bg-base-100 card-border hover:bg-base-300 min-w-0 w-full border-base-content/10">
+  <li class="list-row w-full min-w-0">
+    <div class="list-col-grow card w-full min-w-0 border-base-content/10 bg-base-100 card-border hover:bg-base-300">
       <div class="card-body min-w-0">
         <h2 class="card-title flex-wrap sm:justify-between">
           <div class="flex gap-8 sm:h-full">
@@ -94,9 +94,9 @@ function expirationMessage(timeUtil: TimeUntil): string {
         <div class="flex justify-start">
           <div v-if="contract.contract_version">Version: {{ contract.contract_version }}</div>
         </div>
-        <div class="flex justify-between min-w-0">
+        <div class="flex min-w-0 justify-between">
           <div>Creation date: {{ new Date(contract.created_at).toLocaleString() }}</div>
-          <div v-if="contract.description" class="px-10 flex-1 min-w-0 truncate hidden sm:block">
+          <div v-if="contract.description" class="hidden min-w-0 flex-1 truncate px-10 sm:block">
             {{ contract.description }}
           </div>
           <div class="card-actions justify-end">
@@ -115,7 +115,7 @@ function expirationMessage(timeUtil: TimeUntil): string {
                     }
                   : '#'
               "
-              class="btn btn-sm btn-primary gap-2"
+              class="btn gap-2 btn-sm btn-primary"
               :class="{ 'btn-disabled': !canEdit }"
             >
               Edit

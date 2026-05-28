@@ -44,7 +44,7 @@ watch(isRevealed, (value) => {
 })
 
 const handleConfirm = () => {
-  if (hasEditor) {
+  if (hasEditor.value) {
     if (inputRequired.value) return
     confirm(inputText.value)
   } else {
@@ -52,28 +52,28 @@ const handleConfirm = () => {
   }
 }
 
-defineExpose({ reveal: reveal as (data: ModalData) => Promise<ConfirmData> })
+interface ModalExpose {
+  reveal: (data: ModalData) => Promise<ConfirmData>
+}
+
+defineExpose<ModalExpose>({ reveal: reveal })
 </script>
 
 <template>
-  <dialog ref="action-modal" @close="cancel" class="modal modal-bottom sm:modal-middle">
+  <dialog ref="action-modal" class="modal modal-bottom sm:modal-middle" @close="cancel">
     <div class="modal-box">
       <h3 class="text-lg font-bold">Confirmation</h3>
       <p class="text-md py-4">{{ modalData.message }}</p>
-      <div v-if="modalData.editor" class="max-w-4xl mx-auto py-3 flex flex-col md:flex-row gap-3">
+      <div v-if="modalData.editor" class="mx-auto flex max-w-4xl flex-col gap-3 py-3 md:flex-row">
         <textarea
           v-model="inputText"
-          class="textarea textarea-ghost textarea-sm w-full mt-0.5 text-sm min-h-10 resize-y border border-base-300/50 rounded-lg"
+          class="textarea mt-0.5 min-h-10 w-full resize-y rounded-lg border textarea-ghost border-base-300/50 text-sm textarea-sm"
           :placeholder="modalData.editor.placeholder ?? 'Comment'"
           rows="4"
         />
       </div>
       <div class="modal-action flex-col" :class="{ 'flex-row-reverse justify-start': hasEditor }">
-        <button
-          class="btn btn-primary btn-sm"
-          :class="{ 'btn-disabled': inputRequired }"
-          @click="handleConfirm"
-        >
+        <button class="btn btn-sm btn-primary" :class="{ 'btn-disabled': inputRequired }" @click="handleConfirm">
           {{ hasEditor ? 'Submit' : 'Confirm' }}
         </button>
         <button class="btn btn-outline btn-sm" @click="cancel">Cancel</button>

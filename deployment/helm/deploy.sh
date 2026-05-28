@@ -192,8 +192,15 @@ fi
 log "✅ Placeholders replaced in $TMP_VALUES"
 
 # Helm dependency build & install
+log "ℹ️ Adding required Helm repos"
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+helm repo update
+
 log "ℹ️ Running: helm dependency build"
 helm dependency build . --kubeconfig "$KUBECONFIG"
+
+log "ℹ️ Installing Prometheus Operator CRDs"
+helm show crds charts/kube-prometheus-stack-*.tgz | kubectl apply --server-side -f - --kubeconfig "$KUBECONFIG"
 
 DEP_SET_ARGS=()
 if [[ "${DEP_POSTGRESQL:-false}" == "true" ]]; then

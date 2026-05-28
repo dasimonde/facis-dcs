@@ -1,5 +1,4 @@
-export type NegotiationTaskState =
-  (typeof NegotiationTaskState)[keyof typeof NegotiationTaskState]
+export type NegotiationTaskState = (typeof NegotiationTaskState)[keyof typeof NegotiationTaskState]
 
 export const NegotiationTaskState = {
   open: 'OPEN',

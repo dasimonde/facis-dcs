@@ -11,9 +11,19 @@
         </thead>
         <tbody>
           <!-- Add row -->
-          <MetaDataRow :key="addRowKey" :initial-name="draft.name" :initial-value="draft.value" :all-names="allNames"
-            :is-new="true" :is-active="activeIndex === -1" @confirm="createMeta" @cancel="resetDraft"
-            @delete="resetDraft" @row-focus="setActiveIndex(-1)" :is-editable="uiStore.isTemplateEditable" />
+          <MetaDataRow
+            :key="addRowKey"
+            :initial-name="draft.name"
+            :initial-value="draft.value"
+            :all-names="allNames"
+            :is-new="true"
+            :is-active="activeIndex === -1"
+            :is-editable="uiStore.isTemplateEditable"
+            @confirm="createMeta"
+            @cancel="resetDraft"
+            @delete="resetDraft"
+            @row-focus="setActiveIndex(-1)"
+          />
 
           <!-- Small visual gap between add row and existing rows -->
           <tr v-if="customMetaData.length">
@@ -21,10 +31,19 @@
           </tr>
 
           <!-- Existing rows -->
-          <MetaDataRow v-for="(meta, index) in customMetaData" :key="index" :initial-name="meta.name"
-            :initial-value="meta.value" :all-names="allNames" :index="index" :is-active="activeIndex === index"
-            @confirm="updateMeta(index, $event)" @delete="deleteMeta(index)" @row-focus="setActiveIndex(index)"
-            :is-editable="uiStore.isTemplateEditable" />
+          <MetaDataRow
+            v-for="(meta, index) in customMetaData"
+            :key="index"
+            :initial-name="meta.name"
+            :initial-value="meta.value"
+            :all-names="allNames"
+            :index="index"
+            :is-active="activeIndex === index"
+            :is-editable="uiStore.isTemplateEditable"
+            @confirm="updateMeta(index, $event)"
+            @delete="deleteMeta(index)"
+            @row-focus="setActiveIndex(index)"
+          />
         </tbody>
       </table>
     </div>
@@ -50,7 +69,7 @@ const draft = reactive({
 })
 
 const addRowKey = ref(0)
-const activeIndex = ref<number | -1 | null>(null)
+const activeIndex = ref<number | null>(null)
 
 function resetDraft() {
   draft.name = ''
@@ -58,7 +77,7 @@ function resetDraft() {
   addRowKey.value += 1
 }
 
-function setActiveIndex(index: number | -1) {
+function setActiveIndex(index: number) {
   activeIndex.value = index
 }
 

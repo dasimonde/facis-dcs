@@ -26,7 +26,8 @@ export const ContractPdfArchiveFileTypes = {
   contract: 'contract',
 } as const
 
-export type ContractPdfArchiveManifestVersion = (typeof ContractPdfArchiveManifestVersions)[keyof typeof ContractPdfArchiveManifestVersions]
+export type ContractPdfArchiveManifestVersion =
+  (typeof ContractPdfArchiveManifestVersions)[keyof typeof ContractPdfArchiveManifestVersions]
 export type ContractPdfRepresentation = (typeof ContractPdfRepresentations)[keyof typeof ContractPdfRepresentations]
 export type ContractPdfArchiveFileType = (typeof ContractPdfArchiveFileTypes)[keyof typeof ContractPdfArchiveFileTypes]
 
@@ -43,7 +44,7 @@ export type PdfArchiveMediaType = (typeof PdfArchiveMediaTypes)[keyof typeof Pdf
 export interface ContractPdfArchiveManifestFile {
   path: string
   type: ContractPdfArchiveFileType
-  mediaType: "application/json" | "application/ld+json"
+  mediaType: 'application/json' | 'application/ld+json'
   sha256: string
 }
 

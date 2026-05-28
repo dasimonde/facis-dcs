@@ -4,7 +4,7 @@ import type { ContractTemplateSearchResponse } from '@/models/responses/template
 import { contractTemplateService } from '@/services/contract-template-service'
 import ListSearch from '../ListSearch.vue'
 
-const props = defineProps<{
+defineProps<{
   templates: PartialContractTemplate[]
 }>()
 
@@ -18,7 +18,7 @@ const filterLabels: Partial<Record<keyof PartialContractTemplate, string>> = {
   description: 'Description',
   document_number: 'Document number',
   version: 'Version',
-  template_data: 'Template Data'
+  template_data: 'Template Data',
 }
 
 const emptyTemplate: PartialContractTemplate = {
@@ -34,21 +34,18 @@ const emptyTemplate: PartialContractTemplate = {
 }
 
 const responseMapper = (response: ContractTemplateSearchResponse) =>
-  response.map(
-    (item) =>
-      ({
-        did: item.did,
-        name: item.name,
-        description: item.description,
-        version: parseInt(item.version, 10),
-        state: item.state,
-        updated_at: item.updated_at,
-        created_at: item.created_at,
-        document_number: item.document_number,
-        template_type: item.template_type,
-        created_by: item.created_by,
-      }) as PartialContractTemplate,
-  )
+  response.map((item) => ({
+    did: item.did,
+    name: item.name,
+    description: item.description,
+    version: parseInt(item.version, 10),
+    state: item.state,
+    updated_at: item.updated_at,
+    created_at: item.created_at,
+    document_number: item.document_number,
+    template_type: item.template_type,
+    created_by: item.created_by,
+  }))
 </script>
 
 <template>

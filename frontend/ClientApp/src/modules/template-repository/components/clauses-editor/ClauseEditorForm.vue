@@ -1,27 +1,33 @@
 <template>
   <!-- <section class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm"> -->
-  <h3 class="text-sm font-semibold text-base-content/80 mb-4">
-    {{ mode === 'edit' ? 'Edit clause' : 'New clause' }} </h3>
+  <h3 class="mb-4 text-sm font-semibold text-base-content/80">
+    {{ mode === 'edit' ? 'Edit clause' : 'New clause' }}
+  </h3>
   <div class="space-y-4">
     <div>
-      <label class="label-text text-xs text-base-content/60 block mb-1">Clause title
+      <label class="label-text mb-1 block text-xs text-base-content/60">
+        Clause title
         <RequiredIndicator />
       </label>
-      <input v-model="localTitle" type="text" class="input input-bordered input-sm w-full" placeholder="" required />
+      <input v-model="localTitle" type="text" class="input-bordered input input-sm w-full" placeholder="" required />
     </div>
     <div>
-      <label class="label-text text-xs text-base-content/60 block mb-1">Clause text
+      <label class="label-text mb-1 block text-xs text-base-content/60">
+        Clause text
         <RequiredIndicator />
       </label>
-      <ClauseTextEditor :model-value="localText" :semantic-conditions="semanticConditions"
-        @update:model-value="localText = $event" />
+      <ClauseTextEditor
+        :model-value="localText"
+        :semantic-conditions="semanticConditions"
+        @update:model-value="localText = $event"
+      />
     </div>
-    <div class="flex justify-between items-center">
+    <div class="flex items-center justify-between">
       <button v-if="mode === 'edit'" type="button" class="btn btn-outline btn-xs" @click="$emit('cancel')">
         Cancel
       </button>
       <span v-else />
-      <button type="button" class="btn btn-secondary btn-sm" :disabled="!canSubmit" @click="handleSubmit">
+      <button type="button" class="btn btn-sm btn-secondary" :disabled="!canSubmit" @click="handleSubmit">
         {{ mode === 'edit' ? 'Save changes' : 'Add clause' }}
       </button>
     </div>
@@ -56,7 +62,7 @@ watch(
   ([title, text]) => {
     localTitle.value = title
     localText.value = text
-  }
+  },
 )
 
 // Check if there is any required parameter in used rule panel that is not used in the text
@@ -76,10 +82,8 @@ const hasRequiredUnusedParamInUsedRules = computed(() => {
     .some((c) => c.parameters.some((p) => p.isRequired && !usedParams.has(`${c.conditionId}.${p.parameterName}`)))
 })
 
-const canSubmit = computed(() =>
-  !!localTitle.value.trim() &&
-  !!localText.value.trim() &&
-  !hasRequiredUnusedParamInUsedRules.value
+const canSubmit = computed(
+  () => !!localTitle.value.trim() && !!localText.value.trim() && !hasRequiredUnusedParamInUsedRules.value,
 )
 
 function handleSubmit() {

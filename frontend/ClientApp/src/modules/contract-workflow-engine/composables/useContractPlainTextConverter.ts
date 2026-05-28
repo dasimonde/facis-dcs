@@ -9,16 +9,20 @@ import type {
   DocumentOutlineBlock,
   SectionBlock,
   SemanticCondition,
-  TextBlock
+  TextBlock,
 } from '@template-repository/models/contract-templace'
 import {
   isApprovedTemplateBlock,
   isClauseBlock,
   isMergedApprovedTemplateBlock,
   isSectionBlock,
-  isTextBlock
+  isTextBlock,
 } from '@template-repository/models/contract-templace'
-import { getOwnerBlockIdFromMergedBlockId, isMergedBlockId, isSameTemplateDataRef } from '@template-repository/utils/template-data-ref'
+import {
+  getOwnerBlockIdFromMergedBlockId,
+  isMergedBlockId,
+  isSameTemplateDataRef,
+} from '@template-repository/utils/template-data-ref'
 
 const DEFAULT_PLACEHOLDER_TEXT = '__________'
 const NEWLINE = '\n'
@@ -37,7 +41,6 @@ export interface ContractPlainTextLine {
 }
 
 export type ContractPlainTextBlock = ContractPlainTextSection | ContractPlainTextLine
-
 
 export function isSectionPlainTextBlock(block: ContractPlainTextBlock): block is ContractPlainTextSection {
   return block.type === 'section'
@@ -75,7 +78,7 @@ function createContractContext(contractData: ContractPlainTextInput): ContractCo
     rootBlockIds: documentOutline.find((node) => node.isRoot)?.children ?? [],
     semanticConditions: contractData?.semanticConditions ?? [],
     semanticConditionValues: contractData?.semanticConditionValues ?? [],
-    subTemplateSnapshots: contractData?.subTemplateSnapshots ?? []
+    subTemplateSnapshots: contractData?.subTemplateSnapshots ?? [],
   }
 }
 
@@ -89,7 +92,7 @@ function createPlainTextWriter(): PlainTextWriter {
     blocks.push({
       type: 'section',
       text,
-      level
+      level,
     })
   }
 
@@ -101,7 +104,7 @@ function createPlainTextWriter(): PlainTextWriter {
   function breakLine(): void {
     blocks.push({
       type: 'text',
-      text: currentLine
+      text: currentLine,
     })
     currentLine = ''
     hasOpenLine = false
@@ -133,7 +136,7 @@ function createPlainTextWriter(): PlainTextWriter {
     breakLine,
     breakLineIfOpen,
     addBoundarySpaceIfNeeded,
-    toBlocks
+    toBlocks,
   }
 }
 
@@ -167,21 +170,26 @@ function writeClauseBlock(cxt: ContractContext, block: ClauseBlock, writer: Plai
   writer.addBoundarySpaceIfNeeded(block.text ?? '')
 }
 
-function writeApprovedTemplateBlock(cxt: ContractContext, block: ApprovedTemplateBlock, level: number, writer: PlainTextWriter): void {
+function writeApprovedTemplateBlock(
+  cxt: ContractContext,
+  block: ApprovedTemplateBlock,
+  level: number,
+  writer: PlainTextWriter,
+): void {
   writer.breakLineIfOpen()
   const snapshot = cxt.subTemplateSnapshots.find((item) =>
     isSameTemplateDataRef(
       {
         templateId: item.did,
         version: item.version,
-        document_number: item.document_number
+        document_number: item.document_number,
       },
       {
         templateId: block.templateId,
         version: block.version,
-        document_number: block.document_number
-      }
-    )
+        document_number: block.document_number,
+      },
+    ),
   )
 
   if (snapshot?.template_data) {
@@ -190,7 +198,7 @@ function writeApprovedTemplateBlock(cxt: ContractContext, block: ApprovedTemplat
       documentBlocks: snapshot.template_data.documentBlocks ?? [],
       semanticConditions: snapshot.template_data.semanticConditions ?? [],
       semanticConditionValues: cxt.semanticConditionValues,
-      subTemplateSnapshots: cxt.subTemplateSnapshots
+      subTemplateSnapshots: cxt.subTemplateSnapshots,
     })
 
     for (const childId of snapshotContext.rootBlockIds) {
@@ -208,7 +216,13 @@ function writeChildBlocks(cxt: ContractContext, parentBlockId: string, level: nu
   }
 }
 
-function writeClauseText(text: string, blockId: string, semanticConditions: SemanticCondition[], semanticConditionValues: SemanticConditionValue[], writer: PlainTextWriter): void {
+function writeClauseText(
+  text: string,
+  blockId: string,
+  semanticConditions: SemanticCondition[],
+  semanticConditionValues: SemanticConditionValue[],
+  writer: PlainTextWriter,
+): void {
   const segments = parseSegments(text ?? '', semanticConditions)
 
   for (const segment of segments) {
@@ -222,7 +236,7 @@ function writeClauseText(text: string, blockId: string, semanticConditions: Sema
         (item) =>
           item.blockId === blockId &&
           item.conditionId === segment.conditionId &&
-          item.parameterName === segment.parameterName
+          item.parameterName === segment.parameterName,
       )?.parameterValue
       writer.addText(parameterValue == null ? DEFAULT_PLACEHOLDER_TEXT : String(parameterValue))
       continue
@@ -245,14 +259,14 @@ function getSemanticConditionsForClauseBlock(blockId: string, cxt: ContractConte
       {
         templateId: item.did,
         version: item.version,
-        document_number: item.document_number
+        document_number: item.document_number,
       },
       {
         templateId: ownerBlock.templateId,
         version: ownerBlock.version,
-        document_number: ownerBlock.document_number
-      }
-    )
+        document_number: ownerBlock.document_number,
+      },
+    ),
   )
 
   return snapshot?.template_data?.semanticConditions ?? cxt.semanticConditions

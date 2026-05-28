@@ -107,7 +107,6 @@ export interface ContractAuditResponseItem {
 
 export type ContractAuditResponse = ContractAuditResponseItem[]
 
-
 export interface ContractHistoryItem {
   did: string
   contract_version: number

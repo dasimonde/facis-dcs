@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
 import type { PageState } from '@core/models/page-store'
 
-const storeId = "page"
+const storeId = 'page'
 const defaultState: PageState = {
-  pageSidebarId: "main-drawer",
+  pageSidebarId: 'main-drawer',
   isSidebarCollapsed: false,
-  breadcrumbs: []
+  breadcrumbs: [],
 }
 
 export const usePageStore = defineStore(storeId, {
@@ -14,8 +14,6 @@ export const usePageStore = defineStore(storeId, {
   actions: {
     toggleSidebar() {
       this.isSidebarCollapsed = !this.isSidebarCollapsed
-    }
-  }
+    },
+  },
 })
-
-
