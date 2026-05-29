@@ -25,7 +25,7 @@ type GetSelfDescriptionsMetaByIDsHandler struct {
 
 func (h *GetSelfDescriptionsMetaByIDsHandler) Handle(qry GetSelfDescriptionsMetaByIDsQry) (*GetSelfDescriptionsMetaByIDsResult, error) {
 	if h.FCClient == nil {
-		return nil, fmt.Errorf("federated catalogue client is nil")
+		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
 	if len(qry.IDs) == 0 {
 		return nil, fmt.Errorf("self-description ids is empty")

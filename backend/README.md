@@ -51,6 +51,10 @@ goa gen digital-contracting-service/design
 ## Running tests
 ```
 export DATABASE_URL="user=username password=password dbname=test_postgres sslmode=disable"
+export FEDERATED_CATALOGUE_API_URL="http://localhost:30081"
+export FEDERATED_CATALOGUE_CLIENT_ID="dcs-fc-client"
+export FEDERATED_CATALOGUE_CLIENT_SECRET="dcs-fc-client-secret"
+export OIDC_ISSUER_URL="http://localhost:30080/realms/gaia-x"
 ```
 
 ```
@@ -69,7 +73,7 @@ export DATABASE_URL="user=username password=password dbname=postgres sslmode=dis
 export API_PATH_PREFIX="/api"
 
 # Federated Catalogue
-export FEDERATED_CATALOGUE_API_URL="http://localhost:8081"
+export FEDERATED_CATALOGUE_API_URL="http://localhost:30081"
 export FEDERATED_CATALOGUE_CLIENT_ID="dcs-fc-client"
 export FEDERATED_CATALOGUE_CLIENT_SECRET="dcs-fc-client-secret"
 

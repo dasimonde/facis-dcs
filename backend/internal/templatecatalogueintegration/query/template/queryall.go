@@ -44,7 +44,7 @@ LIMIT %d
 
 func (h *GetAllMetadataHandler) Handle(qry GetAllMetadataQry) (*templatecatalogueintegration.TemplateCatalogueRetrieveResponse, error) {
 	if h.FCClient == nil {
-		return nil, fmt.Errorf("federated catalogue client is nil")
+		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
 	if qry.Offset < 0 {
 		return nil, fmt.Errorf("offset must be >= 0")

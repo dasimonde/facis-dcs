@@ -22,7 +22,7 @@ type UpdateHandler struct {
 
 func (h *UpdateHandler) Handle(_ context.Context, cmd UpdateCmd) error {
 	if h.FCClient == nil {
-		return fmt.Errorf("federated catalogue client is nil")
+		return client.ErrFederatedCatalogueNotConfigured
 	}
 	id := strings.TrimSpace(cmd.ID)
 	if id == "" {

@@ -38,7 +38,7 @@ LIMIT 1
 
 func (h *GetCurrentParticipantSummaryHandler) Handle(qry GetCurrentParticipantSummaryQry) (*templatecatalogueintegration.TemplateCatalogueParticipantSummary, error) {
 	if h.FCClient == nil {
-		return nil, fmt.Errorf("federated catalogue client is nil")
+		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
 	if qry.ParticipantID == "" {
 		return nil, fmt.Errorf("participant id is empty")

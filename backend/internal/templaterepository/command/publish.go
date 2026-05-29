@@ -62,7 +62,7 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	if h.FCClient == nil {
-		return errors.New("federated catalogue is not configured")
+		return fcclient.ErrFederatedCatalogueNotConfigured
 	}
 
 	// Exclude remote calls from the transaction to avoid a long-running transaction.

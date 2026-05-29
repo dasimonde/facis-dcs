@@ -42,7 +42,7 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) error {
 		return errors.New("version must be greater than 0")
 	}
 	if h.FCClient == nil {
-		return errors.New("federated catalogue is not configured")
+		return fcclient.ErrFederatedCatalogueNotConfigured
 	}
 
 	queryHandler := templatequery.GetByIDHandler{
@@ -57,7 +57,7 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) error {
 		return fmt.Errorf("could not retrieve template from Federated Catalogue: %w", err)
 	}
 	if fcTemplate == nil {
-		return errors.New("template not found in Federated Catalogue")
+		return fcclient.ErrTemplateNotFoundInFederatedCatalogue
 	}
 
 	templateData, err := templateDataFromAny(fcTemplate.TemplateData)

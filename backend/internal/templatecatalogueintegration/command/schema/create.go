@@ -20,7 +20,7 @@ type CreateHandler struct {
 
 func (h *CreateHandler) Handle(_ context.Context, cmd CreateCmd) error {
 	if h.FCClient == nil {
-		return fmt.Errorf("federated catalogue client is nil")
+		return client.ErrFederatedCatalogueNotConfigured
 	}
 	if len(cmd.Content) == 0 {
 		return fmt.Errorf("schema content is empty")

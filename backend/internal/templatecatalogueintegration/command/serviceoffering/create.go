@@ -36,7 +36,7 @@ type CreateResult struct {
 
 func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) (*CreateResult, error) {
 	if h.FCClient == nil {
-		return nil, fmt.Errorf("federated catalogue client is nil")
+		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
 	if cmd.ParticipantID == "" {
 		return nil, fmt.Errorf("participant id is empty")

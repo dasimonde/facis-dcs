@@ -84,7 +84,7 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyCmd) error {
 
 func (h *Verifier) verifyTemplateResourceSelfDescription(ctx context.Context, cmd VerifyCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
 	if h.FCClient == nil {
-		return fmt.Errorf("federated catalogue client is nil")
+		return fcclient.ErrFederatedCatalogueNotConfigured
 	}
 	if cmd.ParticipantID == "" {
 		return fmt.Errorf("participant id is empty")

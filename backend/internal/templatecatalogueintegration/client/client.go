@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+)
+
+var (
+	ErrFederatedCatalogueNotConfigured      = errors.New("federated catalogue is not configured")
+	ErrTemplateNotFoundInFederatedCatalogue = errors.New("template not found in Federated Catalogue")
 )
 
 // Response wraps essential HTTP response data.

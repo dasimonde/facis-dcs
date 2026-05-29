@@ -1,0 +1,240 @@
+{
+  "@context": [
+    "https://www.w3.org/2018/credentials/v1",
+    "https://w3id.org/security/suites/jws-2020/v1"
+  ],
+  "holder": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8",
+  "id": "did:web:argo.asd-stack.eu:facis:template:930e2471-9f74-4d8f-b539-7626fe518783::0",
+  "type": [
+    "VerifiablePresentation"
+  ],
+  "verifiableCredential": [
+    {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://www.w3.org/2018/credentials/examples/v1",
+        "https://w3id.org/security/suites/jws-2020/v1"
+      ],
+      "credentialSubject": {
+        "@context": {
+          "APPROVED_TEMPLATE": "dcs-template-data:APPROVED_TEMPLATE",
+          "CLAUSE": "dcs-template-data:CLAUSE",
+          "SECTION": "dcs-template-data:SECTION",
+          "TEXT": "dcs-template-data:TEXT",
+          "blockId": "dcs-template-data:blockId",
+          "children": "dcs-template-data:children",
+          "conditionId": "dcs-template-data:conditionId",
+          "conditionIds": "dcs-template-data:conditionIds",
+          "conditionName": "dcs-template-data:conditionName",
+          "customMetaData": "dcs-template-data:customMetaData",
+          "date": "dcs-template-data:date",
+          "dcs-template": "https://argo.asd-stack.eu/facis/dcs-semantic/template/v1#",
+          "dcs-template-data": "https://argo.asd-stack.eu/facis/dcs-semantic/template-data/v1#",
+          "dcs-template:templateData": "dcs-template:templateData",
+          "dct": "http://purl.org/dc/terms/",
+          "decimal": "dcs-template-data:decimal",
+          "did": "dcs-template-data:did",
+          "documentBlocks": "dcs-template-data:documentBlocks",
+          "documentOutline": "dcs-template-data:documentOutline",
+          "document_number": "dcs-template-data:document_number",
+          "gax-core": "https://w3id.org/gaia-x/core#",
+          "gax-trust-framework": "https://w3id.org/gaia-x/gax-trust-framework#",
+          "integer": "dcs-template-data:integer",
+          "isRequired": "dcs-template-data:isRequired",
+          "isRoot": "dcs-template-data:isRoot",
+          "name": "dcs-template-data:name",
+          "operate": "dcs-template-data:operate",
+          "operators": "dcs-template-data:operators",
+          "parameterName": "dcs-template-data:parameterName",
+          "parameters": "dcs-template-data:parameters",
+          "schemaVersion": "dcs-template-data:schemaVersion",
+          "semanticConditions": "dcs-template-data:semanticConditions",
+          "string": "dcs-template-data:string",
+          "subTemplateSnapshots": "dcs-template-data:subTemplateSnapshots",
+          "targets": "dcs-template-data:targets",
+          "templateDataVersion": "dcs-template-data:templateDataVersion",
+          "templateId": "dcs-template-data:templateId",
+          "template_data": "dcs-template-data:template_data",
+          "text": "dcs-template-data:text",
+          "title": "dcs-template-data:title",
+          "type": "@type",
+          "value": "dcs-template-data:value",
+          "version": "dcs-template-data:version",
+          "xsd": "http://www.w3.org/2001/XMLSchema#"
+        },
+        "@id": "did:web:argo.asd-stack.eu:facis:template:930e2471-9f74-4d8f-b539-7626fe518783::0",
+        "@type": [
+          "gax-trust-framework:Resource",
+          "dcs-template:ContractTemplate"
+        ],
+        "gax-core:operatedBy": {
+          "@id": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8"
+        },
+        "gax-trust-framework:name": {
+          "@type": "xsd:string",
+          "@value": "Standard Data Sharing Agreement"
+        },
+        "dct:description": {
+          "@type": "xsd:string",
+          "@value": ""
+        },
+        "dcs-template:name": "Standard Data Sharing Agreement",
+        "dcs-template:did": "930e2471-9f74-4d8f-b539-7626fe518783",
+        "dcs-template:documentNumber": "25625b2b-b5e0-46fc-8d69-4fe38d9f036d",
+        "dcs-template:version": 1,
+        "dcs-template:schemaVersion": 1,
+        "dcs-template:templateType": "SUB_CONTRACT",
+        "dcs-template:description": "",
+        "dcs-template:participantId": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8",
+        "dcs-template:createdAt": {
+          "@type": "xsd:dateTime",
+          "@value": "2026-04-07T13:11:18Z"
+        },
+        "dcs-template:updatedAt": {
+          "@type": "xsd:dateTime",
+          "@value": "2026-04-07T13:11:18Z"
+        },
+        "dcs-template:templateDataJSON": "{\"customMetaData\": [{\"name\": \"jurisdiction\", \"value\": \"Germany\"}], \"documentBlocks\": [{\"text\": \"From {{88e963e3-72e2-4d87-bd96-74d644179756.start}} to {{88e963e3-72e2-4d87-bd96-74d644179756.end}}.\", \"type\": \"CLAUSE\", \"title\": \"clause 1\", \"blockId\": \"f3dc781b-6557-45ed-b290-9fe71606f9b8\", \"conditionIds\": [\"88e963e3-72e2-4d87-bd96-74d644179756\"]}, {\"text\": \"text: {{597b9bd8-f40f-4edb-8730-1beb240e0230.text}}.\\ndecimal: {{597b9bd8-f40f-4edb-8730-1beb240e0230.decimal}}.\\ninteger: {{597b9bd8-f40f-4edb-8730-1beb240e0230.integer}}\", \"type\": \"CLAUSE\", \"title\": \"clause 2\", \"blockId\": \"d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5\", \"conditionIds\": [\"597b9bd8-f40f-4edb-8730-1beb240e0230\"]}, {\"text\": \"\", \"type\": \"SECTION\", \"title\": \"section 1\", \"blockId\": \"5fa9dcd4-4d98-4a34-a2de-7f42f17f196a\"}, {\"text\": \"\", \"type\": \"SECTION\", \"title\": \"section 2\", \"blockId\": \"5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb\"}, {\"text\": \"\\ntext widget.\", \"type\": \"TEXT\", \"title\": \"\", \"blockId\": \"9169a092-4f5b-4957-b316-a904963adea0\"}], \"documentOutline\": [{\"isRoot\": true, \"blockId\": \"24056306-e8fc-4f79-aef9-040beb19968b\", \"children\": [\"5fa9dcd4-4d98-4a34-a2de-7f42f17f196a\", \"5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb\"]}, {\"isRoot\": false, \"blockId\": \"5fa9dcd4-4d98-4a34-a2de-7f42f17f196a\", \"children\": [\"f3dc781b-6557-45ed-b290-9fe71606f9b8\", \"9169a092-4f5b-4957-b316-a904963adea0\"]}, {\"isRoot\": false, \"blockId\": \"5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb\", \"children\": [\"d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5\"]}], \"semanticConditions\": [{\"parameters\": [{\"type\": \"date\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"start\"}, {\"type\": \"date\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"end\"}], \"conditionId\": \"88e963e3-72e2-4d87-bd96-74d644179756\", \"conditionName\": \"date rule\", \"schemaVersion\": \"v1\"}, {\"parameters\": [{\"type\": \"string\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"text\"}, {\"type\": \"decimal\", \"operators\": [], \"isRequired\": true, \"parameterName\": \"decimal\"}, {\"type\": \"integer\", \"operators\": [], \"isRequired\": false, \"parameterName\": \"integer\"}], \"conditionId\": \"597b9bd8-f40f-4edb-8730-1beb240e0230\", \"conditionName\": \"rule 2\", \"schemaVersion\": \"v1\"}], \"templateDataVersion\": 1, \"subTemplateSnapshots\": []}",
+        "dcs-template:templateData": {
+          "customMetaData": [
+            {
+              "name": "jurisdiction",
+              "value": "Germany"
+            }
+          ],
+          "documentBlocks": [
+            {
+              "text": "From {{88e963e3-72e2-4d87-bd96-74d644179756.start}} to {{88e963e3-72e2-4d87-bd96-74d644179756.end}}.",
+              "type": "CLAUSE",
+              "title": "clause 1",
+              "blockId": "f3dc781b-6557-45ed-b290-9fe71606f9b8",
+              "conditionIds": [
+                "88e963e3-72e2-4d87-bd96-74d644179756"
+              ]
+            },
+            {
+              "text": "text: {{597b9bd8-f40f-4edb-8730-1beb240e0230.text}}.\ndecimal: {{597b9bd8-f40f-4edb-8730-1beb240e0230.decimal}}.\ninteger: {{597b9bd8-f40f-4edb-8730-1beb240e0230.integer}}",
+              "type": "CLAUSE",
+              "title": "clause 2",
+              "blockId": "d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5",
+              "conditionIds": [
+                "597b9bd8-f40f-4edb-8730-1beb240e0230"
+              ]
+            },
+            {
+              "text": "",
+              "type": "SECTION",
+              "title": "section 1",
+              "blockId": "5fa9dcd4-4d98-4a34-a2de-7f42f17f196a"
+            },
+            {
+              "text": "",
+              "type": "SECTION",
+              "title": "section 2",
+              "blockId": "5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb"
+            },
+            {
+              "text": "\ntext widget.",
+              "type": "TEXT",
+              "title": "",
+              "blockId": "9169a092-4f5b-4957-b316-a904963adea0"
+            }
+          ],
+          "documentOutline": [
+            {
+              "isRoot": true,
+              "blockId": "24056306-e8fc-4f79-aef9-040beb19968b",
+              "children": [
+                "5fa9dcd4-4d98-4a34-a2de-7f42f17f196a",
+                "5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb"
+              ]
+            },
+            {
+              "isRoot": false,
+              "blockId": "5fa9dcd4-4d98-4a34-a2de-7f42f17f196a",
+              "children": [
+                "f3dc781b-6557-45ed-b290-9fe71606f9b8",
+                "9169a092-4f5b-4957-b316-a904963adea0"
+              ]
+            },
+            {
+              "isRoot": false,
+              "blockId": "5b5feeb3-b9b4-4f9a-bc7d-c3e609bb1adb",
+              "children": [
+                "d7fa5bef-dcfd-4d2c-a4f8-0f10953549f5"
+              ]
+            }
+          ],
+          "semanticConditions": [
+            {
+              "parameters": [
+                {
+                  "type": "date",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "start"
+                },
+                {
+                  "type": "date",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "end"
+                }
+              ],
+              "conditionId": "88e963e3-72e2-4d87-bd96-74d644179756",
+              "conditionName": "date rule",
+              "schemaVersion": "v1"
+            },
+            {
+              "parameters": [
+                {
+                  "type": "string",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "text"
+                },
+                {
+                  "type": "decimal",
+                  "operators": [],
+                  "isRequired": true,
+                  "parameterName": "decimal"
+                },
+                {
+                  "type": "integer",
+                  "operators": [],
+                  "isRequired": false,
+                  "parameterName": "integer"
+                }
+              ],
+              "conditionId": "597b9bd8-f40f-4edb-8730-1beb240e0230",
+              "conditionName": "rule 2",
+              "schemaVersion": "v1"
+            }
+          ],
+          "templateDataVersion": 1,
+          "subTemplateSnapshots": []
+        }
+      },
+      "expirationDate": "2034-01-23T11:29:40Z",
+      "issuanceDate": "2026-04-07T13:12:16Z",
+      "issuer": "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8",
+      "type": [
+        "VerifiableCredential"
+      ],
+      "proof": {
+        "type": "JsonWebSignature2020",
+        "created": "2026-04-07T13:12:16Z",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:web:argo.asd-stack.eu#key-1",
+        "jws": "eyJhbGciOiJSUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..kTCYt5XsITJX1CxPCT8yAV-TVIw5WEuts01mqpQy7UJiN5mgREEMGlv50aqzpqh4Qq_PbChOMqsLfRoPsnsgxD-WUcX16dUOqV0G_zS245-kronKb78cPktb3rk-BuQy72IFLN25DYuNzVBAh4vGHSrQyHUGlcTwLtjPAnKb78"
+      }
+    }
+  ],
+  "proof": {
+    "type": "JsonWebSignature2020",
+    "created": "2026-04-07T13:12:16Z",
+    "proofPurpose": "assertionMethod",
+    "verificationMethod": "did:web:argo.asd-stack.eu#key-1",
+    "jws": "eyJhbGciOiJSUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..kTCYt5XsITJX1CxPCT8yAV-TVIw5WEuts01mqpQy7UJiN5mgREEMGlv50aqzpqh4Qq_PbChOMqsLfRoPsnsgxD-WUcX16dUOqV0G_zS245-kronKb78cPktb3rk-BuQy72IFLN25DYuNzVBAh4vGHSrQyHUGlcTwLtjPAnKb78"
+  }
+}

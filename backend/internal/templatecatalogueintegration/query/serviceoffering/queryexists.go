@@ -32,7 +32,7 @@ LIMIT 1
 
 func (h *ServiceOfferingExistsHandler) Handle(qry ServiceOfferingExistsQry) (*ServiceOfferingExistsResult, error) {
 	if h.FCClient == nil {
-		return nil, fmt.Errorf("federated catalogue client is nil")
+		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
 	if qry.ServiceOfferingID == "" {
 		return nil, fmt.Errorf("service offering id is empty")

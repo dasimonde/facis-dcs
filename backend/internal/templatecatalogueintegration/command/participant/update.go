@@ -23,7 +23,7 @@ type Updater struct {
 
 func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	if h.FCClient == nil {
-		return fmt.Errorf("federated catalogue client is nil")
+		return client.ErrFederatedCatalogueNotConfigured
 	}
 	if cmd.Participant.ParticipantID == "" {
 		return fmt.Errorf("participant id is empty")

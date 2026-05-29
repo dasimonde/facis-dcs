@@ -21,7 +21,7 @@ type remoteSchema struct {
 // Unknown remote shapes are ignored. Schemas are never deleted from FC.
 func Sync(ctx context.Context, fc *fcclient.FederatedCatalogueClient) error {
 	if fc == nil {
-		return fmt.Errorf("federated catalogue client is nil")
+		return fcclient.ErrFederatedCatalogueNotConfigured
 	}
 
 	bundles, err := LoadBundles()

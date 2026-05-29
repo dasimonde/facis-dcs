@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"digital-contracting-service/internal/base/datatype"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
@@ -10,8 +11,10 @@ import (
 	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
 	database "digital-contracting-service/internal/templaterepository/db"
 	"digital-contracting-service/internal/templaterepository/db/pg"
+	"digital-contracting-service/internal/templaterepository/testutil"
 	"log"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -203,4 +206,77 @@ func createApprovalTasks(t *testing.T, ctx context.Context, db *sqlx.DB, repo *T
 	if err != nil {
 		t.Fatalf("Failed to commit transaction: %v", err)
 	}
+}
+
+// Federated Catalogue setup (env is read and validated here; testutil only uses passed config).
+
+func setupTestFC(t *testing.T) *fcclient.FederatedCatalogueClient {
+	t.Helper()
+
+	cfg := federatedCatalogueClientConfigFromEnv(t)
+	client, err := testutil.NewFCClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create Federated Catalogue client: %v", err)
+	}
+	if client == nil {
+		t.Fatalf("Federated Catalogue client is nil")
+	}
+
+	testutil.PrepareFC(t, client)
+
+	return client
+}
+
+func federatedCatalogueClientConfigFromEnv(t *testing.T) testutil.FCClientConfig {
+	t.Helper()
+
+	apiURL := strings.TrimSpace(os.Getenv("FEDERATED_CATALOGUE_API_URL"))
+	clientID := strings.TrimSpace(os.Getenv("FEDERATED_CATALOGUE_CLIENT_ID"))
+	clientSecret := strings.TrimSpace(os.Getenv("FEDERATED_CATALOGUE_CLIENT_SECRET"))
+	keycloakRealmURL := strings.TrimSpace(os.Getenv("OIDC_ISSUER_URL"))
+
+	if apiURL == "" {
+		t.Fatalf("FEDERATED_CATALOGUE_API_URL isn't set")
+	}
+	if clientID == "" {
+		t.Fatalf("FEDERATED_CATALOGUE_CLIENT_ID isn't set")
+	}
+	if clientSecret == "" {
+		t.Fatalf("FEDERATED_CATALOGUE_CLIENT_SECRET isn't set")
+	}
+	if keycloakRealmURL == "" {
+		t.Fatalf("OIDC_ISSUER_URL isn't set")
+	}
+
+	return testutil.FCClientConfig{
+		APIURL:           apiURL,
+		KeycloakRealmURL: keycloakRealmURL,
+		ClientID:         clientID,
+		ClientSecret:     clientSecret,
+	}
+}
+
+func getParticipantID() string {
+	return testutil.DefaultParticipantID
+}
+
+func loadExampleTemplateData(t *testing.T) *datatype.JSON {
+	t.Helper()
+	return testutil.LoadExampleTemplateData(t)
+}
+
+func seedFCTemplateResource(
+	t *testing.T,
+	ctx context.Context,
+	fc *fcclient.FederatedCatalogueClient,
+	participantID string,
+	did string,
+	version int,
+	documentNumber string,
+	templateType string,
+	name string,
+	templateData *datatype.JSON,
+) testutil.TemplateSeed {
+	t.Helper()
+	return testutil.SeedTemplateResource(t, ctx, fc, participantID, did, version, documentNumber, templateType, name, templateData)
 }

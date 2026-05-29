@@ -21,7 +21,7 @@ type GetContentHandler struct {
 
 func (h *GetContentHandler) Handle(qry GetContentQry) ([]byte, error) {
 	if h.FCClient == nil {
-		return nil, fmt.Errorf("federated catalogue client is nil")
+		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
 	id := strings.TrimSpace(qry.ID)
 	if id == "" {

@@ -21,7 +21,7 @@ type Deleter struct {
 
 func (h *Deleter) Handle(ctx context.Context, cmd DeleteCmd) error {
 	if h.FCClient == nil {
-		return fmt.Errorf("federated catalogue client is nil")
+		return fcclient.ErrFederatedCatalogueNotConfigured
 	}
 	if cmd.ID == "" {
 		return fmt.Errorf("participant id is empty")

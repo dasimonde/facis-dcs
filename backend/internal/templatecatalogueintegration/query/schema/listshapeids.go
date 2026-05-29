@@ -23,7 +23,7 @@ type ListShapeIDsHandler struct {
 
 func (h *ListShapeIDsHandler) Handle(_ ListShapeIDsQry) ([]string, error) {
 	if h.FCClient == nil {
-		return nil, fmt.Errorf("federated catalogue client is nil")
+		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
 
 	resp, err := h.FCClient.Get(h.Ctx, client.SchemaEndpointPath, nil)

@@ -4,53 +4,60 @@ import (
 	"context"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
+	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	database "digital-contracting-service/internal/templaterepository/db"
+	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
 	"digital-contracting-service/internal/templaterepository/query/contracttemplate"
+	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestRegister_RegisterContractTemplateDataInValidState(t *testing.T) {
-
+func TestRegister_RegisterContractTemplateFromFederatedCatalogue(t *testing.T) {
 	db := setupTestDB(t)
+	fc := setupTestFC(t)
 
 	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
 
 	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
 	repo := NewTestRepo()
+	participantID := getParticipantID()
+	templateData := loadExampleTemplateData(t)
 
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Approved, creator)
+	sourceDID, err := base.GetDID()
+	require.NoError(t, err)
 
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		RegisteredBy: creator,
-		UpdatedAt:    time.Now().UTC(),
-	}
+	version := 1
+	documentNumber := ""
+	name := "Test Template"
+	seedFCTemplateResource(t, ctx, fc, participantID, *sourceDID, version, documentNumber, contracttemplatetype.SubContract.String(), name, templateData)
+
+	newDID, err := base.GetDID()
+	require.NoError(t, err)
+
+	creator := "Test User"
 	handler := command.Registrar{
-		DB:     db,
-		CTRepo: repo.CTRepo,
-		ATRepo: repo.ATRepo,
-		RTRepo: repo.RTRepo,
+		DB:       db,
+		CTRepo:   repo.CTRepo,
+		FCClient: fc,
 	}
-	err = handler.Handle(ctx, cmd)
-	if err != nil {
-		t.Fatalf("Failed to submit contract template: %v", err)
-	}
+	err = handler.Handle(ctx, command.RegisterCmd{
+		DID:          *sourceDID,
+		NewDID:       *newDID,
+		Version:      version,
+		RegisteredBy: creator,
+	})
+	require.NoError(t, err)
 
 	qry := contracttemplate.GetByIDQry{
-		DID:         *did,
+		DID:         *newDID,
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
@@ -58,258 +65,97 @@ func TestRegister_RegisterContractTemplateDataInValidState(t *testing.T) {
 		CTRepo: repo.CTRepo,
 	}
 	contractTemplate, err := queryHandler.Handle(ctx, qry)
-	if err != nil {
-		t.Fatalf("Failed to query contract template: %v", err)
-	}
+	require.NoError(t, err)
 
-	assert.Equal(t, contractTemplate.DID, *did)
-	assert.Equal(t, contracttemplatestate.Registered, contractTemplate.State)
+	assert.Equal(t, *newDID, contractTemplate.DID)
+	assert.Equal(t, contracttemplatestate.Draft, contractTemplate.State)
+	assert.Equal(t, 1, contractTemplate.Version)
+	require.NotNil(t, contractTemplate.TemplateData)
 }
 
-func TestRegister_RegisterNonExistingContractTemplate(t *testing.T) {
-
+func TestRegister_FailsWhenTemplateNotInFederatedCatalogue(t *testing.T) {
 	db := setupTestDB(t)
+	fc := setupTestFC(t)
 
 	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
 	repo := NewTestRepo()
 
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		UpdatedAt:    time.Now().UTC(),
-		RegisteredBy: "Test User 1",
-	}
-	handler := command.Registrar{
-		DB:     db,
-		CTRepo: repo.CTRepo,
-		ATRepo: repo.ATRepo,
-		RTRepo: repo.RTRepo,
-	}
-	err = handler.Handle(ctx, cmd)
+	sourceDID, err := base.GetDID()
+	require.NoError(t, err)
+	newDID, err := base.GetDID()
+	require.NoError(t, err)
 
-	assert.NotNil(t, err)
+	handler := command.Registrar{
+		DB:       db,
+		CTRepo:   repo.CTRepo,
+		FCClient: fc,
+	}
+	err = handler.Handle(ctx, command.RegisterCmd{
+		DID:          *sourceDID,
+		NewDID:       *newDID,
+		Version:      1,
+		RegisteredBy: "Test User",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fcclient.ErrTemplateNotFoundInFederatedCatalogue))
+
+	tx, err := db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	_, err = repo.CTRepo.ReadDataByID(ctx, tx, *newDID)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, database.ErrContractTemplateNotFound))
+
+	fcQueryHandler := templatequery.GetByIDHandler{
+		Ctx:      ctx,
+		FCClient: fc,
+	}
+	fcTemplate, err := fcQueryHandler.Handle(templatequery.GetByIDQry{
+		DID:     *sourceDID,
+		Version: 1,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, fcTemplate)
 }
 
-func TestRegister_RegisterContractTemplateDataInDraftState(t *testing.T) {
-
+func TestRegister_FailsWhenFederatedCatalogueNotConfigured(t *testing.T) {
 	db := setupTestDB(t)
 
 	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
 
 	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
 	repo := NewTestRepo()
 
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Draft, creator)
+	sourceDID, err := base.GetDID()
+	require.NoError(t, err)
+	newDID, err := base.GetDID()
+	require.NoError(t, err)
 
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		RegisteredBy: creator,
-		UpdatedAt:    time.Now().UTC(),
-	}
-	handler := command.Registrar{
-		DB:     db,
-		RTRepo: repo.RTRepo,
-		ATRepo: repo.ATRepo,
-		CTRepo: repo.CTRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-
-	assert.NotNil(t, err)
-}
-
-func TestRegister_RegisterContractTemplateDataInSubmittedState(t *testing.T) {
-
-	db := setupTestDB(t)
-
-	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
-
-	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
-	defer cancel()
-
-	repo := NewTestRepo()
-
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
-
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		RegisteredBy: creator,
-		UpdatedAt:    time.Now().UTC(),
-	}
 	handler := command.Registrar{
 		DB:     db,
 		CTRepo: repo.CTRepo,
-		ATRepo: repo.ATRepo,
-		RTRepo: repo.RTRepo,
 	}
-	err = handler.Handle(ctx, cmd)
+	err = handler.Handle(ctx, command.RegisterCmd{
+		DID:          *sourceDID,
+		NewDID:       *newDID,
+		Version:      1,
+		RegisteredBy: "Test User",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, fcclient.ErrFederatedCatalogueNotConfigured))
 
-	assert.NotNil(t, err)
-}
+	tx, err := db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
-func TestRegister_RegisterContractTemplateDataInRejectedState(t *testing.T) {
-
-	db := setupTestDB(t)
-
-	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
-
-	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
-	defer cancel()
-
-	repo := NewTestRepo()
-
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Rejected, creator)
-
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		RegisteredBy: creator,
-		UpdatedAt:    time.Now().UTC(),
-	}
-	handler := command.Registrar{
-		DB:     db,
-		CTRepo: repo.CTRepo,
-		ATRepo: repo.ATRepo,
-		RTRepo: repo.RTRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-
-	assert.NotNil(t, err)
-}
-
-func TestRegister_RegisterContractTemplateDataInReviewedState(t *testing.T) {
-
-	db := setupTestDB(t)
-
-	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
-
-	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
-	defer cancel()
-
-	repo := NewTestRepo()
-
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Reviewed, creator)
-
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		RegisteredBy: creator,
-		UpdatedAt:    time.Now().UTC(),
-	}
-	handler := command.Registrar{
-		DB:     db,
-		CTRepo: repo.CTRepo,
-		ATRepo: repo.ATRepo,
-		RTRepo: repo.RTRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-
-	assert.NotNil(t, err)
-}
-
-func TestRegister_RegisterContractTemplateDataInRegisteredState(t *testing.T) {
-
-	db := setupTestDB(t)
-
-	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
-
-	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
-	defer cancel()
-
-	repo := NewTestRepo()
-
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Registered, creator)
-
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		RegisteredBy: creator,
-		UpdatedAt:    time.Now().UTC(),
-	}
-	handler := command.Registrar{
-		DB:     db,
-		CTRepo: repo.CTRepo,
-		ATRepo: repo.ATRepo,
-		RTRepo: repo.RTRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-
-	assert.NotNil(t, err)
-}
-
-func TestRegister_RegisterContractTemplateDataInArchivedState(t *testing.T) {
-
-	db := setupTestDB(t)
-
-	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
-
-	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
-	defer cancel()
-
-	repo := NewTestRepo()
-
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Deleted, creator)
-
-	cmd := command.RegisterCmd{
-		DID:          *did,
-		RegisteredBy: creator,
-		UpdatedAt:    time.Now().UTC(),
-	}
-	handler := command.Registrar{
-		DB:     db,
-		CTRepo: repo.CTRepo,
-		ATRepo: repo.ATRepo,
-		RTRepo: repo.RTRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-
-	assert.NotNil(t, err)
+	_, err = repo.CTRepo.ReadDataByID(ctx, tx, *newDID)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, database.ErrContractTemplateNotFound))
 }

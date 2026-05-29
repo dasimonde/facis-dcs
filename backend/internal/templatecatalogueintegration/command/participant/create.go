@@ -26,7 +26,7 @@ var ErrParticipantAlreadyExists = errors.New("participant already exists")
 
 func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	if h.FCClient == nil {
-		return fmt.Errorf("federated catalogue client is nil")
+		return client.ErrFederatedCatalogueNotConfigured
 	}
 	if cmd.Participant.ParticipantID == "" {
 		return fmt.Errorf("participant id is empty")
