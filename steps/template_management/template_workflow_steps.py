@@ -3,6 +3,7 @@
 import requests
 from behave import given, then, when
 
+from core.utils import is_uuid
 from steps.support.services.template_service import TemplateService
 from steps.support.api_client import (
     template_archive_url,
@@ -373,6 +374,11 @@ def step_when_search_templates(context, keyword):
         timeout=context.http_timeout_seconds,
     )
 
+@when('I am authenticated with roles: "{roles}"')
+def step_when_authenticated_with_roles(context, roles):
+    role_list = [role.strip() for role in roles.split(",")]
+    AuthService.set_headers_for_roles(context, role_list)
+
 @when('I try to search for templates with name "{name}" "{count}"')
 def step_when_search_templates(context, name, count):
     for _ in range(int(count)):
@@ -382,6 +388,11 @@ def step_when_search_templates(context, name, count):
             headers=getattr(context, "headers", {}),
             timeout=context.http_timeout_seconds,
         )
+
+@when('the request is denied because of too many failed attempts')
+def step_when_denied_to_many_attempts(context):
+    response = context.requests_response.json()
+    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
 
 @when('I search for templates with name "{name}"')
 def step_when_search_templates(context, name):
@@ -594,6 +605,8 @@ def step_then_template_assigned_uuid(context):
     body = context.requests_response.json()
     did = body.get("did")
     assert isinstance(did, str) and did.strip(), f"Expected identifier, got: {body}"
+    uuid = did.split(":")[-1]
+    assert is_uuid(uuid), f"Expected did {uuid} to be a valid UUID"
 
 
 @then('the template has a resolvable DID')

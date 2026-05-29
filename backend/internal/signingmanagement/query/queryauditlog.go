@@ -31,18 +31,18 @@ func (h *Auditor) Handle(ctx context.Context, qry GetAuditLogQry) ([]datatype.Au
 	}
 	defer tx.Rollback()
 
-	result, err := h.ATrailReader.ReadAuditLogEntriesByComponentAndDID(ctx, tx, componenttype.ContractTemplateRepo, qry.DID)
+	result, err := h.ATrailReader.ReadAuditLogEntriesByComponentAndDID(ctx, tx, componenttype.SignatureManagement, qry.DID)
 	if err != nil {
 		return nil, err
 	}
 
 	evt := signingmanagementevents.AuditEvt{
 		DID:           qry.DID,
-		ComponentType: componenttype.ContractTemplateRepo,
+		ComponentType: componenttype.SignatureManagement,
 		AuditedBy:     qry.AuditedBy,
 		OccurredAt:    time.Now().UTC(),
 	}
-	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
+	err = event.Create(ctx, tx, evt, componenttype.SignatureManagement)
 	if err != nil {
 		return nil, fmt.Errorf("could not create event: %w", err)
 	}

@@ -14,7 +14,7 @@ const (
 	SignatureManagement       ComponentType = "SIGNATURE_MANAGEMENT"
 )
 
-var validFlag = map[ComponentType]bool{
+var validType = map[ComponentType]bool{
 	ContractTemplateRepo:      true,
 	ContractWorkflowEngine:    true,
 	ProcessAuditAndCompliance: true,
@@ -32,7 +32,7 @@ func NewComponentType(s string) (ComponentType, error) {
 // IsValid checks if the ComponentType is a valid role
 func (f ComponentType) IsValid() bool {
 	upper := ComponentType(strings.ToUpper(string(f)))
-	return validFlag[upper]
+	return validType[upper]
 }
 
 // String returns the string representation of the ComponentType

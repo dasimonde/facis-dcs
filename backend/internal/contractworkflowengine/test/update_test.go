@@ -20,7 +20,7 @@ func TestUpdate_UpdateContractDataInDraftState(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestUpdate_UpdateNonExistingContract(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestUpdate_UpdateContractDataInDraftStateWithInvalidUser(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestUpdate_UpdateContractDataInInvalidState(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}

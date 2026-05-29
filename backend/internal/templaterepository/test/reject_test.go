@@ -4,6 +4,7 @@ import (
 	"context"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
@@ -20,7 +21,7 @@ func TestCreate_RejectContractTemplateInReviewedState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestCreate_RejectContractTemplateInReviewedStateWithInvalidUser(t *testing.
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestCreate_RejectNonExistingContractTemplate(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestCreate_RejectContractTemplateInDraftState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestCreate_RejectContractTemplateInApprovedState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestCreate_RejectContractTemplateAfterUpdate(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}

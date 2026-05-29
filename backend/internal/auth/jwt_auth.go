@@ -22,16 +22,16 @@ import (
 //	    auth.JWTAuthenticator
 //	}
 type JWTAuthenticator struct {
-	Validator *middleware.OIDCValidator
-	DB        *sqlx.DB
-	LARepo    db.LoginAttemptRepo
-	LockRepo  db.IPLockoutRepo
+	Validator    *middleware.OIDCValidator
+	DB           *sqlx.DB
+	AAttemptRepo db.AccessAttemptRepo
+	LockRepo     db.IPLockoutRepo
 }
 
 // NewJWTAuthenticator returns a JWTAuthenticator backed by the given OIDC
 // validator.
-func NewJWTAuthenticator(v *middleware.OIDCValidator, db *sqlx.DB, laRepo db.LoginAttemptRepo, lockRepo db.IPLockoutRepo) JWTAuthenticator {
-	return JWTAuthenticator{Validator: v, DB: db, LARepo: laRepo, LockRepo: lockRepo}
+func NewJWTAuthenticator(v *middleware.OIDCValidator, db *sqlx.DB, aAttemptRepo db.AccessAttemptRepo, lockRepo db.IPLockoutRepo) JWTAuthenticator {
+	return JWTAuthenticator{Validator: v, DB: db, AAttemptRepo: aAttemptRepo, LockRepo: lockRepo}
 }
 
 // JWTAuth validates a JWT token via the OIDC provider and checks that the
@@ -95,7 +95,7 @@ func (a JWTAuthenticator) logAttempt(ctx context.Context, ip string, attemptBy *
 	}
 	defer tx.Rollback()
 
-	_ = a.LARepo.Create(ctx, tx, db.LoginAttempt{
+	_ = a.AAttemptRepo.Create(ctx, tx, db.AccessAttempt{
 		IPAddress:   ip,
 		AttemptBy:   attemptBy,
 		AttemptedAt: time.Now(),
@@ -114,7 +114,7 @@ func (a JWTAuthenticator) checkAndLock(ctx context.Context, ip string) error {
 	}
 	defer tx.Rollback()
 
-	count, err := a.LARepo.CountFailedAttemptsByIP(ctx, tx, ip, time.Now().Add(-conf.LoginLockoutDuration()))
+	count, err := a.AAttemptRepo.CountFailedAttemptsByIP(ctx, tx, ip, time.Now().Add(-conf.LoginLockoutDuration()))
 
 	if err == nil && count >= conf.LoginAttemptsThresholdInDuration() {
 		lockUntil := time.Now().Add(conf.LoginLockoutDuration())

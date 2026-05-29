@@ -96,9 +96,9 @@ func TestSearch_ReturnsTemplatesPostedToFederatedCatalogue(t *testing.T) {
 	participantID := getParticipantID()
 	templateData := loadExampleTemplateData(t)
 
-	didOne, err := base.GetDID()
+	didOne, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
-	didTwo, err := base.GetDID()
+	didTwo, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	const nameOne = "Catalogue Search Template One"
@@ -130,9 +130,9 @@ func TestSearch_FiltersByVersionAfterPostingSDToFederatedCatalogue(t *testing.T)
 	participantID := getParticipantID()
 	templateData := loadExampleTemplateData(t)
 
-	didV1, err := base.GetDID()
+	didV1, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
-	didV2, err := base.GetDID()
+	didV2, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 	const nameOne = "Catalogue Search Template V1"
 	const nameTwo = "Catalogue Search Template V2"
@@ -166,7 +166,7 @@ func TestSearch_FindsPublishedTemplateByMatchingName(t *testing.T) {
 	repo := NewTestRepo()
 	templateData := loadExampleTemplateData(t)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	const publishedName = "Catalogue Search Published Template"
@@ -197,7 +197,7 @@ func TestSearch_DoesNotFindPublishedTemplateByNonMatchingName(t *testing.T) {
 	repo := NewTestRepo()
 	templateData := loadExampleTemplateData(t)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	const publishedName = "Catalogue Search Published Template"
@@ -226,7 +226,7 @@ func TestSearch_FindsTemplatePublishedToFederatedCatalogue(t *testing.T) {
 	repo := NewTestRepo()
 	templateData := loadExampleTemplateData(t)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	const publishedName = "Catalogue Search Published By DID"

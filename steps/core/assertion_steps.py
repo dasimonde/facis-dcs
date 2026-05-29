@@ -27,15 +27,15 @@ def step_then_denied_credential_invalid(context):
     response = context.requests_response.json()
     assert context.requests_response.status_code in (401, 403) and "token is expired" in response["message"], response
 
-@then('the request is denied because of too many failed attempts')
-def step_then_denied_to_many_attempts(context):
-    response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
-
 
 @then("the request is denied")
 def step_then_denied(context):
     assert context.requests_response.status_code in (401, 403), context.requests_response.text
+
+@then('the request is denied because of too many failed attempts')
+def step_then_denied_to_many_attempts(context):
+    response = context.requests_response.json()
+    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
 
 # ---------------------------------------------------------------------------
 # Generic HTTP response assertions

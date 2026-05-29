@@ -4,12 +4,13 @@ import (
 	"context"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
+	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
 	database "digital-contracting-service/internal/templaterepository/db"
-	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
 	"digital-contracting-service/internal/templaterepository/query/contracttemplate"
 	"errors"
 	"testing"
@@ -31,7 +32,7 @@ func TestRegister_RegisterContractTemplateFromFederatedCatalogue(t *testing.T) {
 	participantID := getParticipantID()
 	templateData := loadExampleTemplateData(t)
 
-	sourceDID, err := base.GetDID()
+	sourceDID, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	version := 1
@@ -39,7 +40,7 @@ func TestRegister_RegisterContractTemplateFromFederatedCatalogue(t *testing.T) {
 	name := "Test Template"
 	seedFCTemplateResource(t, ctx, fc, participantID, *sourceDID, version, documentNumber, contracttemplatetype.SubContract.String(), name, templateData)
 
-	newDID, err := base.GetDID()
+	newDID, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	creator := "Test User"
@@ -84,9 +85,9 @@ func TestRegister_FailsWhenTemplateNotInFederatedCatalogue(t *testing.T) {
 
 	repo := NewTestRepo()
 
-	sourceDID, err := base.GetDID()
+	sourceDID, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
-	newDID, err := base.GetDID()
+	newDID, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	handler := command.Registrar{
@@ -133,9 +134,9 @@ func TestRegister_FailsWhenFederatedCatalogueNotConfigured(t *testing.T) {
 
 	repo := NewTestRepo()
 
-	sourceDID, err := base.GetDID()
+	sourceDID, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
-	newDID, err := base.GetDID()
+	newDID, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	handler := command.Registrar{

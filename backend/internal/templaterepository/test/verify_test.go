@@ -4,6 +4,7 @@ import (
 	"context"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
@@ -18,7 +19,7 @@ func TestVerify_VerifyContractTemplateAsReviewer(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestVerify_VerifyNonExistingContractTemplate(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}

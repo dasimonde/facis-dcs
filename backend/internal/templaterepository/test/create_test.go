@@ -19,7 +19,7 @@ func TestCreate_CreateNewContractTemplate(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}

@@ -44,7 +44,7 @@ func TestPublish_ApprovedTemplatePublishesToFCAndUpdatesState(t *testing.T) {
 	participantID := getParticipantID()
 	templateData := loadExampleTemplateData(t)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	approvedTemplateForPublish(t, db, repo, did, "Test User", templateData)
@@ -93,7 +93,7 @@ func TestPublish_FailsWhenTemplateNotApproved(t *testing.T) {
 	defer cancel()
 
 	repo := NewTestRepo()
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Draft, "Test User")
@@ -144,7 +144,7 @@ func TestPublish_PublishesWhenFCTemplateAlreadyExists(t *testing.T) {
 	participantID := getParticipantID()
 	templateData := loadExampleTemplateData(t)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	require.NoError(t, err)
 
 	approvedTemplateForPublish(t, db, repo, did, "Test User", templateData)

@@ -22,7 +22,7 @@ func TestUpdateManage_UpdateContractTemplateDataInDraftState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestUpdateManage_UpdateContractTemplateDataInSubmitState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestUpdateManage_UpdateContractTemplateDataInRejectedState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestUpdateManage_UpdateContractTemplateDataInReviewedState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestUpdateManage_UpdateContractTemplateDataInApproveState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestUpdateManage_UpdateContractTemplateDataInPublishedState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestUpdateManage_UpdateContractTemplateDataInArchiveState(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestUpdateManage_UpdateNonExistingContractTemplate(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestUpdateManage_SetContractTemplateStateFromDraftToDraft(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestUpdateManage_SetContractTemplateStateFromDraftToSubmitted(t *testing.T)
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestUpdateManage_SetContractTemplateStateFromDraftToRejected(t *testing.T) 
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -689,7 +689,7 @@ func TestUpdateManage_SetContractTemplateStateFromDraftToReviewed(t *testing.T) 
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -743,7 +743,7 @@ func TestUpdateManage_SetContractTemplateStateFromDraftToApproved(t *testing.T) 
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -797,7 +797,7 @@ func TestUpdateManage_SetContractTemplateStateFromDraftToPublished(t *testing.T)
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -851,7 +851,7 @@ func TestUpdateManage_SetContractTemplateStateFromDraftToArchive(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -926,7 +926,7 @@ func TestUpdateManage_SetContractTemplateStateFromSubmittedToDraft(t *testing.T)
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1028,7 +1028,7 @@ func TestUpdateManage_SetContractTemplateStateFromReviewedToDraft(t *testing.T) 
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1130,7 +1130,7 @@ func TestUpdateManage_SetContractTemplateStateFromApprovedToDraft(t *testing.T) 
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1188,7 +1188,7 @@ func TestUpdateManage_SetContractTemplateStateFromReviewedToSubmitted(t *testing
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1291,7 +1291,7 @@ func TestUpdateManage_SetContractTemplateStateFromApprovedToSubmitted(t *testing
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1351,7 +1351,7 @@ func TestUpdateManage_SetContractTemplateStateFromApprovedToReviewed(t *testing.
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1411,7 +1411,7 @@ func TestUpdateManage_SetContractTemplateStateFromPublishedToDraft(t *testing.T)
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1465,7 +1465,7 @@ func TestUpdateManage_SetContractTemplateStateFromPublishedToSubmitted(t *testin
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1519,7 +1519,7 @@ func TestUpdateManage_SetContractTemplateStateFromPublishedToApproved(t *testing
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1573,7 +1573,7 @@ func TestUpdateManage_SetContractTemplateStateFromPublishedToArchived(t *testing
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1627,7 +1627,7 @@ func TestUpdateManage_SetContractTemplateStateFromArchivedToDraft(t *testing.T) 
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1681,7 +1681,7 @@ func TestUpdateManage_SetContractTemplateStateFromArchivedToSubmitted(t *testing
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1735,7 +1735,7 @@ func TestUpdateManage_SetContractTemplateStateFromArchivedToApproved(t *testing.
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -1789,7 +1789,7 @@ func TestUpdateManage_SetContractTemplateStateFromArchivedToPublished(t *testing
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}

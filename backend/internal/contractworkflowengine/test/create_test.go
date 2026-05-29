@@ -18,7 +18,7 @@ func TestCreate_CreateNewContract(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}

@@ -35,6 +35,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -86,6 +87,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	dcsIssuer := "localhost"
+	if os.Getenv("DCS_ISSUER") == "" {
+		log.Printf(ctx, "DCS_ISSUER configuration missing: DCS_ISSUER will be set to localhost as issuer")
+	} else {
+		dcsIssuer = os.Getenv("DCS_ISSUER")
+		if strings.Contains(dcsIssuer, ":") {
+			log.Fatalf(ctx, nil, "DCS_ISSUER must not contain service port")
+		}
+	}
+
 	// Connect to NATS (use NATS_URL env var or default)
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
@@ -112,9 +123,9 @@ func main() {
 		log.Fatalf(ctx, err, "failed to initialize OIDC validator")
 	}
 
-	laRepo := &pg.PostgresLoginAttemptRepo{}
+	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
 	lockRepo := &pg.PostgresIPLockoutRepo{}
-	jwtAuth := auth.NewJWTAuthenticator(oidcValidator, db, laRepo, lockRepo)
+	jwtAuth := auth.NewJWTAuthenticator(oidcValidator, db, aAttemptRepo, lockRepo)
 
 	ctRepo := tplrepo.PostgresContractTemplateRepo{}
 	ctRTRepo := tplrepo.PostgresReviewTaskRepo{}

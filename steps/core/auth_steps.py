@@ -2,9 +2,11 @@
 
 import os
 
+import requests
 from behave import given
 
 from steps.support.services.template_service import TemplateService
+from support.api_client import template_search_url
 from support.services.auth_service import AuthService
 
 @given('I hold an expired credential with roles: "{roles}"')
@@ -33,6 +35,10 @@ def step_given_authenticated_service(context):
         "Content-Type": "application/json",
     }
 
+@given('the request is denied because of too many failed attempts')
+def step_given_denied_to_many_attempts(context):
+    response = context.requests_response.json()
+    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
 
 @given("a system service provides an invalid API key")
 def step_given_invalid_api_key(context):
@@ -41,6 +47,15 @@ def step_given_invalid_api_key(context):
         "Content-Type": "application/json",
     }
 
+@given('I try to search for templates with name "{name}" "{count}"')
+def step_given_search_templates(context, name, count):
+    for _ in range(int(count)):
+        context.requests_response = requests.get(
+            template_search_url(context),
+            params={"name": name},
+            headers=getattr(context, "headers", {}),
+            timeout=context.http_timeout_seconds,
+        )
 
 @given('template "{template_name}" is available')
 def step_given_template_available(context, template_name):

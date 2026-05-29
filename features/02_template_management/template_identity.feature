@@ -15,5 +15,4 @@ Feature: Template Identity and Traceability
     And template "Standard NDA" has a DID assigned
     When I retrieve template by DID
     Then I receive the correct template
-    And the DID resolution is verified
 

@@ -1,10 +1,10 @@
-@skip
 @UC-03-02 @FR-CWE-08 @FR-CWE-14 @FR-CWE-18 @FR-CWE-07
 Feature: Contract Negotiation
   Contract Managers and Contract Reviewers negotiate contract terms through
   commenting, version tracking, and structured negotiation workflows with
   redline proposals and full audit logs.
 
+  @clean_db
   Scenario: Open draft contract for negotiation
     Given I am authenticated with roles: "Contract Manager"
     And contract "Service Agreement" is in "Draft" status
@@ -12,6 +12,7 @@ Feature: Contract Negotiation
     Then the negotiation interface is displayed
     And I can view all contract clauses
 
+  @clean_db
   Scenario: Add comment to contract clause
     Given I am authenticated with roles: "Contract Reviewer"
     And contract "Service Agreement" is open for negotiation
@@ -20,7 +21,7 @@ Feature: Contract Negotiation
     And the comment is attributed to my identity
     And the comment includes a timestamp
 
-  @skip
+  @clean_db
   Scenario: Propose redline edit to contract clause
     Given I am authenticated with roles: "Contract Reviewer"
     And contract "Service Agreement" is open for negotiation

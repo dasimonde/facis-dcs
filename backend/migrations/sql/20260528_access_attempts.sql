@@ -1,4 +1,4 @@
-CREATE TABLE login_attempts (
+CREATE TABLE access_attempts (
     id          BIGSERIAL PRIMARY KEY,
     attempt_by     VARCHAR(255),
     ip_address  VARCHAR(45),

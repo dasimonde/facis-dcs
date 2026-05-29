@@ -63,7 +63,7 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
@@ -96,7 +96,7 @@ func (s *templateRepositorysrvc) Copy(ctx context.Context, req *templatereposito
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
@@ -573,7 +573,7 @@ func (s *templateRepositorysrvc) Register(ctx context.Context, req *templaterepo
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	newDID, err := base.GetDID()
+	newDID, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}

@@ -3,8 +3,6 @@ Feature: Archive Contract Templates
   Template Managers deprecate outdated templates to prevent new contract generation
   and delete deprecated templates that are no longer needed.
 
-  # UC-02-05: Deprecate Contract Template
-
   @clean_db
   Scenario: Deprecate an active template
     Given I am authenticated with roles: "Template Manager"
@@ -34,6 +32,7 @@ Feature: Archive Contract Templates
     When I delete template "Standard NDA"
     Then I receive error "invalid contract template state"
 
+  @clean_db
   Scenario: Unauthorized role cannot delete template
     Given I am authenticated with roles: "Template Reviewer"
     And template "Old NDA" is in "Submitted" status

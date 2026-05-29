@@ -62,7 +62,7 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}

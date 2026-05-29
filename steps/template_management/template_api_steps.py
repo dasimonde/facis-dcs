@@ -2,6 +2,7 @@
 
 from behave import then, when
 
+from core.utils import is_uuid
 from steps.support.services.template_service import TemplateService
 from steps.support.api_client import (
     contract_create_url,
@@ -239,6 +240,10 @@ def step_then_uuid_unique(context):
     body = context.requests_response.json()
     did = body.get("did")
     assert isinstance(did, str) and did.strip(), f"No identifier in response: {body}"
+
+    uuid = did.split(":")[-1]
+    assert is_uuid(uuid), f"Expected did {uuid} to be a valid UUID"
+
     # DID format encodes uniqueness; a second create produces a different DID.
     payload = {
         "template_type": "FRAME_CONTRACT",
@@ -253,16 +258,7 @@ def step_then_uuid_unique(context):
         f"Two templates received identical DID '{did}' — UUIDs are not unique"
     )
 
+    second_uuid = second_did.split(":")[-1]
+    assert is_uuid(second_uuid), f"Expected did {second_uuid} to be a valid UUID"
 
-# ---------------------------------------------------------------------------
-# DID resolution
-# ---------------------------------------------------------------------------
-
-@then("the DID resolution is verified")
-def step_then_did_resolution_verified(context):
-    body = context.requests_response.json()
-    did = body.get("did")
-    assert did, f"No DID in response: {body}"
-    retrieve = get_with_headers(context, template_retrieve_by_id_url(context, did))
-    assert retrieve.status_code == 200, f"DID {did} could not be resolved: {retrieve.text}"
-    assert retrieve.json().get("did") == did
+    assert uuid != second_uuid, f"Expected unique UUIDs"

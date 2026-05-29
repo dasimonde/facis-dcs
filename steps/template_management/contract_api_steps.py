@@ -81,8 +81,9 @@ def step_when_attempt_create_contract_from_template(context, template_name):
 def step_then_contract_unique_id(context):
     body = context.requests_response.json()
     did = body.get("did")
-    assert is_uuid(did), f"Expected the DID {did} is UUID"
     assert isinstance(did, str) and did.strip(), f"Expected a contract DID, got: {body}"
+    uuid = did.split(":")[-1]
+    assert is_uuid(uuid), f"Expected {uuid} is a valid UUID"
 
 
 # ---------------------------------------------------------------------------

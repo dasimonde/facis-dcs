@@ -51,8 +51,8 @@ class ContractService:
             "did": did,
             "updated_at": updated_at,
             "reviewers": [AuthService.username_for_roles(["Contract Reviewer"])],
-            "approver": AuthService.username_for_roles(["Contract Approver"]),
-            "negotiators": [],
+            "approvers": [AuthService.username_for_roles(["Contract Approvers"])],
+            "negotiators": [AuthService.username_for_roles(["Contract Reviewer"])],
         }
 
     @staticmethod
@@ -62,7 +62,6 @@ class ContractService:
             "did": did,
             "updated_at": updated_at,
             "forward_to": "approval",
-            "approver": AuthService.username_for_roles(["Contract Approver"]),
         }
 
     @staticmethod
@@ -147,6 +146,35 @@ class ContractService:
         context.contract_dids[contract_name] = c_did
         context.contract_updated_at[contract_name] = updated_at
         context.contract_seed_headers[contract_name] = creator_h
+
+    @staticmethod
+    def _create_contract_in_negotiation(context, contract_name: str):
+        t_did = ContractService._create_approved_template_for_contract(context)
+        creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
+        create_resp = post_json(context, contract_create_url(context), {"did": t_did}, headers=creator_h)
+        assert create_resp.status_code == 200, create_resp.text
+        c_did = create_resp.json().get("did")
+
+        retrieve_resp = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
+        assert retrieve_resp.status_code == 200, retrieve_resp.text
+        updated_at = retrieve_resp.json().get("updated_at")
+
+        submit_payload = ContractService._contract_submit_payload(context, c_did, updated_at)
+        retrieve_resp = post_json(context, contract_submit_url(context), submit_payload, headers=creator_h)
+        assert retrieve_resp.status_code == 200, retrieve_resp.text
+
+        retrieve_resp = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
+        assert retrieve_resp.status_code == 200, retrieve_resp.text
+        assert retrieve_resp.json().get("state") == 'NEGOTIATION', f"Contract should be in NEGOTIATION state, but it is {retrieve_resp.json().get("state")}"
+        updated_at = retrieve_resp.json().get("updated_at")
+
+        ContractService._ensure_store(context, "contract_dids", {})
+        ContractService._ensure_store(context, "contract_updated_at", {})
+        ContractService._ensure_store(context, "contract_seed_headers", {})
+        context.contract_dids[contract_name] = c_did
+        context.contract_updated_at[contract_name] = updated_at
+        context.contract_seed_headers[contract_name] = creator_h
+
 
     @staticmethod
     def _contract_data(context, contract_name: str):

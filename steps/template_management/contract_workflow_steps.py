@@ -46,7 +46,7 @@ def step_given_contract_requires_my_approval(context, name):
 
 @given('contract "{name}" is open for negotiation')
 def step_given_contract_open_for_negotiation(context, name):
-    ContractService._create_contract_in_draft(context, name)
+    ContractService._create_contract_in_negotiation(context, name)
 
 
 @given('contract "{name}" negotiation is complete')

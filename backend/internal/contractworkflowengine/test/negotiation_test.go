@@ -21,7 +21,7 @@ func TestNegotiation_CreateNegotiation(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestNegotiation_CreateNegotiationWithInvalidUser(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestNegotiation_AllNegotiatorsAcceptChangeRequest(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestNegotiation_OneNegotiatorRejectChangeRequest(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestNegotiation_OneAcceptionOneRejectionOfChangeRequest(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestNegotiation_TestForOpenNegotiationDecisions(t *testing.T) {
 
 	cleanupContractTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.ContractResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -559,7 +559,6 @@ func TestNegotiation_TestForOpenNegotiationDecisions(t *testing.T) {
 		AcceptedBy: negotiations[0].Negotiator,
 	}
 	acceptHandler := command.NegotiationAcceptor{
-
 		DB:     db,
 		CRepo:  repo.CRepo,
 		NTRepo: repo.NTRepo,
@@ -576,7 +575,7 @@ func TestNegotiation_TestForOpenNegotiationDecisions(t *testing.T) {
 		t.Fatalf("Failed to begin transaction: %v", err)
 	}
 
-	hasOpenNegotiationDecisions, err := repo.NRepo.HasOpenNegotiationDecisions(ctx, tx, *did, nil)
+	hasOpenNegotiationDecisions, err := repo.NRepo.HasOpenNegotiationDecisions(ctx, tx, *did, 1, negotiations[0].Negotiator)
 	if err != nil {
 		t.Fatalf("Failed to check for open negotiation decisions %v", err)
 	}

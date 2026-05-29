@@ -4,6 +4,7 @@ import (
 	"context"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
 	db2 "digital-contracting-service/internal/templaterepository/db"
@@ -18,7 +19,7 @@ func TestReview_CreateReviewTasks(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestReview_CreateReviewTasksAndApproveThem(t *testing.T) {
 
 	cleanupContractTemplateTable(t, db)
 
-	did, err := base.GetDID()
+	did, err := base.GetDID(datatype.TemplateResourceType)
 	if err != nil {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
