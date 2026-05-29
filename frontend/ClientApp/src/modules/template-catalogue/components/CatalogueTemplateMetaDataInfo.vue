@@ -1,12 +1,9 @@
 <template>
-  <div class="card bg-base-100 border border-base-300 shadow-sm">
+  <div class="card border border-base-300 bg-base-100 shadow-sm">
     <div class="card-body">
       <h3 class="card-title text-sm">Meta Data</h3>
 
-      <div
-        v-if="customMetaData.length"
-        class="overflow-x-auto rounded-box border border-base-content/5 bg-base-100"
-      >
+      <div v-if="customMetaData.length" class="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
         <table class="table table-sm">
           <thead>
             <tr>
@@ -23,9 +20,7 @@
         </table>
       </div>
 
-      <div v-else class="text-sm text-base-content/60">
-        No meta data available.
-      </div>
+      <div v-else class="text-sm text-base-content/60">No meta data available.</div>
     </div>
   </div>
 </template>

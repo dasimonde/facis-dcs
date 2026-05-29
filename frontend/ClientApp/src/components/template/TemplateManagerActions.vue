@@ -85,10 +85,7 @@ const refreshPublishedState = async () => {
 }
 
 onMounted(refreshPublishedState)
-watch(
-  () => [props.template.did, props.template.version, props.template.state] as const,
-  refreshPublishedState,
-)
+watch(() => [props.template.did, props.template.version, props.template.state] as const, refreshPublishedState)
 
 const archive = async () => {
   try {
@@ -111,7 +108,7 @@ const publish = async () => {
     if (!isCanceled) {
       isPublishing.value = true
       await contractTemplateService.publish({ did: props.template.did, updated_at: props.template.updated_at })
-      router.push({ name: ROUTES.TEMPLATES.LIST })
+      await router.push({ name: ROUTES.TEMPLATES.LIST })
     }
   } catch (err) {
     console.error('Publishing failed:', err)
@@ -139,7 +136,7 @@ const exportPdf = async () => {
     :disabled="isPublishedLoading || isPublished || isPublishing"
     @click="publish"
   >
-    <span v-if="isPublishing" class="loading loading-spinner loading-sm"></span>
+    <span v-if="isPublishing" class="loading loading-sm loading-spinner"></span>
     {{ isPublishedLoading ? 'Publish' : isPublished ? 'Published' : 'Publish' }}
   </button>
   <button v-if="canArchive" :class="[filteredClass, 'btn-error']" @click="archive">Archive</button>

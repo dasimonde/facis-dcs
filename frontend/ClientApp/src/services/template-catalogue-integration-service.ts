@@ -7,6 +7,7 @@ import type {
   TemplateCatalogueGetOtherParticipantsRequest,
   TemplateCatalogueRetrieveByIdRequest,
   TemplateCatalogueRetrieveRequest,
+  TemplateCatalogueSearchRequest,
   TemplateCatalogueUpdateParticipantRequest,
   TemplateCatalogueCreateServiceOfferingRequest,
   TemplateCatalogueDeleteServiceOfferingRequest,
@@ -143,14 +144,18 @@ export const templateCatalogueIntegrationService = {
     request: TemplateCatalogueRetrieveByIdRequest,
   ): Promise<TemplateCatalogueRetrieveByIdResponse | null> {
     return http
-      .get<TemplateCatalogueRetrieveByIdResponse | null>(
-        `/catalogue/template/retrieve/${request.did}`,
-        {
-          params: {
-            version: request.version,
-          },
+      .get<TemplateCatalogueRetrieveByIdResponse | null>(`/catalogue/template/retrieve/${request.did}`, {
+        params: {
+          version: request.version,
         },
-      )
+      })
       .then((res) => res.data ?? null)
+  },
+
+  async search_template(request: TemplateCatalogueSearchRequest): Promise<TemplateCatalogueRetrieveResponse> {
+    return http
+      .get<TemplateCatalogueRetrieveResponse>('/catalogue/template/search', { params: request })
+      .then((res) => res.data)
+      .catch(() => ({ totalCount: 0, items: [] }))
   },
 }

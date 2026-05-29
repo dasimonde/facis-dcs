@@ -41,6 +41,22 @@ var TemplateCatalogueRetrieveResponse = Type("TemplateCatalogueRetrieveResponse"
 	Required("totalCount", "items")
 })
 
+var TemplateCatalogueSearchRequest = Type("TemplateCatalogueSearchRequest", func() {
+	Description("Search template catalogues in Federated Catalogue")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract template")
+	Attribute("document_number", String, "The number of the contract template")
+	Attribute("version", Int, "The version of the contract template")
+	Attribute("name", String, "The name of the contract template")
+	Attribute("description", String, "A description for that template")
+	Attribute("offset", Int, "Pagination offset; values less than 1 start at the beginning")
+	Attribute("limit", Int, "Pagination limit; values less than 1 return all matches")
+
+	Required("offset", "limit")
+})
+
 var TemplateCatalogueRetrieveByIdRequest = Type("TemplateCatalogueRetrieveByIdRequest", func() {
 	Description("Retrieve a template catalogue by did and version")
 
@@ -549,6 +565,40 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 			DELETE("/catalogue/service-offering/delete")
 			Response(StatusOK)
 			Response("not_found", StatusNotFound)
+		})
+	})
+
+	// GET /catalogue/template/search
+	Method("search_template", func() {
+		Description("Search templates in XFSC Catalogue by metadata fields.")
+		Meta("dcs:requirements", "DCS-IR-SI-01")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Manager")
+			Scope("Contract Signer")
+		})
+
+		Payload(TemplateCatalogueSearchRequest)
+		Result(TemplateCatalogueRetrieveResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/catalogue/template/search")
+			Param("did")
+			Param("document_number")
+			Param("version")
+			Param("name")
+			Param("description")
+			Param("offset")
+			Param("limit")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
 		})
 	})
 

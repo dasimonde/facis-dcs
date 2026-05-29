@@ -99,4 +99,3 @@ export interface ContractTemplatePublishRequest {
   did: string
   updated_at: string
 }
-

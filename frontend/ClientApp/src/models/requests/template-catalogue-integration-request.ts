@@ -15,6 +15,16 @@ export interface TemplateCatalogueRetrieveByIdRequest {
   version: number
 }
 
+export interface TemplateCatalogueSearchRequest {
+  did?: string
+  document_number?: string
+  version?: number
+  name?: string
+  description?: string
+  offset: number
+  limit: number
+}
+
 // ---- Participant management ----
 
 export type TemplateCatalogueGetCurrentParticipantRequest = Record<string, unknown>

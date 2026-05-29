@@ -1,13 +1,10 @@
 <template>
-  <div class="flex flex-col min-h-full -mx-4 md:-mx-8 -my-4 md:-my-8">
-
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
     <!-- Tabs -->
-    <div class="sticky top-0 z-10 shrink-0 bg-base-100 border-b border-base-300">
-      <div class="max-w-4xl mx-auto px-6 pt-3">
-        <p class="text-xs font-black uppercase tracking-widest text-base-content/40 mb-2">
-          View Template Catalogue
-        </p>
-        <div role="tablist" class="tabs tabs-border tabs-lg">
+    <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
+      <div class="mx-auto max-w-4xl px-6 pt-3">
+        <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">View Template Catalogue</p>
+        <div role="tablist" class="tabs-border tabs tabs-lg">
           <a
             v-for="tab in tabs"
             :key="tab.id"
@@ -23,8 +20,8 @@
     </div>
 
     <!-- Tab Content -->
-    <div class="grow mt-5">
-      <div class="max-w-4xl mx-auto p-6">
+    <div class="mt-5 grow">
+      <div class="mx-auto max-w-4xl p-6">
         <div v-if="loading" class="px-4">Loading Template Catalogue...</div>
         <div v-else-if="error" class="px-4">{{ error }}</div>
         <div v-else>
@@ -36,18 +33,11 @@
     </div>
 
     <!-- Pinned Footer -->
-    <div
-      v-if="did"
-      class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100"
-    >
-      <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
+    <div v-if="did" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
-        <button
-          class="btn btn-primary flex-1"
-          :disabled="isRegisterDisabled"
-          @click="registerTemplate"
-        >
-          <span v-if="registerLoading" class="loading loading-spinner loading-sm"></span>
+        <button class="btn flex-1 btn-primary" :disabled="isRegisterDisabled" @click="registerTemplate">
+          <span v-if="registerLoading" class="loading loading-sm loading-spinner"></span>
           Register
         </button>
       </div>
@@ -68,6 +58,7 @@ import { useTemplateDraftStore } from '@template-repository/store/templateDraftS
 import CatalogueTemplateDetailsInfo from '@/modules/template-catalogue/components/CatalogueTemplateDetailsInfo.vue'
 import CatalogueTemplateMetaDataInfo from '@/modules/template-catalogue/components/CatalogueTemplateMetaDataInfo.vue'
 import CatalogueTemplatePreviewInfo from '@/modules/template-catalogue/components/CatalogueTemplatePreviewInfo.vue'
+import { TemplateType, type TemplateTypeValue } from '@template-repository/models/contract-templace'
 import { TemplateState } from '@/types/contract-template-state'
 import { ROUTES } from '@/router/router'
 import { storeToRefs } from 'pinia'
@@ -116,6 +107,13 @@ const isRegisterDisabled = computed(() => {
 
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
+function toTemplateType(value: string | undefined): TemplateTypeValue {
+  if (value === TemplateType.frameContract || value === TemplateType.subContract) {
+    return value
+  }
+  return TemplateType.subContract
+}
+
 watch(
   () => [did.value, version.value] as const,
   async () => {
@@ -157,7 +155,7 @@ watch(
         semanticConditions: templateData.semanticConditions ?? [],
         customMetaData: templateData.customMetaData ?? [],
         subTemplateSnapshots: templateData.subTemplateSnapshots ?? [],
-        templateType: data.template_type as any,
+        templateType: toTemplateType(data.template_type),
         state: TemplateState.draft,
         document_number: data.document_number ?? null,
         version: data.version ?? null,
@@ -165,8 +163,8 @@ watch(
         created_by: '',
         responsible_persons: null,
       })
-    } catch (e: any) {
-      error.value = e?.message || 'Error loading template catalogue'
+    } catch (e: unknown) {
+      error.value = e instanceof Error && e.message ? e.message : 'Error loading template catalogue'
       catalogue.value = null
     } finally {
       loading.value = false
@@ -177,7 +175,7 @@ watch(
 
 onMounted(() => {
   if (!contractTemplates.value.length && !localTemplatesLoading.value) {
-    templatesStore.loadTemplates()
+    void templatesStore.loadTemplates()
   }
 })
 
@@ -186,7 +184,7 @@ function setActiveTab(tabId: CatalogueTabId) {
 }
 
 async function registerTemplate() {
-  if (!catalogue.value || catalogue.value.version == null) return
+  if (catalogue.value?.version == null) return
 
   try {
     if (!confirmationModal.value) return
@@ -200,12 +198,11 @@ async function registerTemplate() {
     })
 
     await templatesStore.loadTemplates()
-    router.push({ name: ROUTES.TEMPLATES.VIEW, params: { did: registered.did } })
-  } catch (e: any) {
-    error.value = e?.message || 'Registration failed'
+    await router.push({ name: ROUTES.TEMPLATES.VIEW, params: { did: registered.did } })
+  } catch (e: unknown) {
+    error.value = e instanceof Error && e.message ? e.message : 'Registration failed'
   } finally {
     registerLoading.value = false
   }
 }
 </script>
-

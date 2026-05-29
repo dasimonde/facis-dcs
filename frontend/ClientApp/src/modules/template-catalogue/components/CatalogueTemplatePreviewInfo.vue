@@ -1,13 +1,13 @@
 <template>
-  <div class="card bg-base-100 border border-base-300 shadow-sm">
+  <div class="card border border-base-300 bg-base-100 shadow-sm">
     <div class="card-body">
-      <h3 class="card-title text-sm mb-3">Preview</h3>
+      <h3 class="mb-3 card-title text-sm">Preview</h3>
 
       <div
-        class="bg-base-100 border border-base-300 shadow-sm rounded-md overflow-hidden w-full max-w-4xl"
+        class="w-full max-w-4xl overflow-hidden rounded-md border border-base-300 bg-base-100 shadow-sm"
         style="aspect-ratio: 210 / 297"
       >
-        <div class="w-full h-full overflow-auto px-10 py-8">
+        <div class="h-full w-full overflow-auto px-10 py-8">
           <TemplatePreview
             :document-outline="documentOutline"
             :document-blocks="documentBlocks"
@@ -25,5 +25,6 @@ import { storeToRefs } from 'pinia'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 
-const { documentOutline, documentBlocks, semanticConditions, subTemplateSnapshots } = storeToRefs(useTemplateDraftStore())
+const { documentOutline, documentBlocks, semanticConditions, subTemplateSnapshots } =
+  storeToRefs(useTemplateDraftStore())
 </script>

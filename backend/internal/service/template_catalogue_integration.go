@@ -364,6 +364,29 @@ func (s *templateCatalogueIntegrationsrvc) DeleteServiceOffering(ctx context.Con
 	}, nil
 }
 
+func (s *templateCatalogueIntegrationsrvc) SearchTemplate(ctx context.Context, req *templatecatalogueintegration.TemplateCatalogueSearchRequest) (res *templatecatalogueintegration.TemplateCatalogueRetrieveResponse, err error) {
+	queryHandler := templatequery.SearchHandler{
+		Ctx:      ctx,
+		FCClient: s.fcClient,
+	}
+
+	qry := templatequery.SearchQry{
+		DID:            derefString(req.Did),
+		DocumentNumber: derefString(req.DocumentNumber),
+		Version:        derefInt(req.Version),
+		Name:           derefString(req.Name),
+		Description:    derefString(req.Description),
+		Offset:         req.Offset,
+		Limit:          req.Limit,
+	}
+
+	result, err := queryHandler.Handle(qry)
+	if err != nil {
+		return nil, templatecatalogueintegration.MakeInternalError(err)
+	}
+	return result, nil
+}
+
 // derefString safely dereferences a *string.
 // It returns an empty string when the pointer is nil.
 func derefString(v *string) string {
