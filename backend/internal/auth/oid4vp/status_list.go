@@ -3,6 +3,7 @@ package oid4vp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"goa.design/clue/log"
 )
 
 // Status list entry kinds: credentialStatus.type.
@@ -27,7 +30,34 @@ const (
 	maxStatusListResponseSize        = 16 << 20 // 16 MiB compressed/JSON/JWT response cap.
 )
 
-var defaultStatusListHTTPClient = &http.Client{Timeout: 10 * time.Second}
+var (
+	defaultStatusListHTTPClient = &http.Client{Timeout: 10 * time.Second}
+	statusListSkipIfUnavailable bool
+)
+
+// StatusListUnavailableError indicates the status list credential URL could not be fetched.
+type StatusListUnavailableError struct {
+	URI string
+	Err error
+}
+
+func (e *StatusListUnavailableError) Error() string {
+	return fmt.Sprintf("status list unavailable at %s: %v", e.URI, e.Err)
+}
+
+func (e *StatusListUnavailableError) Unwrap() error {
+	return e.Err
+}
+
+// ConfigureStatusListSkipIfUnavailable allows OID4VP login to proceed when status list URLs are unreachable.
+func ConfigureStatusListSkipIfUnavailable(skip bool) {
+	statusListSkipIfUnavailable = skip
+}
+
+func isStatusListUnavailable(err error) bool {
+	var unavailable *StatusListUnavailableError
+	return errors.As(err, &unavailable)
+}
 
 type statusListReference struct {
 	kind       string
@@ -284,6 +314,10 @@ func checkStatusList(rawClaims json.RawMessage) error {
 			err = fmt.Errorf("unsupported status list kind %q", ref.kind)
 		}
 		if err != nil {
+			if statusListSkipIfUnavailable && isStatusListUnavailable(err) {
+				log.Printf(ctx, "oid4vp status list check skipped (unavailable): %v", err)
+				continue
+			}
 			return err
 		}
 	}
@@ -375,23 +409,29 @@ func fetchStatusListBodyWithClient(ctx context.Context, client *http.Client, uri
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", uri, err)
+		return nil, &StatusListUnavailableError{URI: uri, Err: fmt.Errorf("GET %s: %w", uri, err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status list service returned %d", resp.StatusCode)
+		return nil, &StatusListUnavailableError{
+			URI: uri,
+			Err: fmt.Errorf("status list service returned %d", resp.StatusCode),
+		}
 	}
 
 	limited := io.LimitReader(resp.Body, maxStatusListResponseSize+1)
 	body, err := io.ReadAll(limited)
 
 	if err != nil {
-		return nil, fmt.Errorf("read status list response: %w", err)
+		return nil, &StatusListUnavailableError{URI: uri, Err: fmt.Errorf("read status list response: %w", err)}
 	}
 
 	if len(body) > maxStatusListResponseSize {
-		return nil, fmt.Errorf("status list response exceeds %d bytes", maxStatusListResponseSize)
+		return nil, &StatusListUnavailableError{
+			URI: uri,
+			Err: fmt.Errorf("status list response exceeds %d bytes", maxStatusListResponseSize),
+		}
 	}
 
 	return body, nil

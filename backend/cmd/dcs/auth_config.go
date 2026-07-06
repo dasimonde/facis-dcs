@@ -59,6 +59,12 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 	}
 	oid4vp.ConfigureStatusListJWTVerification(trustCfg, skipStatusListJWS)
 
+	skipStatusListIfUnavailable := false
+	if v := strings.TrimSpace(os.Getenv("OID4VP_STATUSLIST_SKIP_IF_UNAVAILABLE")); strings.EqualFold(v, "true") {
+		skipStatusListIfUnavailable = true
+	}
+	oid4vp.ConfigureStatusListSkipIfUnavailable(skipStatusListIfUnavailable)
+
 	dcqlQuery, err := oid4vp.LoadDCQLQuery(os.Getenv("OID4VP_DCQL_QUERY"))
 	if err != nil {
 		return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)

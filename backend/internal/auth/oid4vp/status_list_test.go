@@ -368,6 +368,53 @@ func TestCheckStatusList_FollowsCredentialURI(t *testing.T) {
 	require.NoError(t, checkStatusList(claims))
 }
 
+func TestCheckStatusList_UnavailableSkippedWhenConfigured(t *testing.T) {
+	ConfigureStatusListSkipIfUnavailable(true)
+	t.Cleanup(func() { ConfigureStatusListSkipIfUnavailable(false) })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	claims, err := json.Marshal(map[string]any{
+		"credentialStatus": map[string]any{
+			"type":                 statusKindStatusList2021,
+			"statusListCredential": srv.URL,
+			"statusListIndex":      "1",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, checkStatusList(claims))
+}
+
+func TestCheckStatusList_UnavailableSkippedButRevokedStillFails(t *testing.T) {
+	ConfigureStatusListSkipIfUnavailable(true)
+	t.Cleanup(func() { ConfigureStatusListSkipIfUnavailable(false) })
+
+	idx := uint32(2)
+	bitstring := make([]byte, 16)
+	bitstring[idx/8] |= 1 << (idx % 8)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(makeXFSCListBody(bitstring))
+	}))
+	defer srv.Close()
+
+	claims, err := json.Marshal(map[string]any{
+		"credentialStatus": map[string]any{
+			"type":                 statusKindStatusList2021,
+			"statusListCredential": srv.URL,
+			"statusListIndex":      "2",
+		},
+	})
+	require.NoError(t, err)
+
+	err = checkStatusList(claims)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "revoked")
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
