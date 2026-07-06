@@ -1,3 +1,95 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { EnrichedBlockItem } from '@template-repository/models/enriched-block-item'
+import { useBlockMovementPreview } from '@template-repository/composables/useBlockMovementPreview'
+import IconInsertAbove from './icons/IconInsertAbove.vue'
+import IconInsertBelow from './icons/IconInsertBelow.vue'
+import IconInsertNestBelow from './icons/IconInsertNestBelow.vue'
+import IconTrash from './icons/IconTrash.vue'
+import IconMoveUp from './icons/IconMoveUp.vue'
+import IconMoveDown from './icons/IconMoveDown.vue'
+import IconMoveLeft from './icons/IconMoveLeft.vue'
+import IconMoveRight from './icons/IconMoveRight.vue'
+
+const btnIcon = 'btn btn-ghost btn-xs btn-square'
+
+const props = withDefaults(
+  defineProps<{
+    item: EnrichedBlockItem
+    isDirty?: boolean
+  }>(),
+  { isDirty: false },
+)
+
+const emit = defineEmits<{
+  insertAbove: []
+  insertBelow: []
+  insertNest: []
+  confirm: []
+  cancel: []
+  moveUp: []
+  moveDown: []
+  moveOutdent: []
+  moveIndent: []
+  delete: []
+}>()
+
+const canInsertNest = computed(
+  () =>
+    !!props.item.block &&
+    (props.item.block['@type'] === 'dcs:Section' || props.item.block['@type'] === 'dcs:ApprovedTemplate'),
+)
+const canMoveUp = computed(() => props.item.siblingIndex > 0)
+const canMoveDown = computed(() => props.item.siblingIndex < props.item.siblingCount - 1)
+const canOutdent = computed(() => props.item.canOutdent)
+const canIndent = computed(() => props.item.canIndent)
+
+const preview = useBlockMovementPreview().createToolbarHandlers(() => ({
+  blockId: props.item.blockId,
+  prevSiblingBlockId: props.item.prevSiblingBlockId,
+  nextSiblingBlockId: props.item.nextSiblingBlockId,
+  canMoveUp: canMoveUp.value,
+  canMoveDown: canMoveDown.value,
+  canOutdent: props.item.canOutdent,
+  canIndent: props.item.canIndent,
+}))
+
+function onInsertAbove() {
+  emit('insertAbove')
+}
+function onInsertBelow() {
+  emit('insertBelow')
+}
+function onInsertNest() {
+  emit('insertNest')
+}
+function onConfirm() {
+  emit('confirm')
+}
+function onCancel() {
+  emit('cancel')
+}
+function onMoveUp() {
+  preview.clearVerticalPreview()
+  emit('moveUp')
+}
+function onMoveDown() {
+  preview.clearVerticalPreview()
+  emit('moveDown')
+}
+function onMoveOutdent() {
+  preview.clearHorizontalPreview()
+  emit('moveOutdent')
+}
+function onMoveIndent() {
+  preview.clearHorizontalPreview()
+  emit('moveIndent')
+}
+function onDelete() {
+  emit('delete')
+}
+</script>
+
 <template>
   <div class="flex shrink-0 flex-col items-start gap-1" role="toolbar" aria-label="Block actions">
     <div class="flex items-center gap-0.5">
@@ -93,95 +185,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { computed } from 'vue'
-import type { EnrichedBlockItem } from '@template-repository/models/enriched-block-item'
-import { useBlockMovementPreview } from '@template-repository/composables/useBlockMovementPreview'
-import IconInsertAbove from './icons/IconInsertAbove.vue'
-import IconInsertBelow from './icons/IconInsertBelow.vue'
-import IconInsertNestBelow from './icons/IconInsertNestBelow.vue'
-import IconTrash from './icons/IconTrash.vue'
-import IconMoveUp from './icons/IconMoveUp.vue'
-import IconMoveDown from './icons/IconMoveDown.vue'
-import IconMoveLeft from './icons/IconMoveLeft.vue'
-import IconMoveRight from './icons/IconMoveRight.vue'
-
-const btnIcon = 'btn btn-ghost btn-xs btn-square'
-
-const props = withDefaults(
-  defineProps<{
-    item: EnrichedBlockItem
-    isDirty?: boolean
-  }>(),
-  { isDirty: false },
-)
-
-const emit = defineEmits<{
-  insertAbove: []
-  insertBelow: []
-  insertNest: []
-  confirm: []
-  cancel: []
-  moveUp: []
-  moveDown: []
-  moveOutdent: []
-  moveIndent: []
-  delete: []
-}>()
-
-const canInsertNest = computed(
-  () =>
-    !!props.item.block &&
-    (props.item.block['@type'] === 'dcs:Section' || props.item.block['@type'] === 'dcs:ApprovedTemplate'),
-)
-const canMoveUp = computed(() => props.item.siblingIndex > 0)
-const canMoveDown = computed(() => props.item.siblingIndex < props.item.siblingCount - 1)
-const canOutdent = computed(() => props.item.canOutdent)
-const canIndent = computed(() => props.item.canIndent)
-
-const preview = useBlockMovementPreview().createToolbarHandlers(() => ({
-  blockId: props.item.blockId,
-  prevSiblingBlockId: props.item.prevSiblingBlockId,
-  nextSiblingBlockId: props.item.nextSiblingBlockId,
-  canMoveUp: canMoveUp.value,
-  canMoveDown: canMoveDown.value,
-  canOutdent: props.item.canOutdent,
-  canIndent: props.item.canIndent,
-}))
-
-function onInsertAbove() {
-  emit('insertAbove')
-}
-function onInsertBelow() {
-  emit('insertBelow')
-}
-function onInsertNest() {
-  emit('insertNest')
-}
-function onConfirm() {
-  emit('confirm')
-}
-function onCancel() {
-  emit('cancel')
-}
-function onMoveUp() {
-  preview.clearVerticalPreview()
-  emit('moveUp')
-}
-function onMoveDown() {
-  preview.clearVerticalPreview()
-  emit('moveDown')
-}
-function onMoveOutdent() {
-  preview.clearHorizontalPreview()
-  emit('moveOutdent')
-}
-function onMoveIndent() {
-  preview.clearHorizontalPreview()
-  emit('moveIndent')
-}
-function onDelete() {
-  emit('delete')
-}
-</script>

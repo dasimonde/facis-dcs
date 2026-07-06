@@ -1,3 +1,146 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import type { EnrichedBlockItem } from '@template-repository/models/enriched-block-item'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { useBlockMovementPreview } from '@template-repository/composables/useBlockMovementPreview'
+import BlockToolbar from '@template-repository/components/builder-editor/toolbar/BlockToolbar.vue'
+import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
+import {
+  parseSegmentsFromContent,
+  getPlaceholderLabelFromConditions,
+  type Segment,
+} from '@template-repository/composables/useClauseTextChips'
+import ClauseSegmentsPreview from '@template-repository/components/clauses-editor/ClauseSegmentsPreview.vue'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import type { SubTemplateSnapshot } from '@/models/contract-template'
+import {
+  getBlocksFromTemplateData,
+  getLayoutFromTemplateData,
+  getSemanticConditionsFromTemplateData,
+} from '@template-repository/store/dcsDraftStore'
+
+const props = defineProps<{
+  item: EnrichedBlockItem
+}>()
+
+const emit = defineEmits<{
+  select: []
+  insertAbove: []
+  insertBelow: []
+  insertNest: []
+  confirm: [payload: { title: string; text: string }]
+  moveUp: []
+  moveDown: []
+  moveOutdent: []
+  moveIndent: []
+  delete: []
+}>()
+
+const uiStore = useTemplateEditorUiStore()
+const draftStore = useTemplateDraftStore()
+const { selectedBlockId } = storeToRefs(uiStore)
+const { semanticConditions, subTemplateSnapshots } = storeToRefs(draftStore)
+const { isSwapPreviewTarget } = useBlockMovementPreview()
+
+const block = computed(() => props.item.block)
+
+const clauseBlock = computed(() => (block.value?.['@type'] === 'dcs:Clause' ? block.value : undefined))
+
+const clauseSegments = computed((): Segment[] => {
+  const clause = clauseBlock.value
+  if (!clause) return []
+  const content = clause['dcs:content']
+  if (typeof content === 'string') return []
+  return parseSegmentsFromContent(content['@list'], semanticConditions.value)
+})
+
+function getPlaceholderLabel(seg: Segment): string {
+  return getPlaceholderLabelFromConditions(seg, semanticConditions.value)
+}
+
+const isSelected = computed(() => selectedBlockId.value === props.item.blockId)
+const isSwapPreviewTargetForThis = computed(() => isSwapPreviewTarget(props.item.blockId))
+
+const borderClass = computed(() => {
+  if (isSwapPreviewTargetForThis.value) return 'border border-dashed border-primary'
+  if (isSelected.value) return 'border border-primary'
+  return 'border border-base-300'
+})
+
+const toolbarVisibilityClass = computed(() => {
+  if (isSelected.value) return 'opacity-100'
+  return 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+})
+
+const approvedTemplateBlock = computed(() =>
+  block.value?.['@type'] === 'dcs:ApprovedTemplate' ? block.value : undefined,
+)
+
+const approvedTemplate = computed<SubTemplateSnapshot | undefined>(() => {
+  const b = approvedTemplateBlock.value
+  if (!b) return undefined
+  return subTemplateSnapshots.value.find((t) => t.did === b['dcs:templateDid'])
+})
+
+const approvedTemplateName = computed(() => approvedTemplate.value?.name ?? '')
+const approvedTemplateDescription = computed(() => approvedTemplate.value?.description ?? '')
+const approvedTemplateBlocks = computed(() => getBlocksFromTemplateData(approvedTemplate.value?.template_data))
+const approvedTemplateLayout = computed(() => getLayoutFromTemplateData(approvedTemplate.value?.template_data))
+const approvedTemplateSemanticConditions = computed(() =>
+  getSemanticConditionsFromTemplateData(approvedTemplate.value?.template_data),
+)
+const isApprovedPreviewOpen = ref(false)
+
+function toggleApprovedPreview() {
+  isApprovedPreviewOpen.value = !isApprovedPreviewOpen.value
+}
+
+const savedTitle = computed(() => {
+  const b = block.value
+  if (b?.['@type'] === 'dcs:Section') return b['dcs:title'] ?? ''
+  return ''
+})
+const savedText = computed(() => {
+  const b = block.value
+  if (b?.['@type'] === 'dcs:TextBlock') return b['dcs:text'] ?? ''
+  if (b?.['@type'] === 'dcs:Section') return b['dcs:title'] ?? ''
+  return ''
+})
+
+const localTitle = ref('')
+const localText = ref('')
+
+watch(
+  () => [props.item.blockId, savedTitle.value, savedText.value] as const,
+  ([, title, text]) => {
+    localTitle.value = title
+    localText.value = text
+  },
+  { immediate: true },
+)
+
+const isDirty = computed(() => {
+  const b = block.value
+  if (b?.['@type'] === 'dcs:Section') {
+    return localTitle.value !== savedTitle.value
+  }
+  if (b?.['@type'] === 'dcs:TextBlock') {
+    return localText.value !== savedText.value
+  }
+  return false
+})
+
+function onConfirm() {
+  emit('confirm', { title: localTitle.value, text: localText.value })
+}
+
+function revertToSaved() {
+  localTitle.value = savedTitle.value
+  localText.value = savedText.value
+}
+</script>
+
 <template>
   <div
     :class="[
@@ -36,7 +179,9 @@
       <template v-else-if="block && block['@type'] === 'dcs:Clause'">
         <label class="text-[10px] font-bold uppercase opacity-60">
           Clause
-          <span class="mt-0.5 text-[10px] font-semibold text-base-content">({{ clauseBlock?.['dcs:title'] ?? '' }})</span>
+          <span class="mt-0.5 text-[10px] font-semibold text-base-content">
+            ({{ clauseBlock?.['dcs:title'] ?? '' }})
+          </span>
         </label>
         <p class="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-base-content/70">
           <ClauseSegmentsPreview :segments="clauseSegments" :get-placeholder-label="getPlaceholderLabel" />
@@ -106,147 +251,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { storeToRefs } from 'pinia'
-import type { EnrichedBlockItem } from '@template-repository/models/enriched-block-item'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import { useBlockMovementPreview } from '@template-repository/composables/useBlockMovementPreview'
-import BlockToolbar from '@template-repository/components/builder-editor/toolbar/BlockToolbar.vue'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import {
-  parseSegmentsFromContent,
-  getPlaceholderLabelFromConditions,
-  type Segment,
-} from '@template-repository/composables/useClauseTextChips'
-import ClauseSegmentsPreview from '@template-repository/components/clauses-editor/ClauseSegmentsPreview.vue'
-import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import type { SubTemplateSnapshot } from '@/models/contract-template'
-import {
-  getBlocksFromTemplateData,
-  getLayoutFromTemplateData,
-  getSemanticConditionsFromTemplateData,
-} from '@template-repository/store/dcsDraftStore'
-import type { DcsClause, DcsSection, DcsTextBlock, DcsApprovedTemplate } from '@/models/dcs-jsonld'
-
-const props = defineProps<{
-  item: EnrichedBlockItem
-}>()
-
-const emit = defineEmits<{
-  select: []
-  insertAbove: []
-  insertBelow: []
-  insertNest: []
-  confirm: [payload: { title: string; text: string }]
-  moveUp: []
-  moveDown: []
-  moveOutdent: []
-  moveIndent: []
-  delete: []
-}>()
-
-const uiStore = useTemplateEditorUiStore()
-const draftStore = useTemplateDraftStore()
-const { selectedBlockId } = storeToRefs(uiStore)
-const { semanticConditions, subTemplateSnapshots } = storeToRefs(draftStore)
-const { isSwapPreviewTarget } = useBlockMovementPreview()
-
-const block = computed(() => props.item.block)
-
-const clauseBlock = computed(() => (block.value?.['@type'] === 'dcs:Clause' ? (block.value as DcsClause) : undefined))
-
-const clauseSegments = computed((): Segment[] => {
-  const clause = clauseBlock.value
-  if (!clause) return []
-  const content = clause['dcs:content']
-  if (typeof content === 'string') return []
-  return parseSegmentsFromContent(content['@list'], semanticConditions.value)
-})
-
-function getPlaceholderLabel(seg: Segment): string {
-  return getPlaceholderLabelFromConditions(seg, semanticConditions.value)
-}
-
-const isSelected = computed(() => selectedBlockId.value === props.item.blockId)
-const isSwapPreviewTargetForThis = computed(() => isSwapPreviewTarget(props.item.blockId))
-
-const borderClass = computed(() => {
-  if (isSwapPreviewTargetForThis.value) return 'border border-dashed border-primary'
-  if (isSelected.value) return 'border border-primary'
-  return 'border border-base-300'
-})
-
-const toolbarVisibilityClass = computed(() => {
-  if (isSelected.value) return 'opacity-100'
-  return 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-})
-
-const approvedTemplateBlock = computed(() =>
-  block.value?.['@type'] === 'dcs:ApprovedTemplate' ? (block.value as DcsApprovedTemplate) : undefined,
-)
-
-const approvedTemplate = computed<SubTemplateSnapshot | undefined>(() => {
-  const b = approvedTemplateBlock.value
-  if (!b) return undefined
-  return subTemplateSnapshots.value.find((t) => t.did === b['dcs:templateDid'])
-})
-
-const approvedTemplateName = computed(() => approvedTemplate.value?.name ?? '')
-const approvedTemplateDescription = computed(() => approvedTemplate.value?.description ?? '')
-const approvedTemplateBlocks = computed(() => getBlocksFromTemplateData(approvedTemplate.value?.template_data))
-const approvedTemplateLayout = computed(() => getLayoutFromTemplateData(approvedTemplate.value?.template_data))
-const approvedTemplateSemanticConditions = computed(() =>
-  getSemanticConditionsFromTemplateData(approvedTemplate.value?.template_data),
-)
-const isApprovedPreviewOpen = ref(false)
-
-function toggleApprovedPreview() {
-  isApprovedPreviewOpen.value = !isApprovedPreviewOpen.value
-}
-
-const savedTitle = computed(() => {
-  const b = block.value
-  if (b?.['@type'] === 'dcs:Section') return (b as DcsSection)['dcs:title'] ?? ''
-  return ''
-})
-const savedText = computed(() => {
-  const b = block.value
-  if (b?.['@type'] === 'dcs:TextBlock') return (b as DcsTextBlock)['dcs:text'] ?? ''
-  if (b?.['@type'] === 'dcs:Section') return (b as DcsSection)['dcs:title'] ?? ''
-  return ''
-})
-
-const localTitle = ref('')
-const localText = ref('')
-
-watch(
-  () => [props.item.blockId, savedTitle.value, savedText.value] as const,
-  ([, title, text]) => {
-    localTitle.value = title
-    localText.value = text
-  },
-  { immediate: true },
-)
-
-const isDirty = computed(() => {
-  const b = block.value
-  if (b?.['@type'] === 'dcs:Section') {
-    return localTitle.value !== savedTitle.value
-  }
-  if (b?.['@type'] === 'dcs:TextBlock') {
-    return localText.value !== savedText.value
-  }
-  return false
-})
-
-function onConfirm() {
-  emit('confirm', { title: localTitle.value, text: localText.value })
-}
-
-function revertToSaved() {
-  localTitle.value = savedTitle.value
-  localText.value = savedText.value
-}
-</script>

@@ -178,23 +178,6 @@ func ontologyStatementsFromConfiguredFile() []string {
 	return nil
 }
 
-//nolint:unused
-func statementLeaf(statementField string) string {
-	_, leaf, ok := splitStatementField(statementField)
-	if !ok {
-		return statementField
-	}
-	return leaf
-}
-
-func splitStatementField(value string) (string, string, bool) {
-	parts := strings.SplitN(strings.TrimSpace(value), ".", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
 func loadOntologyDomainFields() (map[string]domainField, error) {
 	var failures []string
 	for _, path := range ontologyPathCandidates() {
@@ -367,12 +350,6 @@ func entityRoleFromEntityType(value string) string {
 	return ""
 }
 
-func applyStatementEntityRole(statement map[string]any, role string) {
-	if role != "" {
-		statement[ontologyRuntime.EntityRoleStatementField] = role
-	}
-}
-
 func validateOntologyRoleEntity(entity map[string]any) error {
 	entityType, _ := entity["@type"].(string)
 	if ontologyIdentifier(entityType) != ontologyRuntime.RoleEntityType {
@@ -441,23 +418,6 @@ func ontologySubject(statement string) string {
 		return ""
 	}
 	return fields[0]
-}
-
-func ontologyStatementHasType(statement string, class string) bool {
-	expandedClass := expandOntologyResource(class)
-	for _, line := range strings.Split(statement, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 3 || fields[1] != "a" {
-			continue
-		}
-		for _, rawClass := range fields[2:] {
-			candidate := strings.TrimSuffix(strings.TrimSuffix(rawClass, ";"), ",")
-			if expandOntologyResource(candidate) == expandedClass {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func parseOntologyValueConstraint(statement string, catalogOptions map[string]valueOption) *valueConstraint {

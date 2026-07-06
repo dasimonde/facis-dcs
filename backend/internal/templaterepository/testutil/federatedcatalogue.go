@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"digital-contracting-service/internal/base/datatype"
-	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/fcasset"
 	semanticmapper "digital-contracting-service/internal/semantic/mapper"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	templatedb "digital-contracting-service/internal/templaterepository/db"
 	"digital-contracting-service/migrations/fcschemas"
 )

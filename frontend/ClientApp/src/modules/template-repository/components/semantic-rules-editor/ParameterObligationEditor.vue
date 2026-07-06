@@ -1,91 +1,3 @@
-<template>
-  <div class="contents">
-    <div class="flex flex-col gap-1 md:col-span-3">
-      <label class="label min-h-0 py-0">
-        <span class="label-text text-xs text-base-content/60">Obligation</span>
-      </label>
-      <select v-model="draftOperator" class="select-bordered select h-9 w-full select-sm">
-        <option value="">None</option>
-        <option v-for="option in operatorOptions" :key="option.value" :value="option.value">
-          {{ option.label }}
-        </option>
-      </select>
-    </div>
-
-    <div v-if="!usesSetConstraintEditor" class="flex flex-col gap-1 md:col-span-2">
-      <label class="label min-h-0 py-0">
-        <span class="label-text text-xs text-base-content/60">Value</span>
-      </label>
-      <select
-        v-if="parameter.type === 'boolean'"
-        v-model="draftTarget"
-        class="select-bordered select h-9 w-full select-sm"
-        :disabled="!draftOperator"
-      >
-        <option value="">Select</option>
-        <option value="true">true</option>
-        <option value="false">false</option>
-      </select>
-      <input
-        v-else
-        v-model="draftTarget"
-        :type="parameter.type === 'date' ? 'date' : 'text'"
-        :inputmode="isNumericParameter ? 'decimal' : undefined"
-        class="input-bordered input input-sm h-9 w-full"
-        :disabled="!draftOperator"
-        placeholder=""
-        @input="formatNumericTarget"
-      />
-      <p v-if="operatorError" class="text-xs text-error">{{ operatorError }}</p>
-    </div>
-
-    <div
-      v-if="usesSetConstraintEditor && isSetOperator(draftOperator)"
-      class="flex flex-col gap-1 md:col-span-5 md:col-start-5"
-    >
-      <label class="label min-h-0 py-0">
-        <span class="label-text text-xs text-base-content/60">Values</span>
-        <span v-if="!activeSetTargets.length" class="label-text-alt text-xs text-warning">Select at least one value</span>
-      </label>
-      <input
-        v-if="valueOptions.length"
-        v-model="valueOptionSearch"
-        type="search"
-        class="input-bordered input input-sm h-9 w-full"
-        placeholder="Search values"
-      />
-      <div v-if="valueOptions.length" class="max-h-36 overflow-y-auto rounded border border-base-300 bg-base-100 p-2">
-        <label
-          v-for="option in filteredValueOptions"
-          :key="option.value"
-          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-base-200"
-        >
-          <input
-            v-model="draftSetTargets"
-            type="checkbox"
-            class="checkbox checkbox-xs checkbox-primary"
-            :value="option.value"
-          />
-          <span>{{ option.label }} ({{ option.value }})</span>
-        </label>
-      </div>
-      <input
-        v-else
-        v-model="draftTokenTargets"
-        type="text"
-        class="input-bordered input input-sm h-9 w-full"
-        placeholder=""
-      />
-      <div v-if="draftSetTargets.length" class="flex flex-wrap gap-1">
-        <span v-for="value in draftSetTargets" :key="value" class="badge badge-outline badge-sm">
-          {{ formatSelectedValue(value) }}
-        </span>
-      </div>
-      <p v-if="operatorError" class="text-xs text-error">{{ operatorError }}</p>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type {
@@ -338,3 +250,93 @@ function clearSetConstraintTargets() {
   valueOptionSearch.value = ''
 }
 </script>
+
+<template>
+  <div class="contents">
+    <div class="flex flex-col gap-1 md:col-span-3">
+      <label class="label min-h-0 py-0">
+        <span class="label-text text-xs text-base-content/60">Obligation</span>
+      </label>
+      <select v-model="draftOperator" class="select-bordered select h-9 w-full select-sm">
+        <option value="">None</option>
+        <option v-for="option in operatorOptions" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+    </div>
+
+    <div v-if="!usesSetConstraintEditor" class="flex flex-col gap-1 md:col-span-2">
+      <label class="label min-h-0 py-0">
+        <span class="label-text text-xs text-base-content/60">Value</span>
+      </label>
+      <select
+        v-if="parameter.type === 'boolean'"
+        v-model="draftTarget"
+        class="select-bordered select h-9 w-full select-sm"
+        :disabled="!draftOperator"
+      >
+        <option value="">Select</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+      <input
+        v-else
+        v-model="draftTarget"
+        :type="parameter.type === 'date' ? 'date' : 'text'"
+        :inputmode="isNumericParameter ? 'decimal' : undefined"
+        class="input-bordered input input-sm h-9 w-full"
+        :disabled="!draftOperator"
+        placeholder=""
+        @input="formatNumericTarget"
+      />
+      <p v-if="operatorError" class="text-xs text-error">{{ operatorError }}</p>
+    </div>
+
+    <div
+      v-if="usesSetConstraintEditor && isSetOperator(draftOperator)"
+      class="flex flex-col gap-1 md:col-span-5 md:col-start-5"
+    >
+      <label class="label min-h-0 py-0">
+        <span class="label-text text-xs text-base-content/60">Values</span>
+        <span v-if="!activeSetTargets.length" class="label-text-alt text-xs text-warning">
+          Select at least one value
+        </span>
+      </label>
+      <input
+        v-if="valueOptions.length"
+        v-model="valueOptionSearch"
+        type="search"
+        class="input-bordered input input-sm h-9 w-full"
+        placeholder="Search values"
+      />
+      <div v-if="valueOptions.length" class="max-h-36 overflow-y-auto rounded border border-base-300 bg-base-100 p-2">
+        <label
+          v-for="option in filteredValueOptions"
+          :key="option.value"
+          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-base-200"
+        >
+          <input
+            v-model="draftSetTargets"
+            type="checkbox"
+            class="checkbox checkbox-xs checkbox-primary"
+            :value="option.value"
+          />
+          <span>{{ option.label }} ({{ option.value }})</span>
+        </label>
+      </div>
+      <input
+        v-else
+        v-model="draftTokenTargets"
+        type="text"
+        class="input-bordered input input-sm h-9 w-full"
+        placeholder=""
+      />
+      <div v-if="draftSetTargets.length" class="flex flex-wrap gap-1">
+        <span v-for="value in draftSetTargets" :key="value" class="badge badge-outline badge-sm">
+          {{ formatSelectedValue(value) }}
+        </span>
+      </div>
+      <p v-if="operatorError" class="text-xs text-error">{{ operatorError }}</p>
+    </div>
+  </div>
+</template>

@@ -1,17 +1,3 @@
-<template>
-  <li class="-mx-1 flex items-center gap-1.5 rounded px-1 py-0.5" :class="rowClass" @click="$emit('click')">
-    <span
-      class="rounded border border-base-300 px-1"
-      @mouseenter="$emit('mouseenter')"
-      @mouseleave="$emit('mouseleave')"
-    >
-      {{ label }}
-    </span>
-    <span class="text-base-content/50">{{ param.isRequired ? 'required' : 'optional' }}</span>
-    <span v-if="constraintLabel" class="text-base-content/40">{{ constraintLabel }}</span>
-  </li>
-</template>
-
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { SemanticConditionParameter } from '@/modules/template-repository/models/contract-template'
@@ -48,3 +34,17 @@ const constraintLabel = computed(() => {
   return ''
 })
 </script>
+
+<template>
+  <li class="-mx-1 flex items-center gap-1.5 rounded px-1 py-0.5" :class="rowClass" @click="$emit('click')">
+    <span
+      class="rounded border border-base-300 px-1"
+      @mouseenter="$emit('mouseenter')"
+      @mouseleave="$emit('mouseleave')"
+    >
+      {{ label }}
+    </span>
+    <span class="text-base-content/50">{{ param.isRequired ? 'required' : 'optional' }}</span>
+    <span v-if="constraintLabel" class="text-base-content/40">{{ constraintLabel }}</span>
+  </li>
+</template>

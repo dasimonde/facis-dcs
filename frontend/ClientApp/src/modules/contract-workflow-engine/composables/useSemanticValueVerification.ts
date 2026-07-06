@@ -53,8 +53,8 @@ export function hasConditionParameterForValue(
   subTemplateSnapshots: SubTemplateSnapshot[],
 ): boolean {
   const block = blocks.find((b) => b['@id'] === conditionValue.blockId)
-  if (!block || block['@type'] !== 'dcs:Clause') return false
-  const clause = block as DcsClause
+  if (block?.['@type'] !== 'dcs:Clause') return false
+  const clause = block
   const availableConditions = getConditionsByBlockId(
     conditionValue.blockId,
     blocks,
@@ -176,7 +176,7 @@ export function useSemanticValueVerification() {
     let isValid = false
     blocks.forEach((b) => {
       if (b['@type'] !== 'dcs:Clause') return
-      const clause = b as DcsClause
+      const clause = b
       const conditions = getConditions(clause['@id'], blocks, semanticConditions, subTemplateSemanticConditions)
       const conditionIds = clauseConditionIds(clause, conditions)
       conditionIds.forEach((cId) => {

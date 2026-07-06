@@ -1,63 +1,3 @@
-<template>
-  <div class="clause-text-editor space-y-4">
-    <div class="relative">
-      <div
-        ref="editorRef"
-        class="clause-editor textarea-bordered textarea min-h-24 w-full text-sm textarea-sm wrap-break-word whitespace-pre-wrap"
-        contenteditable="true"
-        data-placeholder=""
-        @input="onEditorInput"
-        @paste="onEditorPaste"
-        @blur="onEditorBlur"
-        @keydown="onEditorKeydown"
-        @click="onEditorClick"
-      ></div>
-      <!-- placeholder suggestions -->
-      <div v-show="showPlaceholderSuggestions" :style="placeholderDropdownStyle" :class="placeholderDropdownClass">
-        <p class="border-b border-base-200 px-3 py-2 text-xs text-base-content/50">Pick a requirement field</p>
-        <button
-          v-for="(opt, idx) in filteredPlaceholderOptions"
-          :key="opt.insertText"
-          type="button"
-          class="w-full px-3 py-2 text-left text-sm hover:bg-base-200 focus:bg-base-200 focus:outline-none"
-          :class="{ 'bg-primary/10': idx === safePlaceholderIndex }"
-          @click="insertPlaceholder(opt)"
-        >
-          <span class="font-medium">{{ opt.label }}</span>
-          <span class="ml-1 text-base-content/50">({{ opt.conditionName }})</span>
-        </button>
-        <p v-if="!filteredPlaceholderOptions.length" class="px-3 py-2 text-xs text-base-content/50 italic">
-          No parameters available or all rules already used.
-        </p>
-      </div>
-    </div>
-    <!-- rule panel -->
-    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <SemanticRuleList
-        title="Used in text"
-        empty-message="No requirements used yet."
-        :conditions="usedConditions"
-        :is-param-used-in-text="isParamUsedInText"
-        :is-param-required-and-unused="isParamRequiredAndUnused"
-        :highlight-rule-title="true"
-        @highlight-rule="(id) => setHighlight({ conditionId: id })"
-        @highlight-param="(id, name) => setHighlight({ conditionId: id, parameterName: name })"
-        @clear-highlight="clearHighlight"
-        @insert-placeholder="onInsertPlaceholderFromPanel"
-      />
-      <SemanticRuleList
-        title="Available requirements"
-        empty-message="All requirements used or none defined."
-        :conditions="unusedConditions"
-        @highlight-rule="(id) => setHighlight({ conditionId: id })"
-        @highlight-param="(id, name) => setHighlight({ conditionId: id, parameterName: name })"
-        @clear-highlight="clearHighlight"
-        @insert-placeholder="onInsertPlaceholderFromPanel"
-      />
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -379,18 +319,15 @@ function applyEditorChange(newValue: string, newCursorPos: number) {
 /** When modelValue changes from outside (e.g. parent), sync editor DOM.
  *  Skip if the change came from user input so we don't overwrite the editor.
  */
-watch(
-  modelValueAsString,
-  () => {
-    if (valueFromEditor) {
-      valueFromEditor = false
-      return
-    }
-    void nextTick(() => {
-      if (isMounted.value) syncFromTemplateText(modelValueAsString.value, props.semanticConditions)
-    })
-  },
-)
+watch(modelValueAsString, () => {
+  if (valueFromEditor) {
+    valueFromEditor = false
+    return
+  }
+  void nextTick(() => {
+    if (isMounted.value) syncFromTemplateText(modelValueAsString.value, props.semanticConditions)
+  })
+})
 
 watch(
   clausePlaceholderHighlight,
@@ -421,6 +358,66 @@ onBeforeUnmount(() => {
   }
 })
 </script>
+
+<template>
+  <div class="clause-text-editor space-y-4">
+    <div class="relative">
+      <div
+        ref="editorRef"
+        class="clause-editor textarea-bordered textarea min-h-24 w-full text-sm textarea-sm wrap-break-word whitespace-pre-wrap"
+        contenteditable="true"
+        data-placeholder=""
+        @input="onEditorInput"
+        @paste="onEditorPaste"
+        @blur="onEditorBlur"
+        @keydown="onEditorKeydown"
+        @click="onEditorClick"
+      ></div>
+      <!-- placeholder suggestions -->
+      <div v-show="showPlaceholderSuggestions" :style="placeholderDropdownStyle" :class="placeholderDropdownClass">
+        <p class="border-b border-base-200 px-3 py-2 text-xs text-base-content/50">Pick a requirement field</p>
+        <button
+          v-for="(opt, idx) in filteredPlaceholderOptions"
+          :key="opt.insertText"
+          type="button"
+          class="w-full px-3 py-2 text-left text-sm hover:bg-base-200 focus:bg-base-200 focus:outline-none"
+          :class="{ 'bg-primary/10': idx === safePlaceholderIndex }"
+          @click="insertPlaceholder(opt)"
+        >
+          <span class="font-medium">{{ opt.label }}</span>
+          <span class="ml-1 text-base-content/50">({{ opt.conditionName }})</span>
+        </button>
+        <p v-if="!filteredPlaceholderOptions.length" class="px-3 py-2 text-xs text-base-content/50 italic">
+          No parameters available or all rules already used.
+        </p>
+      </div>
+    </div>
+    <!-- rule panel -->
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <SemanticRuleList
+        title="Used in text"
+        empty-message="No requirements used yet."
+        :conditions="usedConditions"
+        :is-param-used-in-text="isParamUsedInText"
+        :is-param-required-and-unused="isParamRequiredAndUnused"
+        :highlight-rule-title="true"
+        @highlight-rule="(id) => setHighlight({ conditionId: id })"
+        @highlight-param="(id, name) => setHighlight({ conditionId: id, parameterName: name })"
+        @clear-highlight="clearHighlight"
+        @insert-placeholder="onInsertPlaceholderFromPanel"
+      />
+      <SemanticRuleList
+        title="Available requirements"
+        empty-message="All requirements used or none defined."
+        :conditions="unusedConditions"
+        @highlight-rule="(id) => setHighlight({ conditionId: id })"
+        @highlight-param="(id, name) => setHighlight({ conditionId: id, parameterName: name })"
+        @clear-highlight="clearHighlight"
+        @insert-placeholder="onInsertPlaceholderFromPanel"
+      />
+    </div>
+  </div>
+</template>
 
 <style scoped>
 .clause-editor:empty::before {

@@ -1,3 +1,94 @@
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
+import { TemplateType } from '@/modules/template-repository/models/contract-template'
+import { contractTemplateService } from '@/services/contract-template-service'
+import { useTemplateList } from '@/views/contract-template-list/ContractTemplateListController'
+import { TemplateState } from '@/types/contract-template-state'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { useTemplatePermissions } from '../composables/useTemplatePermissions'
+
+interface ComponentTemplateKey {
+  did: string
+  version: number
+  document_number?: string
+}
+
+const store = useTemplateDraftStore()
+const uiStore = useTemplateEditorUiStore()
+const { templates: allTemplates } = useTemplateList()
+const { templateType, blocks, subTemplateSnapshots, state, version } = storeToRefs(store)
+
+const { isManager } = useTemplatePermissions()
+
+const document_number = computed({
+  get: () => store.document_number,
+  set: (value: string) => store.updateDocumentNumber(value),
+})
+
+const name = computed({
+  get: () => store.name,
+  set: (value: string) => store.updateName(value.trim()),
+})
+
+const description = computed({
+  get: () => store.description,
+  set: (value: string) => store.updateDescription(value),
+})
+
+const selectedComponents = computed<ComponentTemplateKey[]>(() =>
+  subTemplateSnapshots.value.map((item) => ({
+    did: item.did,
+    version: item.version,
+    document_number: item.document_number,
+  })),
+)
+const showComponentPicker = ref(false)
+const componentSearchQuery = ref('')
+
+const isSameTemplate = (a: ComponentTemplateKey, b: ComponentTemplateKey) =>
+  a.did === b.did && a.version === b.version && a.document_number === b.document_number
+const isSelected = (t: ComponentTemplateKey) => selectedComponents.value.some((s) => isSameTemplate(s, t))
+
+const filteredComponentTemplates = computed(() => {
+  const q = componentSearchQuery.value.toLowerCase()
+  const selectableStates = new Set<string>([TemplateState.approved, TemplateState.published])
+  return allTemplates.value.filter(
+    (t) =>
+      !isSelected(t) &&
+      selectableStates.has(t.state) &&
+      t.template_type === TemplateType.component &&
+      (q === '' || (t.name ?? '').toLowerCase().includes(q) || t.did.toLowerCase().includes(q)),
+  )
+})
+
+const getComponentTemplateName = (item: ComponentTemplateKey) =>
+  subTemplateSnapshots.value.find((t) => isSameTemplate(t, item))?.name ??
+  allTemplates.value.find((t) => isSameTemplate(t, item))?.name ??
+  item.did
+
+const addComponentTemplate = async (template: { did: string; version: number; document_number?: string }) => {
+  if (isSelected(template)) return
+  await contractTemplateService.retrieveById(template).then((fullTemplate) => {
+    if (fullTemplate) store.addSubTemplateSnapshot(fullTemplate)
+  })
+  componentSearchQuery.value = ''
+}
+
+const isComponentReferenced = (item: ComponentTemplateKey): boolean => {
+  const inOutline = store.blockIdsInOutline
+  return blocks.value.some(
+    (b) => b['@type'] === 'dcs:ApprovedTemplate' && inOutline.has(b['@id']) && b['dcs:templateDid'] === item.did,
+  )
+}
+
+const removeComponentTemplate = (item: ComponentTemplateKey) => {
+  if (isComponentReferenced(item)) return
+  store.removeSubTemplateSnapshot(item)
+}
+</script>
+
 <template>
   <div class="grid grid-cols-1 gap-4">
     <!-- Contract Kind -->
@@ -151,94 +242,3 @@
     </fieldset>
   </div>
 </template>
-
-<script setup lang="ts">
-import { ref, computed } from 'vue'
-import { storeToRefs } from 'pinia'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import { TemplateType } from '@/modules/template-repository/models/contract-template'
-import { contractTemplateService } from '@/services/contract-template-service'
-import { useTemplateList } from '@/views/contract-template-list/ContractTemplateListController'
-import { TemplateState } from '@/types/contract-template-state'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import { useTemplatePermissions } from '../composables/useTemplatePermissions'
-
-interface ComponentTemplateKey {
-  did: string
-  version: number
-  document_number?: string
-}
-
-const store = useTemplateDraftStore()
-const uiStore = useTemplateEditorUiStore()
-const { templates: allTemplates } = useTemplateList()
-const { templateType, blocks, subTemplateSnapshots, state, version } = storeToRefs(store)
-
-const { isManager } = useTemplatePermissions()
-
-const document_number = computed({
-  get: () => store.document_number,
-  set: (value: string) => store.updateDocumentNumber(value),
-})
-
-const name = computed({
-  get: () => store.name,
-  set: (value: string) => store.updateName(value.trim()),
-})
-
-const description = computed({
-  get: () => store.description,
-  set: (value: string) => store.updateDescription(value),
-})
-
-const selectedComponents = computed<ComponentTemplateKey[]>(() =>
-  subTemplateSnapshots.value.map((item) => ({
-    did: item.did,
-    version: item.version,
-    document_number: item.document_number,
-  })),
-)
-const showComponentPicker = ref(false)
-const componentSearchQuery = ref('')
-
-const isSameTemplate = (a: ComponentTemplateKey, b: ComponentTemplateKey) =>
-  a.did === b.did && a.version === b.version && a.document_number === b.document_number
-const isSelected = (t: ComponentTemplateKey) => selectedComponents.value.some((s) => isSameTemplate(s, t))
-
-const filteredComponentTemplates = computed(() => {
-  const q = componentSearchQuery.value.toLowerCase()
-  const selectableStates = new Set<string>([TemplateState.approved, TemplateState.published])
-  return allTemplates.value.filter(
-    (t) =>
-      !isSelected(t) &&
-      selectableStates.has(t.state) &&
-      t.template_type === TemplateType.component &&
-      (q === '' || (t.name ?? '').toLowerCase().includes(q) || t.did.toLowerCase().includes(q)),
-  )
-})
-
-const getComponentTemplateName = (item: ComponentTemplateKey) =>
-  subTemplateSnapshots.value.find((t) => isSameTemplate(t, item))?.name ??
-  allTemplates.value.find((t) => isSameTemplate(t, item))?.name ??
-  item.did
-
-const addComponentTemplate = async (template: { did: string; version: number; document_number?: string }) => {
-  if (isSelected(template)) return
-  await contractTemplateService.retrieveById(template).then((fullTemplate) => {
-    if (fullTemplate) store.addSubTemplateSnapshot(fullTemplate)
-  })
-  componentSearchQuery.value = ''
-}
-
-const isComponentReferenced = (item: ComponentTemplateKey): boolean => {
-  const inOutline = store.blockIdsInOutline
-  return blocks.value.some(
-    (b) => b['@type'] === 'dcs:ApprovedTemplate' && inOutline.has(b['@id']) && b['dcs:templateDid'] === item.did,
-  )
-}
-
-const removeComponentTemplate = (item: ComponentTemplateKey) => {
-  if (isComponentReferenced(item)) return
-  store.removeSubTemplateSnapshot(item)
-}
-</script>

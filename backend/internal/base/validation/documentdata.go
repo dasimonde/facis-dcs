@@ -47,11 +47,6 @@ type valueOption struct {
 	IRI    string
 }
 
-type blockDefinition struct {
-	SchemaRef    string
-	SemanticPath string
-}
-
 func (constraint *valueConstraint) asMap() map[string]any {
 	result := map[string]any{}
 	if constraint.Format != "" {
@@ -554,27 +549,6 @@ func containsODRLTerms(value any) bool {
 	return false
 }
 
-func normalizeTemplateMetadata(data documentData) {
-	data["@context"] = jsonLDContextIRI
-	data["@type"] = "ContractTemplate"
-	data["schemaRefs"] = map[string]any{
-		"documentStructure": SchemaDocumentStructureV1,
-		"semanticCondition": SchemaSemanticConditionV1,
-		"templateData":      SchemaTemplateDataV1,
-		"jsonLdContext":     SchemaJSONLDContextV1,
-		"ontology":          SchemaOntologyV1,
-		"shaclShapes":       SchemaSHACLShapesV1,
-	}
-	data["policyRefs"] = templatePolicyRefs
-	data["validation"] = map[string]any{
-		"schemaVersion":     "v1",
-		"profile":           "FACIS_DCS_TEMPLATE_V1",
-		"requiredPolicies":  []string{PolicyTemplateStructureV1, PolicyTemplateSemanticConditionsV1},
-		"validatedBySchema": true,
-	}
-	normalizeSemanticRuntimeMetadata(data)
-}
-
 func normalizeContractMetadata(data documentData) {
 	data["@context"] = jsonLDContextIRI
 	data["@type"] = "Contract"
@@ -917,9 +891,7 @@ func parseSemanticOperator(raw any) (string, []any) {
 		}
 		targets := []any{}
 		if rawTargets, ok := asArray(value["targets"]); ok {
-			for _, rawTarget := range rawTargets {
-				targets = append(targets, rawTarget)
-			}
+			targets = append(targets, rawTargets...)
 		} else if rawTarget, ok := value[semanticRuleRightOperandProperty]; ok {
 			if rawTargets, ok := asArray(rawTarget); ok {
 				targets = append(targets, rawTargets...)
@@ -1440,25 +1412,6 @@ func findParameter(condition map[string]any, parameterName string) (map[string]a
 		}
 	}
 	return nil, false
-}
-
-func valueMatchesType(value any, paramType string) bool {
-	switch paramType {
-	case "string", "date", "enum":
-		_, ok := value.(string)
-		return ok
-	case "boolean":
-		_, ok := value.(bool)
-		return ok
-	case "integer":
-		number, ok := value.(float64)
-		return ok && number == float64(int64(number))
-	case "decimal":
-		_, ok := value.(float64)
-		return ok
-	default:
-		return false
-	}
 }
 
 func valueMatchesConstraint(value any, constraint *valueConstraint) error {

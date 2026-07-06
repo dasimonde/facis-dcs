@@ -1,3 +1,44 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import type { SubTemplateSnapshot } from '@/models/contract-template'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import {
+  getBlocksFromTemplateData,
+  getLayoutFromTemplateData,
+  getSemanticConditionsFromTemplateData,
+} from '@template-repository/store/dcsDraftStore'
+
+const props = withDefaults(
+  defineProps<{
+    templates: SubTemplateSnapshot[]
+    referenceCountByDid?: Record<string, number>
+    title?: string
+  }>(),
+  {
+    title: 'Approved sub-templates:',
+  },
+)
+
+defineEmits<(e: 'select', template: SubTemplateSnapshot) => void>()
+
+const expandedTemplateId = ref<string | null>(null)
+
+function referenceCount(did: string): number {
+  if (props.referenceCountByDid == null) return 0
+  return props.referenceCountByDid[did] ?? 0
+}
+
+function usedInTemplateLabel(did: string): string {
+  const n = referenceCount(did)
+  if (n === 0) return 'Not used'
+  return n === 1 ? 'Used once' : `Used ${n} times`
+}
+
+function togglePreview(templateId: string) {
+  expandedTemplateId.value = expandedTemplateId.value === templateId ? null : templateId
+}
+</script>
+
 <template>
   <div>
     <p class="mb-2 text-sm text-base-content/70">{{ title }}</p>
@@ -67,44 +108,3 @@
     <p v-else class="text-xs text-base-content/60 italic">No approved sub-templates available.</p>
   </div>
 </template>
-
-<script setup lang="ts">
-import { ref } from 'vue'
-import type { SubTemplateSnapshot } from '@/models/contract-template'
-import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import {
-  getBlocksFromTemplateData,
-  getLayoutFromTemplateData,
-  getSemanticConditionsFromTemplateData,
-} from '@template-repository/store/dcsDraftStore'
-
-const props = withDefaults(
-  defineProps<{
-    templates: SubTemplateSnapshot[]
-    referenceCountByDid?: Record<string, number>
-    title?: string
-  }>(),
-  {
-    title: 'Approved sub-templates:',
-  },
-)
-
-defineEmits<(e: 'select', template: SubTemplateSnapshot) => void>()
-
-const expandedTemplateId = ref<string | null>(null)
-
-function referenceCount(did: string): number {
-  if (props.referenceCountByDid == null) return 0
-  return props.referenceCountByDid[did] ?? 0
-}
-
-function usedInTemplateLabel(did: string): string {
-  const n = referenceCount(did)
-  if (n === 0) return 'Not used'
-  return n === 1 ? 'Used once' : `Used ${n} times`
-}
-
-function togglePreview(templateId: string) {
-  expandedTemplateId.value = expandedTemplateId.value === templateId ? null : templateId
-}
-</script>

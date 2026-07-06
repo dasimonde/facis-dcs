@@ -97,10 +97,10 @@ func validateKBIssuedAt(claims jwt.MapClaims) error {
 		return fmt.Errorf("kb jwt missing iat")
 	}
 	now := time.Now().UTC()
-	if iat.Time.After(now.Add(10 * time.Minute)) {
+	if iat.After(now.Add(10 * time.Minute)) {
 		return fmt.Errorf("kb jwt iat is too far in the future")
 	}
-	if iat.Time.Before(now.Add(-5 * time.Minute)) {
+	if iat.Before(now.Add(-5 * time.Minute)) {
 		return fmt.Errorf("kb jwt iat is too old")
 	}
 	return nil

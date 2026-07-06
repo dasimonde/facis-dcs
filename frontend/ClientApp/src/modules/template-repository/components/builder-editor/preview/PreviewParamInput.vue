@@ -1,55 +1,3 @@
-<template>
-  <span class="tooltip tooltip-top inline-flex items-baseline" :data-tip="tipText">
-    <select
-      v-if="valueOptions.length && (type === 'string' || type === 'enum')"
-      v-model="stringValue"
-      :class="selectClass"
-      :aria-label="label"
-      @change="emitStringValue"
-    >
-      <option value=""></option>
-      <option v-for="option in valueOptions" :key="option.value" :value="option.value">
-        {{ formatOption(option) }}
-      </option>
-    </select>
-    <input
-      v-else-if="type === 'string' || type === 'enum'"
-      v-model="stringValue"
-      type="text"
-      :class="inputClass"
-      :aria-label="label"
-      @input="emitStringValue"
-    />
-    <input
-      v-else-if="type === 'integer'"
-      v-model="numberValue"
-      type="text"
-      inputmode="numeric"
-      :class="inputClass"
-      :aria-label="label"
-      @keydown="onIntegerKeyDown"
-      @input="emitIntegerValue"
-    />
-    <input
-      v-else-if="type === 'decimal'"
-      v-model="numberValue"
-      type="text"
-      inputmode="decimal"
-      :class="inputClass"
-      :aria-label="label"
-      @input="emitDecimalValue"
-    />
-    <input
-      v-else-if="type === 'date'"
-      v-model="dateValue"
-      type="date"
-      :class="inputClass"
-      :aria-label="label"
-      @input="emitDateValue"
-    />
-  </span>
-</template>
-
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type {
@@ -182,3 +130,55 @@ function onIntegerKeyDown(event: KeyboardEvent) {
   }
 }
 </script>
+
+<template>
+  <span class="tooltip tooltip-top inline-flex items-baseline" :data-tip="tipText">
+    <select
+      v-if="valueOptions.length && (type === 'string' || type === 'enum')"
+      v-model="stringValue"
+      :class="selectClass"
+      :aria-label="label"
+      @change="emitStringValue"
+    >
+      <option value=""></option>
+      <option v-for="option in valueOptions" :key="option.value" :value="option.value">
+        {{ formatOption(option) }}
+      </option>
+    </select>
+    <input
+      v-else-if="type === 'string' || type === 'enum'"
+      v-model="stringValue"
+      type="text"
+      :class="inputClass"
+      :aria-label="label"
+      @input="emitStringValue"
+    />
+    <input
+      v-else-if="type === 'integer'"
+      v-model="numberValue"
+      type="text"
+      inputmode="numeric"
+      :class="inputClass"
+      :aria-label="label"
+      @keydown="onIntegerKeyDown"
+      @input="emitIntegerValue"
+    />
+    <input
+      v-else-if="type === 'decimal'"
+      v-model="numberValue"
+      type="text"
+      inputmode="decimal"
+      :class="inputClass"
+      :aria-label="label"
+      @input="emitDecimalValue"
+    />
+    <input
+      v-else-if="type === 'date'"
+      v-model="dateValue"
+      type="date"
+      :class="inputClass"
+      :aria-label="label"
+      @input="emitDateValue"
+    />
+  </span>
+</template>

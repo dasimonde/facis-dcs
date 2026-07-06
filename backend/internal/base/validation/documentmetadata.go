@@ -27,10 +27,6 @@ const (
 )
 
 var (
-	templatePolicyRefs = []map[string]any{
-		{"policyId": PolicyTemplateStructureV1, "version": "v1", "enforcementPoint": "template:create"},
-		{"policyId": PolicyTemplateSemanticConditionsV1, "version": "v1", "enforcementPoint": "template:verify"},
-	}
 	contractPolicyRefs = []map[string]any{
 		{"policyId": PolicyContractStructureV1, "version": "v1", "enforcementPoint": "contract:create"},
 		{"policyId": PolicyContractSemanticValuesV1, "version": "v1", "enforcementPoint": "contract:update"},

@@ -1,3 +1,31 @@
+<script setup lang="ts">
+import NegotiationPartiesTabView from '@/modules/template-catalogue/components/negotiation/NegotiationPartiesTabView.vue'
+import type { Participant } from '@/modules/template-catalogue/models/participant'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+const activeTab = ref<'parties' | 'contractFilling' | 'preview'>('parties')
+
+const initiator = ref<Participant | null>(null)
+const participants = ref<Participant[]>([])
+const selectedResponderIndexes = ref<number[]>([])
+
+const selectedResponders = computed(() =>
+  selectedResponderIndexes.value
+    .map((index) => ({ index, participant: participants.value[index] }))
+    .filter((entry): entry is { index: number; participant: Participant } => !!entry.participant),
+)
+
+function toggleParticipant(index: number) {
+  if (selectedResponderIndexes.value.includes(index)) {
+    selectedResponderIndexes.value = selectedResponderIndexes.value.filter((item) => item !== index)
+    return
+  }
+  selectedResponderIndexes.value = [...selectedResponderIndexes.value, index]
+}
+</script>
+
 <template>
   <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
     <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-200">
@@ -53,31 +81,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import NegotiationPartiesTabView from '@/modules/template-catalogue/components/negotiation/NegotiationPartiesTabView.vue'
-import type { Participant } from '@/modules/template-catalogue/models/participant'
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
-
-const router = useRouter()
-const activeTab = ref<'parties' | 'contractFilling' | 'preview'>('parties')
-
-const initiator = ref<Participant | null>(null)
-const participants = ref<Participant[]>([])
-const selectedResponderIndexes = ref<number[]>([])
-
-const selectedResponders = computed(() =>
-  selectedResponderIndexes.value
-    .map((index) => ({ index, participant: participants.value[index] }))
-    .filter((entry): entry is { index: number; participant: Participant } => !!entry.participant),
-)
-
-function toggleParticipant(index: number) {
-  if (selectedResponderIndexes.value.includes(index)) {
-    selectedResponderIndexes.value = selectedResponderIndexes.value.filter((item) => item !== index)
-    return
-  }
-  selectedResponderIndexes.value = [...selectedResponderIndexes.value, index]
-}
-</script>

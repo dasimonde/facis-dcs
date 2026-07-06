@@ -14,7 +14,12 @@ import {
   isMergedBlockId,
   isSameTemplateDataRef,
 } from '@template-repository/utils/template-data-ref'
-import { parseSegmentsFromContent, isText, isPlaceholder, isNewline } from '@template-repository/composables/useClauseTextChips'
+import {
+  parseSegmentsFromContent,
+  isText,
+  isPlaceholder,
+  isNewline,
+} from '@template-repository/composables/useClauseTextChips'
 import { isDcsDocumentData } from '@/models/dcs-jsonld'
 
 const DEFAULT_PLACEHOLDER_TEXT = '__________'
@@ -124,12 +129,7 @@ function createPlainTextWriter(): PlainTextWriter {
   return { addSection, addText, breakLine, breakLineIfOpen, addBoundarySpaceIfNeeded, toBlocks }
 }
 
-function writeBlockAsPlainText(
-  cxt: ContractContext,
-  blockId: string,
-  level: number,
-  writer: PlainTextWriter,
-): void {
+function writeBlockAsPlainText(cxt: ContractContext, blockId: string, level: number, writer: PlainTextWriter): void {
   const block = cxt.blockMap.get(blockId)
   if (!block) return
 
@@ -146,9 +146,9 @@ function writeBlockAsPlainText(
     }
     writer.addBoundarySpaceIfNeeded(text)
   } else if (block['@type'] === 'dcs:Clause') {
-    writeClauseBlock(cxt, block as DcsClause, writer)
+    writeClauseBlock(cxt, block, writer)
   } else if (block['@type'] === 'dcs:ApprovedTemplate') {
-    writeApprovedTemplateBlock(cxt, block as import('@/models/dcs-jsonld').DcsApprovedTemplate, level, writer)
+    writeApprovedTemplateBlock(cxt, block, level, writer)
   } else if (isDcsMergedApprovedTemplate(block)) {
     writeChildBlocks(cxt, blockId, level, writer)
   }
@@ -190,7 +190,11 @@ function writeApprovedTemplateBlock(
   const snapshot = cxt.subTemplateSnapshots.find((item) =>
     isSameTemplateDataRef(
       { templateId: item.did, version: item.version, document_number: item.document_number },
-      { templateId: block['dcs:templateDid'], version: block['dcs:version'], document_number: block['dcs:documentNumber'] },
+      {
+        templateId: block['dcs:templateDid'],
+        version: block['dcs:version'],
+        document_number: block['dcs:documentNumber'],
+      },
     ),
   )
 
@@ -237,7 +241,9 @@ function getConditionsForBlock(blockId: string, cxt: ContractContext): SemanticC
       },
     ),
   )
-  return snapshot?.template_data ? getSemanticConditionsFromTemplateData(snapshot.template_data) : cxt.semanticConditions
+  return snapshot?.template_data
+    ? getSemanticConditionsFromTemplateData(snapshot.template_data)
+    : cxt.semanticConditions
 }
 
 export function useContractPlainTextConverter() {

@@ -16,7 +16,7 @@ func (s *processAuditAndCompliancesrvc) auditArchiveTrailEntries(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	entries, err := s.CRepo.ReadArchiveEntries(ctx, tx)
 	if err != nil {

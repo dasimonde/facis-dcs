@@ -1,38 +1,3 @@
-<template>
-  <div class="space-y-6">
-    <!-- Section 1: New clause -->
-    <section v-if="uiStore.isTemplateEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
-      <ClauseEditorForm
-        mode="create"
-        :initial-title="draftTitle"
-        :initial-text="draftText"
-        :semantic-conditions="newClauseSemanticConditions"
-        :source-requirement-name="pendingClauseDraft?.sourceConditionName"
-        :show-cancel="!!pendingClauseDraft"
-        @submit="addClause"
-        @cancel="cancelPendingClauseDraft"
-      />
-    </section>
-
-    <!-- Section 2: Existing clauses -->
-    <section class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
-      <h3 class="mb-4 text-sm font-semibold text-base-content/80">Existing clauses</h3>
-      <ExistingClausesList
-        :clause-blocks="clauseBlocks"
-        :semantic-conditions="semanticConditions"
-        :block-ids-in-outline="store.blockIdsInOutline"
-        :editing-block-id="editingBlockId"
-        :editable="uiStore.isTemplateEditable"
-        @delete="deleteClause"
-        @edit="startEditClause"
-        @place="placeClause"
-        @save="saveEditedClause"
-        @cancel-edit="cancelEdit"
-      />
-    </section>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -45,12 +10,7 @@ import type { DcsClause, DcsContentSegment } from '@/models/dcs-jsonld'
 
 const store = useTemplateDraftStore()
 const uiStore = useTemplateEditorUiStore()
-const {
-  blocks,
-  layout,
-  semanticConditions: mainSemanticConditions,
-  subTemplateSnapshots,
-} = storeToRefs(store)
+const { blocks, layout, semanticConditions: mainSemanticConditions, subTemplateSnapshots } = storeToRefs(store)
 const { pendingClauseDraft } = storeToRefs(uiStore)
 
 const editingBlockId = ref<string | null>(null)
@@ -66,7 +26,9 @@ const clauseBlocks = computed((): DcsClause[] => {
     if (!subBlocks || typeof subBlocks !== 'object') return []
     const doc = subBlocks as import('@/models/dcs-jsonld').DcsDocumentData
     if (!doc['dcs:documentStructure']) return []
-    return doc['dcs:documentStructure']['dcs:blocks']['@list'].filter((b): b is DcsClause => b['@type'] === 'dcs:Clause')
+    return doc['dcs:documentStructure']['dcs:blocks']['@list'].filter(
+      (b): b is DcsClause => b['@type'] === 'dcs:Clause',
+    )
   })
   return [...mainClauses, ...subTemplateClauses]
 })
@@ -130,3 +92,38 @@ function placeClause(blockId: string) {
   uiStore.openAddBlockModal(root['@id'], root['dcs:children']['@list'].length)
 }
 </script>
+
+<template>
+  <div class="space-y-6">
+    <!-- Section 1: New clause -->
+    <section v-if="uiStore.isTemplateEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+      <ClauseEditorForm
+        mode="create"
+        :initial-title="draftTitle"
+        :initial-text="draftText"
+        :semantic-conditions="newClauseSemanticConditions"
+        :source-requirement-name="pendingClauseDraft?.sourceConditionName"
+        :show-cancel="!!pendingClauseDraft"
+        @submit="addClause"
+        @cancel="cancelPendingClauseDraft"
+      />
+    </section>
+
+    <!-- Section 2: Existing clauses -->
+    <section class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+      <h3 class="mb-4 text-sm font-semibold text-base-content/80">Existing clauses</h3>
+      <ExistingClausesList
+        :clause-blocks="clauseBlocks"
+        :semantic-conditions="semanticConditions"
+        :block-ids-in-outline="store.blockIdsInOutline"
+        :editing-block-id="editingBlockId"
+        :editable="uiStore.isTemplateEditable"
+        @delete="deleteClause"
+        @edit="startEditClause"
+        @place="placeClause"
+        @save="saveEditedClause"
+        @cancel-edit="cancelEdit"
+      />
+    </section>
+  </div>
+</template>

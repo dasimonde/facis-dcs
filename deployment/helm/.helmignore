@@ -25,3 +25,5 @@
 # Local caches
 .cache/
 tmp/
+
+tmpcharts-*/

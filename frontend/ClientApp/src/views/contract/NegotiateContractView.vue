@@ -17,7 +17,10 @@ import TemplatePreview from '@/modules/template-repository/components/builder-ed
 import { useContractPermissions } from '@/modules/template-repository/composables/useContractPermissions'
 import { useTemplateDraftStore } from '@/modules/template-repository/store/templateDraftStore'
 import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
-import { buildContractDocument, getSemanticConditionsFromTemplateData } from '@/modules/template-repository/store/dcsDraftStore'
+import {
+  buildContractDocument,
+  getSemanticConditionsFromTemplateData,
+} from '@/modules/template-repository/store/dcsDraftStore'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
@@ -108,10 +111,7 @@ const changedContractData = computed(() => {
 const semanticConditionValuesEqual = (a: SemanticConditionValue[], b: SemanticConditionValue[]) => {
   if (a.length !== b.length) return false
   const bValues = new Map(
-    b.map((value) => [
-      `${value.blockId}|${value.conditionId}|${value.parameterName}`,
-      value.parameterValue,
-    ]),
+    b.map((value) => [`${value.blockId}|${value.conditionId}|${value.parameterName}`, value.parameterValue]),
   )
   return a.every((value) => {
     const key = `${value.blockId}|${value.conditionId}|${value.parameterName}`
@@ -160,11 +160,7 @@ watch(
 )
 
 watch(
-  () => [
-    templateDraftStore.blocks,
-    templateDraftStore.semanticConditions,
-    templateDraftStore.subTemplateSnapshots,
-  ],
+  () => [templateDraftStore.blocks, templateDraftStore.semanticConditions, templateDraftStore.subTemplateSnapshots],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>

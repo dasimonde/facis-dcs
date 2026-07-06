@@ -878,10 +878,6 @@ func contractStructureFinding(policy ContractContentPolicy, ruleID, title, sever
 	return finding
 }
 
-func shaclPropertyFinding(policy ContractContentPolicy, shape ContractSHACLShape, property ContractSHACLProperty, fallbackMessage string) PolicyFinding {
-	return shaclPropertyFindingWithDetails(policy, shape, property, fallbackMessage, nil, nil, nil, "")
-}
-
 func shaclPropertyFindingWithDetails(policy ContractContentPolicy, shape ContractSHACLShape, property ContractSHACLProperty, fallbackMessage string, actualValue any, expectedValue any, expectedValues []any, operator string) PolicyFinding {
 	message := property.Message
 	if strings.TrimSpace(message) == "" {

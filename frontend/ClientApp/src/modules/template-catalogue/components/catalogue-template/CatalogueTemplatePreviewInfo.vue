@@ -1,3 +1,11 @@
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
+
+const { layout, blocks, semanticConditions, subTemplateSnapshots } = storeToRefs(useTemplateDraftStore())
+</script>
+
 <template>
   <div class="card border border-base-300 bg-base-100 shadow-sm">
     <div class="card-body">
@@ -19,11 +27,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { storeToRefs } from 'pinia'
-import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-
-const { layout, blocks, semanticConditions, subTemplateSnapshots } = storeToRefs(useTemplateDraftStore())
-</script>

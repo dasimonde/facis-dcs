@@ -1,97 +1,3 @@
-<template>
-  <Teleport to="body">
-    <div
-      v-if="addBlockModalContext !== null"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="add-block-title"
-      @click.self="handleCancel"
-    >
-      <div
-        class="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-2xl bg-base-100 p-6 shadow-xl"
-        @click.stop
-      >
-        <h2 id="add-block-title" class="text-lg font-bold">Add block</h2>
-        <template v-if="!isContractWorkflow && isContractTemplate">
-          <ApprovedSubTemplatePicker
-            :templates="subTemplateSnapshots"
-            :reference-count-by-did="referenceCountByDid"
-            @select="handleAddApprovedTemplate"
-          />
-        </template>
-        <template v-else>
-          <div>
-            <p class="mb-2 text-sm text-base-content/70">Common:</p>
-            <div class="flex flex-col gap-2">
-              <BlockPaletteItem
-                v-for="item in paletteBlockTypes"
-                :key="item.blockType"
-                :label="item.label"
-                @select="handleAddBlock(item.blockType)"
-              />
-            </div>
-          </div>
-
-          <div class="border-t border-base-300 pt-4">
-            <div v-if="pendingPlacementClause" class="mb-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
-              <p class="mb-2 text-xs font-semibold text-primary">Selected clause</p>
-              <button
-                type="button"
-                class="flex min-h-[44px] w-full cursor-pointer flex-col justify-center rounded-lg border border-primary/40 bg-base-100 px-3 py-2 text-left transition-colors select-none hover:bg-base-200"
-                @click="handleAddClause(pendingPlacementClause['@id'])"
-              >
-                <span class="text-sm font-medium text-base-content">
-                  {{ pendingPlacementClause['dcs:title'] || 'Untitled clause' }}
-                </span>
-                <p class="mt-0.5 line-clamp-2 text-xs leading-relaxed text-base-content/70">
-                  <ClauseSegmentsPreview
-                    :segments="getSegments(pendingPlacementClause)"
-                    :get-placeholder-label="getPlaceholderLabel"
-                  />
-                </p>
-              </button>
-            </div>
-            <div class="mb-2 flex flex-col gap-2">
-              <p class="text-sm text-base-content/70">Defined clauses:</p>
-              <input
-                v-model="clauseSearch"
-                type="search"
-                class="input-bordered input input-sm w-full"
-                placeholder="Search clauses"
-                autocomplete="off"
-              />
-            </div>
-            <div class="flex max-h-64 flex-col gap-2 overflow-y-auto">
-              <button
-                v-for="clause in filteredUnusedClauses"
-                :key="clause['@id']"
-                type="button"
-                class="flex min-h-[44px] cursor-pointer flex-col justify-center rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-left transition-colors select-none hover:bg-base-200"
-                @click="handleAddClause(clause['@id'])"
-              >
-                <span class="text-sm font-medium text-base-content">
-                  {{ clause['dcs:title'] || 'Untitled clause' }}
-                </span>
-                <p class="mt-0.5 line-clamp-2 text-xs leading-relaxed text-base-content/70">
-                  <ClauseSegmentsPreview :segments="getSegments(clause)" :get-placeholder-label="getPlaceholderLabel" />
-                </p>
-              </button>
-              <p v-if="!filteredUnusedClauses.length" class="py-2 text-sm text-base-content/50">
-                {{ unusedClauses.length ? 'No matching clauses.' : 'No unplaced clauses from the Clauses tab.' }}
-              </p>
-            </div>
-          </div>
-        </template>
-
-        <div class="flex justify-end pt-2">
-          <button type="button" class="btn btn-outline btn-sm" @click="handleCancel">Cancel</button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
-</template>
-
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -209,3 +115,97 @@ function handleAddClause(clauseBlockId: string) {
   uiStore.closeAddBlockModal()
 }
 </script>
+
+<template>
+  <Teleport to="body">
+    <div
+      v-if="addBlockModalContext !== null"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-block-title"
+      @click.self="handleCancel"
+    >
+      <div
+        class="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-2xl bg-base-100 p-6 shadow-xl"
+        @click.stop
+      >
+        <h2 id="add-block-title" class="text-lg font-bold">Add block</h2>
+        <template v-if="!isContractWorkflow && isContractTemplate">
+          <ApprovedSubTemplatePicker
+            :templates="subTemplateSnapshots"
+            :reference-count-by-did="referenceCountByDid"
+            @select="handleAddApprovedTemplate"
+          />
+        </template>
+        <template v-else>
+          <div>
+            <p class="mb-2 text-sm text-base-content/70">Common:</p>
+            <div class="flex flex-col gap-2">
+              <BlockPaletteItem
+                v-for="item in paletteBlockTypes"
+                :key="item.blockType"
+                :label="item.label"
+                @select="handleAddBlock(item.blockType)"
+              />
+            </div>
+          </div>
+
+          <div class="border-t border-base-300 pt-4">
+            <div v-if="pendingPlacementClause" class="mb-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <p class="mb-2 text-xs font-semibold text-primary">Selected clause</p>
+              <button
+                type="button"
+                class="flex min-h-[44px] w-full cursor-pointer flex-col justify-center rounded-lg border border-primary/40 bg-base-100 px-3 py-2 text-left transition-colors select-none hover:bg-base-200"
+                @click="handleAddClause(pendingPlacementClause['@id'])"
+              >
+                <span class="text-sm font-medium text-base-content">
+                  {{ pendingPlacementClause['dcs:title'] || 'Untitled clause' }}
+                </span>
+                <p class="mt-0.5 line-clamp-2 text-xs leading-relaxed text-base-content/70">
+                  <ClauseSegmentsPreview
+                    :segments="getSegments(pendingPlacementClause)"
+                    :get-placeholder-label="getPlaceholderLabel"
+                  />
+                </p>
+              </button>
+            </div>
+            <div class="mb-2 flex flex-col gap-2">
+              <p class="text-sm text-base-content/70">Defined clauses:</p>
+              <input
+                v-model="clauseSearch"
+                type="search"
+                class="input-bordered input input-sm w-full"
+                placeholder="Search clauses"
+                autocomplete="off"
+              />
+            </div>
+            <div class="flex max-h-64 flex-col gap-2 overflow-y-auto">
+              <button
+                v-for="clause in filteredUnusedClauses"
+                :key="clause['@id']"
+                type="button"
+                class="flex min-h-[44px] cursor-pointer flex-col justify-center rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-left transition-colors select-none hover:bg-base-200"
+                @click="handleAddClause(clause['@id'])"
+              >
+                <span class="text-sm font-medium text-base-content">
+                  {{ clause['dcs:title'] || 'Untitled clause' }}
+                </span>
+                <p class="mt-0.5 line-clamp-2 text-xs leading-relaxed text-base-content/70">
+                  <ClauseSegmentsPreview :segments="getSegments(clause)" :get-placeholder-label="getPlaceholderLabel" />
+                </p>
+              </button>
+              <p v-if="!filteredUnusedClauses.length" class="py-2 text-sm text-base-content/50">
+                {{ unusedClauses.length ? 'No matching clauses.' : 'No unplaced clauses from the Clauses tab.' }}
+              </p>
+            </div>
+          </div>
+        </template>
+
+        <div class="flex justify-end pt-2">
+          <button type="button" class="btn btn-outline btn-sm" @click="handleCancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+</template>

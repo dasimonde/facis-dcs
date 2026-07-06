@@ -44,19 +44,23 @@ const resolveViewRouteName = computed(() => {
 function getTemplateLink(template: PartialContractTemplate): string {
   return `/ui/templates/view/${template.latest_did}`
 }
-
 </script>
 
 <template>
   <li class="list-row w-full min-w-0">
     <div class="list-col-grow card w-full min-w-0 border-base-content/10 bg-base-100 card-border hover:bg-base-300">
       <div class="card-body min-w-0">
-
-      <div class="-mt-9 -ml-1 mr-1 grid w-full grid-cols-3 items-center">
-        <div class="badge badge-md badge-accent justify-self-start">{{ toProperCase(template.template_type) }}</div>
-        <a v-if="template?.latest_did" class="badge badge-md badge-warning justify-self-center" :href="getTemplateLink(template)">A newer template version is available</a>
-        <div></div>
-      </div>
+        <div class="-mt-9 mr-1 -ml-1 grid w-full grid-cols-3 items-center">
+          <div class="badge justify-self-start badge-md badge-accent">{{ toProperCase(template.template_type) }}</div>
+          <a
+            v-if="template?.latest_did"
+            class="badge justify-self-center badge-md badge-warning"
+            :href="getTemplateLink(template)"
+          >
+            A newer template version is available
+          </a>
+          <div></div>
+        </div>
 
         <h2 class="card-title items-start justify-between">
           <div class="flex min-w-0 flex-1 items-center gap-2">

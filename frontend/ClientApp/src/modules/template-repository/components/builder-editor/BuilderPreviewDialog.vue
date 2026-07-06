@@ -1,3 +1,23 @@
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+
+const uiStore = useTemplateEditorUiStore()
+const draftStore = useTemplateDraftStore()
+
+const { isPreviewDialogOpen } = storeToRefs(uiStore)
+const { layout, blocks, semanticConditions, subTemplateSnapshots } = storeToRefs(draftStore)
+
+// This container is block, not flex
+const previewContainerClasses = 'w-full h-full overflow-auto px-10 py-8'
+
+function close() {
+  uiStore.togglePreviewDialog()
+}
+</script>
+
 <template>
   <Teleport to="body">
     <div
@@ -38,23 +58,3 @@
     </div>
   </Teleport>
 </template>
-
-<script setup lang="ts">
-import { storeToRefs } from 'pinia'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
-
-const uiStore = useTemplateEditorUiStore()
-const draftStore = useTemplateDraftStore()
-
-const { isPreviewDialogOpen } = storeToRefs(uiStore)
-const { layout, blocks, semanticConditions, subTemplateSnapshots } = storeToRefs(draftStore)
-
-// This container is block, not flex
-const previewContainerClasses = 'w-full h-full overflow-auto px-10 py-8'
-
-function close() {
-  uiStore.togglePreviewDialog()
-}
-</script>

@@ -142,7 +142,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 					return err
 				}
 				if exist {
-					// return errors.New("contract template needs to be verified before")
+					return errors.New("contract template needs to be verified before")
 				}
 				err = h.RTRepo.UpdateState(ctx, tx, processData.DID, cmd.SubmittedBy, contracttemplatestate.Approved.String())
 				if err != nil {

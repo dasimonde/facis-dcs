@@ -1,50 +1,3 @@
-<template>
-  <div class="flex flex-col gap-2">
-    <div
-      v-for="item in flatItemsWithBlock"
-      :key="item.blockId"
-      :class="[
-        'flex min-w-0 items-stretch',
-        'transition-[opacity] duration-200 ease-out',
-        isInFadeOutSet(item.blockId) && 'opacity-50',
-      ]"
-    >
-      <!-- Indent area: width by depth, left border for children to show hierarchy -->
-      <div
-        v-if="item.block && !isDcsMergedApprovedTemplate(item.block)"
-        :class="[
-          'relative flex min-h-[2.5rem] flex-shrink-0 items-center',
-          'transition-[width] duration-300 ease-out',
-          item.depthLevel > 0 && !horizontalPreviewFor(item) && 'border-l-2 border-base-300',
-          horizontalPreviewFor(item) && 'border-l-2 border-primary',
-        ]"
-        :style="{ width: effectiveIndentWidth(item) }"
-        aria-hidden
-      >
-        <component
-          :is="horizontalArrowIcon(item)"
-          v-if="horizontalPreviewFor(item)"
-          :size="14"
-          class="pointer-events-none absolute top-1/2 left-0.5 -translate-y-1/2 text-primary"
-        />
-      </div>
-      <EditorBlock
-        :item="item"
-        @select="selectBlock(item.blockId)"
-        @insert-above="onInsertAbove(item)"
-        @insert-below="onInsertBelow(item)"
-        @insert-nest="onInsertNest(item)"
-        @confirm="(payload) => confirmBlock(item.blockId, payload)"
-        @move-up="onMoveUp(item)"
-        @move-down="onMoveDown(item)"
-        @move-outdent="onMoveOutdent(item)"
-        @move-indent="onMoveIndent(item)"
-        @delete="deleteBlock(item.blockId)"
-      />
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -53,14 +6,8 @@ import { useTemplateEditorUiStore } from '@template-repository/store/templateEdi
 import type { EnrichedBlockItem } from '@template-repository/models/enriched-block-item'
 import { useFlattenedOutline, type FlattenedOutlineItem } from '@template-repository/composables/useFlattenedOutline'
 import type { DcsBlock, DcsLayoutNode } from '@/models/dcs-jsonld'
-import {
-  isDcsSection,
-  isDcsApprovedTemplate,
-} from '@/models/dcs-jsonld'
-import {
-  isDcsMergedApprovedTemplate,
-  type MergedApprovedTemplateBlock,
-} from '@template-repository/store/dcsDraftStore'
+import { isDcsSection, isDcsApprovedTemplate } from '@/models/dcs-jsonld'
+import { isDcsMergedApprovedTemplate, type MergedApprovedTemplateBlock } from '@template-repository/store/dcsDraftStore'
 import EditorBlock from '@template-repository/components/builder-editor/document-block/EditorBlock.vue'
 import { useBlockMovementPreview } from '@template-repository/composables/useBlockMovementPreview'
 import { getOwnerBlockIdFromMergedBlockId, isMergedBlockId } from '@template-repository/utils/template-data-ref'
@@ -145,7 +92,9 @@ function enrichFlatItem(
   const isDirectChildOfRoot = !!root && item.parentBlockId === root['@id']
   const isLastChild = item.siblingIndex === siblingCount - 1
   const grandparentNode = layout.find((n) => layoutNodeChildIds(n).includes(item.parentBlockId))
-  const parentIndexInGrandparent = grandparentNode ? layoutNodeChildIds(grandparentNode).indexOf(item.parentBlockId) : -1
+  const parentIndexInGrandparent = grandparentNode
+    ? layoutNodeChildIds(grandparentNode).indexOf(item.parentBlockId)
+    : -1
   const canOutdent = !isDirectChildOfRoot && isLastChild
   const outdentGrandparentBlockId = grandparentNode?.['@id'] ?? ''
   const outdentInsertIndex = parentIndexInGrandparent + 1
@@ -188,3 +137,50 @@ function enrichFlatItem(
   }
 }
 </script>
+
+<template>
+  <div class="flex flex-col gap-2">
+    <div
+      v-for="item in flatItemsWithBlock"
+      :key="item.blockId"
+      :class="[
+        'flex min-w-0 items-stretch',
+        'transition-[opacity] duration-200 ease-out',
+        isInFadeOutSet(item.blockId) && 'opacity-50',
+      ]"
+    >
+      <!-- Indent area: width by depth, left border for children to show hierarchy -->
+      <div
+        v-if="item.block && !isDcsMergedApprovedTemplate(item.block)"
+        :class="[
+          'relative flex min-h-[2.5rem] flex-shrink-0 items-center',
+          'transition-[width] duration-300 ease-out',
+          item.depthLevel > 0 && !horizontalPreviewFor(item) && 'border-l-2 border-base-300',
+          horizontalPreviewFor(item) && 'border-l-2 border-primary',
+        ]"
+        :style="{ width: effectiveIndentWidth(item) }"
+        aria-hidden
+      >
+        <component
+          :is="horizontalArrowIcon(item)"
+          v-if="horizontalPreviewFor(item)"
+          :size="14"
+          class="pointer-events-none absolute top-1/2 left-0.5 -translate-y-1/2 text-primary"
+        />
+      </div>
+      <EditorBlock
+        :item="item"
+        @select="selectBlock(item.blockId)"
+        @insert-above="onInsertAbove(item)"
+        @insert-below="onInsertBelow(item)"
+        @insert-nest="onInsertNest(item)"
+        @confirm="(payload) => confirmBlock(item.blockId, payload)"
+        @move-up="onMoveUp(item)"
+        @move-down="onMoveDown(item)"
+        @move-outdent="onMoveOutdent(item)"
+        @move-indent="onMoveIndent(item)"
+        @delete="deleteBlock(item.blockId)"
+      />
+    </div>
+  </div>
+</template>

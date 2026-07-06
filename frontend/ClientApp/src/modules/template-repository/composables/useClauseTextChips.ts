@@ -247,7 +247,10 @@ export function conditionIdsInContent(content: DcsContentSegment[], conditions: 
  * Returns the conditionId.parameterName key set for all placeholders in content.
  * Used to track which parameter slots are already filled.
  */
-export function usedPlaceholderKeysInContent(content: DcsContentSegment[], conditions: SemanticCondition[]): Set<string> {
+export function usedPlaceholderKeysInContent(
+  content: DcsContentSegment[],
+  conditions: SemanticCondition[],
+): Set<string> {
   const set = new Set<string>()
   for (const seg of content) {
     if (typeof seg === 'string') continue
