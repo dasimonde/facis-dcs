@@ -35,7 +35,7 @@ Feature: Create and Maintain Semantic Schemas
   Scenario: Link schema to template
     Given I am authenticated with roles: "Template Creator"
     And schema "contract-base-v1" exists
-    # Use fctemplatebuilder.go and FC POST /verification
+    # Use asset.go and FC POST /verification
     When I link schema "contract-base-v1" to template "Standard NDA"
     # May need to disable FC sinature verification if the testing server has no SSL certificate
     Then the template enforces schema conformity
