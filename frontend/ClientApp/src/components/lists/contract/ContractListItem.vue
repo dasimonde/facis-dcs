@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Contract } from '@/models/contract/contract'
-import { useContractPermissions } from '@/modules/template-repository/composables/useContractPermissions'
+import { useContractPermissions } from '@/modules/contract-workflow-engine/composables/useContractPermissions'
 import { ROUTES } from '@/router/router'
 import { requestContractSync } from '@/services/dcs-to-dcs-service'
 import { useContractsStore } from '@/stores/contracts-store'

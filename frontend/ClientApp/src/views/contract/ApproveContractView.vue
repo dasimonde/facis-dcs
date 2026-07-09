@@ -13,7 +13,7 @@ import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-e
 import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
 import TemplatePreview from '@/modules/template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import { useContractPermissions } from '@/modules/template-repository/composables/useContractPermissions'
+import { useContractPermissions } from '@/modules/contract-workflow-engine/composables/useContractPermissions'
 import { useTemplateDraftStore } from '@/modules/template-repository/store/templateDraftStore'
 import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
 import { contractWorkflowService } from '@/services/contract-workflow-service'

@@ -10,7 +10,7 @@ import {
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { onMounted, ref } from 'vue'
-import { useContractPermissions } from '@/modules/template-repository/composables/useContractPermissions'
+import { useContractPermissions } from '@/modules/contract-workflow-engine/composables/useContractPermissions'
 
 const authStore = useAuthStore()
 

@@ -1,33 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { onClickOutside } from '@vueuse/core'
 import { useAuthStore } from '@/stores/auth-store'
+import { toProperCase } from '@/utils/string'
+import { computed } from 'vue'
 
 const authStore = useAuthStore()
 const roles = computed(() => [...(authStore.user?.roles ?? [])].sort())
 
-const isOpen = ref(false)
-const panelRef = ref(null)
-
-function formatRole(role: string): string {
-  return role
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ')
-}
-
-onClickOutside(panelRef, () => {
-  isOpen.value = false
-})
+const formatRole = (role: string): string => toProperCase(role)
 </script>
 
 <template>
-  <div ref="panelRef" class="relative">
-    <button class="btn gap-2 btn-outline btn-sm" @click="isOpen = !isOpen">User Details</button>
+  <div class="relative">
+    <button id="perm-btn-user" class="btn gap-2 btn-outline btn-sm" popovertarget="perm-popover-user">
+      User Details
+    </button>
 
     <div
-      v-if="isOpen"
-      class="absolute right-0 z-50 mt-2 w-120 rounded-box border border-base-300 bg-base-100 p-4 shadow-lg"
+      id="perm-popover-user"
+      class="menu dropdown dropdown-end mt-2 ml-2 w-auto max-w-[95vw] min-w-[16rem] rounded-box border border-base-300 bg-base-100 p-4 shadow-lg sm:ml-0 sm:min-w-[20rem] md:max-w-lg md:min-w-[24rem] lg:min-w-md"
+      popover
+      anchor="perm-btn-user"
     >
       <div class="mb-3 border-b border-base-300 pb-3">
         <p class="mb-2 text-xs font-bold text-base-content/50 uppercase">Issuer</p>
@@ -48,3 +40,13 @@ onClickOutside(panelRef, () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+#perm-btn-user {
+  anchor-name: --anchor-perm-user;
+}
+
+#perm-popover-user {
+  position-anchor: --anchor-perm-user;
+}
+</style>

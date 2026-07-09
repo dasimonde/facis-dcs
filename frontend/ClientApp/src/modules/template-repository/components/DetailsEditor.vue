@@ -123,13 +123,7 @@ const removeComponentTemplate = (item: ComponentTemplateKey) => {
 
     <fieldset v-if="isManager" class="fieldset border-none p-0">
       <legend class="fieldset-legend">Template State</legend>
-      <select
-        v-model="state"
-        class="input-bordered select w-full"
-        type="text"
-        required
-        :disabled="!uiStore.isTemplateEditable"
-      >
+      <select v-model="state" class="input-bordered select w-full" required :disabled="!uiStore.isTemplateEditable">
         <option>DRAFT</option>
         <option>REJECTED</option>
         <option>SUBMITTED</option>

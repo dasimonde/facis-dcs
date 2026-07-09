@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import type { Contract } from '@/models/contract/contract'
+import { useContractPermissions } from '@/modules/contract-workflow-engine/composables/useContractPermissions'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
-import { useAuthStore } from '@/stores/auth-store'
 import { ContractState } from '@/types/contract-state'
 import { computed, normalizeClass, useAttrs, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
@@ -33,11 +33,7 @@ const props = defineProps<{
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const router = useRouter()
-const authStore = useAuthStore()
-
-const isManager = computed(() => {
-  return authStore.user?.roles?.includes('CONTRACT_MANAGER') ?? false
-})
+const { isManager } = useContractPermissions()
 
 const canTerminate = computed(() => {
   return isManager.value && props.contract.state !== ContractState.terminated

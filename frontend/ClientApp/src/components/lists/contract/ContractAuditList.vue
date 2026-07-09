@@ -85,7 +85,6 @@ const eventType = useContractEventType()
           <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
         </div>
         <div v-else>{{ audit.event_data }}</div>
-        {{ console.log(audit) }}
       </div>
     </li>
   </ul>

@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import ContractList from '@/components/lists/contract/ContractList.vue'
+import { useContractPermissions } from '@/modules/contract-workflow-engine/composables/useContractPermissions'
 import { ROUTES } from '@/router/router'
-import { useAuthStore } from '@/stores/auth-store'
-import { computed } from 'vue'
 
-const authStore = useAuthStore()
-
-const isContractCreator = computed(() => authStore.user?.roles?.some((role) => ['CONTRACT_CREATOR'].includes(role)))
+const { isCreator } = useContractPermissions()
 </script>
 
 <template>
@@ -16,7 +13,7 @@ const isContractCreator = computed(() => authStore.user?.roles?.some((role) => [
     </h2>
 
     <RouterLink
-      v-if="isContractCreator"
+      v-if="isCreator"
       v-slot="{ route }"
       :to="{ name: ROUTES.CONTRACTS.NEW }"
       class="btn gap-2 self-end btn-primary"

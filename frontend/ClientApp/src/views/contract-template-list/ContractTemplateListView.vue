@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import TemplateList from '@/components/lists/template/TemplateList.vue'
+import { useTemplatePermissions } from '@/modules/template-repository/composables/useTemplatePermissions'
 import { ROUTES } from '@/router/router'
-import { useAuthStore } from '@/stores/auth-store'
-import { computed } from 'vue'
 
-const authStore = useAuthStore()
-
-const isTemplateCreator = computed(() => authStore.user?.roles?.includes('TEMPLATE_CREATOR') ?? false)
+const { isCreator } = useTemplatePermissions()
 </script>
 
 <template>
@@ -16,7 +13,7 @@ const isTemplateCreator = computed(() => authStore.user?.roles?.includes('TEMPLA
     </h2>
 
     <RouterLink
-      v-if="isTemplateCreator"
+      v-if="isCreator"
       v-slot="{ route }"
       :to="{ name: ROUTES.TEMPLATES.NEW }"
       class="btn gap-2 self-end btn-primary"

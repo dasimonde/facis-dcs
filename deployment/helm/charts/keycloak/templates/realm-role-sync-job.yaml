@@ -20,7 +20,7 @@ spec:
           image: alpine:3.19
           env:
             - name: KC_URL
-              value: "http://{{ .Release.Name }}-keycloak:{{ .Values.service.port }}"
+              value: "http://{{ .Release.Name }}-keycloak:{{ .Values.service.port }}{{ if .Values.route.path }}/{{ trimAll "/" .Values.route.path }}{{ end }}"
             - name: KC_REALM
               value: "gaia-x"
             - name: KC_ADMIN_USER

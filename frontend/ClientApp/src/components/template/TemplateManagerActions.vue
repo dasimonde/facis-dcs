@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import type { PartialContractTemplate } from '@/models/contract-template'
+import { useTemplatePermissions } from '@/modules/template-repository/composables/useTemplatePermissions'
 import { TemplateType } from '@/modules/template-repository/models/contract-template'
 import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
-import { useAuthStore } from '@/stores/auth-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { TemplateState, type ContractTemplateState } from '@/types/contract-template-state'
 import { computed, normalizeClass, ref, useAttrs, useTemplateRef } from 'vue'
@@ -35,15 +35,12 @@ const props = defineProps<{
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const router = useRouter()
-const authStore = useAuthStore()
+
+const { isManager } = useTemplatePermissions()
 
 const isPublishing = ref(false)
 
 const templatesStore = useContractTemplatesStore()
-
-const isManager = computed(() => {
-  return authStore.user?.roles?.includes('TEMPLATE_MANAGER') ?? false
-})
 
 const canArchive = computed(() => {
   const archiveStates: ContractTemplateState[] = [TemplateState.deleted, TemplateState.deprecated]

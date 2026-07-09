@@ -14,7 +14,7 @@ import { ROUTES } from '@/router/router'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useContractPermissions } from '@/modules/template-repository/composables/useContractPermissions'
+import { useContractPermissions } from '@/modules/contract-workflow-engine/composables/useContractPermissions'
 
 const router = useRouter()
 const route = useRoute()
