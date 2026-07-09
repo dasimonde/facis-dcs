@@ -82,22 +82,42 @@ func verifyJWTStatusListBodyWithContext(ctx context.Context, body []byte, index 
 		return fmt.Errorf("JWT status list token missing status_list claim")
 	}
 
-	lst, _ := statusList["lst"].(string)
-	if strings.TrimSpace(lst) == "" {
-		return fmt.Errorf("JWT status list token missing status_list.lst")
-	}
-
-	bitsPerEntry, err := parseTokenStatusListBits(statusList["bits"])
+	encoded, bitsPerEntry, err := parseJWTStatusListEncodedList(statusList)
 	if err != nil {
 		return err
 	}
 
-	status, err := queryTokenStatusFromEncodedList(lst, index, bitsPerEntry)
+	status, err := queryTokenStatusFromEncodedList(encoded, index, bitsPerEntry)
 	if err != nil {
 		return fmt.Errorf("query JWT status list: %w", err)
 	}
 
 	return ensureActiveStatus(status, index)
+}
+
+// parseJWTStatusListEncodedList extracts the compressed bitstring from a JWT status_list claim.
+// Standard IETF tokens use integer bits + lst string; some issuers put the
+// encoded bitstring directly in bits as a string.
+func parseJWTStatusListEncodedList(statusList map[string]any) (encoded string, bitsPerEntry uint32, err error) {
+	if lst, ok := statusList["lst"].(string); ok {
+		lst = strings.TrimSpace(lst)
+		if lst != "" {
+			bitsPerEntry, err = parseTokenStatusListBits(statusList["bits"])
+			if err != nil {
+				return "", 0, err
+			}
+			return lst, bitsPerEntry, nil
+		}
+	}
+
+	if bitsStr, ok := statusList["bits"].(string); ok {
+		bitsStr = strings.TrimSpace(bitsStr)
+		if bitsStr != "" {
+			return bitsStr, 1, nil
+		}
+	}
+
+	return "", 0, fmt.Errorf("JWT status list token missing status_list.lst")
 }
 
 func validateStatusListJWTHeader(token string) error {

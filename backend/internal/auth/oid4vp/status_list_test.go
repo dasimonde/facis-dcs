@@ -2,6 +2,7 @@ package oid4vp
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
 	"encoding/base64"
@@ -166,6 +167,33 @@ func TestTokenStatusListJWT_UsesLSBPacking(t *testing.T) {
 	err := verifyJWTStatusListBody([]byte(token), idx)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "revoked")
+}
+
+func TestVerifyJWTStatusListBody_CryptoProviderBitsField(t *testing.T) {
+	bitstring := make([]byte, 16384)
+	idx := uint32(0)
+
+	var buf bytes.Buffer
+	w, err := flate.NewWriter(&buf, flate.DefaultCompression)
+	require.NoError(t, err)
+	_, err = w.Write(bitstring)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"statuslist+jwt"}`))
+	payload, err := json.Marshal(map[string]any{
+		"iat": time.Now().Add(-time.Minute).Unix(),
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"status_list": map[string]any{
+			"bits":    base64.RawURLEncoding.EncodeToString(buf.Bytes()),
+			"purpose": "revocation",
+		},
+	})
+	require.NoError(t, err)
+	payloadEnc := base64.RawURLEncoding.EncodeToString(payload)
+	token := header + "." + payloadEnc + "."
+
+	require.NoError(t, verifyJWTStatusListBody([]byte(token), idx))
 }
 
 func TestVerifyJWTStatusListBody_RejectsUnsignedWithoutSkip(t *testing.T) {

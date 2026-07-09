@@ -2,6 +2,7 @@ package oid4vp
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
 	"encoding/base64"
@@ -117,6 +118,10 @@ func decompressEncodedList(encoded string) ([]byte, error) {
 		return out, nil
 	}
 
+	if out, err := readFlateBitstring(compressed); err == nil {
+		return out, nil
+	}
+
 	// fallback if compression magic bytes are wrong
 	if r, err := gzip.NewReader(bytes.NewReader(compressed)); err == nil {
 		out, err := readCompressed(r)
@@ -126,7 +131,23 @@ func decompressEncodedList(encoded string) ([]byte, error) {
 		return out, nil
 	}
 
-	return nil, fmt.Errorf("unsupported status list compression; expected gzip or zlib")
+	return nil, fmt.Errorf("unsupported status list compression; expected gzip, zlib, or raw deflate")
+}
+
+func readFlateBitstring(compressed []byte) ([]byte, error) {
+	r := flate.NewReader(bytes.NewReader(compressed))
+	defer func() { _ = r.Close() }()
+
+	limited := io.LimitReader(r, maxStatusListDecodedBytes+1)
+	out, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > maxStatusListDecodedBytes {
+		return nil, fmt.Errorf("decoded status list exceeds %d bytes", maxStatusListDecodedBytes)
+	}
+
+	return out, nil
 }
 
 func decodeStatusListEncoding(encoded string) ([]byte, error) {
