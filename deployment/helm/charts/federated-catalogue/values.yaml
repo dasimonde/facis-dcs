@@ -1,11 +1,10 @@
 replicaCount: 1
 
 image:
-  # repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/catalogue/fc-service-server
-  # tag: "latest"
-  # Use this Harbor repository until the latest official FC release tag is confirmed.
+  # Available FC service images:
+  # https://github.com/eclipse-xfsc/federated-catalogue/pkgs/container/federated-catalogue%2Ffc-service-server
   repository: ghcr.io/eclipse-xfsc/federated-catalogue/fc-service-server
-  tag: latest
+  tag: "sha-c243a65"
   pullPolicy: IfNotPresent
 
 service:
