@@ -16,7 +16,7 @@ import (
 	"github.com/piprate/json-gold/ld"
 )
 
-//go:embed contexts/credentials-v2.jsonld contexts/data-integrity-v2.json
+//go:embed contexts/credentials-v2.jsonld contexts/data-integrity-v2.json contexts/ed25519-signature-2020-v1.jsonld
 var embeddedContexts embed.FS
 
 const (
@@ -32,12 +32,17 @@ const (
 	// https://www.w3.org/TR/vc-di-eddsa/#hashing-eddsa-rdfc-2022
 	dataIntegrityV2ContextURL = "https://w3id.org/security/data-integrity/v2"
 
+	// Ed25519Signature2020 JSON-LD @context.
+	// Specification: https://w3.org/TR/vc-di-eddsa/#ed25519signature2020
+	ed25519Signature2020ContextURL = "https://w3id.org/security/suites/ed25519-2020/v1"
+
 	contextFetchTimeout = 10 * time.Second
 )
 
 var supportedContextFiles = map[string]string{
-	credentialsV2ContextURL:   "contexts/credentials-v2.jsonld",
-	dataIntegrityV2ContextURL: "contexts/data-integrity-v2.json",
+	credentialsV2ContextURL:        "contexts/credentials-v2.jsonld",
+	dataIntegrityV2ContextURL:      "contexts/data-integrity-v2.json",
+	ed25519Signature2020ContextURL: "contexts/ed25519-signature-2020-v1.jsonld",
 }
 
 // DefaultDocumentLoader resolves the context URLs above for RDF Dataset Canonicalization.

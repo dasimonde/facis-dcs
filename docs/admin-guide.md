@@ -87,7 +87,7 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json   # baked into the image, see deployment/docker/Dockerfile
-    statusListSkipJWSVerify: false
+    xfscAllowUnsignedFallback: false
 ```
 
 `trust.dataPath` points at the trust configuration (accepted issuers,
