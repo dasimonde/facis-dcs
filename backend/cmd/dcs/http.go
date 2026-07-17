@@ -181,6 +181,10 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		c2paServer = c2pasvr.New(c2paEndpoints, apiMux, dec, enc, eh, ef)
 		internalSigningServer = internalsigningsvr.New(internalSigningEndpoints, apiMux, dec, enc, eh, ef)
 		semanticHubServer = semantichubsvr.New(semanticHubEndpoints, apiMux, dec, enc, eh, ef)
+
+		authServer.PresentationRequest = withOAuthAuthzReqJWTContentType(authServer.PresentationRequest)
+		authServer.PidPresentationRequest = withOAuthAuthzReqJWTContentType(authServer.PidPresentationRequest)
+		signatureManagementServer.PresentationRequest = withOAuthAuthzReqJWTContentType(signatureManagementServer.PresentationRequest)
 	}
 
 	didsvr.Mount(mux, didServer)
@@ -388,4 +392,34 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+const oauthAuthzReqJWTContentType = "application/oauth-authz-req+jwt"
+
+// withOAuthAuthzReqJWTContentType sets Content-Type for successful JAR body
+// writes when the handler left it unset.
+func withOAuthAuthzReqJWTContentType(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&oauthAuthzReqJWTWriter{ResponseWriter: w}, r)
+	})
+}
+
+type oauthAuthzReqJWTWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (w *oauthAuthzReqJWTWriter) WriteHeader(statusCode int) {
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *oauthAuthzReqJWTWriter) Write(b []byte) (int, error) {
+	// Only fill Content-Type on the success path.
+	// Error encoders set Content-Type before WriteHeader.
+	if !w.wroteHeader && w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", oauthAuthzReqJWTContentType)
+	}
+	w.wroteHeader = true
+	return w.ResponseWriter.Write(b)
 }

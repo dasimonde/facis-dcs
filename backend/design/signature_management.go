@@ -460,6 +460,32 @@ var _ = Service("SignatureManagement", func() {
 		})
 	})
 
+	Method("presentationRequest", func() {
+		Description("Returns a signed OpenID4VP authorization request JWT for a signing ceremony.")
+		Meta("dcs:requirements", "DCS-FR-SM-16")
+		NoSecurity()
+		Payload(func() {
+			Attribute("ceremony_id", String, "Signing ceremony identifier")
+			Attribute("wallet_nonce", String, "Wallet-provided nonce echoed in the authorization request object when request_uri_method=post")
+			Attribute("wallet_metadata", String, "Wallet metadata JSON submitted with request_uri_method=post")
+			Required("ceremony_id")
+		})
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Ceremony not found")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			POST("/signature/presentation/request/{ceremony_id}")
+			GET("/signature/presentation/request/{ceremony_id}")
+			SkipResponseBodyEncodeDecode()
+			Response(StatusOK, func() {
+				ContentType("application/oauth-authz-req+jwt")
+			})
+			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("ceremonyStatus", func() {
 		Description("report a signing ceremony's lifecycle status (FR-SM-14).")
 		Meta("dcs:requirements", "DCS-FR-SM-16")

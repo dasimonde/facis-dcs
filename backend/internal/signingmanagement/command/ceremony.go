@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -50,6 +51,17 @@ type StartCeremonyHandler struct {
 	CeremonyRepo db.CeremonyRepo
 }
 
+func buildCeremonyWalletURI(baseURL, ceremonyID string) string {
+	requestURI := strings.TrimRight(baseURL, "/") + "/signature/presentation/request/" + url.PathEscape(ceremonyID)
+
+	q := url.Values{}
+	q.Set("client_id", ceremonyAudience)
+	q.Set("request_uri", requestURI)
+	q.Set("request_uri_method", "post")
+
+	return "openid4vp://?" + q.Encode()
+}
+
 func (h *StartCeremonyHandler) Handle(ctx context.Context, cmd StartCeremonyCmd) (*db.SignatureCeremony, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -63,8 +75,13 @@ func (h *StartCeremonyHandler) Handle(ctx context.Context, cmd StartCeremonyCmd)
 	now := time.Now().UTC()
 	id := uuid.NewString()
 	nonce := uuid.NewString()
-	walletURI := fmt.Sprintf("openid4vp://?client_id=%s&request_uri=%s/signature/request/%s&nonce=%s",
-		ceremonyAudience, strings.TrimRight(cmd.BaseURL, "/"), id, nonce)
+	baseURL := strings.TrimRight(strings.TrimSpace(cmd.BaseURL), "/")
+
+	if baseURL == "" {
+		return nil, fmt.Errorf("base URL is required")
+	}
+
+	walletURI := buildCeremonyWalletURI(baseURL, id)
 	expiresAt := now.Add(ceremonyTTL)
 
 	ceremony := db.SignatureCeremony{

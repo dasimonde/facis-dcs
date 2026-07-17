@@ -18,8 +18,10 @@ and PID binding.
    harness.
 
 2. The ceremony endpoints POST /signature/request, GET
-   /signature/request/{ceremony_id}, and POST /signature/request/webhook
-   are defined in backend/design/signature_management.go.
+   /signature/request/{ceremony_id}, POST
+   /signature/presentation/request/{ceremony_id}, and POST
+   /signature/request/webhook are defined in
+   backend/design/signature_management.go.
 
 3. EUDIPLO itself is never co-deployed or called by this harness. Instead,
    THIS HARNESS plays the "EUDIPLO test client" role: it POSTs directly to
@@ -61,6 +63,8 @@ import time
 import uuid
 
 from behave import given, then, when
+
+import requests
 
 from steps.support.api_client import (
     signature_apply_url,
@@ -719,12 +723,58 @@ def step_then_apply_rejected_ceremony_required(context):
 
 @then("the ceremony response includes a ceremony_id, wallet_uri, and expires_at")
 def step_then_ceremony_start_response_shape(context):
+    import base64
+    import json
+    from urllib.parse import parse_qs, unquote
+
     resp = context.requests_response
     assert resp.status_code == 200, f"POST /signature/request failed: {resp.status_code} {resp.text}"
     body = resp.json()
     for field in ("ceremony_id", "wallet_uri", "expires_at"):
         assert body.get(field), f"/signature/request response missing '{field}': {body}"
 
+    wallet_uri = body["wallet_uri"]
+    assert wallet_uri.startswith("openid4vp://?"), f"wallet_uri must be an openid4vp deep link: {wallet_uri}"
+    query = wallet_uri.split("?", 1)[1]
+    params = parse_qs(query)
+    assert params.get("client_id", [""])[0] == "dcs-signature-ceremony", params
+    assert params.get("request_uri_method", [""])[0] == "post", params
+    assert "nonce" not in params, f"nonce belongs in the JAR, not the deep link: {wallet_uri}"
+    request_uri = unquote(params.get("request_uri", [""])[0])
+    ceremony_id = body["ceremony_id"]
+    assert request_uri.endswith(f"/signature/presentation/request/{ceremony_id}"), (
+        f"request_uri must point at the ceremony JAR endpoint, got: {request_uri}"
+    )
+    # OpenID4VP request_uri_method=post: form-urlencoded POST.
+    jar_resp = requests.post(
+        request_uri,
+        timeout=context.http_timeout_seconds,
+        headers={
+            "Accept": "application/oauth-authz-req+jwt, application/jwt",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={},
+    )
+    assert jar_resp.status_code == 200, (
+        f"POST ceremony presentation request failed: {jar_resp.status_code} {jar_resp.text}"
+    )
+    content_type = (jar_resp.headers.get("Content-Type") or "").split(";", 1)[0].strip()
+    assert content_type == "application/oauth-authz-req+jwt", (
+        f"expected JAR content type, got {content_type!r}"
+    )
+    jar = jar_resp.text.strip()
+    parts = jar.split(".")
+    assert len(parts) >= 2, "authorization request must look like a JWT"
+    header = json.loads(base64.urlsafe_b64decode(parts[0] + "=="))
+    assert header.get("typ") == "oauth-authz-req+jwt", header
+    claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
+    assert claims.get("client_id") == "dcs-signature-ceremony", claims
+    assert claims.get("response_type") == "vp_token", claims
+    assert claims.get("response_mode") == "direct_post", claims
+    assert claims.get("state") == ceremony_id, claims
+    assert claims.get("nonce"), "JAR must carry the ceremony nonce"
+    assert str(claims.get("response_uri", "")).endswith("/signature/presentation/callback"), claims
+    assert claims.get("dcql_query"), "JAR must include PID dcql_query"
 
 @then("the ceremony start request is denied for that role")
 def step_then_ceremony_start_denied(context):

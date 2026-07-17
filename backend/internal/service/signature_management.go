@@ -1,10 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	signaturemanagement "digital-contracting-service/gen/signature_management"
 	"digital-contracting-service/internal/auth"
+	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
@@ -26,10 +28,12 @@ import (
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
+	"digital-contracting-service/internal/signingmanagement/pidverify"
 	"digital-contracting-service/internal/signingmanagement/query"
 	"digital-contracting-service/internal/signingmanagement/signer"
 
 	"github.com/jmoiron/sqlx"
+	"goa.design/clue/log"
 )
 
 // mapSignatureCommandError classifies a signing command error for the HTTP
@@ -68,13 +72,16 @@ type signatureManagementsrvc struct {
 	ArchiveRepo   cwedb.ContractRepo
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    *tsa.APIClient
+	RequestSigner oid4vprequest.Signer
+	PublicAPIBase string
+	PIDDCQLQuery  any
 	auth.JWTAuthenticator
 }
 
 func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, ceremonyRepo db.CeremonyRepo,
 	auditTrailReader base.AuditTrailReader, contractSigner signer.ContractSigner, vcSigner provenance.VCSigner, issuerDID string,
 	ipfsClient *ipfs.APIClient, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
-	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer) signaturemanagement.Service {
+	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer, requestSigner oid4vprequest.Signer, publicAPIBase string, pidDCQLQuery any) signaturemanagement.Service {
 
 	return &signatureManagementsrvc{
 		JWTAuthenticator: jwtAuth,
@@ -91,6 +98,9 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		ArchiveRepo:      archiveRepo,
 		ArchiveNotary:    archiveNotary,
 		ArchiveTSA:       archiveTSA,
+		RequestSigner:    requestSigner,
+		PublicAPIBase:    strings.TrimRight(strings.TrimSpace(publicAPIBase), "/"),
+		PIDDCQLQuery:     pidDCQLQuery,
 	}
 }
 
@@ -516,8 +526,8 @@ func (s *signatureManagementsrvc) StartCeremony(ctx context.Context, req *signat
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("DCS_PUBLIC_BASE_URL")), "/")
-	if baseURL == "" {
+	if s.PublicAPIBase == "" {
+		log.Printf(ctx, "StartCeremony: DCS_PUBLIC_BASE_URL is empty")
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("could not start the signing ceremony"))
 	}
 
@@ -526,7 +536,7 @@ func (s *signatureManagementsrvc) StartCeremony(ctx context.Context, req *signat
 		ContractDID: req.ContractDid,
 		FieldName:   req.FieldName,
 		RequestedBy: middleware.GetParticipantID(ctx),
-		BaseURL:     baseURL,
+		BaseURL:     s.PublicAPIBase,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
@@ -542,6 +552,64 @@ func (s *signatureManagementsrvc) StartCeremony(ctx context.Context, req *signat
 		ExpiresAt:  ceremony.ExpiresAt.Format(time.RFC3339),
 		Status:     ceremony.Status,
 	}, nil
+}
+
+func (s *signatureManagementsrvc) PresentationRequest(ctx context.Context, p *signaturemanagement.PresentationRequestPayload) (io.ReadCloser, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
+
+	defer func() { _ = tx.Rollback() }()
+
+	ceremony, err := s.CeremonyRepo.GetCeremonyByID(ctx, tx, p.CeremonyID)
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
+
+	if ceremony == nil {
+		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony not found"))
+	}
+
+	if ceremony.Status != db.CeremonyPending {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony is not pending"))
+	}
+
+	if !time.Now().UTC().Before(ceremony.ExpiresAt) {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony expired"))
+	}
+
+	if s.RequestSigner == nil || s.PublicAPIBase == "" || s.PIDDCQLQuery == nil {
+		log.Printf(ctx, "PresentationRequest: OpenID4VP request signing is not configured")
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("could not build the authorization request"))
+	}
+
+	walletNonce := ""
+	if p.WalletNonce != nil {
+		walletNonce = strings.TrimSpace(*p.WalletNonce)
+	}
+
+	responseURI := s.PublicAPIBase + "/signature/presentation/callback"
+
+	jwt, err := oid4vprequest.BuildJWT(s.RequestSigner, oid4vprequest.Params{
+		ClientID:    pidverify.Audience,
+		ResponseURI: responseURI,
+		State:       ceremony.ID,
+		Nonce:       ceremony.Nonce,
+		WalletNonce: walletNonce,
+		ExpiresAt:   ceremony.ExpiresAt,
+		DCQLQuery:   s.PIDDCQLQuery,
+	})
+
+	if err != nil {
+		log.Printf(ctx, "PresentationRequest: build JAR failed: %v", err)
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("could not build the authorization request"))
+	}
+
+	return io.NopCloser(bytes.NewReader([]byte(jwt))), nil
 }
 
 func (s *signatureManagementsrvc) CeremonyStatus(ctx context.Context, req *signaturemanagement.SMSignatureRequestStatusRequest) (res *signaturemanagement.SMSignatureRequestStatusResponse, err error) {
