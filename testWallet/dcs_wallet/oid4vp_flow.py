@@ -23,6 +23,7 @@ from dcs_wallet.sdjwt import split_sd_jwt
 DCS_REQUEST_URI_MARKERS = (
     "/auth/pid/presentation/request/",
     "/auth/presentation/request/",
+    "/signature/presentation/request/",
 )
 
 WALLET_VP_FORMATS_SUPPORTED = {

@@ -185,6 +185,53 @@ class AuthService:
             nonce=nonce,
         )
 
+    @staticmethod
+    def build_pid_vp_token(
+        *,
+        given_name: str,
+        family_name: str,
+        nonce: str,
+        client_id: str,
+        holder_private: dict[str, Any] | None = None,
+        keys: WalletKeys | None = None,
+    ) -> str:
+        """Build PID vp_token: runtime-minted x5c SD-JWT + KB-JWT.
+
+        Same issuance pattern as build_vp_token (issuer-dev key + statuslist tenant
+        credential), but signs with header.x5c and vct=urn:eudi:pid:de:1 for VerifyPID.
+        """
+        if not nonce:
+            raise ValueError("nonce is required to build pid vp_token")
+        if not client_id:
+            raise ValueError("client_id is required to build pid vp_token")
+
+        wallet_keys = keys or AuthService.load_wallet_keys()
+        AuthService._ensure_dcs_wallet_importable()
+        from dcs_wallet.issuer import (
+            DEFAULT_ISSUER_DID,
+            issue_pid_presentation,
+        )
+        from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT
+
+        issuer_did = os.getenv("BDD_ISSUER_DID", DEFAULT_ISSUER_DID)
+        statuslist_base = os.getenv("STATUSLIST_SERVICE_URL", "http://localhost:30821").strip()
+        if not statuslist_base:
+            raise RuntimeError(
+                "STATUSLIST_SERVICE_URL is required for BDD PID OID4VP credentials "
+                "(set by run_bdd_helm.sh; same as PoA login credentials)"
+            )
+        return issue_pid_presentation(
+            given_name=given_name,
+            family_name=family_name,
+            issuer_private=wallet_keys.issuer_private,
+            wallet_private=holder_private or wallet_keys.wallet_private,
+            aud=client_id,
+            nonce=nonce,
+            issuer_did=issuer_did,
+            statuslist_service_base=statuslist_base,
+            statuslist_tenant=BDD_CREDENTIAL_TENANT,
+        )
+
     # ------------------------------------------------------------------
     # Step 3 — OID4VP login API calls
     # ------------------------------------------------------------------

@@ -35,6 +35,11 @@ def status_list_index_seed(*, sub: str, organization: str, roles: list[str]) -> 
     return f"{sub}\x1e{organization}\x1e{role_part}"
 
 
+def status_list_index_seed_pid(*, sub: str, given_name: str, family_name: str) -> str:
+    """Stable seed so each PID credential (sub + names) maps to its own index."""
+    return f"{sub}\x1epid\x1e{given_name}\x1e{family_name}"
+
+
 def status_list_uri(
     service_base: str = DEFAULT_SERVICE_BASE,
     list_number: int = DEFAULT_LIST_NUMBER,
@@ -58,6 +63,28 @@ def build_credential_status(
     """Return IETF status.status_list reference for issuer JWT visible claims."""
     uri = status_list_uri(service_base, list_number, tenant)
     idx = status_list_index(status_list_index_seed(sub=sub, organization=organization, roles=roles))
+    return {
+        "status_list": {
+            "idx": idx,
+            "uri": uri,
+        },
+    }
+
+
+def build_pid_credential_status(
+    *,
+    sub: str,
+    given_name: str,
+    family_name: str,
+    service_base: str = DEFAULT_SERVICE_BASE,
+    list_number: int = DEFAULT_LIST_NUMBER,
+    tenant: str = DEFAULT_TENANT,
+) -> dict[str, Any]:
+    """Return IETF status.status_list reference for PID issuer JWT visible claims."""
+    uri = status_list_uri(service_base, list_number, tenant)
+    idx = status_list_index(
+        status_list_index_seed_pid(sub=sub, given_name=given_name, family_name=family_name)
+    )
     return {
         "status_list": {
             "idx": idx,

@@ -19,19 +19,18 @@ and PID binding.
 
 2. The ceremony endpoints POST /signature/request, GET
    /signature/request/{ceremony_id}, POST
-   /signature/presentation/request/{ceremony_id}, and POST
+   /signature/presentation/request/{ceremony_id}, POST
+   /signature/presentation/callback (OpenID4VP direct_post), and POST
    /signature/request/webhook are defined in
    backend/design/signature_management.go.
 
-3. EUDIPLO itself is never co-deployed or called by this harness. Instead,
-   THIS HARNESS plays the "EUDIPLO test client" role: it POSTs directly to
-   POST /signature/request/webhook with a real, protocol-correct SD-JWT VC
-   + KB-JWT presentation (built with the existing testWallet/dcs_wallet
-   signing primitives - the same library AuthService already uses for the
-   OID4VP login flow, just with PID-shaped claims (vct urn:eudi:pid:1,
-   given_name/family_name) instead of the role-credential shape). The BDD
-   harness calls the webhook the way EUDIPLO itself would - a legitimate
-   stand-in for a co-deployed EUDIPLO instance.
+3. EUDIPLO itself is never co-deployed or called by this harness. The
+   default ceremony completion path is OpenID4VP direct_post to
+   POST /signature/presentation/callback with a DCQL-keyed vp_token.
+   Dedicated webhook scenarios still exercise POST /signature/request/webhook
+   with the X-EUDIPLO-Webhook-Secret header. Presentations mint a PID
+   SD-JWT at runtime (x5c + urn:eudi:pid:de:1 + statuslist), reusing the
+   same testWallet issuer/status helpers as PoA login.
 
 4. The webhook's shared-secret header is X-EUDIPLO-Webhook-Secret, env
    BDD_EUDIPLO_WEBHOOK_SECRET (default "bdd-eudiplo-webhook-secret"). The
@@ -59,7 +58,6 @@ the bottom of the feature file, not a fabricated pass.
 
 from __future__ import annotations
 
-import time
 import uuid
 
 from behave import given, then, when
@@ -68,6 +66,7 @@ import requests
 
 from steps.support.api_client import (
     signature_apply_url,
+    signature_presentation_callback_url,
     signature_request_by_id_url,
     signature_request_url,
     signature_request_webhook_url,
@@ -98,56 +97,32 @@ def _webhook_secret() -> str:
 
 
 def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonce: str, holder_private=None):
-    """Build a real, protocol-correct PID SD-JWT VC + KB-JWT presentation
-    using the same testWallet/dcs_wallet signing primitives already used by
-    AuthService for the DCS role-credential OID4VP login flow — just with
-    PID-shaped claims (vct urn:eudi:pid:1) instead of organization/roles.
+    """Build a compact PID SD-JWT VC + KB-JWT presentation for headless ceremony
+    completion via AuthService.build_pid_vp_token (x5c + statuslist).
     Returns (compact_presentation, issuer_jwt, disclosures, subject_did).
 
     holder_private lets a scenario present as a DIFFERENT natural person than
-    the shared test wallet: the trusted test issuer binds the credential's cnf
-    to whatever holder key it is given, so a fresh ephemeral key yields a
-    fresh subject DID (needed by multi-signer scenarios, where two fields
-    must be signed by two distinct identities).
+    the shared test wallet: the test issuer binds the credential's cnf to
+    whatever holder key it is given, so a fresh ephemeral key yields a fresh
+    subject DID (needed by multi-signer scenarios).
     """
     AuthService._ensure_dcs_wallet_importable()
-    from dcs_wallet.issuer import (  # noqa: PLC0415
-        DEFAULT_ISSUER_DID,
-        sign_credential_sd_jwt,
-        sign_key_binding_jwt,
-    )
-    from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk  # noqa: PLC0415
-    from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt  # noqa: PLC0415
+    from dcs_wallet.keys import did_jwk_from_public_jwk, public_jwk  # noqa: PLC0415
+    from dcs_wallet.sdjwt import split_sd_jwt  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
     holder_key = holder_private or keys.wallet_private
-    holder_public = public_jwk(holder_key)
-    subject_did = did_jwk_from_public_jwk(holder_public)
+    subject_did = did_jwk_from_public_jwk(public_jwk(holder_key))
 
-    now = int(time.time())
-    visible_claims = {
-        "iss": DEFAULT_ISSUER_DID,
-        "sub": subject_did,
-        "vct": "urn:eudi:pid:1",
-        "iat": now - 3600,
-        "exp": now + 3600,
-        "cnf": {"jwk": cnf_jwk(holder_public)},
-    }
-    selective_claims = {"given_name": given_name, "family_name": family_name}
-    issued = sign_credential_sd_jwt(
-        visible_claims=visible_claims,
-        selective_claims=selective_claims,
-        issuer_private=keys.issuer_private,
-    )
-    issuer_jwt, disclosures, _old_kb = split_sd_jwt(issued)
-    kb_jwt = sign_key_binding_jwt(
-        issuer_jwt=issuer_jwt,
-        disclosures=disclosures,
-        wallet_private=holder_key,
-        aud=aud,
+    presentation = AuthService.build_pid_vp_token(
+        given_name=given_name,
+        family_name=family_name,
         nonce=nonce,
+        client_id=aud,
+        holder_private=holder_key,
+        keys=keys,
     )
-    presentation = join_sd_jwt(issuer_jwt, disclosures, kb_jwt)
+    issuer_jwt, disclosures, _kb = split_sd_jwt(presentation)
     return presentation, issuer_jwt, disclosures, subject_did
 
 
@@ -184,32 +159,72 @@ def _complete_ceremony_via_webhook(context, ceremony_id, presentation, subject_d
     return post_json(context, signature_request_webhook_url(context), payload, headers=headers)
 
 
+def _ceremony_nonce_from_jar(context, wallet_uri: str) -> str:
+    """Fetch the ceremony JAR and return the server nonce the KB-JWT must echo."""
+    import base64
+    import json
+    from urllib.parse import parse_qs, unquote
+
+    assert wallet_uri.startswith("openid4vp://?"), wallet_uri
+    params = parse_qs(wallet_uri.split("?", 1)[1])
+    request_uri = unquote(params.get("request_uri", [""])[0])
+    assert request_uri, f"wallet_uri missing request_uri: {wallet_uri}"
+    jar_resp = requests.post(
+        request_uri,
+        timeout=context.http_timeout_seconds,
+        headers={
+            "Accept": "application/oauth-authz-req+jwt, application/jwt",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={},
+    )
+    assert jar_resp.status_code == 200, (
+        f"POST ceremony presentation request failed: {jar_resp.status_code} {jar_resp.text}"
+    )
+    parts = jar_resp.text.strip().split(".")
+    assert len(parts) >= 2, "authorization request must look like a JWT"
+    claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
+    nonce = claims.get("nonce")
+    assert nonce, f"JAR missing nonce: {claims}"
+    return str(nonce)
+
+
+def _complete_ceremony_via_callback(context, ceremony_id, presentation):
+    """OpenID4VP direct_post: DCQL-keyed vp_token + state=ceremony_id."""
+    import json
+
+    vp_token = json.dumps({"eudi_pid_credential": [presentation]}, separators=(",", ":"))
+    return requests.post(
+        signature_presentation_callback_url(context),
+        timeout=context.http_timeout_seconds,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={"state": ceremony_id, "vp_token": vp_token},
+    )
+
+
 def _run_full_ceremony(context, name, field_name, signatory_name, holder_private=None):
-    """Start a ceremony, complete it headlessly via the assumed webhook
-    contract (see module docstring point 3), and stash the presentation +
-    ceremony id on context for later PDF-embedding assertions.
-    """
+    """Start a ceremony and complete it via OpenID4VP direct_post callback."""
     signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
     start_resp = _start_ceremony(context, name, field_name, signer_h)
     assert start_resp.status_code == 200, (
         f"POST /signature/request failed for contract '{name}': "
         f"{start_resp.status_code} {start_resp.text}"
     )
-    ceremony_id = start_resp.json().get("ceremony_id")
+    body = start_resp.json()
+    ceremony_id = body.get("ceremony_id")
     assert ceremony_id, f"/signature/request response has no ceremony_id: {start_resp.text}"
+    wallet_uri = body.get("wallet_uri") or ""
+    nonce = _ceremony_nonce_from_jar(context, wallet_uri)
 
-    nonce = str(uuid.uuid4())
     given_name, family_name = signatory_name, "BDD-Testperson"
     presentation, issuer_jwt, disclosures, subject_did = _build_pid_presentation(
         given_name=given_name, family_name=family_name, aud="dcs-signature-ceremony", nonce=nonce,
         holder_private=holder_private,
     )
-    webhook_resp = _complete_ceremony_via_webhook(
-        context, ceremony_id, presentation, subject_did, given_name, family_name
-    )
-    assert webhook_resp.status_code == 200, (
-        f"POST /signature/request/webhook failed for ceremony '{ceremony_id}': "
-        f"{webhook_resp.status_code} {webhook_resp.text}"
+    callback_resp = _complete_ceremony_via_callback(context, ceremony_id, presentation)
+    assert callback_resp.status_code == 204, (
+        f"POST /signature/presentation/callback failed for ceremony '{ceremony_id}': "
+        f"{callback_resp.status_code} {callback_resp.text}"
     )
 
     if not hasattr(context, "ceremony_ids"):

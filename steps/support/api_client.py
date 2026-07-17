@@ -183,6 +183,10 @@ def signature_request_webhook_url(context) -> str:
     return f"{context.base_url}/signature/request/webhook"
 
 
+def signature_presentation_callback_url(context) -> str:
+    return f"{context.base_url}/signature/presentation/callback"
+
+
 # Authenticated, non-public backend endpoint that signs a COSE
 # Sig_structure via hsm.Signer("dcs-c2pa") for pdf-core
 # (backend/design/internal_signing.go).

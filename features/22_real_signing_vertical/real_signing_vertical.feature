@@ -11,12 +11,11 @@
 #      bytes GET /pdf/export/contract/{did} serves afterwards, using the
 #      same direct-byte-search technique established elsewhere in this
 #      codebase's BDD packs.
-#   2. EUDIPLO is never co-deployed here; this harness plays the "EUDIPLO
-#      test client" role itself, POSTing a real, protocol-correct SD-JWT VC +
-#      KB-JWT PID presentation straight at the ceremony webhook
-#      (POST /signature/request/webhook, authenticated via the
-#      X-EUDIPLO-Webhook-Secret shared-secret header), built with the
-#      testWallet/dcs_wallet signing primitives.
+#   2. EUDIPLO is never co-deployed here. The default ceremony completion
+#      path is OpenID4VP direct_post to POST /signature/presentation/callback
+#      with a DCQL-keyed vp_token. Dedicated webhook scenarios still hit
+#      POST /signature/request/webhook (X-EUDIPLO-Webhook-Secret). Presentations
+#      use the EUDIPLO PID model.
 #   3. Byte-level PDF assertions (SubFilter, x5chain, RFC3161 timestamp,
 #      ByteRange coverage) are direct-byte-search heuristics, not a full PDF/
 #      CMS/ASN.1 parse - each documents its own precision limit at its point
@@ -170,7 +169,7 @@ Feature: Real signing vertical - PAdES signature, EUDIPLO ceremony, PID binding
     Then the webhook request is rejected for the incorrect shared secret
 
   @UC-04-02
-  Scenario: The ceremony completes headlessly by fulfilling the OID4VP presentation/webhook contract, no wallet UI involved
+  Scenario: The ceremony completes headlessly by fulfilling the OID4VP direct_post callback, no wallet UI involved
     Given contract "RSV Headless Ceremony Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerTwelve"
     When I poll the signing ceremony status for contract "RSV Headless Ceremony Contract"
     Then get http 200:Success code

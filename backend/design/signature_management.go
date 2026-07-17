@@ -325,6 +325,17 @@ var SMSignatureWebhookResponse = Type("SMSignatureWebhookResponse", func() {
 	Required("ceremony_id", "status")
 })
 
+var SMPresentationCallbackRequest = Type("SMPresentationCallbackRequest", func() {
+	Description("Wallet OpenID4VP direct_post of a PID presentation for a signing ceremony")
+
+	Attribute("state", String, "Ceremony identifier from the authorization request state claim")
+	Attribute("vp_token", String, "JSON object keyed by DCQL credential-query id containing arrays of verifiable presentations")
+	Attribute("error", String, "Error code when the wallet could not return a verifiable presentation")
+	Attribute("error_description", String, "Optional wallet-provided details for the error")
+
+	Required("state")
+})
+
 // Signature Management Service  (/signature/...)
 var _ = Service("SignatureManagement", func() {
 	Description("Signature Management APIs (/signature/...)")
@@ -481,6 +492,25 @@ var _ = Service("SignatureManagement", func() {
 				ContentType("application/oauth-authz-req+jwt")
 			})
 			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("presentationCallback", func() {
+		Description("Handles the wallet OpenID4VP direct_post for a signing ceremony PID presentation.")
+		Meta("dcs:requirements", "DCS-FR-SM-16")
+		NoSecurity()
+		Payload(SMPresentationCallbackRequest)
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("unauthorized", ErrorResult, "Presentation verification failed")
+		Error("not_found", ErrorResult, "Ceremony not found")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			POST("/signature/presentation/callback")
+			Response(StatusNoContent)
+			Response("bad_request", StatusBadRequest)
+			Response("unauthorized", StatusUnauthorized)
 			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
