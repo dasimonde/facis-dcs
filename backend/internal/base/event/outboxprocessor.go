@@ -2,7 +2,9 @@ package event
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -270,6 +272,10 @@ func (j OutboxProcessor) anchorBatch(ctx context.Context, events []datatype.Outb
 		return fmt.Errorf("could not append checkpoint: %w", err)
 	}
 
+	if err := j.ARepo.AppendCheckpointLeaves(ctx, tx, seq, leafCIDs, leafHashes); err != nil {
+		return fmt.Errorf("could not record the leaves of checkpoint %d: %w", seq, err)
+	}
+
 	for key, cid := range updatedHeads {
 		if err := j.ARepo.UpdateLogCID(ctx, tx, key.component, key.did, &cid); err != nil {
 			return fmt.Errorf("could not update log CID: %w", err)
@@ -409,6 +415,11 @@ func (j OutboxProcessor) writeEntries(ctx context.Context, events []datatype.Out
 // hash is taken over the exact bytes stored, so an auditor can refetch the entry
 // and recompute its membership in the checkpoint.
 func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEvent, predCID *string) (anchoredEntry, error) {
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return anchoredEntry{}, fmt.Errorf("could not draw a blinding nonce for event %d: %w", event.ID, err)
+	}
+
 	entry := datatype.AuditLogEntry{
 		ID:            event.ID,
 		Component:     event.Component,
@@ -417,6 +428,7 @@ func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEv
 		DID:           event.DID,
 		CreatedAt:     event.CreatedAt,
 		ResLogPredCID: predCID,
+		Nonce:         hex.EncodeToString(nonce),
 	}
 	raw, err := json.Marshal(entry)
 	if err != nil {

@@ -25,3 +25,19 @@ CREATE INDEX IF NOT EXISTS audit_checkpoints_pending_timestamp
 -- The global head is a checkpoint root now, not a row in the per-resource CID
 -- table; the per-resource chains keep using audit_trail_log unchanged.
 DELETE FROM audit_trail_log WHERE component = 'GLOBAL_AUDIT_TRAIL' AND did = 'GLOBAL_AUDIT_TRAIL';
+
+-- Leaf index: which checkpoint an anchored entry sits in, and at which
+-- position. Needed to serve an inclusion proof for one entry without reading
+-- the whole batch back out of IPFS. The leaf hash is blinded by the entry's
+-- nonce (see datatype.AuditLogEntry.Nonce), so these rows commit to the
+-- entries without revealing anything about them.
+CREATE TABLE IF NOT EXISTS audit_checkpoint_leaves (
+    checkpoint_seq BIGINT       NOT NULL REFERENCES audit_checkpoints (seq) ON DELETE CASCADE,
+    idx            INTEGER      NOT NULL,
+    entry_cid      VARCHAR(120) NOT NULL,
+    leaf_hash      VARCHAR(64)  NOT NULL,
+    PRIMARY KEY (checkpoint_seq, idx)
+);
+
+CREATE INDEX IF NOT EXISTS audit_checkpoint_leaves_entry_cid
+    ON audit_checkpoint_leaves (entry_cid);

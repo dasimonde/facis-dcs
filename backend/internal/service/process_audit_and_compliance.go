@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -535,4 +536,66 @@ func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processa
 func (s *processAuditAndCompliancesrvc) IncidentReport(ctx context.Context, p *processauditandcompliance.IncidentReportPayload) (res any, err error) {
 	log.Printf(ctx, "processAuditAndCompliance.incident_report")
 	return
+}
+
+// CheckpointHead serves the newest audit-trail checkpoint head. Everything in
+// the response is a hash, a count or a trusted timestamp, so a caller may
+// publish it onward to an external notary — which is the point: a head held by
+// someone we do not control pins every entry anchored before it (ADR-16).
+func (s *processAuditAndCompliancesrvc) CheckpointHead(ctx context.Context, p *processauditandcompliance.CheckpointHeadPayload) (res *processauditandcompliance.PACCheckpointHead, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	handler := qry2.CheckpointAuditor{DB: s.DB, ARepo: s.ATrailReader.ARepo}
+	head, err := handler.Head(ctx)
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	if head == nil {
+		return nil, processauditandcompliance.MakeNotFound(errors.New("no audit checkpoint has been anchored yet"))
+	}
+	return toCheckpointHead(*head), nil
+}
+
+// CheckpointProof serves the inclusion proof for one anchored entry. The entry
+// itself is deliberately not part of the response: the verifier already holds
+// it, and everything here is a hash, so the proof carries no system data.
+func (s *processAuditAndCompliancesrvc) CheckpointProof(ctx context.Context, p *processauditandcompliance.CheckpointProofPayload) (res *processauditandcompliance.PACCheckpointProof, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	handler := qry2.CheckpointAuditor{DB: s.DB, ARepo: s.ATrailReader.ARepo}
+	proof, err := handler.Proof(ctx, p.EntryCid)
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	if proof == nil {
+		return nil, processauditandcompliance.MakeNotFound(fmt.Errorf("no checkpoint commits to entry %s", p.EntryCid))
+	}
+
+	return &processauditandcompliance.PACCheckpointProof{
+		EntryCid:  proof.EntryCID,
+		LeafHash:  proof.LeafHash,
+		LeafIndex: proof.LeafIndex,
+		Siblings:  proof.Siblings,
+		Head:      toCheckpointHead(proof.Head),
+	}, nil
+}
+
+func toCheckpointHead(head qry2.CheckpointHead) *processauditandcompliance.PACCheckpointHead {
+	result := &processauditandcompliance.PACCheckpointHead{
+		Seq:          head.Seq,
+		Root:         head.Root,
+		PrevRoot:     head.PrevRoot,
+		LeafCount:    head.LeafCount,
+		CreatedAt:    head.CreatedAt.UTC().Format(time.RFC3339),
+		TsaTimestamp: head.TsaTimestamp,
+	}
+	if head.TimestampedAt != nil {
+		timestampedAt := head.TimestampedAt.UTC().Format(time.RFC3339)
+		result.TimestampedAt = &timestampedAt
+	}
+	return result
 }

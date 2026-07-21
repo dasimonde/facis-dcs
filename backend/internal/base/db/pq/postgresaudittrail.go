@@ -138,3 +138,70 @@ func (r *PostgresAuditTrailRepository) UpdateCheckpointTimestamp(ctx context.Con
 	_, err := tx.ExecContext(ctx, statement, seq, tsaSignature)
 	return err
 }
+
+// AppendCheckpointLeaves records the ordered leaves of one checkpoint so an
+// inclusion proof can be built for a single entry later.
+func (r *PostgresAuditTrailRepository) AppendCheckpointLeaves(ctx context.Context, tx *sqlx.Tx, seq int64, entryCIDs, leafHashes []string) error {
+	if len(entryCIDs) != len(leafHashes) {
+		return errors.New("checkpoint leaves: CID and hash counts differ")
+	}
+	statement := `
+        INSERT INTO audit_checkpoint_leaves (checkpoint_seq, idx, entry_cid, leaf_hash)
+        VALUES ($1, $2, $3, $4)
+    `
+	for i := range entryCIDs {
+		if _, err := tx.ExecContext(ctx, statement, seq, i, entryCIDs[i], leafHashes[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *PostgresAuditTrailRepository) ReadLatestCheckpoint(ctx context.Context, tx *sqlx.Tx) (*datatype.AuditCheckpointRecord, error) {
+	query := `
+        SELECT seq, cid, root, prev_root, leaf_count, tsa_signature, created_at, timestamped_at
+        FROM audit_checkpoints ORDER BY seq DESC LIMIT 1
+    `
+	var record datatype.AuditCheckpointRecord
+	if err := tx.GetContext(ctx, &record, query); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &record, nil
+}
+
+// ReadCheckpointForEntry returns the checkpoint that commits to entryCID, that
+// checkpoint's leaf hashes in order, and the entry's index among them.
+func (r *PostgresAuditTrailRepository) ReadCheckpointForEntry(ctx context.Context, tx *sqlx.Tx, entryCID string) (*datatype.AuditCheckpointRecord, []string, int, error) {
+	var located struct {
+		Seq int64 `db:"checkpoint_seq"`
+		Idx int   `db:"idx"`
+	}
+	if err := tx.GetContext(ctx, &located, `
+        SELECT checkpoint_seq, idx FROM audit_checkpoint_leaves WHERE entry_cid = $1 ORDER BY checkpoint_seq LIMIT 1
+    `, entryCID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, 0, nil
+		}
+		return nil, nil, 0, err
+	}
+
+	var record datatype.AuditCheckpointRecord
+	if err := tx.GetContext(ctx, &record, `
+        SELECT seq, cid, root, prev_root, leaf_count, tsa_signature, created_at, timestamped_at
+        FROM audit_checkpoints WHERE seq = $1
+    `, located.Seq); err != nil {
+		return nil, nil, 0, err
+	}
+
+	var leafHashes []string
+	if err := tx.SelectContext(ctx, &leafHashes, `
+        SELECT leaf_hash FROM audit_checkpoint_leaves WHERE checkpoint_seq = $1 ORDER BY idx ASC
+    `, located.Seq); err != nil {
+		return nil, nil, 0, err
+	}
+
+	return &record, leafHashes, located.Idx, nil
+}

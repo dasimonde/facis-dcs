@@ -86,3 +86,18 @@ func TestRootOverNoLeavesIsRefused(t *testing.T) {
 		t.Fatal("expected an error for a checkpoint with no leaves")
 	}
 }
+
+// The blinding nonce is what makes a leaf hash publishable: two audit entries
+// that differ only by their nonce must not produce the same leaf, otherwise a
+// published proof would be an unsalted commitment over guessable content and
+// anyone could brute-force it to confirm what an entry says.
+func TestLeafHashIsBlindedByTheNonce(t *testing.T) {
+	const entry = `{"id":42,"component":"ContractWorkflowEngine","event_type":"TERMINATE_CONTRACT",` +
+		`"did":"did:example:contract:1","created_at":"2026-07-21T14:03:07Z","res_log_pred_cid":null,"nonce":%q}`
+
+	first := MerkleLeafHash([]byte(fmt.Sprintf(entry, "8f14e45fceea167a5a36dedd4bea2543")))
+	second := MerkleLeafHash([]byte(fmt.Sprintf(entry, "c9f0f895fb98ab9159f51fd0297e236d")))
+	if first == second {
+		t.Fatal("the nonce does not enter the leaf hash; a published leaf would be guessable")
+	}
+}

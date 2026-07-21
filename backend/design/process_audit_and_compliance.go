@@ -65,6 +65,37 @@ var PACMonitorResponse = Type("PACMonitorResponse", func() {
 	Required("checked_at", "risks")
 })
 
+
+// The publishable head of an audit-trail checkpoint (ADR-16): hashes, counts
+// and a trusted timestamp only — nothing derived from the entries it commits
+// to, so it is safe to hand to an external notary such as an ORCE flow.
+var PACCheckpointHead = Type("PACCheckpointHead", func() {
+	Description("Publishable head of an audit-trail Merkle checkpoint")
+
+	Attribute("seq", Int64, "Checkpoint sequence number")
+	Attribute("root", String, "Merkle root over the batch this checkpoint commits to")
+	Attribute("prev_root", String, "Root of the preceding checkpoint; chaining makes one published root commit to the whole prefix")
+	Attribute("leaf_count", Int, "Number of audit entries committed to")
+	Attribute("created_at", String, "When the checkpoint was anchored (RFC3339)")
+	Attribute("tsa_timestamp", String, "RFC 3161 timestamp token over the root; absent while the TSA has not answered yet")
+	Attribute("timestamped_at", String, "When the timestamp was obtained (RFC3339)")
+
+	Required("seq", "root", "leaf_count", "created_at")
+})
+
+// Evidence that one audit entry is committed to by a timestamped root.
+var PACCheckpointProof = Type("PACCheckpointProof", func() {
+	Description("Merkle inclusion proof tying one audit entry to a checkpoint")
+
+	Attribute("entry_cid", String, "IPFS CID of the audit entry the proof is for")
+	Attribute("leaf_hash", String, "Blinded leaf hash of that entry")
+	Attribute("leaf_index", Int, "Position of the leaf in the checkpoint")
+	Attribute("siblings", ArrayOf(String), "Sibling hashes from the leaf up to the root")
+	Attribute("head", PACCheckpointHead, "Head of the checkpoint the entry belongs to")
+
+	Required("entry_cid", "leaf_hash", "leaf_index", "siblings", "head")
+})
+
 // Process Audit & Compliance Management Service  (/pac/...)
 var _ = Service("ProcessAuditAndCompliance", func() {
 	Description("Process Audit & Compliance Management APIs (/pac/...)")
@@ -164,5 +195,64 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Response(StatusOK)
 		})
 		Result(Any)
+	})
+
+	Method("checkpoint_head", func() {
+		Description("retrieve the newest audit-trail checkpoint head (ADR-16). Contains only hashes, counts and a trusted timestamp, so the response may be published onward — an external notary that stores one head pins the whole log before it, because every root chains to its predecessor.")
+		Meta("dcs:requirements", "DCS-IR-PACM-01")
+		Meta("dcs:ui", "Auditing Tool")
+		Meta("dcs:pacm:components", "")
+
+		Security(JWTAuth, func() {
+			Scope("Auditor")
+			Scope("Archive Manager")
+		})
+
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
+		Result(PACCheckpointHead)
+
+		Error("not_found", ErrorResult, "Nothing anchored yet")
+		Error("forbidden", ErrorResult, "Forbidden")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/pac/audit/checkpoint/head")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("checkpoint_proof", func() {
+		Description("retrieve the inclusion proof tying one anchored audit entry to a timestamped checkpoint root (ADR-16). The entry bytes themselves are NOT part of this response; a verifier hashes the entry it already holds, nonce included, walks the siblings and compares against a root obtained from the external anchor.")
+		Meta("dcs:requirements", "DCS-IR-PACM-01")
+		Meta("dcs:ui", "Auditing Tool")
+		Meta("dcs:pacm:components", "")
+
+		Security(JWTAuth, func() {
+			Scope("Auditor")
+		})
+
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("entry_cid", String, "IPFS CID of the audit entry")
+			Required("entry_cid")
+		})
+		Result(PACCheckpointProof)
+
+		Error("not_found", ErrorResult, "No checkpoint commits to that entry")
+		Error("forbidden", ErrorResult, "Forbidden")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/pac/audit/checkpoint/proof/{entry_cid}")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
+			Response("internal_error", StatusInternalServerError)
+		})
 	})
 })

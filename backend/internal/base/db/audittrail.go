@@ -21,7 +21,13 @@ type AuditTrailRepository interface {
 	// number. tsaSignature is nil when the TSA did not answer in time; the
 	// checkpoint is still valid and gets timestamped by a later pass.
 	AppendCheckpoint(ctx context.Context, tx *sqlx.Tx, cid, root string, prevRoot *string, leafCount int, tsaSignature *string) (int64, error)
+	AppendCheckpointLeaves(ctx context.Context, tx *sqlx.Tx, seq int64, entryCIDs, leafHashes []string) error
 	ReadLatestCheckpointRoot(ctx context.Context, tx *sqlx.Tx) (*string, error)
+	ReadLatestCheckpoint(ctx context.Context, tx *sqlx.Tx) (*datatype.AuditCheckpointRecord, error)
+	// ReadCheckpointForEntry locates the checkpoint an anchored entry belongs
+	// to, with the ordered leaf hashes of that checkpoint and the entry's
+	// position in them — everything an inclusion proof is built from.
+	ReadCheckpointForEntry(ctx context.Context, tx *sqlx.Tx, entryCID string) (*datatype.AuditCheckpointRecord, []string, int, error)
 	ReadCheckpoints(ctx context.Context, tx *sqlx.Tx, limit int) ([]datatype.AuditCheckpointRecord, error)
 	ReadCheckpointsAwaitingTimestamp(ctx context.Context, tx *sqlx.Tx, limit int) ([]datatype.AuditCheckpointRecord, error)
 	UpdateCheckpointTimestamp(ctx context.Context, tx *sqlx.Tx, seq int64, tsaSignature string) error
