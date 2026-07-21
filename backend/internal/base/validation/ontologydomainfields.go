@@ -52,16 +52,6 @@ func requireDomainOntology(ctx context.Context) (*domainOntology, error) {
 	return ontology, nil
 }
 
-// loadedDomainOntology returns the cached index without loading; nil until
-// the first successful requireDomainOntology call. Deep value-normalization
-// helpers (compactEntityRole) read it after an audit entry point has
-// already loaded — and hard-failed on — the ontology.
-func loadedDomainOntology() *domainOntology {
-	domainOntologyMu.Lock()
-	defer domainOntologyMu.Unlock()
-	return cachedDomainOntology
-}
-
 // ResetDomainOntologyCache drops the cached domain-field index so the next
 // audit re-reads the hub's active ontology version — called on hub
 // activation (service.RefreshValidationAnchors).
@@ -204,17 +194,6 @@ func resolveAllowedValuesRefs(constraints map[string]*valueConstraint) {
 
 func normalizedAllowedValuesRef(value string) string {
 	return strings.ToLower(strings.Join(strings.Fields(value), " "))
-}
-
-// compactEntityRole trims the taxonomy role-IRI prefix off a
-// controlled-vocabulary contract-party role value; plain values pass
-// through.
-func compactEntityRole(value string) string {
-	ontology := loadedDomainOntology()
-	if ontology == nil || ontology.entityRolePrefix == "" {
-		return value
-	}
-	return strings.TrimPrefix(value, ontology.entityRolePrefix)
 }
 
 func firstObjectValue(graph *shacl.Graph, subject shacl.Term, predicate string) string {

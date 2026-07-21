@@ -576,14 +576,6 @@ func clauseHasContractDataBinding(block map[string]any, fieldIDs map[string]bool
 	return false
 }
 
-func domainFieldValueConstraint(ontology *domainOntology, domainFieldID string) map[string]any {
-	field, ok := ontology.fields[domainFieldID]
-	if !ok || field.Constraint == nil {
-		return nil
-	}
-	return field.Constraint.asMap()
-}
-
 func stringMapValue(values map[string]any, key string) string {
 	value, ok := values[key]
 	if !ok || value == nil {

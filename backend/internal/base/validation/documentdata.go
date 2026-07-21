@@ -119,61 +119,6 @@ func (constraint *valueConstraint) clone() *valueConstraint {
 	return &copied
 }
 
-func (constraint *valueConstraint) asMap() map[string]any {
-	result := map[string]any{}
-	if constraint.Format != "" {
-		result["format"] = constraint.Format
-	}
-	if constraint.Pattern != "" {
-		result["pattern"] = constraint.Pattern
-	}
-	if constraint.ValueType != "" {
-		result["valueType"] = constraint.ValueType
-	}
-	if len(constraint.AllowedValues) > 0 {
-		values := make([]any, len(constraint.AllowedValues))
-		for i, value := range constraint.AllowedValues {
-			values[i] = value
-		}
-		result["allowedValues"] = values
-	}
-	if valueOptions := constraint.ValueOptions; len(valueOptions) > 0 {
-		options := make([]any, 0, len(valueOptions))
-		for _, option := range valueOptions {
-			if option.Value == "" {
-				continue
-			}
-			item := map[string]any{"value": option.Value}
-			if option.Label != "" {
-				item["label"] = option.Label
-			}
-			if option.Symbol != "" {
-				item["symbol"] = option.Symbol
-			}
-			if option.IRI != "" {
-				item["iri"] = option.IRI
-			}
-			options = append(options, item)
-		}
-		if len(options) > 0 {
-			result["valueOptions"] = options
-		}
-	}
-	if constraint.AllowedValuesRef != "" {
-		result["allowedValuesRef"] = constraint.AllowedValuesRef
-	}
-	if constraint.Min != nil {
-		result["min"] = *constraint.Min
-	}
-	if constraint.Max != nil {
-		result["max"] = *constraint.Max
-	}
-	if constraint.Description != "" {
-		result["description"] = constraint.Description
-	}
-	return result
-}
-
 type documentData map[string]any
 
 // ErrContractHierarchyInvalid is the sentinel wrapped by every hierarchy

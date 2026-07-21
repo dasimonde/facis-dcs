@@ -90,13 +90,13 @@ func canonicalTemplateData(t *testing.T) *datatype.JSON {
 		},
 		"dcs:contractData": []any{
 			map[string]any{
-				"@id":                "urn:uuid:field-provider-country",
-				"@type":              "dcs:Placeholder",
-				"dcs:label":          "Provider country",
-				"dcs:datatype":       "xsd:string",
-				"dcs:shape":          map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-country"},
+				"@id":                 "urn:uuid:field-provider-country",
+				"@type":               "dcs:Placeholder",
+				"dcs:label":           "Provider country",
+				"dcs:datatype":        "xsd:string",
+				"dcs:shape":           map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-country"},
 				"dcs:valueConstraint": map[string]any{"format": "iso-3166-1-alpha-3"},
-				"dcs:required":       true,
+				"dcs:required":        true,
 			},
 		},
 		"dcs:policies": map[string]any{
