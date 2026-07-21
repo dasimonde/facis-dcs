@@ -79,28 +79,71 @@ can. This is what makes proofs publishable.
 `GET /pac/audit/checkpoint/proof/{entry_cid}` returns a proof and the head of
 the checkpoint that commits to the entry — never the entry.
 
-**6. External anchoring via ORCE.** An ORCE flow polls the head endpoint and
-stores what it retrieves outside our control. Because every root chains to its
-predecessor, **one published head transitively commits to the entire log before
-it**, so polling every few minutes is sufficient — roughly a hundred writes a
-day rather than one per second. This is the step that turns "tamper-evident to
-us" into "provable against the operator", and it is the same argument a
-blockchain anchor would make; the sink is an implementation detail.
+**6. External anchoring via ORCE — pull wired, sink still TODO.** The ORCE flow
+`deployment/helm/charts/orce/flows/audit-checkpoint-anchor-flow.json` polls
+`GET /pac/audit/checkpoint/head` every 15 minutes and skips a `seq` it has
+already seen. It currently drops each new head on a **debug node** carrying an
+explicit TODO: a debug node anchors nothing, and evidence that never leaves the
+operator's reach proves nothing against the operator. The sink — a notary, a
+chain, a counterparty, anything third-party and append-only — is the deliberate
+next step; the flow exists so that step is a rewire, not a rebuild.
+
+Because every root chains to its predecessor, **one published head transitively
+commits to the entire log before it**, so polling every few minutes is
+sufficient — roughly a hundred writes a day rather than one per second. This is
+the step that turns "tamper-evident to us" into "provable against the
+operator", and it is the same argument a blockchain anchor makes; the sink is
+an implementation detail.
 
 A third party verifies with: the entry bytes it was given (nonce included), the
 inclusion proof, and a head obtained **from the anchor, not from us**.
 
+**7. Machine callers are SRS System Users authenticated by client credentials.**
+ORCE has no wallet and no browser, so it cannot obtain a token the way a person
+does — the OID4VP ceremony (an SD-JWT VC carrying the roles, wallet-signed,
+bound to a Hydra login challenge, exchanged at the callback) is what fills a
+human token's `ext.roles` and `ext.iss`. It therefore authenticates against
+this deployment's Hydra with its own `client_id`/`client_secret`
+(`client_credentials` grant) and calls DCS with that access token.
+
+Such a token proves exactly one thing: Hydra saw this client's secret. It
+carries no verifiable role claims and must not be trusted to assert any. So
+`middleware.HydraJWTValidator` resolves a system caller's authority from
+deployment configuration — `systemClients` in the Helm values, reaching the
+backend as `DCS_SYSTEM_CLIENTS` — mapping `client_id` to a participant DID for
+audit attribution and to a fixed set of DCS roles (SRS §2.4 Table 5, System
+User classes). Unconfigured clients are not system users, and an empty
+configuration accepts none at all. Roles are validated against
+`userrole.IsValid` at startup, so a typo fails the boot rather than silently
+granting nothing.
+
+ORCE is configured with `Auditor` — the narrowest role that may read the
+checkpoint head — and is attributed to this operator's own DID, which is what
+it is: part of this deployment, acting on its behalf.
+
+This replaces the `alg: none` token minted by the older DCS flows. That was
+never a credential; it worked only because nothing verified it.
+
 ## Consequences
 
 - Anchoring throughput is no longer bounded by `N × (TSA + IPFS round-trip)`.
-- A poison event delays only itself. It is retried each tick and must be
-  surfaced operationally rather than retried silently forever — a dead-letter
-  path is still to be built.
+- A poison event delays only itself. `outbox_events` counts the failed
+  anchoring attempts and keeps the last error; after
+  `conf.OutboxAnchorMaxAttempts` (50 — generous, because nearly all anchoring
+  failures are transient) the event is dead-lettered, the anchoring loop stops
+  selecting it, and it is logged as **not in the audit trail**. Dead-lettered
+  events are found with `SELECT ... WHERE dead_lettered_at IS NOT NULL` and
+  need an operator: they are gaps in the trail, and the checkpoint chain does
+  not hide them, it simply never covered them.
 - Published heads leak batch size and cadence, i.e. activity volume. Accepted;
   padding would blunt it if it ever matters.
 - The audit trail's authority still rests on IPFS content addressing; the
   Postgres tables (`audit_checkpoints`, `audit_checkpoint_leaves`) are an index
   over it, holding the head, the walk order and the pending timestamps.
+- Machine callers gain a real identity, but a coarse one: everything a system
+  client may do is granted at deployment time and cannot be narrowed per
+  request. That is the trade for having no credential ceremony; keep the role
+  set minimal per client.
 - Removed with this change: the per-entry global link
   (`GlobalLogPredCID`, exposed as `global_log_pred_cid` on four API types),
   the `SignedAuditLogEntry` wrapper whose per-entry TSA signature is subsumed

@@ -124,7 +124,7 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 		rows, err := tx.QueryxContext(ctx, `
 			SELECT id, component, event_type, event_data, did, created_at
 			FROM outbox_events
-			WHERE processed = FALSE
+			WHERE processed = FALSE AND dead_lettered_at IS NULL
 			ORDER BY created_at ASC
 			LIMIT 100
 			FOR UPDATE SKIP LOCKED
@@ -377,8 +377,7 @@ func (j OutboxProcessor) writeEntries(ctx context.Context, events []datatype.Out
 			for _, event := range chain {
 				entry, err := j.writeEntry(gctx, event, pred)
 				if err != nil {
-					log.Printf("could not anchor event %d (%s/%s), retrying next tick: %v",
-						event.ID, event.Component, event.EventType, err)
+					j.recordAnchorFailure(ctx, event, err)
 					break
 				}
 				pred = &entry.cid
@@ -394,8 +393,7 @@ func (j OutboxProcessor) writeEntries(ctx context.Context, events []datatype.Out
 		g.Go(func() error {
 			entry, err := j.writeEntry(gctx, event, nil)
 			if err != nil {
-				log.Printf("could not anchor event %d (%s/%s), retrying next tick: %v",
-					event.ID, event.Component, event.EventType, err)
+				j.recordAnchorFailure(ctx, event, err)
 				return nil
 			}
 			mu.Lock()
@@ -409,6 +407,39 @@ func (j OutboxProcessor) writeEntries(ctx context.Context, events []datatype.Out
 	}
 
 	return anchored, updatedHeads
+}
+
+// recordAnchorFailure counts the failed attempt and dead-letters the event once
+// it has failed too often, so a permanently unanchorable event stops being
+// retried on every tick and becomes visible instead of merely noisy. The count
+// is only advisory for a transient failure: the event is retried until the
+// budget runs out.
+func (j OutboxProcessor) recordAnchorFailure(ctx context.Context, event datatype.OutboxEvent, cause error) {
+	tx, err := j.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		log.Printf("could not record the anchoring failure of event %d: %v", event.ID, err)
+		return
+	}
+	deadLettered, err := db.RecordOutboxAnchorFailure(ctx, tx, event.ID, cause.Error(), conf.OutboxAnchorMaxAttempts())
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			log.Printf("could not rollback transaction: %v", rollbackErr)
+		}
+		log.Printf("could not record the anchoring failure of event %d: %v", event.ID, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("could not commit the anchoring failure of event %d: %v", event.ID, err)
+		return
+	}
+
+	if deadLettered {
+		log.Printf("DEAD-LETTERED audit event %d (%s/%s) after %d failed anchoring attempts, it is NOT in the audit trail: %v",
+			event.ID, event.Component, event.EventType, conf.OutboxAnchorMaxAttempts(), cause)
+		return
+	}
+	log.Printf("could not anchor event %d (%s/%s), retrying next tick: %v",
+		event.ID, event.Component, event.EventType, cause)
 }
 
 // writeEntry stores one audit entry and returns its CID and leaf hash. The leaf

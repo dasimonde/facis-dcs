@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 
 	"digital-contracting-service/internal/auth/hydra"
 	"digital-contracting-service/internal/auth/oid4vp"
+	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pathutil"
 	"digital-contracting-service/internal/service"
 )
@@ -105,4 +108,51 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 		UIPath:            uiPath,
 		OID4VPStateTTL:    oid4vpStateTTL,
 	}, nil
+}
+
+// loadSystemClients reads the SRS System User clients (SRS §2.4 Table 5) from
+// DCS_SYSTEM_CLIENTS, a JSON array of {client_id, participant_did, roles}.
+// These are machine callers that authenticate with the OAuth2 client
+// credentials grant, so their authority comes from this configuration and not
+// from token claims — a system client can present nothing that widens it.
+// Unset means no system client may call DCS at all.
+func loadSystemClients() ([]middleware.SystemClient, error) {
+	raw := strings.TrimSpace(os.Getenv("DCS_SYSTEM_CLIENTS"))
+	if raw == "" {
+		return nil, nil
+	}
+
+	var configured []struct {
+		ClientID       string   `json:"client_id"`
+		ParticipantDID string   `json:"participant_did"`
+		Roles          []string `json:"roles"`
+	}
+	if err := json.Unmarshal([]byte(raw), &configured); err != nil {
+		return nil, fmt.Errorf("DCS_SYSTEM_CLIENTS is not a JSON array of {client_id, participant_did, roles}: %w", err)
+	}
+
+	clients := make([]middleware.SystemClient, 0, len(configured))
+	for _, entry := range configured {
+		clientID := strings.TrimSpace(entry.ClientID)
+		if clientID == "" {
+			return nil, fmt.Errorf("DCS_SYSTEM_CLIENTS: an entry has no client_id")
+		}
+		if strings.TrimSpace(entry.ParticipantDID) == "" {
+			return nil, fmt.Errorf("DCS_SYSTEM_CLIENTS: client %q has no participant_did to attribute its actions to", clientID)
+		}
+		if len(entry.Roles) == 0 {
+			return nil, fmt.Errorf("DCS_SYSTEM_CLIENTS: client %q has no roles", clientID)
+		}
+		for _, role := range entry.Roles {
+			if !userrole.UserRole(role).IsValid() {
+				return nil, fmt.Errorf("DCS_SYSTEM_CLIENTS: client %q has unknown role %q", clientID, role)
+			}
+		}
+		clients = append(clients, middleware.SystemClient{
+			ClientID:       clientID,
+			ParticipantDID: strings.TrimSpace(entry.ParticipantDID),
+			Roles:          entry.Roles,
+		})
+	}
+	return clients, nil
 }

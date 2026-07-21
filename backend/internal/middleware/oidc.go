@@ -18,6 +18,25 @@ type HydraJWTConfig struct {
 	InternalIssuerURL string
 	// Example: "dcs-client". Hydra JWT access tokens use the client_id claim (RFC 9068).
 	ClientID string
+	// SystemClients are the machine identities of the SRS System User classes
+	// (SRS §2.4 Table 5): integrated platforms and orchestration layers that
+	// reach DCS over its API instead of through a browser.
+	SystemClients []SystemClient
+}
+
+// SystemClient is one non-human caller, authenticated by the OAuth2 client
+// credentials grant. A human user proves who they are with a verifiable
+// credential and the OID4VP ceremony fills the token's ext claims; a system
+// user has no wallet and no ceremony, so its token carries only Hydra's proof
+// that the client secret was presented. What such a client may do is therefore
+// decided HERE, from deployment configuration, and never from claims the caller
+// could influence.
+type SystemClient struct {
+	ClientID string
+	// ParticipantDID is the identity its actions are attributed to in the audit
+	// trail, standing in for the ext.iss a human token carries.
+	ParticipantDID string
+	Roles          []string
 }
 
 // HydraJWTValidator validates JWT tokens from OIDC providers.
@@ -88,6 +107,17 @@ func (v *HydraJWTValidator) ValidateToken(ctx context.Context, token string) (*T
 		return nil, fmt.Errorf("failed to parse token claims: %w", err)
 	}
 
+	// A system client's token is a client-credentials token: Hydra signed it, so
+	// the client secret was presented, but no OID4VP ceremony ran and there are
+	// no ext claims to read. Its authority comes from configuration.
+	if system, ok := v.systemClientFor(claims); ok {
+		return &TokenInfo{
+			Roles:          system.Roles,
+			HolderDID:      system.ClientID,
+			ParticipantDID: system.ParticipantDID,
+		}, nil
+	}
+
 	if !matchesClientID(claims, v.config.ClientID) {
 		return nil, fmt.Errorf("token is not bound to client ID %q", v.config.ClientID)
 	}
@@ -102,6 +132,21 @@ func (v *HydraJWTValidator) ValidateToken(ctx context.Context, token string) (*T
 		HolderDID:      claims.Subject,
 		ParticipantDID: issuer,
 	}, nil
+}
+
+// systemClientFor matches a token against the configured system clients. Only
+// an exact client_id/audience match counts — a system client's rights are not
+// something a token can ask for.
+func (v *HydraJWTValidator) systemClientFor(claims Claims) (SystemClient, bool) {
+	for _, system := range v.config.SystemClients {
+		if system.ClientID == "" {
+			continue
+		}
+		if matchesClientID(claims, system.ClientID) {
+			return system, true
+		}
+	}
+	return SystemClient{}, false
 }
 
 // extractRoles extracts DCS roles from a Hydra access token.

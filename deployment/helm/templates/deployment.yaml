@@ -110,6 +110,14 @@ spec:
             - name: HYDRA_ADMIN_URL
               value: {{ include "digital-contracting-service.hydraAdminURL" . | quote }}
             {{- end }}
+            {{- if .Values.systemClients }}
+            # SRS §2.4 Table 5 System Users: machine callers that authenticate
+            # with the OAuth2 client credentials grant. Their roles are fixed
+            # here, not carried in the token — a client-credentials token has no
+            # OID4VP ceremony behind it and therefore no verifiable role claims.
+            - name: DCS_SYSTEM_CLIENTS
+              value: {{ .Values.systemClients | toJson | quote }}
+            {{- end }}
             {{- if include "digital-contracting-service.fcKeycloakRealmURL" . }}
             - name: FC_KEYCLOAK_REALM_URL
               value: {{ include "digital-contracting-service.fcKeycloakRealmURL" . | quote }}

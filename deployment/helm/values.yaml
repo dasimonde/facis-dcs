@@ -226,6 +226,13 @@ hydra:
   enabled: false
   clients: []
 
+# SRS System User clients (SRS §2.4 Table 5), each authenticating with the
+# OAuth2 client credentials grant against this deployment's Hydra. Empty means
+# no machine caller is accepted at all. Every entry needs a client_id that also
+# exists under hydra.clients, a participant_did its actions are attributed to,
+# and the DCS roles it may exercise.
+systemClients: []
+
 nats:
   enabled: false
 
