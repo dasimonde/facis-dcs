@@ -151,10 +151,16 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 			log.Println("process ", len(events), " events")
 		}
 
+		// Keep going past a failing event instead of returning: anchoring is
+		// network-bound (TSA, IPFS) and a single transient failure at the head of
+		// the backlog used to stall every event behind it for as long as it kept
+		// failing, so a whole contract's trail could read empty. Each event is
+		// anchored in its own transaction and stays unprocessed on failure, so it
+		// is simply retried on the next tick, behind the ones that did succeed.
 		for _, event := range events {
 			if err := j.processEvent(ctx, event, origin); err != nil {
-				log.Printf("could not process event %d: %v", event.ID, err)
-				return err
+				log.Printf("could not process event %d (%s/%s), retrying next tick: %v",
+					event.ID, event.Component, event.EventType, err)
 			}
 		}
 
