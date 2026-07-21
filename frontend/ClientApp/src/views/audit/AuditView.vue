@@ -2,9 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
+import { downloadBlob as saveBlob } from '@/utils/download-blob'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
-import { downloadBlob as saveBlob } from '@/utils/download-blob'
 
 const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
 const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})
