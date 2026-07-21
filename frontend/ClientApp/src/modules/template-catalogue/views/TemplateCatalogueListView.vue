@@ -2,11 +2,14 @@
 import { onMounted } from 'vue'
 import TemplateCatalogueList from '@/modules/template-catalogue/components/catalogue-template/TemplateCatalogueList.vue'
 import { useTemplateCatalogueList } from '@/modules/template-catalogue/composables/useTemplateCatalogueList'
+import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 
 const { templates, loading, error, refresh } = useTemplateCatalogueList()
+const templatesStore = useContractTemplatesStore()
 
 onMounted(() => {
   void refresh()
+  void templatesStore.loadTemplates()
 })
 </script>
 

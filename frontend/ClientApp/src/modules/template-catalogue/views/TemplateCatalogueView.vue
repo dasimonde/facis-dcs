@@ -124,9 +124,7 @@ watch(
 )
 
 onMounted(() => {
-  if (!contractTemplates.value.length && !localTemplatesLoading.value) {
-    void templatesStore.loadTemplates()
-  }
+  void templatesStore.loadTemplates()
 })
 
 function setActiveTab(tabId: CatalogueTabId) {

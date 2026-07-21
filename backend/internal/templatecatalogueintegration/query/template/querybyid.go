@@ -3,6 +3,7 @@ package template
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -15,7 +16,6 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/fcasset"
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
 	catalogueevents "digital-contracting-service/internal/templatecatalogueintegration/event"
 	"digital-contracting-service/internal/templatecatalogueintegration/internal/ptr"
@@ -44,7 +44,9 @@ RETURN {
   description: ct.description,
   version: ct.version,
   state: ct.state,
-  template_uuid: ct.templateUuid
+  template_uuid: ct.templateUuid,
+  template_type: ct.templateType,
+  template_data_string: ct.templateDataString
 } AS n
 LIMIT 1
 `
@@ -116,10 +118,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, qry GetByIDQry) (*templatec
 		}
 	}
 
-	templateData, err := fcasset.FetchDocument(ctx, qry.DID)
-	if errors.Is(err, fcasset.ErrRemoteTemplateNotFound) {
-		return result, nil
-	}
+	templateData, err := templateDataFromString(ptr.StringFromMap(n, "template_data_string"))
 	if err != nil {
 		return nil, err
 	}
@@ -139,9 +138,24 @@ func mapCatalogueDetail(n map[string]interface{}) *templatecatalogueintegration.
 	}
 
 	return &templatecatalogueintegration.TemplateCatalogueRetrieveByIDResponse{
-		Did:         did,
-		Version:     ptr.Ref(ptr.IntFromMap(n, "version")),
-		Name:        ptr.Ref(ptr.StringFromMap(n, "name")),
-		Description: ptr.Ref(ptr.StringFromMap(n, "description")),
+		Did:          did,
+		Version:      ptr.Ref(ptr.IntFromMap(n, "version")),
+		Name:         ptr.Ref(ptr.StringFromMap(n, "name")),
+		Description:  ptr.Ref(ptr.StringFromMap(n, "description")),
+		TemplateType: ptr.Ref(ptr.StringFromMap(n, "template_type")),
 	}
+}
+
+func templateDataFromString(raw string) (map[string]interface{}, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, errors.New("template data is missing from Federated Catalogue")
+	}
+
+	var templateData map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &templateData); err != nil {
+		return nil, fmt.Errorf("parse template data from Federated Catalogue: %w", err)
+	}
+
+	return templateData, nil
 }

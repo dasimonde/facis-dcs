@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { ROUTES } from '@/router/router'
+import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { toProperCase } from '@/utils/string'
 import type { TemplateResourcesItem } from '@/modules/template-catalogue/models/template-resource'
 
-const props = defineProps<{
+defineProps<{
   template: TemplateResourcesItem
   templates: TemplateResourcesItem[]
 }>()
 
+const templatesStore = useContractTemplatesStore()
+
 function existLocally(did: string): boolean {
-  const result = props.templates.filter((contract) => contract.did === did)
-  if (result.length > 0) {
-    return true
-  }
-  return false
+  return templatesStore.findTemplateByDid(did) != null
 }
 </script>
 

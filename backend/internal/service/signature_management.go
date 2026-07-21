@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base/datatype"
@@ -653,11 +655,17 @@ func (s *signatureManagementsrvc) StartCeremony(ctx context.Context, req *signat
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("DCS_PUBLIC_BASE_URL")), "/")
+	if baseURL == "" {
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("could not start the signing ceremony"))
+	}
+
 	handler := command.StartCeremonyHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
 	ceremony, err := handler.Handle(ctx, command.StartCeremonyCmd{
 		ContractDID: req.ContractDid,
 		FieldName:   req.FieldName,
 		RequestedBy: middleware.GetParticipantID(ctx),
+		BaseURL:     baseURL,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)

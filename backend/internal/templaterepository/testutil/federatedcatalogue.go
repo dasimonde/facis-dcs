@@ -117,7 +117,7 @@ type TemplateSeed struct {
 	DocumentNumber string
 }
 
-// SeedTemplateResource posts a thin catalogue template asset to the Federated Catalogue.
+// SeedTemplateResource posts a catalogue template asset to the Federated Catalogue.
 func SeedTemplateResource(
 	t *testing.T,
 	ctx context.Context,
@@ -128,6 +128,8 @@ func SeedTemplateResource(
 	state string,
 	name string,
 	description string,
+	templateType string,
+	templateDataString string,
 ) TemplateSeed {
 	t.Helper()
 
@@ -141,7 +143,9 @@ func SeedTemplateResource(
 			state,
 			name,
 			description,
+			templateType,
 		),
+		TemplateDataString: templateDataString,
 	})
 	if err != nil {
 		t.Fatalf("build template asset payload failed: %v", err)

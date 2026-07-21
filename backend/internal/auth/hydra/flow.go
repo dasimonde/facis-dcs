@@ -51,6 +51,7 @@ func (c *Client) AuthorizeURL(ctx context.Context, oidcState string) (string, er
 	params.Set("response_type", "code")
 	params.Set("scope", "openid offline_access") // the combination of the open and offline scopes is the standard OpenID Connect method for requesting a Refresh Token
 	params.Set("state", oidcState)
+	params.Set("prompt", "login") // OID4VP login only needs a fresh login_challenge; avoid Hydra reusing a remembered browser session.
 	return metadata.AuthorizationEndpoint + "?" + params.Encode(), nil
 }
 

@@ -16,7 +16,6 @@ func VerifyCredential(token string, disclosures []string, cfg TrustConfig) (jwt.
 	}
 
 	parsed, err := jwt.NewParser(
-		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
 		jwt.WithValidMethods([]string{"ES256"}),
 	).Parse(token, func(t *jwt.Token) (any, error) {
@@ -68,7 +67,6 @@ func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig)
 	}
 
 	parsed, err := jwt.NewParser(
-		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
 		jwt.WithValidMethods([]string{"ES256"}),
 	).Parse(token, func(t *jwt.Token) (any, error) {

@@ -1,12 +1,13 @@
 package fcasset
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"digital-contracting-service/internal/base/datatype"
 )
 
 const (
@@ -18,18 +19,20 @@ const (
 
 // CatalogueSubject is the credentialSubject published to FC.
 type CatalogueSubject struct {
-	ID          string
-	State       string
-	Name        string
-	Description string
-	Version     string
+	ID           string
+	State        string
+	Name         string
+	Description  string
+	Version      string
+	TemplateType string
 }
 
 // BuildInput carries catalogue metadata required for an FC /assets JSON-LD payload.
 type BuildInput struct {
-	Issuer    string
-	ValidFrom time.Time
-	Subject   CatalogueSubject
+	Issuer             string
+	ValidFrom          time.Time
+	Subject            CatalogueSubject
+	TemplateDataString string
 }
 
 // BuildPayload assembles a thin catalogue VC for FC publish.
@@ -64,16 +67,31 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 		"issuer":    input.Issuer,
 		"validFrom": validFrom.Format(time.RFC3339),
 		"credentialSubject": map[string]any{
-			// We need a reachable link for DCS registration.
-			"id":                 input.Subject.ID,
-			"type":               "dcs:ContractTemplate",
-			"dcs:templateUuid":   input.Subject.ID,
-			"dcs:state":          input.Subject.State,
-			"schema:name":        input.Subject.Name,
-			"schema:description": input.Subject.Description,
-			"schema:version":     input.Subject.Version,
+			"id":                     input.Subject.ID,
+			"type":                   "dcs:ContractTemplate",
+			"dcs:templateUuid":       input.Subject.ID,
+			"dcs:state":              input.Subject.State,
+			"dcs:templateType":       input.Subject.TemplateType,
+			"schema:name":            input.Subject.Name,
+			"schema:description":     input.Subject.Description,
+			"schema:version":         input.Subject.Version,
+			"dcs:templateDataString": input.TemplateDataString,
 		},
 	}, nil
+}
+
+// TemplateDataString serializes persisted template_data for FC graph storage.
+func TemplateDataString(templateData *datatype.JSON) (string, error) {
+	if templateData == nil || !templateData.IsNotNullValue() {
+		return "", fmt.Errorf("template data is empty")
+	}
+
+	raw := []byte(*templateData)
+	if !json.Valid(raw) {
+		return "", fmt.Errorf("template data is not valid JSON")
+	}
+
+	return string(raw), nil
 }
 
 // CatalogueSubjectFromRepository builds FC catalogue metadata from a local template.
@@ -83,46 +101,14 @@ func CatalogueSubjectFromRepository(
 	state string,
 	name string,
 	description string,
+	templateType string,
 ) CatalogueSubject {
 	return CatalogueSubject{
-		ID:          did,
-		State:       strings.ToLower(strings.TrimSpace(state)),
-		Name:        name,
-		Description: description,
-		Version:     strconv.Itoa(version),
+		ID:           did,
+		State:        strings.ToLower(strings.TrimSpace(state)),
+		Name:         name,
+		Description:  description,
+		Version:      strconv.Itoa(version),
+		TemplateType: templateType,
 	}
-}
-
-// ErrRemoteTemplateNotFound is returned when the remote DCS does not expose template content for a DID yet.
-var ErrRemoteTemplateNotFound = errors.New("remote template not found")
-
-// ToDidDocumentURL maps a did:web identifier to its HTTPS DID document URL per W3C DID Core.
-// Example: did:web:localhost:template:uuid → https://localhost/template/uuid/did.json
-func ToDidDocumentURL(did string) (string, error) {
-	const prefix = "did:web:"
-
-	did = strings.TrimSpace(did)
-	if did == "" {
-		return "", fmt.Errorf("did is empty")
-	}
-	if !strings.HasPrefix(did, prefix) {
-		return "", fmt.Errorf("only did:web is supported: %s", did)
-	}
-
-	path := strings.TrimPrefix(did, prefix)
-	if path == "" {
-		return "", fmt.Errorf("did path is empty")
-	}
-
-	return "https://" + strings.ReplaceAll(path, ":", "/") + "/did.json", nil
-}
-
-// FetchDocument resolves template content from the DID document URL.
-func FetchDocument(ctx context.Context, did string) (map[string]any, error) {
-	if _, err := ToDidDocumentURL(did); err != nil {
-		return nil, err
-	}
-
-	_ = ctx
-	return nil, ErrRemoteTemplateNotFound
 }

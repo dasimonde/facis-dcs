@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -105,7 +106,7 @@ func (h *W3CBitstring) extractW3CEncodedList(response fetch.Response) (string, s
 		if status.IsLikelyJWT(body) {
 			return "", "", status.ErrUnsupportedMediaType
 		}
-		claims, err := h.verifyDataIntegrity(body)
+		claims, err := h.verifySecuredW3CDocument(body)
 		if err != nil {
 			return "", "", mapStatusVerifyError(err)
 		}
@@ -135,6 +136,52 @@ func (h *W3CBitstring) verifyCOSE(body []byte) (map[string]any, error) {
 	return envelope.VerifyCOSEVC(body, envelope.COSEVerifier{
 		ResolveECDSA: h.Trust.ResolveECDSAPublicKey,
 	})
+}
+
+func (h *W3CBitstring) verifySecuredW3CDocument(body []byte) (map[string]any, error) {
+	var document map[string]any
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, err
+	}
+	if document["proof"] == nil {
+		return nil, status.ErrStatusListNotSecured
+	}
+	if err := requireStatusTrust(h.Trust); err != nil {
+		return nil, err
+	}
+
+	proof, err := extractW3CProof(document)
+	if err != nil {
+		return nil, err
+	}
+	proofType, _ := proof["type"].(string)
+	switch strings.TrimSpace(proofType) {
+	case envelope.ProofTypeEd25519Signature2020:
+		return envelope.VerifyEd25519Signature2020Credential(body, envelope.Ed25519Signature2020Verifier{
+			ResolveEd25519: h.Trust.ResolveEd25519PublicKey,
+		})
+	default:
+		return h.verifyDataIntegrity(body)
+	}
+}
+
+func extractW3CProof(document map[string]any) (map[string]any, error) {
+	raw := document["proof"]
+	switch proof := raw.(type) {
+	case map[string]any:
+		return proof, nil
+	case []any:
+		if len(proof) == 0 {
+			return nil, fmt.Errorf("credential proof is empty")
+		}
+		first, ok := proof[0].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("credential proof has invalid shape")
+		}
+		return first, nil
+	default:
+		return nil, fmt.Errorf("credential is missing proof")
+	}
 }
 
 func (h *W3CBitstring) verifyDataIntegrity(body []byte) (map[string]any, error) {

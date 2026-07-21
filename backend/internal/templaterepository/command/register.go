@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -14,7 +15,6 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/fcasset"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
@@ -64,8 +64,8 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 	}(tx)
 
 	existing, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
-	if err != nil {
-		return nil, fmt.Errorf("could not check if contract template already exists: %s", cmd.DID)
+	if err != nil && !errors.Is(err, db.ErrContractTemplateNotFound) {
+		return nil, fmt.Errorf("could not check if contract template already exists: %w", err)
 	}
 
 	err = tx.Commit()
@@ -156,35 +156,18 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		}
 
 		var templateData *datatype.JSON
-		if fcTemplate.TemplateData != nil {
-			templateData, err = templateDataFromAny(fcTemplate.TemplateData)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			templateDataMap, fetchErr := fcasset.FetchDocument(ctx, cmd.DID)
-			if fetchErr != nil && !errors.Is(fetchErr, fcasset.ErrRemoteTemplateNotFound) {
-				return nil, fmt.Errorf("could not fetch remote template data: %w", fetchErr)
-			}
-			if templateDataMap != nil {
-				templateData, err = templateDataFromAny(templateDataMap)
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-		if templateData == nil {
+		if fcTemplate.TemplateData == nil {
 			return nil, errors.New("template data is missing from Federated Catalogue")
 		}
+		templateData, err = templateDataFromAny(fcTemplate.TemplateData)
+		if err != nil {
+			return nil, err
+		}
 
-		templateTypeValue := ""
-		if fcTemplate.TemplateType != nil {
-			templateTypeValue = *fcTemplate.TemplateType
+		if fcTemplate.TemplateType == nil || strings.TrimSpace(*fcTemplate.TemplateType) == "" {
+			return nil, errors.New("template type is missing from Federated Catalogue")
 		}
-		if templateTypeValue == "" {
-			templateTypeValue = resolveTemplateTypeFromData(templateData)
-		}
-		templateType, err := contracttemplatetype.NewContractTemplateType(templateTypeValue)
+		templateType, err := contracttemplatetype.NewContractTemplateType(*fcTemplate.TemplateType)
 		if err != nil {
 			return nil, fmt.Errorf("invalid template type from Federated Catalogue: %w", err)
 		}
@@ -331,8 +314,18 @@ func templateDataFromAny(raw any) (*datatype.JSON, error) {
 		return nil, errors.New("template data is missing from Federated Catalogue")
 	}
 
-	templateDataMap, ok := raw.(map[string]interface{})
-	if !ok {
+	var templateDataMap map[string]interface{}
+	switch value := raw.(type) {
+	case map[string]interface{}:
+		templateDataMap = value
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return nil, errors.New("template data is missing from Federated Catalogue")
+		}
+		if err := json.Unmarshal([]byte(value), &templateDataMap); err != nil {
+			return nil, fmt.Errorf("parse template data from Federated Catalogue: %w", err)
+		}
+	default:
 		return nil, errors.New("invalid template data format from Federated Catalogue")
 	}
 
@@ -342,23 +335,4 @@ func templateDataFromAny(raw any) (*datatype.JSON, error) {
 	}
 
 	return &templateData, nil
-}
-
-func resolveTemplateTypeFromData(templateData *datatype.JSON) string {
-	if templateData == nil || !templateData.IsNotNullValue() {
-		return ""
-	}
-
-	var templateDataMap map[string]interface{}
-	if err := json.Unmarshal(*templateData, &templateDataMap); err != nil {
-		return ""
-	}
-
-	if metadata, ok := templateDataMap["dcs:metadata"].(map[string]interface{}); ok {
-		if value, ok := metadata["dcs:templateType"].(string); ok {
-			return value
-		}
-	}
-
-	return ""
 }

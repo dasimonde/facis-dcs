@@ -40,7 +40,7 @@ backend/internal/auth/oid4vp/
     │   ├── ietf_token.go
     │   ├── xfsc.go
     │   └── trust_required.go
-    ├── envelope/                     # JWT, COSE, CWT, Data Integrity
+    ├── envelope/                     # JWT, COSE, CWT, Data Integrity, Ed25519Signature2020
     ├── codec/                        # base64, GZIP/ZLIB, bit reading
     └── fetch/                        # bounded HTTP GET
 ```
@@ -170,6 +170,7 @@ This rule applies to:
 - W3C JWT;
 - W3C COSE;
 - W3C Data Integrity proofs;
+- W3C Ed25519Signature2020 proofs;
 - IETF JWT;
 - IETF CWT;
 - XFSC signed JWT.
@@ -183,6 +184,7 @@ DCS never falls back from “signature cannot be verified” to “parse and tru
 | W3C/IETF/XFSC JWT | JWT `iss` or `issuer` → trusted P-256 key |
 | W3C COSE VC | payload issuer → trusted P-256 key |
 | W3C Data Integrity | `verificationMethod` controller → trusted ECDSA or Ed25519 key |
+| W3C Ed25519Signature2020 | `verificationMethod` controller → trusted Ed25519 key |
 | IETF CWT | COSE `kid`, scoped to the Status List URI; optional CWT `iss` fallback |
 
 ## 7. W3C Bitstring Status List handling
@@ -195,7 +197,8 @@ DCS never falls back from “signature cannot be verified” to “parse and tru
 |---|---|
 | `application/vc+jwt` or compact JWT | ES256 JWS verification |
 | `application/vc+cose` | COSE_Sign1 + ES256 verification |
-| `application/vc` / `application/ld+json` | Data Integrity verification using `ecdsa-rdfc-2019` or `eddsa-rdfc-2022` |
+| `application/vc` / `application/ld+json` with `DataIntegrityProof` | `ecdsa-rdfc-2019` or `eddsa-rdfc-2022` |
+| `application/vc` / `application/ld+json` with `Ed25519Signature2020` | Linked Data Proof verification |
 
 Unsigned W3C JSON is rejected.
 
@@ -405,7 +408,7 @@ The implementation contains focused tests for the high-risk paths, including:
 - response-shaped XFSC detection without URL-based routing;
 - XFSC signed retrieval before unsigned fallback;
 - production rejection of unsigned XFSC fallback;
-- fail-closed behavior for W3C JWT, COSE, Data Integrity and IETF JWT/CWT;
+- fail-closed behavior for W3C JWT, COSE, Data Integrity, Ed25519Signature2020 and IETF JWT/CWT;
 - exact IETF `sub == uri` comparison;
 - IETF CWT draft-21 example structure and negative cases;
 - URI-scoped CWT `kid` trust resolution;
@@ -418,12 +421,15 @@ Representative test files:
 status/verifier_test.go
 status/detect_test.go
 status/handler/w3c_bitstring_test.go
+status/handler/w3c_bitstring_ed25519_signature_2020_test.go
 status/handler/ietf_token_test.go
 status/handler/xfsc_test.go
 status/envelope/cwt_test.go
 status/trust_test.go
 statuslist_verify_test.go
 ```
+
+Offline W3C Ed25519Signature2020 coverage uses fixture `status/handler/testdata/w3c_bitstring_ed25519_signature_2020.json` served via `httptest`.
 
 ## 15. Implementation rules for future changes
 
