@@ -200,6 +200,22 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		return err
 	}
 
+	// A submitted PDF may only ADD a signature to the document we prepared — it
+	// may never redefine it. This is deliberately the opposite of the
+	// federation rule (ADR-13, receivepdf.go), where an inbound PDF is
+	// authoritative and replaces the local copy: there the peer owns the
+	// document, here we do. So the machine-readable payload embedded in what
+	// comes back must still be this instance's contract data, and nothing from
+	// the upload is ever written into contract_data.
+	//
+	// Without this the signature would still validate while the artifact said
+	// something else: finalize records contentHash computed from the LOCAL
+	// payload, so a divergent upload would be stored under a hash that attests
+	// a document it does not contain.
+	if err := h.assertSubmittedPayloadIsOurs(ctx, cmd.SignedPDF, prepared.contentHash); err != nil {
+		return err
+	}
+
 	report, err := h.Validator.ValidatePDF(ctx, cmd.SignedPDF, prepared.ceremony.FieldName)
 	if err != nil {
 		return fmt.Errorf("validate submitted signature: %w", err)
@@ -1003,4 +1019,23 @@ func isPeerPartyField(resp *db.Responsible, localDID, field string) bool {
 // and breaks PDF/A conformance. The artifact itself is the reliable witness.
 func carriesPAdESSignature(pdf []byte) bool {
 	return bytes.Contains(pdf, []byte("/ByteRange"))
+}
+
+// assertSubmittedPayloadIsOurs refuses a submitted PDF whose embedded JSON-LD is
+// not the contract this instance prepared. contentHash is the SHA-256 of the
+// local contract_data, and the pdf-core boundary embeds that payload verbatim
+// (no canonicalization), so the digests match exactly when the document is ours.
+func (h *Applier) assertSubmittedPayloadIsOurs(ctx context.Context, signedPDF []byte, contentHash string) error {
+	embedded, err := h.PDFCore.ExtractPayload(ctx, signedPDF)
+	if err != nil {
+		return fmt.Errorf("could not read the machine-readable payload embedded in the submitted PDF: %w", err)
+	}
+	embeddedSum := sha256.Sum256(embedded)
+	embeddedHash := hex.EncodeToString(embeddedSum[:])
+	if embeddedHash == contentHash {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: the submitted PDF carries a different contract than this instance prepared (embedded payload %s, prepared %s)",
+		ErrSignatureInvalid, embeddedHash[:16], contentHash[:16])
 }
