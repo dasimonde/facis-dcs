@@ -11,6 +11,7 @@ Client secrets mirror deployment/helm/values.bdd.yml; overridable per client via
 BDD_SYSTEM_CLIENT_SECRET_<client id with - replaced by _, uppercased>.
 """
 
+import json
 import os
 import time
 
@@ -103,9 +104,17 @@ def step_system_client_gets(context, path):
     _request(context, "GET", path)
 
 
-@when('the system client requests POST "{path}"')
-def step_system_client_posts(context, path):
-    _request(context, "POST", path, body={})
+@when('the system client requests POST "{path}" with body')
+def step_system_client_posts_with_body(context, path):
+    """POST with a well-formed body.
+
+    The body must satisfy the endpoint's payload shape or goa rejects the
+    request at the transport layer with 400 missing_field, BEFORE the security
+    scheme runs — so an empty body tests nothing about authorization. The
+    values themselves are irrelevant: authorization is decided before the
+    handler ever looks for the contract.
+    """
+    _request(context, "POST", path, body=json.loads(context.text))
 
 
 @then("the system client request is refused as forbidden")

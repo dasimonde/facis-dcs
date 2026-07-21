@@ -40,22 +40,36 @@ Feature: SRS System User classes authenticate as machine clients
     And the system client requests GET "/contract/retrieve"
     Then the system client request is refused as forbidden
 
+  # The bodies below are well-formed on purpose: goa rejects a malformed
+  # payload at the transport layer before the security scheme runs, so an empty
+  # body would return 400 and prove nothing about authorization. The values are
+  # arbitrary — the refusal happens before the handler looks anything up.
+
   @UC-04 @DCS-FR-SM-03 @ADR-17
   Scenario: A System Contract Signer cannot start a signing ceremony
     When the system client "dcs-orce-signer" obtains an access token
-    And the system client requests POST "/signature/request"
+    And the system client requests POST "/signature/request" with body
+      """
+      {"contract_did": "urn:uuid:refused", "field_name": "signature-field-refused"}
+      """
     Then the system client request is refused as forbidden
 
   @UC-04 @DCS-FR-SM-03 @ADR-17
   Scenario: A System Contract Signer cannot prepare a document for signature
     When the system client "dcs-orce-signer" obtains an access token
-    And the system client requests POST "/signature/prepare"
+    And the system client requests POST "/signature/prepare" with body
+      """
+      {"did": "urn:uuid:refused", "signer_did": "did:web:refused.example"}
+      """
     Then the system client request is refused as forbidden
 
   @UC-04 @DCS-FR-SM-03 @ADR-17
   Scenario: A System Contract Signer cannot submit a signature
     When the system client "dcs-orce-signer" obtains an access token
-    And the system client requests POST "/signature/submit"
+    And the system client requests POST "/signature/submit" with body
+      """
+      {"did": "urn:uuid:refused", "signer_did": "did:web:refused.example", "signed_pdf": "JVBERi0="}
+      """
     Then the system client request is refused as forbidden
 
   @UC-04 @DCS-FR-SM-19 @ADR-17
