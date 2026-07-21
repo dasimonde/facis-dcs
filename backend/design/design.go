@@ -26,6 +26,7 @@ var JWTAuth = JWTSecurity("jwt", func() {
 	Scope("Template Approver", "Approve or reject templates")
 	Scope("Template Manager", "Manage template lifecycle")
 	Scope("Auditor", "Perform audits and generate reports")
+	Scope("Sys. Auditor", "External integrity notary: reads the audit trail's tamper-evidence surface, nothing else (ADR-16)")
 	Scope("Compliance Officer", "Monitor compliance and report incidents")
 	Scope("Sys. Administrator", "Maintains Sys. configurations, permissions, and user access")
 })
