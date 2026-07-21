@@ -553,7 +553,6 @@ var _ = Service("SignatureManagement", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
-			Scope("Sys. Contract Signer")
 		})
 
 		Payload(SMSignaturePrepareRequest)
@@ -578,7 +577,6 @@ var _ = Service("SignatureManagement", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
-			Scope("Sys. Contract Signer")
 		})
 
 		Payload(SMSignatureSubmitRequest)
@@ -605,7 +603,6 @@ var _ = Service("SignatureManagement", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
-			Scope("Sys. Contract Signer")
 		})
 
 		Payload(SMSignatureRequestStartRequest)
@@ -680,7 +677,6 @@ var _ = Service("SignatureManagement", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
-			Scope("Sys. Contract Signer")
 		})
 
 		Payload(SMSignatureRequestPublishRequest)

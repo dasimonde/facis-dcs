@@ -147,8 +147,14 @@ Only `GET /pac/audit/checkpoint/head` accepts it; the inclusion-proof endpoint
 stays human-Auditor-only, since building a proof requires naming an entry and
 that is an auditor's question, not a notary's.
 
-ORCE is configured with exactly this role and attributed to this operator's own
-DID, which is what it is: part of this deployment, acting on its behalf.
+**One OAuth2 client per System User class, never one shared machine identity.**
+Each ORCE flow authenticates as the capability it exercises
+(`dcs-orce-notary`, `dcs-orce-creator`, `dcs-orce-manager`,
+`dcs-orce-signer`), so a compromised or misbehaving flow reaches only what its
+class may reach, and the audit trail attributes actions to the capability
+rather than to "the integration". Every client is attributed to this operator's
+own DID, which is what these flows are: part of this deployment, acting on its
+behalf.
 
 This is an addition to the SRS role model, not a reading of it. It belongs in
 the SRS proper the next time that document is revised.
