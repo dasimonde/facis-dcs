@@ -499,14 +499,13 @@ func (s *signatureManagementsrvc) Audit(ctx context.Context, req *signaturemanag
 	history := make([]*signaturemanagement.SMContractAuditResponse, 0)
 	for _, entry := range auditLogHistory {
 		history = append(history, &signaturemanagement.SMContractAuditResponse{
-			ID:               entry.ID,
-			Component:        entry.Component,
-			EventType:        entry.EventType,
-			EventData:        entry.EventData,
-			Did:              entry.DID,
-			CreatedAt:        entry.CreatedAt.String(),
-			GlobalLogPredCid: entry.GlobalLogPredCID,
-			ResLogPredCid:    entry.ResLogPredCID,
+			ID:            entry.ID,
+			Component:     entry.Component,
+			EventType:     entry.EventType,
+			EventData:     entry.EventData,
+			Did:           entry.DID,
+			CreatedAt:     entry.CreatedAt.String(),
+			ResLogPredCid: entry.ResLogPredCID,
 		})
 	}
 

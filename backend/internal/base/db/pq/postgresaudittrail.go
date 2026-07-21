@@ -8,15 +8,17 @@ import (
 	"errors"
 
 	"github.com/jmoiron/sqlx"
+
+	"digital-contracting-service/internal/base/datatype"
 )
 
 type PostgresAuditTrailRepository struct{}
 
 // UpdateLogCID stores the IPFS CID of the most recently anchored audit entry
-// for (component, did) — this is the "predecessor CID" the OutboxProcessor
-// reads back on the next event to build the tamper-evident hash chain
-// (per-resource when did is a real DID, and globally when called with
-// conf.GlobalAuditTrailName() for both arguments).
+// for (component, did) — the "predecessor CID" the OutboxProcessor reads back
+// on that resource's next event to build its tamper-evident hash chain.
+// Tamper evidence ACROSS resources comes from the Merkle checkpoints
+// (AppendCheckpoint), not from a row in this table.
 func (r *PostgresAuditTrailRepository) UpdateLogCID(ctx context.Context, tx *sqlx.Tx, component string, did string, lastLogDID *string) error {
 	statement := `UPDATE audit_trail_log SET last_log_cid = $3 WHERE component = $1 AND did = $2`
 	result, err := tx.ExecContext(ctx, statement, component, did, lastLogDID)
@@ -71,4 +73,68 @@ func (r *PostgresAuditTrailRepository) ReadLogCID(ctx context.Context, tx *sqlx.
 		return nil, err
 	}
 	return result, nil
+}
+
+// AppendCheckpoint stores one Merkle checkpoint over an anchored batch. The
+// checkpoint bytes themselves live in IPFS at cid; this row is the index that
+// makes the head, the walk order and the pending timestamps findable.
+func (r *PostgresAuditTrailRepository) AppendCheckpoint(ctx context.Context, tx *sqlx.Tx, cid, root string, prevRoot *string, leafCount int, tsaSignature *string) (int64, error) {
+	statement := `
+        INSERT INTO audit_checkpoints (cid, root, prev_root, leaf_count, tsa_signature, timestamped_at)
+        VALUES ($1, $2, $3, $4, $5, CASE WHEN $5::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
+        RETURNING seq
+    `
+	var seq int64
+	if err := tx.GetContext(ctx, &seq, statement, cid, root, prevRoot, leafCount, tsaSignature); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+func (r *PostgresAuditTrailRepository) ReadLatestCheckpointRoot(ctx context.Context, tx *sqlx.Tx) (*string, error) {
+	query := `SELECT root FROM audit_checkpoints ORDER BY seq DESC LIMIT 1`
+	var root *string
+	if err := tx.GetContext(ctx, &root, query); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return root, nil
+}
+
+// ReadCheckpoints returns the most recent checkpoints first, which is the order
+// the audit trail is read in.
+func (r *PostgresAuditTrailRepository) ReadCheckpoints(ctx context.Context, tx *sqlx.Tx, limit int) ([]datatype.AuditCheckpointRecord, error) {
+	query := `
+        SELECT seq, cid, root, prev_root, leaf_count, tsa_signature, created_at, timestamped_at
+        FROM audit_checkpoints ORDER BY seq DESC LIMIT $1
+    `
+	var records []datatype.AuditCheckpointRecord
+	if err := tx.SelectContext(ctx, &records, query, limit); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (r *PostgresAuditTrailRepository) ReadCheckpointsAwaitingTimestamp(ctx context.Context, tx *sqlx.Tx, limit int) ([]datatype.AuditCheckpointRecord, error) {
+	query := `
+        SELECT seq, cid, root, prev_root, leaf_count, tsa_signature, created_at, timestamped_at
+        FROM audit_checkpoints WHERE tsa_signature IS NULL ORDER BY seq ASC LIMIT $1
+    `
+	var records []datatype.AuditCheckpointRecord
+	if err := tx.SelectContext(ctx, &records, query, limit); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (r *PostgresAuditTrailRepository) UpdateCheckpointTimestamp(ctx context.Context, tx *sqlx.Tx, seq int64, tsaSignature string) error {
+	statement := `
+        UPDATE audit_checkpoints
+        SET tsa_signature = $2, timestamped_at = CURRENT_TIMESTAMP
+        WHERE seq = $1 AND tsa_signature IS NULL
+    `
+	_, err := tx.ExecContext(ctx, statement, seq, tsaSignature)
+	return err
 }

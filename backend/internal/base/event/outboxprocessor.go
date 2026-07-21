@@ -3,9 +3,12 @@ package event
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -17,6 +20,8 @@ import (
 	"digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/tsa"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type OutboxProcessor struct {
@@ -27,9 +32,10 @@ type OutboxProcessor struct {
 	CEPPubClient *CloudEventPubClient
 }
 
-func (j OutboxProcessor) Start(ctx context.Context, origin string) error {
+func (j OutboxProcessor) Start(ctx context.Context) error {
 	go j.startPublishingJob(ctx, conf.OutboxPublishTimeOut())
-	go j.startProcessingJob(ctx, conf.OutboxProcessorTimeOut(), origin)
+	go j.startProcessingJob(ctx, conf.OutboxProcessorTimeOut())
+	go j.startTimestampingJob(ctx, conf.AuditCheckpointTimestampRetry())
 	return nil
 }
 
@@ -101,7 +107,7 @@ func (j OutboxProcessor) startPublishingJob(ctx context.Context, interval time.D
 	}
 }
 
-func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.Duration, origin string) {
+func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.Duration) {
 	schedulerLogic := func() error {
 		tx, err := j.DB.BeginTxx(ctx, nil)
 		if err != nil {
@@ -151,20 +157,26 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 			log.Println("process ", len(events), " events")
 		}
 
-		// Keep going past a failing event instead of returning: anchoring is
-		// network-bound (TSA, IPFS) and a single transient failure at the head of
-		// the backlog used to stall every event behind it for as long as it kept
-		// failing, so a whole contract's trail could read empty. Each event is
-		// anchored in its own transaction and stays unprocessed on failure, so it
-		// is simply retried on the next tick, behind the ones that did succeed.
+		// Read-only lookup events (RETRIEVE_*/SEARCH_*) are operational traces that
+		// every audit read filters out (see base.IsAuditVisibleEventType). They are
+		// never surfaced from the tamper-evident chain, so they are marked processed
+		// without being anchored — otherwise the high-frequency traces dominate the
+		// batch and starve genuine audit-visible events.
+		anchorable := make([]datatype.OutboxEvent, 0, len(events))
 		for _, event := range events {
-			if err := j.processEvent(ctx, event, origin); err != nil {
-				log.Printf("could not process event %d (%s/%s), retrying next tick: %v",
-					event.ID, event.Component, event.EventType, err)
+			if base.IsAuditVisibleEventType(event.EventType) {
+				anchorable = append(anchorable, event)
+				continue
+			}
+			if err := j.processUnanchoredEvent(ctx, event); err != nil {
+				log.Printf("could not mark lookup event %d processed: %v", event.ID, err)
 			}
 		}
 
-		return nil
+		if len(anchorable) == 0 {
+			return nil
+		}
+		return j.anchorBatch(ctx, anchorable)
 	}
 
 	ticker := time.NewTicker(interval)
@@ -175,26 +187,38 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 	}
 }
 
-// processEvent anchors one outbox event into the tamper-evident audit trail:
-// it chains the entry to the previous CID (both per-resource and globally),
-// has it timestamped by the TSA, verifies that timestamp immediately as a
-// sanity check, writes the signed entry to IPFS, and only then marks the
-// outbox row processed. Because each entry embeds the hash of its
-// predecessor, retroactively modifying an already-anchored entry breaks the
-// chain and is detectable. The event was already republished on NATS by the
-// caller before this ran (see startProcessingJob).
-func (j OutboxProcessor) processEvent(ctx context.Context, event datatype.OutboxEvent, origin string) error {
-	// Read-only lookup events (RETRIEVE_*/SEARCH_*) are operational traces that
-	// every audit read filters out (see base.IsAuditVisibleEventType and its use
-	// in both the contract and PAC audit handlers). They are never surfaced from
-	// the tamper-evident chain, yet each one costs a synchronous TSA round-trip
-	// plus an IPFS write here. Under a full BDD run these high-frequency traces
-	// dominate the outbox and starve genuine audit-visible events (e.g. EXPORT):
-	// an event created at the tail of a scenario could take ~45s to anchor,
-	// missing the ~30s audit poll window. They still get republished on NATS and
-	// marked processed, but they are not anchored into the hash chain.
-	if !base.IsAuditVisibleEventType(event.EventType) {
-		return j.processUnanchoredEvent(ctx, event)
+// anchorBatch anchors one batch of audit-visible events and commits to it with
+// a single Merkle checkpoint (base/datatype.AuditCheckpoint).
+//
+// Entries of the same resource stay a strict hash chain — each links to its
+// predecessor's CID — but different resources are independent and are written
+// concurrently. The batch as a whole is committed to by one root, chained to
+// the previous checkpoint's root and timestamped once, instead of one TSA
+// round-trip per event. An entry that cannot be written is left out of this
+// checkpoint and retried in the next one; it no longer holds back the events
+// behind it.
+func (j OutboxProcessor) anchorBatch(ctx context.Context, events []datatype.OutboxEvent) error {
+	heads, err := j.readChainHeads(ctx, events)
+	if err != nil {
+		return err
+	}
+
+	anchored, updatedHeads := j.writeEntries(ctx, events, heads)
+	if len(anchored) == 0 {
+		return errors.New("no audit entry of this batch could be written, retrying next tick")
+	}
+
+	// Deterministic batch order: the outbox sequence, not the order in which the
+	// concurrent writes happened to finish.
+	sort.Slice(anchored, func(a, b int) bool { return anchored[a].eventID < anchored[b].eventID })
+
+	leafHashes := make([]string, 0, len(anchored))
+	leafCIDs := make([]string, 0, len(anchored))
+	eventIDs := make([]int64, 0, len(anchored))
+	for _, entry := range anchored {
+		leafHashes = append(leafHashes, entry.leafHash)
+		leafCIDs = append(leafCIDs, entry.cid)
+		eventIDs = append(eventIDs, entry.eventID)
 	}
 
 	tx, err := j.DB.BeginTxx(ctx, nil)
@@ -207,93 +231,283 @@ func (j OutboxProcessor) processEvent(ctx context.Context, event datatype.Outbox
 		}
 	}(tx)
 
-	globalLogPredCID, err := j.ARepo.ReadLogCID(ctx, tx, conf.GlobalAuditTrailName(), conf.GlobalAuditTrailName())
+	prevRoot, err := j.ARepo.ReadLatestCheckpointRoot(ctx, tx)
 	if err != nil {
-		return fmt.Errorf("could not read log CID: %w", err)
+		return fmt.Errorf("could not read the previous checkpoint root: %w", err)
 	}
-
-	var resLogPredCID *string
-	if isResourceDID(event.DID) {
-		resLogPredCID, err = j.ARepo.ReadLogCID(ctx, tx, event.Component, *event.DID)
-		if err != nil {
-			return fmt.Errorf("could not read log CID: %w", err)
-		}
-	} else if event.Component == componenttype.System.String() {
-		if event.DID != nil && len(*event.DID) > 1 {
-			resLogPredCID, err = j.ARepo.ReadLogCID(ctx, tx, event.Component, *event.DID)
-			if err != nil {
-				return fmt.Errorf("could not read log CID: %w", err)
-			}
-		}
-	}
-
-	auditLogEntry := datatype.AuditLogEntry{
-		ID:               event.ID,
-		Component:        event.Component,
-		EventType:        event.EventType,
-		EventData:        event.EventData,
-		DID:              event.DID,
-		CreatedAt:        event.CreatedAt,
-		ResLogPredCID:    resLogPredCID,
-		GlobalLogPredCID: globalLogPredCID,
-	}
-
-	tsaResult, err := j.TSAClient.Timestamp(ctx, auditLogEntry)
+	root, err := base.MerkleRoot(leafHashes)
 	if err != nil {
-		return fmt.Errorf("could not timestamp event %d: %w", event.ID, err)
+		return fmt.Errorf("could not compute the checkpoint root: %w", err)
 	}
 
-	signedAuditLogEntry := datatype.SignedAuditLogEntry{
-		ID:            event.ID,
-		AuditLogEntry: auditLogEntry,
-		TsaSignature:  tsaResult,
+	checkpoint := datatype.AuditCheckpoint{
+		Root:       root,
+		PrevRoot:   prevRoot,
+		LeafHashes: leafHashes,
+		LeafCIDs:   leafCIDs,
+		CreatedAt:  time.Now().UTC(),
 	}
-
-	// sanity check that our cert is ok
-	isVerified, verifyErr := j.TSAClient.Verify(tsaResult, auditLogEntry)
-	if !isVerified {
-		return fmt.Errorf("timestamp verification failed for event %d: %w", event.ID, verifyErr)
-	}
-	log.Printf("timestamp verification succeeded for event %d", event.ID)
-
-	result, err := j.IPFSClient.CreateFile(ctx, signedAuditLogEntry)
+	stored, err := j.IPFSClient.CreateFile(ctx, checkpoint)
 	if err != nil {
-		return fmt.Errorf("could not create IPFS file for event %d: %w", event.ID, err)
+		return fmt.Errorf("could not store checkpoint: %w", err)
+	}
+	if _, err := j.IPFSClient.FetchFile(stored.Identifier.Value); err != nil {
+		return fmt.Errorf("checkpoint CID %s not resolvable after store: %w", stored.Identifier.Value, err)
 	}
 
-	// Confirm the entry resolves through the read path before persisting its CID
-	// as the audit-trail head. The tenant store is eventually consistent, so a
-	// CID CreateFile has just returned is not always immediately retrievable;
-	// persisting it early lets a later audit read walk the chain to a head — or
-	// a predecessor link — it cannot yet fetch and fail the whole trail with a
-	// "DataIdentifier not found". Blocking here until the entry is resolvable
-	// makes every anchored CID a safe chain link (mirrors apply.go's readback).
-	if _, err := j.IPFSClient.FetchFile(result.Identifier.Value); err != nil {
-		return fmt.Errorf("audit entry CID %s not resolvable after store for event %d: %w", result.Identifier.Value, event.ID, err)
+	// The root is immutable, so a TSA that is slow or down must not hold up the
+	// trail: the checkpoint is recorded either way and startTimestampingJob
+	// attaches the timestamp once the TSA answers.
+	var tsaSignature *string
+	if signature, err := j.timestampRoot(ctx, root); err != nil {
+		log.Printf("checkpoint %s stored without a timestamp, retrying later: %v", root, err)
+	} else {
+		tsaSignature = &signature
 	}
 
-	if isResourceDID(event.DID) {
-		if err = j.ARepo.UpdateLogCID(ctx, tx, event.Component, *event.DID, &result.Identifier.Value); err != nil {
+	seq, err := j.ARepo.AppendCheckpoint(ctx, tx, stored.Identifier.Value, root, prevRoot, len(leafHashes), tsaSignature)
+	if err != nil {
+		return fmt.Errorf("could not append checkpoint: %w", err)
+	}
+
+	for key, cid := range updatedHeads {
+		if err := j.ARepo.UpdateLogCID(ctx, tx, key.component, key.did, &cid); err != nil {
 			return fmt.Errorf("could not update log CID: %w", err)
 		}
-	} else if event.Component == componenttype.System.String() {
-		if event.DID != nil && len(*event.DID) > 1 {
-			if err = j.ARepo.UpdateLogCID(ctx, tx, event.Component, *event.DID, &result.Identifier.Value); err != nil {
-				return fmt.Errorf("could not update log CID: %w", err)
-			}
+	}
+
+	for _, id := range eventIDs {
+		if err := db.UpdateOutboxEvent(ctx, tx, id); err != nil {
+			return fmt.Errorf("could not update outbox event %d: %w", id, err)
 		}
 	}
 
-	if err = j.ARepo.UpdateLogCID(ctx, tx, conf.GlobalAuditTrailName(), conf.GlobalAuditTrailName(), &result.Identifier.Value); err != nil {
-		return fmt.Errorf("could not update log CID: %w", err)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit checkpoint %d: %w", seq, err)
 	}
+	log.Printf("anchored checkpoint %d: %d entries, root %s, timestamped=%t", seq, len(leafHashes), root, tsaSignature != nil)
+	return nil
+}
 
-	err = db.UpdateOutboxEvent(ctx, tx, event.ID)
+// chainKey identifies the per-resource hash chain an event belongs to. Events
+// that carry no resource DID are anchored by the checkpoint alone.
+type chainKey struct {
+	component string
+	did       string
+}
+
+func chainKeyFor(event datatype.OutboxEvent) (chainKey, bool) {
+	if isResourceDID(event.DID) {
+		return chainKey{component: event.Component, did: *event.DID}, true
+	}
+	if event.Component == componenttype.System.String() && event.DID != nil && len(*event.DID) > 1 {
+		return chainKey{component: event.Component, did: *event.DID}, true
+	}
+	return chainKey{}, false
+}
+
+// readChainHeads reads the current head CID of every per-resource chain this
+// batch touches, in one transaction.
+func (j OutboxProcessor) readChainHeads(ctx context.Context, events []datatype.OutboxEvent) (map[chainKey]*string, error) {
+	tx, err := j.DB.BeginTxx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("could not update outbox event: %w", err)
+		return nil, fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func(tx *sqlx.Tx) {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("could not rollback transaction: %v", err)
+		}
+	}(tx)
+
+	heads := make(map[chainKey]*string)
+	for _, event := range events {
+		key, ok := chainKeyFor(event)
+		if !ok {
+			continue
+		}
+		if _, seen := heads[key]; seen {
+			continue
+		}
+		head, err := j.ARepo.ReadLogCID(ctx, tx, key.component, key.did)
+		if err != nil {
+			return nil, fmt.Errorf("could not read log CID: %w", err)
+		}
+		heads[key] = head
+	}
+	return heads, tx.Commit()
+}
+
+type anchoredEntry struct {
+	eventID  int64
+	cid      string
+	leafHash string
+}
+
+// writeEntries writes every entry of the batch to IPFS, one chain at a time but
+// all chains concurrently, and reports what was written plus each touched
+// chain's new head. A chain stops at its first failure — its later entries link
+// to a predecessor that does not exist yet — while the other chains carry on.
+func (j OutboxProcessor) writeEntries(ctx context.Context, events []datatype.OutboxEvent, heads map[chainKey]*string) ([]anchoredEntry, map[chainKey]string) {
+	grouped := make(map[chainKey][]datatype.OutboxEvent)
+	unchained := make([]datatype.OutboxEvent, 0)
+	for _, event := range events {
+		key, ok := chainKeyFor(event)
+		if !ok {
+			unchained = append(unchained, event)
+			continue
+		}
+		grouped[key] = append(grouped[key], event)
 	}
 
-	return tx.Commit()
+	var mu sync.Mutex
+	anchored := make([]anchoredEntry, 0, len(events))
+	updatedHeads := make(map[chainKey]string)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(16)
+	for key, chain := range grouped {
+		g.Go(func() error {
+			pred := heads[key]
+			for _, event := range chain {
+				entry, err := j.writeEntry(gctx, event, pred)
+				if err != nil {
+					log.Printf("could not anchor event %d (%s/%s), retrying next tick: %v",
+						event.ID, event.Component, event.EventType, err)
+					break
+				}
+				pred = &entry.cid
+				mu.Lock()
+				anchored = append(anchored, entry)
+				updatedHeads[key] = entry.cid
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+	for _, event := range unchained {
+		g.Go(func() error {
+			entry, err := j.writeEntry(gctx, event, nil)
+			if err != nil {
+				log.Printf("could not anchor event %d (%s/%s), retrying next tick: %v",
+					event.ID, event.Component, event.EventType, err)
+				return nil
+			}
+			mu.Lock()
+			anchored = append(anchored, entry)
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		log.Printf("could not write audit entries: %v", err)
+	}
+
+	return anchored, updatedHeads
+}
+
+// writeEntry stores one audit entry and returns its CID and leaf hash. The leaf
+// hash is taken over the exact bytes stored, so an auditor can refetch the entry
+// and recompute its membership in the checkpoint.
+func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEvent, predCID *string) (anchoredEntry, error) {
+	entry := datatype.AuditLogEntry{
+		ID:            event.ID,
+		Component:     event.Component,
+		EventType:     event.EventType,
+		EventData:     event.EventData,
+		DID:           event.DID,
+		CreatedAt:     event.CreatedAt,
+		ResLogPredCID: predCID,
+	}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return anchoredEntry{}, fmt.Errorf("could not encode entry for event %d: %w", event.ID, err)
+	}
+
+	stored, err := j.IPFSClient.CreateFile(ctx, entry)
+	if err != nil {
+		return anchoredEntry{}, fmt.Errorf("could not create IPFS file for event %d: %w", event.ID, err)
+	}
+
+	// Confirm the entry resolves through the read path before it becomes a chain
+	// link. The tenant store is eventually consistent, so a CID CreateFile has
+	// just returned is not always immediately retrievable; anchoring it early
+	// lets a later audit read walk to a link it cannot yet fetch and fail the
+	// whole trail with a "DataIdentifier not found".
+	if _, err := j.IPFSClient.FetchFile(stored.Identifier.Value); err != nil {
+		return anchoredEntry{}, fmt.Errorf("audit entry CID %s not resolvable after store for event %d: %w", stored.Identifier.Value, event.ID, err)
+	}
+
+	return anchoredEntry{eventID: event.ID, cid: stored.Identifier.Value, leafHash: base.MerkleLeafHash(raw)}, nil
+}
+
+// startTimestampingJob attaches a trusted timestamp to checkpoints that were
+// anchored while the TSA was unavailable. Roots are immutable, so timestamping
+// one later is sound: the timestamp attests that the root — and with it every
+// entry it commits to — existed no later than the time it was issued.
+func (j OutboxProcessor) startTimestampingJob(ctx context.Context, interval time.Duration) {
+	schedulerLogic := func() error {
+		tx, err := j.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("could not start transaction: %w", err)
+		}
+		defer func(tx *sqlx.Tx) {
+			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+				log.Printf("could not rollback transaction: %v", err)
+			}
+		}(tx)
+
+		pending, err := j.ARepo.ReadCheckpointsAwaitingTimestamp(ctx, tx, 50)
+		if err != nil {
+			return fmt.Errorf("could not read checkpoints awaiting a timestamp: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("could not commit transaction: %w", err)
+		}
+
+		for _, checkpoint := range pending {
+			signature, err := j.timestampRoot(ctx, checkpoint.Root)
+			if err != nil {
+				return fmt.Errorf("could not timestamp checkpoint %d: %w", checkpoint.Seq, err)
+			}
+			updateTx, err := j.DB.BeginTxx(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("could not start transaction: %w", err)
+			}
+			if err := j.ARepo.UpdateCheckpointTimestamp(ctx, updateTx, checkpoint.Seq, signature); err != nil {
+				if rollbackErr := updateTx.Rollback(); rollbackErr != nil {
+					log.Printf("could not rollback transaction: %v", rollbackErr)
+				}
+				return fmt.Errorf("could not store the timestamp of checkpoint %d: %w", checkpoint.Seq, err)
+			}
+			if err := updateTx.Commit(); err != nil {
+				return fmt.Errorf("could not commit the timestamp of checkpoint %d: %w", checkpoint.Seq, err)
+			}
+			log.Printf("timestamped checkpoint %d", checkpoint.Seq)
+		}
+		return nil
+	}
+
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		if err := schedulerLogic(); err != nil {
+			log.Printf("could not timestamp pending checkpoints: %v", err)
+		}
+	}
+}
+
+// timestampRoot has the TSA timestamp a checkpoint root and verifies the
+// receipt straight away, so a broken certificate chain is caught here rather
+// than years later at an audit.
+func (j OutboxProcessor) timestampRoot(ctx context.Context, root string) (string, error) {
+	receipt, err := j.TSAClient.Timestamp(ctx, root)
+	if err != nil {
+		return "", fmt.Errorf("could not timestamp root %s: %w", root, err)
+	}
+	verified, err := j.TSAClient.Verify(receipt, root)
+	if !verified {
+		return "", fmt.Errorf("timestamp verification failed for root %s: %w", root, err)
+	}
+	return receipt, nil
 }
 
 // processUnanchoredEvent marks a read-only-lookup outbox event (see

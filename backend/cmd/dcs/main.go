@@ -305,7 +305,7 @@ func main() {
 		ARepo:        &aRepo,
 		TSAClient:    tsaClient,
 	}
-	err = outboxProcessor.Start(ctx, did)
+	err = outboxProcessor.Start(ctx)
 	if err != nil {
 		log.Fatalf(ctx, err, "failed to start outbox processor")
 	}

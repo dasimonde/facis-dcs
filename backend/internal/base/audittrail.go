@@ -39,18 +39,18 @@ func (r AuditTrailReader) ReadAuditLogEntriesByComponentAndDID(ctx context.Conte
 		if err != nil {
 			return nil, fmt.Errorf("read body: %w", err)
 		}
-		var signedAuditLogEntry datatype.SignedAuditLogEntry
-		if err := json.Unmarshal(result.Data, &signedAuditLogEntry); err != nil {
+		logEntry, err := decodeAuditLogEntry(result.Data)
+		if err != nil {
 			return nil, fmt.Errorf("decode response: %w", err)
 		}
 
-		logEntries = append(logEntries, signedAuditLogEntry.AuditLogEntry)
+		logEntries = append(logEntries, logEntry)
 
-		if signedAuditLogEntry.AuditLogEntry.ResLogPredCID == nil {
+		if logEntry.ResLogPredCID == nil {
 			break
 		}
 
-		currentCID = *signedAuditLogEntry.AuditLogEntry.ResLogPredCID
+		currentCID = *logEntry.ResLogPredCID
 	}
 
 	return logEntries, nil
@@ -90,7 +90,7 @@ func (r AuditTrailReader) ReadAuditLogEntriesByComponent(ctx context.Context, tx
 				if err != nil {
 					return fmt.Errorf("read body: %w", err)
 				}
-				logEntry, err := decodeSignedAuditLogEntry(fetched.Data)
+				logEntry, err := decodeAuditLogEntry(fetched.Data)
 				if err != nil {
 					return fmt.Errorf("decode response: %w", err)
 				}
@@ -114,45 +114,63 @@ func (r AuditTrailReader) ReadAuditLogEntriesByComponent(ctx context.Context, tx
 	return chains, nil
 }
 
+// ReadAllAuditLogEntries returns the whole trail, newest first, by walking the
+// Merkle checkpoints backwards and reading the entries each one commits to.
+// The checkpoints ARE the global order: within one, the batch order the root
+// was computed over; across them, the chain of roots.
 func (r AuditTrailReader) ReadAllAuditLogEntries(ctx context.Context, tx *sqlx.Tx) ([]datatype.AuditLogEntry, error) {
 
-	cid, err := r.ARepo.ReadLogCID(ctx, tx, conf.GlobalAuditTrailName(), conf.GlobalAuditTrailName())
+	checkpoints, err := r.ARepo.ReadCheckpoints(ctx, tx, conf.AuditCheckpointReadLimit())
 	if err != nil {
 		return nil, err
 	}
 
 	logEntries := make([]datatype.AuditLogEntry, 0)
-	if cid == nil {
-		return logEntries, nil
-	}
-
-	currentCID := *cid
-	for {
-		bodyBytes, err := r.IPFSClient.FetchFile(currentCID)
+	for _, record := range checkpoints {
+		fetched, err := r.IPFSClient.FetchFile(record.CID)
 		if err != nil {
-			return nil, fmt.Errorf("read body: %w", err)
+			return nil, fmt.Errorf("read checkpoint %d: %w", record.Seq, err)
 		}
-		logEntry, err := decodeSignedAuditLogEntry(bodyBytes.Data)
-		if err != nil {
-			return nil, fmt.Errorf("decode response: %w", err)
-		}
-
-		logEntries = append(logEntries, logEntry)
-
-		if logEntry.GlobalLogPredCID == nil {
-			break
+		var checkpoint datatype.AuditCheckpoint
+		if err := json.Unmarshal(fetched.Data, &checkpoint); err != nil {
+			return nil, fmt.Errorf("decode checkpoint %d: %w", record.Seq, err)
 		}
 
-		currentCID = *logEntry.GlobalLogPredCID
+		entries := make([]datatype.AuditLogEntry, len(checkpoint.LeafCIDs))
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(32)
+		for i, cid := range checkpoint.LeafCIDs {
+			g.Go(func() error {
+				if err := gctx.Err(); err != nil {
+					return err
+				}
+				leaf, err := r.IPFSClient.FetchFile(cid)
+				if err != nil {
+					return fmt.Errorf("read entry %s of checkpoint %d: %w", cid, record.Seq, err)
+				}
+				entry, err := decodeAuditLogEntry(leaf.Data)
+				if err != nil {
+					return fmt.Errorf("decode entry %s of checkpoint %d: %w", cid, record.Seq, err)
+				}
+				entries[i] = entry
+				return nil
+			})
+		}
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
+		for i := len(entries) - 1; i >= 0; i-- {
+			logEntries = append(logEntries, entries[i])
+		}
 	}
 
 	return logEntries, nil
 }
 
-func decodeSignedAuditLogEntry(data []byte) (datatype.AuditLogEntry, error) {
-	var signedAuditLogEntry datatype.SignedAuditLogEntry
-	if err := json.Unmarshal(data, &signedAuditLogEntry); err != nil {
+func decodeAuditLogEntry(data []byte) (datatype.AuditLogEntry, error) {
+	var logEntry datatype.AuditLogEntry
+	if err := json.Unmarshal(data, &logEntry); err != nil {
 		return datatype.AuditLogEntry{}, err
 	}
-	return signedAuditLogEntry.AuditLogEntry, nil
+	return logEntry, nil
 }

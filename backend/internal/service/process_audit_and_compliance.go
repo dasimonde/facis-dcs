@@ -149,27 +149,25 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 			}
 
 			history = append(history, &processauditandcompliance.PACResourceAuditTrailEntry{
-				ID:               entry.ID,
-				Component:        entry.Component,
-				EventType:        entry.EventType,
-				EventData:        entry.EventData,
-				Did:              entry.DID,
-				CreatedAt:        entry.CreatedAt.Format(time.RFC3339),
-				GlobalLogPredCid: entry.GlobalLogPredCID,
-				ResLogPredCid:    entry.ResLogPredCID,
+				ID:            entry.ID,
+				Component:     entry.Component,
+				EventType:     entry.EventType,
+				EventData:     entry.EventData,
+				Did:           entry.DID,
+				CreatedAt:     entry.CreatedAt.Format(time.RFC3339),
+				ResLogPredCid: entry.ResLogPredCID,
 			})
 		}
 		if scopeConfig.includeTemplatePolicyTrail && did != "" {
 			for _, entry := range templatePolicyEntriesByDID[did] {
 				history = append(history, &processauditandcompliance.PACResourceAuditTrailEntry{
-					ID:               entry.ID,
-					Component:        entry.Component,
-					EventType:        entry.EventType,
-					EventData:        entry.EventData,
-					Did:              entry.DID,
-					CreatedAt:        entry.CreatedAt.Format(time.RFC3339),
-					GlobalLogPredCid: entry.GlobalLogPredCID,
-					ResLogPredCid:    entry.ResLogPredCID,
+					ID:            entry.ID,
+					Component:     entry.Component,
+					EventType:     entry.EventType,
+					EventData:     entry.EventData,
+					Did:           entry.DID,
+					CreatedAt:     entry.CreatedAt.Format(time.RFC3339),
+					ResLogPredCid: entry.ResLogPredCID,
 				})
 			}
 			seenDIDs[did] = true
@@ -191,28 +189,26 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 
 			for _, entry := range provenanceResult {
 				history = append(history, &processauditandcompliance.PACResourceAuditTrailEntry{
-					ID:               entry.ID,
-					Component:        entry.Component,
-					EventType:        entry.EventType,
-					EventData:        entry.EventData,
-					Did:              entry.DID,
-					CreatedAt:        entry.CreatedAt.Format(time.RFC3339),
-					GlobalLogPredCid: entry.GlobalLogPredCID,
-					ResLogPredCid:    entry.ResLogPredCID,
+					ID:            entry.ID,
+					Component:     entry.Component,
+					EventType:     entry.EventType,
+					EventData:     entry.EventData,
+					Did:           entry.DID,
+					CreatedAt:     entry.CreatedAt.Format(time.RFC3339),
+					ResLogPredCid: entry.ResLogPredCID,
 				})
 			}
 		}
 		if scopeConfig.includeContractContentTrail && did != "" {
 			for _, entry := range contractContentEntriesByDID[did] {
 				history = append(history, &processauditandcompliance.PACResourceAuditTrailEntry{
-					ID:               entry.ID,
-					Component:        entry.Component,
-					EventType:        entry.EventType,
-					EventData:        entry.EventData,
-					Did:              entry.DID,
-					CreatedAt:        entry.CreatedAt.Format(time.RFC3339),
-					GlobalLogPredCid: entry.GlobalLogPredCID,
-					ResLogPredCid:    entry.ResLogPredCID,
+					ID:            entry.ID,
+					Component:     entry.Component,
+					EventType:     entry.EventType,
+					EventData:     entry.EventData,
+					Did:           entry.DID,
+					CreatedAt:     entry.CreatedAt.Format(time.RFC3339),
+					ResLogPredCid: entry.ResLogPredCID,
 				})
 			}
 			seenDIDs[did] = true
@@ -240,14 +236,13 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		auditTrail := []*processauditandcompliance.PACResourceAuditTrailEntry{}
 		for _, entry := range entries {
 			auditTrail = append(auditTrail, &processauditandcompliance.PACResourceAuditTrailEntry{
-				ID:               entry.ID,
-				Component:        entry.Component,
-				EventType:        entry.EventType,
-				EventData:        entry.EventData,
-				Did:              entry.DID,
-				CreatedAt:        entry.CreatedAt.Format(time.RFC3339),
-				GlobalLogPredCid: entry.GlobalLogPredCID,
-				ResLogPredCid:    entry.ResLogPredCID,
+				ID:            entry.ID,
+				Component:     entry.Component,
+				EventType:     entry.EventType,
+				EventData:     entry.EventData,
+				Did:           entry.DID,
+				CreatedAt:     entry.CreatedAt.Format(time.RFC3339),
+				ResLogPredCid: entry.ResLogPredCID,
 			})
 		}
 
@@ -269,14 +264,13 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		auditTrail := []*processauditandcompliance.PACResourceAuditTrailEntry{}
 		for _, entry := range entries {
 			auditTrail = append(auditTrail, &processauditandcompliance.PACResourceAuditTrailEntry{
-				ID:               entry.ID,
-				Component:        entry.Component,
-				EventType:        entry.EventType,
-				EventData:        entry.EventData,
-				Did:              entry.DID,
-				CreatedAt:        entry.CreatedAt.Format(time.RFC3339),
-				GlobalLogPredCid: entry.GlobalLogPredCID,
-				ResLogPredCid:    entry.ResLogPredCID,
+				ID:            entry.ID,
+				Component:     entry.Component,
+				EventType:     entry.EventType,
+				EventData:     entry.EventData,
+				Did:           entry.DID,
+				CreatedAt:     entry.CreatedAt.Format(time.RFC3339),
+				ResLogPredCid: entry.ResLogPredCID,
 			})
 		}
 

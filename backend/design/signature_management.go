@@ -254,7 +254,6 @@ var SMContractAuditResponse = Type("SMContractAuditResponse", func() {
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 	Attribute("created_at", String, "The creation date of the event")
 	Attribute("res_log_pred_cid", String, "Resource audit trail predecessor on the IPFS chain")
-	Attribute("global_log_pred_cid", String, "Global audit trail predecessor on the IPFS chain")
 
 	Required("id", "component", "event_type", "event_data", "created_at")
 })

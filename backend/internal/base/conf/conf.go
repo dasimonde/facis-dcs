@@ -40,8 +40,18 @@ func EventBusTopic() string {
 	return "dcs"
 }
 
-func GlobalAuditTrailName() string {
-	return "GLOBAL_AUDIT_TRAIL"
+// AuditCheckpointTimestampRetry is how often checkpoints that were anchored
+// while the TSA was unreachable are retried. Roots are immutable, so attaching
+// the timestamp later costs nothing but this delay.
+func AuditCheckpointTimestampRetry() time.Duration {
+	return 30 * time.Second
+}
+
+// AuditCheckpointReadLimit bounds how many checkpoints a full-trail read walks
+// back through, so the read stays within a request deadline once the log has
+// real history.
+func AuditCheckpointReadLimit() int {
+	return 500
 }
 
 func LoginAttemptsThresholdInDuration() int {
