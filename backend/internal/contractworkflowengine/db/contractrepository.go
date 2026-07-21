@@ -131,12 +131,12 @@ type ContractMetadata struct {
 }
 
 type ContractProcessData struct {
-	DID             string     `db:"did"`
-	Origin          string     `db:"origin"`
-	ContractVersion int        `db:"contract_version"`
-	State           string     `db:"state"`
-	CreatedBy       string     `db:"created_by"`
-	UpdatedAt       time.Time  `db:"updated_at"`
+	DID             string    `db:"did"`
+	Origin          string    `db:"origin"`
+	ContractVersion int       `db:"contract_version"`
+	State           string    `db:"state"`
+	CreatedBy       string    `db:"created_by"`
+	UpdatedAt       time.Time `db:"updated_at"`
 	// ContentUpdatedAt moves only when contract_data actually changes, so the
 	// optimistic-lock guard distinguishes a real concurrent content edit from a
 	// benign write that merely nudged updated_at.

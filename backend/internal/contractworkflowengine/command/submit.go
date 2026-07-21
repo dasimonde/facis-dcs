@@ -202,7 +202,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("this peer is not a valid negotiator")
 		}
 
-		hasOpenNegotiations, err := h.NRepo.HasOpenNegotiationDecisions(ctx, tx, cmd.DID, processData.ContractVersion, cmd.CauserDID)
+		hasOpenNegotiations, err := h.NRepo.HasOpenNegotiationDecisions(ctx, tx, cmd.DID, processData.ContractVersion, cmd.CauserDID, cmd.SubmittedBy)
 		if err != nil {
 			return fmt.Errorf("could not check open negotiations: %w", err)
 		}

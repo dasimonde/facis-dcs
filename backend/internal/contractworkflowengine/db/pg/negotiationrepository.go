@@ -160,7 +160,11 @@ func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx cont
 	return negotiations, nil
 }
 
-func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int, negotiator string) (bool, error) {
+func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int, negotiator string, caller string) (bool, error) {
+	// A decision the caller authored is unresolvable BY THE CALLER: FR-CWE-07
+	// refuses an accept by the change request's own author, so counting it here
+	// would block that identity's submit with a decision nobody it can act as
+	// may ever clear. It still blocks any other identity holding the same slot.
 	query := `
         SELECT EXISTS (
             SELECT 1
@@ -170,10 +174,11 @@ func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(ctx context.Context
               AND contract_version = $2
               AND cnd.decision IS NULL
               AND cnd.negotiator = $3
+              AND ($4 = '' OR cn.created_by IS DISTINCT FROM $4)
         )
     `
 	var exists bool
-	err := tx.GetContext(ctx, &exists, query, did, contractVersion, negotiator)
+	err := tx.GetContext(ctx, &exists, query, did, contractVersion, negotiator, caller)
 	if err != nil {
 		return false, err
 	}

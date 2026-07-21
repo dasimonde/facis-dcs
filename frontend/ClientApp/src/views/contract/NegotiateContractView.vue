@@ -164,11 +164,7 @@ watch(
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
-        !hasConditionParameterForValue(
-          conditionValue,
-          dcsDraftStore.blocks,
-          dcsDraftStore.semanticConditions,
-        ),
+        !hasConditionParameterForValue(conditionValue, dcsDraftStore.blocks, dcsDraftStore.semanticConditions),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },
@@ -246,12 +242,17 @@ const submitContract = async () => {
 // signatory's organization and never matches a party).
 const localInstanceDid = ref('')
 
+// A change request we authored ourselves is excluded: FR-CWE-07 refuses an
+// accept by its own author, so it would disable Submit with a decision this
+// user can never resolve. The backend submit gate skips the same rows.
 const hasOpenDecisions = computed(
   () =>
-    contract.value?.negotiations?.some((negotiation) =>
-      negotiation.negotiation_decisions.some(
-        (decision) => !decision.decision && decision.negotiator === localInstanceDid.value,
-      ),
+    contract.value?.negotiations?.some(
+      (negotiation) =>
+        negotiation.created_by !== issuer.value &&
+        negotiation.negotiation_decisions.some(
+          (decision) => !decision.decision && decision.negotiator === localInstanceDid.value,
+        ),
     ) ?? false,
 )
 

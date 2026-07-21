@@ -111,24 +111,6 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not read negotiators: %w", err)
 	}
-	// A party does not owe a decision on its OWN change request: the
-	// conflict-of-interest rule (FR-CWE-07) forbids the author's identity from
-	// ever accepting it, so recording a decision for the proposing party leaves
-	// a pending decision nobody may resolve — which blocks that party's Submit
-	// forever. It bites the federated flow, where the negotiator IS the party's
-	// own DCS DID; single-instance negotiators are participant identities and
-	// never equal the proposing peer, so their decisions are unaffected.
-	if cmd.CauserDID != "" {
-		remaining := make([]string, 0, len(negotiators))
-		for _, negotiator := range negotiators {
-			if negotiator == cmd.CauserDID {
-				continue
-			}
-			remaining = append(remaining, negotiator)
-		}
-		negotiators = remaining
-	}
-
 	data := db.NegotiationCreateData{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,

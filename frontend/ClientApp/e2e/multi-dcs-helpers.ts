@@ -114,7 +114,8 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   // and what it got, rather than only that no prepare arrived.
   const viewerCalls: string[] = []
   inst.page.on('response', (r) => {
-    if (/\/signature\/(request|prepare)/.test(r.url())) viewerCalls.push(`${r.status()} ${r.request().method()} ${r.url().split('/api')[1] ?? r.url()}`)
+    if (/\/signature\/(request|prepare)/.test(r.url()))
+      viewerCalls.push(`${r.status()} ${r.request().method()} ${r.url().split('/api')[1] ?? r.url()}`)
   })
   const viewerErrors: string[] = []
   inst.page.on('console', (m) => {
@@ -274,10 +275,9 @@ async function exportContractPdf(inst: Instance, contractDid: string): Promise<s
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
   const exportUrl = `${inst.apiBase}/pdf/export/contract/${encodeURIComponent(contractDid)}`
 
-  const exported = inst.page.waitForResponse(
-    (r) => r.url().includes(`/pdf/export/contract/${contractDid}`) && r.ok(),
-    { timeout: 120_000 },
-  )
+  const exported = inst.page.waitForResponse((r) => r.url().includes(`/pdf/export/contract/${contractDid}`) && r.ok(), {
+    timeout: 120_000,
+  })
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
   await exported
 
@@ -743,7 +743,6 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   await proposed
 }
 
-
 /**
  * Stage 5 — A transmits the DRAFT contract to its counterparty through the real
  * UI: the Contract Creator's "Offer to counterparty" action on the contract view
@@ -793,16 +792,28 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
     // decisions" while the fetch was still in flight, silently skipping the
     // accept and leaving the round unresolvable.
     await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
-    const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
-    if (!(await showBtn.isVisible().catch(() => false))) break
-    await showBtn.click()
-    const responded = inst.page.waitForResponse(
-      (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
-      { timeout: 30_000 },
-    )
-    await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
-    await confirmModalOn(inst, 'Confirm')
-    await responded
+    const pending = await inst.page.getByRole('button', { name: 'Show' }).count()
+    if (pending === 0) break
+
+    // Walk every pending round rather than only the first: a change request this
+    // instance authored itself stays pending forever (FR-CWE-07 refuses an accept
+    // by its own author), so it must be stepped over to reach the peer's.
+    let accepted = false
+    for (let i = 0; i < pending && !accepted; i++) {
+      await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+      await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
+      const showBtn = inst.page.getByRole('button', { name: 'Show' }).nth(i)
+      if (!(await showBtn.isVisible().catch(() => false))) continue
+      await showBtn.click()
+      const responded = inst.page.waitForResponse(
+        (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
+        { timeout: 30_000 },
+      )
+      await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await confirmModalOn(inst, 'Confirm')
+      accepted = (await responded).ok()
+    }
+    if (!accepted) break
   }
 }
 
