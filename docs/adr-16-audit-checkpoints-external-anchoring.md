@@ -117,12 +117,41 @@ configuration accepts none at all. Roles are validated against
 `userrole.IsValid` at startup, so a typo fails the boot rather than silently
 granting nothing.
 
-ORCE is configured with `Auditor` — the narrowest role that may read the
-checkpoint head — and is attributed to this operator's own DID, which is what
-it is: part of this deployment, acting on its behalf.
-
 This replaces the `alg: none` token minted by the older DCS flows. That was
 never a credential; it worked only because nothing verified it.
+
+**8. A new System User class: System Auditor (`Sys. Auditor`).** SRS §2.4
+Table 5 lists six System User classes, and all of them act on contracts —
+System Contract Creator, Reviewer, Approver, Manager, Signer, and Contract
+Target System. None describes a machine that only *reads integrity evidence*,
+which is exactly what an external notary is: it must never create, approve,
+sign or receive a contract, and it never needs to see contract content.
+
+Assigning the human `Auditor` role to a machine would have worked and would
+have been wrong twice over. It would grant an unattended client the full
+auditor surface — every audit trail, every contract's history — to do a job
+that needs one endpoint. And it would blur the SRS's own division between
+Human Users, who authenticate with verifiable credentials, and System Users,
+who do not; `userrole.IsHumanRole` would then answer yes for something with no
+human behind it.
+
+So Table 5 gains a seventh class:
+
+| Role | Description |
+|---|---|
+| System Auditor | External integrity notary. Reads the audit trail's tamper-evidence surface — checkpoint heads — to anchor it outside the operator. No access to contract content, no write path anywhere in the system. |
+
+It is a system role (`userrole.SystemAuditor`, `IsSystemRole() == true`), it is
+distinct from the human `Auditor`, and holding one never implies the other.
+Only `GET /pac/audit/checkpoint/head` accepts it; the inclusion-proof endpoint
+stays human-Auditor-only, since building a proof requires naming an entry and
+that is an auditor's question, not a notary's.
+
+ORCE is configured with exactly this role and attributed to this operator's own
+DID, which is what it is: part of this deployment, acting on its behalf.
+
+This is an addition to the SRS role model, not a reading of it. It belongs in
+the SRS proper the next time that document is revised.
 
 ## Consequences
 

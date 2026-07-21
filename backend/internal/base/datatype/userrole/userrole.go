@@ -41,6 +41,11 @@ const (
 	SystemContractManager  UserRole = "Sys. Contract Manager"
 	SystemContractSigner   UserRole = "Sys. Contract Signer"
 	ContractTargetSystem   UserRole = "Contract Target System"
+	// SystemAuditor extends the SRS System User classes (SRS §2.4 Table 5, all
+	// of which are contract-oriented) with the read-only integrity role an
+	// external notary needs: it may read the audit trail's tamper-evidence
+	// surface and nothing else. See ADR-16.
+	SystemAuditor UserRole = "Sys. Auditor"
 )
 
 func NewUserRole(s string) (UserRole, error) {
@@ -60,7 +65,8 @@ func (r UserRole) IsValid() bool {
 		ArchiveManager, Auditor, SystemAdministrator, ComplianceOfficer, IntegrationManager,
 		ProcessOrchestrator, Validator,
 		SystemContractCreator, SystemContractReviewer, SystemContractApprover,
-		SystemContractManager, SystemContractSigner, ContractTargetSystem:
+		SystemContractManager, SystemContractSigner, ContractTargetSystem,
+		SystemAuditor:
 		return true
 	}
 	return false
@@ -75,7 +81,8 @@ func (r UserRole) String() string {
 func (r UserRole) IsSystemRole() bool {
 	switch r {
 	case SystemContractCreator, SystemContractReviewer, SystemContractApprover,
-		SystemContractManager, SystemContractSigner, ContractTargetSystem:
+		SystemContractManager, SystemContractSigner, ContractTargetSystem,
+		SystemAuditor:
 		return true
 	}
 	return false

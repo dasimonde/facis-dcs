@@ -266,14 +266,15 @@ ipfsDocumentManager:
 # origin, so the BDD runner reaches it without a port-forward — identical
 # path locally and on CI. The /tsa flow itself signs locally (localTSA in the
 # orce chart) — no external timestamp authority is contacted.
-# ORCE polls the audit-trail checkpoint head (ADR-16) as an SRS System User.
-# Auditor is the narrowest role that may read it; the head carries only hashes,
-# counts and a timestamp, never contract content. Attribution is this operator's
-# own DID: ORCE is part of this deployment, acting on its behalf.
+# ORCE polls the audit-trail checkpoint head (ADR-16) as a System Auditor: the
+# read-only integrity role, which may read the tamper-evidence surface and
+# nothing else. The head carries only hashes, counts and a timestamp, never
+# contract content. Attribution is this operator's own DID: ORCE is part of
+# this deployment, acting on its behalf.
 systemClients:
   - client_id: dcs-orce-system
     participant_did: "did:web:dcs-a.localhost%3A18080"
-    roles: ["Auditor"]
+    roles: ["Sys. Auditor"]
 
 orce:
   enabled: true

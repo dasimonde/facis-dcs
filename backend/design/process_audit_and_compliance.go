@@ -206,6 +206,9 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Archive Manager")
+			// The System User class an external notary authenticates as: it may
+			// read this head and nothing else (ADR-16).
+			Scope("Sys. Auditor")
 		})
 
 		Payload(func() {
