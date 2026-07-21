@@ -237,7 +237,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Conte
 
 func (r *PostgresContractTemplateRepo) ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplateProcessData, error) {
 	query := `
-        SELECT did, document_number, version, state, updated_at, created_by
+        SELECT did, document_number, version, state, updated_at, content_updated_at, created_by
         FROM contract_templates WHERE did = $1
     `
 	var processData db.ContractTemplateProcessData

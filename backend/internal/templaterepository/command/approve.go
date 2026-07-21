@@ -56,7 +56,7 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	// older than what's stored (see command package doc / ADR-0007). Templates
 	// aren't peer-synced, so unlike contractworkflowengine there's no
 	// local-vs-remote distinction in the error message here.
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 

@@ -54,7 +54,7 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 	}
 
 	// Optimistic concurrency (see command package doc / ADR-0007).
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 

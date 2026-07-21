@@ -83,7 +83,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	// Optimistic concurrency: reject if the caller's view of the template is
 	// older than what's stored (see command package doc / ADR-0007).
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 

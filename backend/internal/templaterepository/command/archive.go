@@ -51,7 +51,7 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 	}
 
 	// Optimistic concurrency (see command package doc / ADR-0007).
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 

@@ -62,7 +62,7 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		}
 	}
 
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 

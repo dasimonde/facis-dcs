@@ -50,6 +50,11 @@ type ContractTemplateProcessData struct {
 	State          string    `db:"state"`
 	CreatedBy      string    `db:"created_by"`
 	UpdatedAt      time.Time `db:"updated_at"`
+	// ContentUpdatedAt moves only when template_data actually changes, so the
+	// optimistic-lock guard distinguishes a real concurrent content edit from a
+	// benign write (a state transition, the background PDF write) that merely
+	// nudged updated_at.
+	ContentUpdatedAt time.Time `db:"content_updated_at"`
 }
 
 type ContractTemplateUpdateData struct {
