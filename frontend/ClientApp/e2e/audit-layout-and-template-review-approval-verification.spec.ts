@@ -141,7 +141,10 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
     await expect(page.getByText('Failed Checks').locator('..')).toContainText('1')
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeEnabled()
     await finding.click()
-    await expect(page.getByRole('heading', { name: 'Finding Details' }).locator('..')).toContainText('RULE-1')
+    const findingDetails = page.locator('aside').filter({
+      has: page.getByRole('heading', { name: 'Finding Details' }),
+    })
+    await expect(findingDetails).toContainText('RULE-1')
 
     await page.getByRole('button', { name: /Component/ }).click()
     await page.getByRole('button', { name: 'None' }).click()

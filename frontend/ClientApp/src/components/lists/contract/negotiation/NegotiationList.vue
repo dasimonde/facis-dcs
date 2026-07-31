@@ -2,6 +2,7 @@
 import { computed, ref, useTemplateRef } from 'vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { activeNegotiations } from '@/components/lists/contract/negotiation/active-negotiations'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import type { Contract } from '@/models/contract/contract'
@@ -23,10 +24,7 @@ const emit = defineEmits<{ selectedNegotiation: [negotiation: ContractNegotiatio
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const negotiations = computed(() => {
-  const activeNegotiations = props.contract.negotiations?.filter(
-    (negotiation) => negotiation.contract_version === props.contract.contract_version,
-  )
-  return activeNegotiations ?? []
+  return activeNegotiations(props.contract.negotiations, props.contract.contract_version)
 })
 
 const sortedNegotiations = computed(() =>

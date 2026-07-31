@@ -23,6 +23,7 @@ import {
   fromDocumentSemanticValues,
 } from '@contract-workflow-engine/utils/semantic-condition-values'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import { activeNegotiations } from '@/components/lists/contract/negotiation/active-negotiations'
 import NegotiationList from '@/components/lists/contract/negotiation/NegotiationList.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
@@ -455,17 +456,8 @@ const currentContractData = computed<ContractData | undefined>(() => {
 })
 
 const hasActiveNegotiations = computed(() => {
-  // A negotiation needs surfacing while it still carries an undecided decision
-  // (that decision blocks Submit) OR it targets the current version. Keying on
-  // the version alone hid the list once a counter's immediate redline bumped the
-  // contract version, deadlocking the round: Submit disabled, no list to resolve.
-  return (
-    contract.value?.negotiations?.some(
-      (negotiation) =>
-        negotiation.contract_version === contract.value?.contract_version ||
-        negotiation.negotiation_decisions.some((decision) => !decision.decision),
-    ) ?? false
-  )
+  if (!contract.value) return false
+  return activeNegotiations(contract.value.negotiations, contract.value.contract_version).length > 0
 })
 
 const { download: downloadExport, exporting } = useDocumentExport()

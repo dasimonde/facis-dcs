@@ -730,24 +730,16 @@ export async function registerCatalogueTemplateOn(inst: Instance, name: string):
 
   const entry = inst.page.getByRole('listitem').filter({ hasText: name })
   const search = inst.page.getByRole('button', { name: 'Search', exact: true })
-  await expect
-    .poll(
-      async () => {
-        const searched = inst.page.waitForResponse(
-          (response) => response.url().includes('/catalogue/template/search') && response.request().method() === 'GET',
-        )
-        await search.click()
-        const response = await searched
-        expect(response.ok(), `catalogue search on ${inst.origin}: HTTP ${response.status()}`).toBeTruthy()
-        return entry.count()
-      },
-      {
-        message: `catalogue entry ${name} on ${inst.origin}`,
-        timeout: 60_000,
-        intervals: [1_000, 2_000, 5_000],
-      },
-    )
-    .toBe(1)
+  const searched = inst.page.waitForResponse(
+    (response) => response.url().includes('/catalogue/template/search') && response.request().method() === 'GET',
+  )
+  await search.click()
+  const searchResponse = await searched
+  expect(searchResponse.ok(), `catalogue search on ${inst.origin}: HTTP ${searchResponse.status()}`).toBeTruthy()
+  // The response can already contain the federated entry while Vue has not
+  // completed the reactive list render. Re-clicking the now-disabled Search
+  // button waits forever, so wait for the result of this successful request.
+  await expect(entry, `catalogue entry ${name} on ${inst.origin}`).toHaveCount(1, { timeout: 15_000 })
   await entry.getByRole('link', { name: 'View' }).click()
   await expect(inst.page).toHaveURL(/\/catalogues\/templates\/view\/.+version=/)
 

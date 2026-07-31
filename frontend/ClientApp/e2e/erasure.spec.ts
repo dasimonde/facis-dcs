@@ -64,7 +64,10 @@ async function expectKeyShredded(inst: Instance, contractDid: string): Promise<v
           },
         })
         if (!resp.ok()) return `HTTP ${resp.status()}`
-        const scopes = (await resp.json()) as { audit_trail?: { did?: string; event_type?: string }[] }[]
+        const payload = (await resp.json()) as
+          | { audit_trail?: { did?: string; event_type?: string }[] }
+          | { audit_trail?: { did?: string; event_type?: string }[] }[]
+        const scopes = Array.isArray(payload) ? payload : [payload]
         const types = scopes.flatMap((s) => s.audit_trail ?? []).filter((e) => e.did === contractDid)
         return types.some((e) => e.event_type === 'KEY_SHREDDED')
           ? 'found'
