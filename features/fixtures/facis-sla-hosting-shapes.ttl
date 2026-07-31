@@ -1,0 +1,72 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix slah: <https://w3id.org/facis/sla/hosting/v1#> .
+
+# The hosting-SLA domain as an IMPORTED hub shapes graph (kind="shapes",
+# name="facis-sla-hosting") — published at runtime, never seeded. It is the
+# same mechanism the SRS Appendix C access grant already uses: DCS does
+# general ODRL contracting, and importing a vocabulary is what makes a
+# particular domain addressable. Registering this graph does two things at
+# once:
+#
+#   * the template builder's object picker gains two ▣ assets (every
+#     sh:NodeShape carrying sh:targetClass becomes pickable, its property
+#     shapes becoming the fields declared with it — parseShapesAssets in
+#     frontend/.../ontology-domain-fields.ts), and an asset declared in a
+#     clause becomes the typed dcs:contractData object the clause's ODRL
+#     rule names as its odrl:target;
+#   * the same property shapes ENFORCE the negotiated values: a document
+#     whose data uses one of these classes declares this graph in
+#     sh:shapesGraph, and validation dereferences each field reference to
+#     its filled dcs:value before checking it (ADR-23).
+#
+# So the enum, the bounds and the datatype below are authored once and are
+# simultaneously what the picker offers and what the signing gate refuses.
+#
+# No sh:minCount: an unfilled field reference is dropped by materialization,
+# so requiring one would refuse the TEMPLATE — which by construction carries
+# no negotiated values. Completeness before signature is ValidateContractClosed's
+# job; this graph says only what a value must look like once agreed.
+
+slah:ManagedKubernetesEnvironmentShape
+  a sh:NodeShape ;
+  sh:targetClass slah:ManagedKubernetesEnvironment ;
+  rdfs:label "Managed Kubernetes Environment" ;
+  sh:property [
+    sh:path slah:provisionedNodes ;
+    sh:name "Provisioned nodes" ;
+    sh:description "Worker nodes the Provider keeps available." ;
+    sh:datatype xsd:integer ;
+    sh:minInclusive 1 ;
+    sh:maxInclusive 500 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path slah:nodeClass ;
+    sh:name "Node class" ;
+    sh:datatype xsd:string ;
+    sh:in ( "GENERAL_PURPOSE" "MEMORY_OPTIMIZED" "COMPUTE_OPTIMIZED" ) ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path slah:serviceRegion ;
+    sh:name "Service region" ;
+    sh:datatype xsd:string ;
+    sh:in ( "EMEA" "AMER" "APAC" ) ;
+    sh:maxCount 1 ;
+  ] .
+
+slah:SupportServiceShape
+  a sh:NodeShape ;
+  sh:targetClass slah:SupportService ;
+  rdfs:label "Support Service" ;
+  sh:property [
+    sh:path slah:incidentResponseMinutes ;
+    sh:name "P1 incident response in minutes" ;
+    sh:description "Time within which the Provider must inform the Customer of a priority-1 incident." ;
+    sh:datatype xsd:integer ;
+    sh:minInclusive 5 ;
+    sh:maxInclusive 240 ;
+    sh:maxCount 1 ;
+  ] .

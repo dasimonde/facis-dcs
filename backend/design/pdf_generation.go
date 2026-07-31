@@ -9,9 +9,13 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 
 	// MR/HR consistency (DCS-FR-CWE-04/05)
 	Attribute("match", Boolean, "True when the stored PDF was generated from the embedded JSON-LD without alteration")
-	Attribute("jsonld_hash", String, "SHA-256 hex of the extracted JSON-LD attachment")
-	Attribute("base_pdf_hash", String, "SHA-256 hex of the re-generated base PDF from the same JSON-LD")
-	Attribute("stored_base_pdf_hash", String, "SHA-256 hex of the stored PDF base layer (before any C2PA incremental updates)")
+	// The three digests the match verdict is reached on, reported by pdf-core's
+	// /verify. base_pdf_hash and stored_base_pdf_hash are equal exactly when the
+	// stored document re-renders to its own bytes, so on a mismatch they name
+	// which side diverged rather than leaving match=false unevidenced.
+	Attribute("jsonld_hash", String, "SHA-256 hex of the machine-readable JSON-LD payload embedded in the stored PDF — the latest one on an amended document, i.e. the payload that governs its current visible state")
+	Attribute("base_pdf_hash", String, "SHA-256 hex of the deterministic re-render produced from that payload: a bare recompile for a plain document, the replay of the last amendment hop for an incrementally updated one. Taken over the same COSE-zeroed normalization the comparison uses, since a fresh compile carries a fresh randomized claim signature.")
+	Attribute("stored_base_pdf_hash", String, "SHA-256 hex of the stored bytes that re-render was compared against: the leading span of the stored PDF it must reproduce, excluding the append-only PAdES signature layers that legitimately follow, normalized the same way. Empty — like the other two — only where no digest could be taken at all: an artifact that failed authenticated decryption, or a verification that never reached the comparison. The discrepancy field names which.")
 
 	// C2PA provenance validation (DCS-OR-C2PA-006). Both signature checks are
 	// three-state rather than boolean: a check that could not be performed reports

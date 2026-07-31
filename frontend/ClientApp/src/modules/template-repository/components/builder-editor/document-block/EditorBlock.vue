@@ -83,6 +83,7 @@ const localText = ref('')
 
 const localTitleId = useId()
 const localTextId = useId()
+const clauseLabelId = useId()
 
 watch(
   () => [props.item.blockId, savedTitle.value, savedText.value] as const,
@@ -152,13 +153,16 @@ function revertToSaved() {
       </template>
       <!-- Clause: read-only -->
       <template v-else-if="block && block['@type'] === 'dcs:Clause'">
-        <label class="text-[10px] font-bold uppercase opacity-60">
+        <span :id="clauseLabelId" class="text-[10px] font-bold uppercase opacity-60">
           Clause
           <span class="mt-0.5 text-[10px] font-semibold text-base-content">
             ({{ clauseBlock?.['dcs:title'] ?? '' }})
           </span>
-        </label>
-        <p class="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-base-content/70">
+        </span>
+        <p
+          :aria-labelledby="clauseLabelId"
+          class="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-base-content/70"
+        >
           <ClauseSegmentsPreview :segments="clauseSegments" :get-placeholder-label="getPlaceholderLabel" />
         </p>
       </template>

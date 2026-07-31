@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,9 +78,19 @@ type httpError struct {
 	status  int
 	name    string
 	message string
+	// digests are merged into the error body when the refusal is a verification
+	// verdict, so a caller sees the evidence the refusal rests on rather than a
+	// message it can only quote.
+	digests verifyDigests
 }
 
 func (e *httpError) Error() string { return e.message }
+
+// withDigests attaches the digests a verification verdict was reached on.
+func (e *httpError) withDigests(d verifyDigests) *httpError {
+	e.digests = d
+	return e
+}
 
 func prettyLog(m map[string]interface{}) {
 	b, err := json.MarshalIndent(m, "", "  ")
@@ -106,6 +118,18 @@ func writeError(w http.ResponseWriter, err error) {
 		"temporary": false,
 		"timeout":   false,
 		"fault":     false,
+	}
+	for key, digest := range map[string]string{
+		"jsonld_hash":          he.digests.JSONLDHash,
+		"base_pdf_hash":        he.digests.BasePDFHash,
+		"stored_base_pdf_hash": he.digests.StoredBasePDFHash,
+	} {
+		// A digest that could not be computed is left out entirely: an empty
+		// string under a hash key reads as "the hash is blank", which is a claim
+		// about the content rather than about the check.
+		if digest != "" {
+			body[key] = digest
+		}
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(he.status)
@@ -210,8 +234,64 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 	writePrepared(w, pdf, signer.Captured())
 }
 
+// verifyDigests are the SHA-256 digests (hex, the digest every other DCS
+// component records) that the /verify match verdict is reached on. They are the
+// evidence for the verdict rather than a restatement of it: on the reproduction
+// check BasePDFHash and StoredBasePDFHash are equal exactly when the submitted
+// document re-renders to its stored bytes.
+//
+// Both PDF digests are taken over compiler.ZeroCOSESignatures output, the same
+// normalization the comparison itself uses. A fresh compile produces a fresh
+// randomized ECDSA COSE claim signature, so digesting the raw bytes would report
+// two different hashes for a document the verdict calls intact.
+//
+// Absent digests are omitted rather than sent empty — an empty hash field states
+// something about the content, not about the check.
+type verifyDigests struct {
+	// JSONLDHash is the SHA-256 of the machine-readable payload embedded in the
+	// submitted PDF — the latest one on an amended document, i.e. the payload
+	// that governs its current visible state.
+	JSONLDHash string `json:"jsonld_hash,omitempty"`
+	// BasePDFHash is the SHA-256 of the deterministic re-render produced from
+	// JSONLDHash's payload: a bare recompile for a plain document, the replay of
+	// the last amendment hop for an incrementally updated one.
+	BasePDFHash string `json:"base_pdf_hash,omitempty"`
+	// StoredBasePDFHash is the SHA-256 of the stored bytes that re-render was
+	// compared against — the leading span of the submitted PDF it must reproduce,
+	// excluding the append-only PAdES signature layers that legitimately follow.
+	StoredBasePDFHash string `json:"stored_base_pdf_hash,omitempty"`
+}
+
+// reproductionDigests digests the two sides of the reproduction check plus the
+// payload it was driven from. reproduced may be nil when the check failed before
+// producing one, and payload nil when none could be extracted; the corresponding
+// digests are then left unset rather than reporting the digest of nothing.
+func reproductionDigests(payload, stored, reproduced []byte) verifyDigests {
+	var d verifyDigests
+	if payload != nil {
+		d.JSONLDHash = sha256Hex(payload)
+	}
+	if reproduced == nil {
+		return d
+	}
+	fresh := compiler.ZeroCOSESignatures(reproduced)
+	storedBase := compiler.ZeroCOSESignatures(stored)
+	if len(storedBase) > len(fresh) {
+		storedBase = storedBase[:len(fresh)]
+	}
+	d.BasePDFHash = sha256Hex(fresh)
+	d.StoredBasePDFHash = sha256Hex(storedBase)
+	return d
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 // verifyResponse is the JSON body returned by POST /verify.
 type verifyResponse struct {
+	verifyDigests
 	Match bool `json:"match"`
 	// C2PASignatureValid is the outcome of compiler.VerifyC2PAClaimSignatures:
 	// every manifest's COSE_Sign1 claim signature verified against its own
@@ -273,17 +353,25 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload []byte
+	var digests verifyDigests
 
 	if _, ok := compiler.SplitAtIncrementalUpdate(raw); ok {
-		if err := compiler.VerifyIncrementalUpdate(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw); err != nil {
-			writeError(w, errConflict(err))
+		reproduced, chainErr := compiler.VerifyIncrementalUpdate(
+			compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw)
+		// The payload is read whatever the chain verdict, so a rejected document
+		// still names which machine-readable content was on the table. A payload
+		// that cannot be read is reported only when the chain itself held —
+		// otherwise the chain failure is the finding, and stays the status.
+		payload, err = compiler.ExtractLatestEmbeddedJSONLD(raw)
+		if chainErr != nil {
+			writeError(w, errConflict(chainErr).withDigests(reproductionDigests(payload, raw, reproduced)))
 			return
 		}
-		payload, err = compiler.ExtractLatestEmbeddedJSONLD(raw)
 		if err != nil {
 			writeError(w, errBadRequest(err))
 			return
 		}
+		digests = reproductionDigests(payload, raw, reproduced)
 	} else {
 		payload, err = compiler.ExtractEmbeddedJSONLD(raw)
 		if err != nil {
@@ -303,9 +391,10 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		verifyCtx := compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority)
 		recompiled, err := compiler.CompilePDF(verifyCtx, payload, compiledAt)
 		if err != nil {
-			writeError(w, errUnprocessableEntity(err))
+			writeError(w, errUnprocessableEntity(err).withDigests(verifyDigests{JSONLDHash: sha256Hex(payload)}))
 			return
 		}
+		digests = reproductionDigests(payload, raw, recompiled)
 		// The compiled base must reproduce the leading bytes of the submitted
 		// PDF. A PAdES signature (and the signing evidence embedded before it)
 		// is an append-only incremental update written after the base's %%EOF —
@@ -313,7 +402,7 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		// /ByteRange — so the base is a byte-prefix of a signed PDF rather than
 		// byte-equal to it (DCS-OR-C2PA-010).
 		if !bytes.HasPrefix(compiler.ZeroCOSESignatures(raw), compiler.ZeroCOSESignatures(recompiled)) {
-			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")))
+			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")).withDigests(digests))
 			return
 		}
 		// An unsigned base must be byte-EQUAL to its deterministic recompile. The
@@ -322,9 +411,13 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		// (handled by the branch above via its marker). Trailing content on an
 		// otherwise-unsigned PDF is an offline amendment made outside /update —
 		// reject it (DCS-OR-C2PA-002 tamper-evidence).
+		//
+		// The digests agree here — the divergence is in the trailing bytes, not in
+		// the base the digests cover — so they are reported as the record of what
+		// was checked, and the message names what actually failed.
 		if !compiler.IsPAdESSigned(raw) &&
 			len(compiler.ZeroCOSESignatures(raw)) != len(compiler.ZeroCOSESignatures(recompiled)) {
-			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")))
+			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")).withDigests(digests))
 			return
 		}
 	}
@@ -346,6 +439,7 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := verifyResponse{
+		verifyDigests:      digests,
 		Match:              true,
 		C2PASignatureValid: c2paSignatureError == "",
 		C2PASignatureError: c2paSignatureError,
@@ -779,11 +873,6 @@ func (s *service) manifestChain(w http.ResponseWriter, r *http.Request) {
 func (s *service) ontologyContext(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/ld+json")
 	_, _ = w.Write(ontologyContext)
-}
-
-func (s *service) ontologyOwl(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/turtle; charset=utf-8")
-	_, _ = w.Write(ontologyOWL)
 }
 
 // readMultipartParts reads all parts from a multipart body into a map keyed by form field name.

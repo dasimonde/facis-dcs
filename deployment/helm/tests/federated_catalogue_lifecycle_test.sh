@@ -234,6 +234,7 @@ if grep -q 'tcpSocket:' <<<"$statuslist_proxy_doc"; then
 fi
 
 helm template proxy-default "$CHART_DIR" \
+  --set-string systemToken=lifecycle-test-system-token \
   --set statusListLocalhostProxy.enabled=true \
   --set statusListLocalhostProxy.upstream=http://status-list-service:8080 \
   >"$TMP_DIR/proxy-default.yaml"
@@ -313,13 +314,16 @@ if grep -q 'name: FEDERATED_CATALOGUE_API_URL' "$TMP_DIR/disabled.yaml"; then
 fi
 
 if helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.acceptance.yml" >/dev/null 2>"$TMP_DIR/remote-error"; then
+  -f "$CHART_DIR/values.acceptance.yml" \
+  --set-string systemToken=lifecycle-test-system-token \
+  >/dev/null 2>"$TMP_DIR/remote-error"; then
   fail "remote ADMIN_ALL catalogue rendered without explicit ADR-18 acknowledgement"
 fi
 grep -q 'acknowledgeAdminAllTrustBoundary' "$TMP_DIR/remote-error" ||
   fail "remote FC rejection does not explain the required ADR-18 acknowledgement"
 helm template lifecycle "$CHART_DIR" \
   -f "$CHART_DIR/values.acceptance.yml" \
+  --set-string systemToken=lifecycle-test-system-token \
   --set federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=true \
   >"$TMP_DIR/remote-acknowledged.yaml"
 

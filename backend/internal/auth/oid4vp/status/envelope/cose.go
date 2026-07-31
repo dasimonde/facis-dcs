@@ -49,13 +49,6 @@ func VerifyCOSEVC(raw []byte, verifier COSEVerifier) (map[string]any, error) {
 	return document, nil
 }
 
-func ParseCOSEDocumentClaims(document map[string]any) (map[string]any, error) {
-	if document == nil {
-		return nil, fmt.Errorf("empty cose document")
-	}
-	return document, nil
-}
-
 func IssuerFromClaims(claims map[string]any) string {
 	if iss, ok := claims["iss"].(string); ok {
 		return strings.TrimSpace(iss)

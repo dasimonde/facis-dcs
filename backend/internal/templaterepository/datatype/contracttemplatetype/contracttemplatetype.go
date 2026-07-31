@@ -27,13 +27,13 @@ func NewContractTemplateType(s string) (ContractTemplateType, error) {
 	return flag, nil
 }
 
-// IsValid checks if the ActionFlag is a valid role
+// IsValid reports whether the value is one of the declared ContractTemplateType values.
 func (f ContractTemplateType) IsValid() bool {
 	upper := ContractTemplateType(strings.ToUpper(string(f)))
 	return validFlag[upper]
 }
 
-// String returns the string representation of the ActionFlag
+// String returns the string representation of the ContractTemplateType
 func (f ContractTemplateType) String() string {
 	return string(f)
 }

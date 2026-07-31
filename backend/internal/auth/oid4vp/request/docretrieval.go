@@ -66,12 +66,15 @@ type DocRetrievalParams struct {
 // documentDigests/documentLocations/hashAlgorithmOID members.
 //
 // The client identifier carries its scheme as a prefix and no separate
-// client_id_scheme claim accompanies it: ARF profiles OpenID4VP 1.0 / HAIP
-// (SRS line 727), where the prefix is part of the identifier, and the bare
-// value plus client_id_scheme is the superseded pre-1.0 draft encoding an
-// ARF-compliant wallet may reject. The identifier is the same value the
-// ceremony's deep link and its identity request object name, so the one
-// request_uri cannot present two different verifiers.
+// client_id_scheme claim accompanies it: that is the OpenID4VP 1.0 / HAIP
+// encoding, where the prefix is part of the identifier, and the bare value
+// plus client_id_scheme is the superseded pre-1.0 draft encoding an
+// ARF-compliant wallet may reject. This choice is taken from those
+// specifications directly — the SRS asks only that the chosen natural-person
+// wallet demonstrate ARF compliance and says nothing about the encoding. The
+// identifier is the same value the ceremony's deep link and its identity
+// request object name, so the one request_uri cannot present two different
+// verifiers.
 //
 // signer is an X5CSigner carrying the DCS's own DID/hostname x5c chain in the
 // JAR header (not a bare jwk), so the wallet resolves the DNS name the

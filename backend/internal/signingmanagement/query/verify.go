@@ -80,10 +80,17 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 	// Fetch PDF bytes and run MR/HR hash check (DCS-FR-CWE-04).
 	pdfBytes, err := h.CRepo.FetchContractPDFBytes(ctx, tx, cmd.DID)
 	if err != nil || len(pdfBytes) == 0 {
-		// No PDF yet — return match=false with sig count only.
+		// Without stored bytes no check ran at all, which is a different result
+		// from a check that ran and failed. match=false alone reads as the
+		// latter, so the reason is named.
+		finding := "No contract PDF stored yet — no integrity check was performed"
+		if err != nil {
+			finding = fmt.Sprintf("Contract PDF could not be read, so no integrity check was performed: %v", err)
+		}
 		return &SignatureVerifyResult{
 			Match:    false,
 			SigCount: sigCount,
+			Findings: []string{finding},
 		}, nil
 	}
 
@@ -186,9 +193,30 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 		findings = append(findings, fmt.Sprintf("Status list state: %s", status))
 	}
 
+	jsonldHash, basePDFHash := verifyDigests(verifyResult)
+
 	return &SignatureVerifyResult{
-		Match:    match,
-		Findings: findings,
-		SigCount: sigCount,
+		Match:       match,
+		Findings:    findings,
+		SigCount:    sigCount,
+		JsonldHash:  jsonldHash,
+		BasePdfHash: basePDFHash,
 	}, nil
+}
+
+// verifyDigests carries the digests pdf-core reached its verdict on onto the two
+// optional response fields: the embedded machine-readable payload and the
+// deterministic re-render produced from it. A digest pdf-core could not compute
+// stays absent rather than becoming a pointer to "" — an empty hash states
+// something about the artifact, where an absent one states that no digest was
+// taken. They are populated on a content mismatch too, where the re-render
+// digest is precisely what the stored bytes failed to match.
+func verifyDigests(result pdfcore.VerifyResult) (jsonldHash, basePDFHash *string) {
+	optional := func(digest string) *string {
+		if digest == "" {
+			return nil
+		}
+		return &digest
+	}
+	return optional(result.JSONLDHash), optional(result.BasePDFHash)
 }

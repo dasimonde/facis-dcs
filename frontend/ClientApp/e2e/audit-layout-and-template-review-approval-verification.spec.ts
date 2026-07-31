@@ -136,10 +136,11 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
 
     failAudit = false
     await page.getByRole('button', { name: 'Execute Audit' }).click()
-    await expect(page.getByText('Policy mismatch')).toBeVisible()
+    const finding = page.getByText('Policy mismatch', { exact: true })
+    await expect(finding).toBeVisible()
     await expect(page.getByText('Failed Checks').locator('..')).toContainText('1')
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeEnabled()
-    await page.getByText('Policy mismatch').click()
+    await finding.click()
     await expect(page.getByRole('heading', { name: 'Finding Details' }).locator('..')).toContainText('RULE-1')
 
     await page.getByRole('button', { name: /Component/ }).click()

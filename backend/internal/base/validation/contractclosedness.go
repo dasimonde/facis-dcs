@@ -25,6 +25,13 @@ var ErrContractNotClosed = errors.New("contract is not closed")
 // materialized: each negotiated-boundary right operand references a filled
 // field, each required data field a policy enforces carries a value, and each
 // prose field binds to a filled field.
+//
+// Note the narrowness, against the SRS wording above: the `dcs:required` check
+// happens inside the per-rule constraint loop below, so it only covers fields
+// an ODRL constraint's leftOperand names. A field marked `dcs:required: true`
+// that no constraint references and no prose block binds is not checked by
+// this function at all. "No unresolved placeholders" at the call sites means
+// no placeholder the policy or the prose depends on — not every required field.
 func ValidateContractClosed(contractDocument any) error {
 	data, err := normalizeObject(contractDocument)
 	if err != nil {

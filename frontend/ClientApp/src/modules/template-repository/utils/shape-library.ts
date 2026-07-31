@@ -6,7 +6,7 @@ import {
   OntologyGraph,
   readRdfList,
 } from '@template-repository/utils/ontology-domain-fields'
-import type { XsdDatatype } from '@/models/dcs-jsonld'
+import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
 
 /**
  * Authorable classes from the Semantic Hub's registered SHACL libraries: any
@@ -18,7 +18,6 @@ import type { XsdDatatype } from '@/models/dcs-jsonld'
  */
 
 const SH = 'http://www.w3.org/ns/shacl#'
-const XSD = 'http://www.w3.org/2001/XMLSchema#'
 
 /** Hub entries that shape the document envelope, not domain data. */
 const ENVELOPE_SCHEMA_NAMES = new Set(['facis-dcs', 'clause-catalog'])
@@ -51,19 +50,6 @@ export interface ShapeClass {
   properties: ShapeProperty[]
 }
 
-const XSD_TO_COMPACT: Record<string, XsdDatatype> = {
-  [`${XSD}string`]: 'xsd:string',
-  [`${XSD}decimal`]: 'xsd:decimal',
-  [`${XSD}double`]: 'xsd:decimal',
-  [`${XSD}float`]: 'xsd:decimal',
-  [`${XSD}integer`]: 'xsd:integer',
-  [`${XSD}int`]: 'xsd:integer',
-  [`${XSD}long`]: 'xsd:integer',
-  [`${XSD}boolean`]: 'xsd:boolean',
-  [`${XSD}date`]: 'xsd:date',
-  [`${XSD}dateTime`]: 'xsd:dateTime',
-}
-
 type LeafConstraint = Pick<ShapeProperty, 'datatype' | 'datatypeIri' | 'options' | 'iri' | 'classRef'>
 
 /** Resolves one constraint node (a property shape or an sh:or / sh:xone
@@ -71,8 +57,16 @@ type LeafConstraint = Pick<ShapeProperty, 'datatype' | 'datatypeIri' | 'options'
  *  object reference (sh:class / sh:node), or a bare IRI (sh:nodeKind sh:IRI). */
 function leafConstraint(graph: OntologyGraph, node: string): LeafConstraint | null {
   const declaredDatatype = graph.first(node, `${SH}datatype`)
-  const datatype = XSD_TO_COMPACT[declaredDatatype] ?? (declaredDatatype ? 'xsd:string' : undefined)
-  const datatypeIri = declaredDatatype && !XSD_TO_COMPACT[declaredDatatype] ? declaredDatatype : undefined
+  // compactXsdDatatype throws on an XSD datatype DCS cannot order, so an
+  // unsupported declaration surfaces as a library-import error instead of
+  // degrading to a string. A non-XSD datatype (an external library's own) has
+  // no compact DCS term: datatypeIri stays authoritative and rides every
+  // emitted literal verbatim, while `datatype` is a rendering hint only —
+  // such a leaf cannot become a dcs:ContractField (see DataObjectNode's
+  // negotiableSupported), so the hint never reaches a comparison.
+  const compact = compactXsdDatatype(declaredDatatype)
+  const datatype: XsdDatatype | undefined = compact ?? (declaredDatatype ? 'xsd:string' : undefined)
+  const datatypeIri = declaredDatatype && !compact ? declaredDatatype : undefined
 
   const inList = graph.first(node, `${SH}in`)
   if (inList) {

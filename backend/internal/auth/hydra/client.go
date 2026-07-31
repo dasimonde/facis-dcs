@@ -79,24 +79,6 @@ func New(cfg Config) *Client {
 	}
 }
 
-// NewFromEnv constructs a Client using HYDRA_* environment variables.
-func NewFromEnv() *Client {
-	timeout := defaultHTTPTimeout
-	if raw := strings.TrimSpace(os.Getenv("HYDRA_HTTP_TIMEOUT")); raw != "" {
-		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
-			timeout = parsed
-		}
-	}
-	return New(Config{
-		PublicIssuerURL:   os.Getenv("HYDRA_PUBLIC_ISSUER_URL"),
-		InternalIssuerURL: os.Getenv("HYDRA_INTERNAL_ISSUER_URL"),
-		ClientID:          os.Getenv("HYDRA_CLIENT_ID"),
-		ClientSecret:      os.Getenv("HYDRA_CLIENT_SECRET"),
-		RedirectURI:       os.Getenv("HYDRA_REDIRECT_URI"),
-		HTTPTimeout:       timeout,
-	})
-}
-
 // IssuerURL returns the public Hydra issuer base URL.
 func (c *Client) IssuerURL() string {
 	return c.cfg.PublicIssuerURL

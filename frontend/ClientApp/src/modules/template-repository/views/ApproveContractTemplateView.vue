@@ -8,14 +8,14 @@ import CopyTemplateButton from '@template-repository/components/CopyTemplateButt
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import TemplateManagerActions from '@/components/template/TemplateManagerActions.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useNavStore } from '@/stores/nav-store'
 import { reportActionError } from '@/utils/report-action-error'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const router = useRouter()
 const route = useRoute()

@@ -72,10 +72,20 @@ creation application (SCA). The signatory's key lives in their wallet/QTSP.
 2. **Publish.** The DCS publishes a **standard OID4VP Document-Retrieval
    request object** (signed JAR, `client_id=x509_san_dns:<dns-name>`) carrying
    `document_digests`, `document_locations`, `response_uri`, and `nonce`, as a
-   QR / deep link. The client identifier carries its scheme as a **prefix** —
-   OpenID4VP 1.0 / HAIP, the encoding the ARF profiles (SRS line 727) — and no
-   separate `client_id_scheme` parameter accompanies it; the deep link and both
-   of a ceremony's request objects name that one identifier.
+   QR / deep link. The client identifier carries its scheme as a **prefix**,
+   per OpenID4VP 1.0 / HAIP, and no separate `client_id_scheme` parameter
+   accompanies it; the deep link and both of a ceremony's request objects name
+   that one identifier. **This encoding is sourced from the OpenID4VP 1.0 and
+   HAIP specifications themselves, not from the SRS.** Earlier revisions of
+   this ADR attributed it to SRS line 727; that line
+   requires only "a digital wallet for natural persons supporting
+   OpenID4VCI and OpenID4VP as profiled by the ARF … any chosen wallet MUST
+   demonstrate ARF compliance." It names neither OpenID4VP 1.0 nor HAIP and
+   says nothing about `client_id` encoding. This is the same
+   narrative-section overread ADR-20 retracted for "SRS §199". The encoding
+   decision stands on the specifications; the SRS is not its authority, and
+   it has been exercised only against the project's own testWallet, never
+   against a real EUDI wallet implementation.
    `document_digests` is an array: the PDF **and** the JSON-LD
    are offered together, so one ceremony yields both a PAdES and a JAdES over
    the **same content hash** (SM-02, SM-11).

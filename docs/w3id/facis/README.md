@@ -18,12 +18,12 @@ system nothing at runtime:
   copy for the historical w3id context IRI — so expansion and validation
   never depend on w3id resolving.
 - The vocabulary documents themselves stay fetchable from any instance's
-  public `/semantic/ontology/facis-dcs`, `/semantic/context/facis-dcs`,
+  public `/semantic/ontology/facis-sla`, `/semantic/context/facis-dcs`,
   and `/semantic/shapes/facis-dcs` routes.
 
 What the registration adds is third-party follow-your-nose: an external
-agent pasting a bare `dcs:` term IRI into a resolver reaches the served
-ontology.
+agent pasting a bare `dcs:` term IRI into a resolver reaches the shapes
+that constrain it.
 
 # w3id.org registration for the FACIS DCS namespaces
 
@@ -41,10 +41,16 @@ redirect targets are the Semantic Hub's public resolution routes:
 
 | w3id IRI                                   | resolves to                          |
 |--------------------------------------------|--------------------------------------|
-| `/facis/dcs/ontology/v1` (and `#term`)     | `/semantic/ontology/facis-dcs`       |
+| `/facis/dcs/ontology/v1` (and `#term`)     | `/semantic/shapes/facis-dcs`         |
 | `/facis/dcs/context/v1`                    | `/semantic/context/facis-dcs`        |
 | `/facis/dcs/shapes/v1`                     | `/semantic/shapes/facis-dcs`         |
-| `/facis/dcs/taxonomy/v1` (and `#term`)     | `/semantic/ontology/facis-dcs`       |
+| `/facis/dcs/taxonomy/v1` (and `#term`)     | `/semantic/ontology/facis-sla`       |
+
+There is no envelope-ontology document behind `dcs:`. The terms are
+constrained by the shapes graph and by nothing else, so their IRIs
+dereference to the shapes rather than to a vocabulary document that would
+describe them without constraining them. `dcst:` taxonomy values are
+fragments on the domain-field ontology, which is where they are declared.
 
 All four routes are public and unauthenticated (`backend/design/
 semantic_hub.go`), so the redirect targets dereference without a DCS

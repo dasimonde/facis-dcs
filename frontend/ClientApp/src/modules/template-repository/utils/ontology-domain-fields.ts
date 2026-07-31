@@ -1,5 +1,6 @@
 import { Parser, type Quad } from 'n3'
 import { shallowReactive } from 'vue'
+import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
 import type {
   DomainFieldDefinition,
   SemanticParameterType,
@@ -22,7 +23,6 @@ const RDF_NIL = `${RDF}nil`
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#'
 const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class'
 const SKOS = 'http://www.w3.org/2004/02/skos/core#'
-const XSD = 'http://www.w3.org/2001/XMLSchema#'
 const DCS = 'https://w3id.org/facis/dcs/ontology/v1#'
 const SH = 'http://www.w3.org/ns/shacl#'
 
@@ -199,16 +199,19 @@ function parseClassLabels(graph: OntologyGraph): ReadonlyMap<string, string> {
   return labels
 }
 
-/** Maps a field's rdfs:range xsd datatype to the builder's parameter type. */
-function parameterTypeForRange(rangeIRI: string): SemanticParameterType {
-  switch (rangeIRI) {
-    case `${XSD}decimal`:
+/** Maps a field's declared datatype to the builder's parameter type — which
+ *  input widget the field gets. The widget vocabulary has no duration and no
+ *  instant, so it is NOT the field's datatype: that is carried separately (see
+ *  DomainFieldDefinition.datatype) and must never be re-derived from here. */
+function parameterTypeForDatatype(datatype?: XsdDatatype): SemanticParameterType {
+  switch (datatype) {
+    case 'xsd:decimal':
       return 'decimal'
-    case `${XSD}integer`:
+    case 'xsd:integer':
       return 'integer'
-    case `${XSD}boolean`:
+    case 'xsd:boolean':
       return 'boolean'
-    case `${XSD}date`:
+    case 'xsd:date':
       return 'date'
     default:
       return 'string'
@@ -250,12 +253,19 @@ function parseOntologyDomainFields(
       const valueConstraintRef = graph.first(subject, `${DCS}hasValueConstraint`)
       const valueConstraint = valueConstraintRef ? cloneConstraint(constraints.get(valueConstraintRef)) : undefined
       const domain = graph.first(subject, `${RDFS}domain`) || undefined
+      // An rdfs:range naming a class (an object-valued field) yields no
+      // datatype; an XSD range DCS cannot order throws out of here rather
+      // than degrading to xsd:string.
+      const datatype = compactXsdDatatype(range)
       // A field is an enum when its constraint enumerates allowed values.
-      const type: SemanticParameterType = valueConstraint?.allowedValues?.length ? 'enum' : parameterTypeForRange(range)
+      const type: SemanticParameterType = valueConstraint?.allowedValues?.length
+        ? 'enum'
+        : parameterTypeForDatatype(datatype)
       return {
         ontologyId: subject,
         parameterName: parameterNameFor(subject),
         type,
+        datatype,
         label,
         domain,
         domainLabel: domain ? classLabels.get(domain) : undefined,
@@ -307,11 +317,13 @@ function buildPropertyField(graph: OntologyGraph, propShape: string, path: strin
   const hasConstraint = allowedValues.length > 0 || pattern !== undefined || min !== undefined || max !== undefined
   // A property with no sh:datatype and no enum is object-valued (sh:class /
   // sh:node) — filled with a reference/identifier, carried as a string.
-  const type: SemanticParameterType = allowedValues.length ? 'enum' : parameterTypeForRange(datatype)
+  const compactDatatype = compactXsdDatatype(datatype)
+  const type: SemanticParameterType = allowedValues.length ? 'enum' : parameterTypeForDatatype(compactDatatype)
   return {
     ontologyId: path,
     parameterName: parameterNameFor(path),
     type,
+    datatype: compactDatatype,
     label,
     valueConstraint: hasConstraint
       ? {

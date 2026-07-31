@@ -31,7 +31,7 @@ func NewExpirationPolicy(s string) (ExpirationPolicy, error) {
 	return flag, nil
 }
 
-// IsValid checks if the ExpirationPolicy is a valid role
+// IsValid reports whether the value is one of the declared ExpirationPolicy values.
 func (f ExpirationPolicy) IsValid() bool {
 	upper := ExpirationPolicy(strings.ToUpper(string(f)))
 	return validPolicies[upper]

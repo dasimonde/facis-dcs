@@ -1,0 +1,50 @@
+# Example values for a DCS instance's credential issuer.
+#
+# The issuer is an OID4VCI credential issuer running the ORCE subchart's
+# `flows-issuer` flow set. It mints the Power of Attorney credential a
+# signatory presents to log in and to authorize a signature, so it is a
+# separate Helm release from `dcs` with its own volume, its own key and its own
+# DID — see deployment/README.md, "Credential issuers".
+#
+# Published under the DCS instance's own hostname behind /issuer, so its DID
+# resolves as did:web:<host>:issuer. That is the identifier the instance's
+# trust configuration grants `login` and `peer`.
+#
+# THIS FILE IS AN EXAMPLE. Everything below marked as a placeholder is not a
+# working value:
+#   dcs.example.org  → the public hostname of the DCS instance this issuer serves
+#   className        → your cluster's ingress class
+#   ingress.tls      → empty here; a reachable issuer needs a real certificate
+# Key material is deliberately absent: the issuer generates its own root CA and
+# signing key into its volume on first boot and publishes them at /issuer/
+# pki/jwks.json and /issuer/.well-known/did.json. The repo gives you the shape
+# of an issuer, never an identity.
+
+flowsDir: flows-issuer
+
+# The flows build every URL they publish (DID, credential offers, status list)
+# from this prefix, so it must match the path the ingress routes.
+extraEnv:
+  - name: ISSUER_PATH_PREFIX
+    value: /issuer
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # The issuer serves its routes at the root, so the prefix is stripped on the
+    # way in and re-announced to the app via x-forwarded-prefix.
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/x-forwarded-prefix: /issuer
+  hosts:
+    - host: dcs.example.org
+      path: "/issuer(/|$)(.*)"
+  pathType: ImplementationSpecific
+  tls: []
+
+# No flowImport block: the chart's flowsFile default mounts the chart's flows as
+# Node-RED's startup flows, and the import hook is not rendered at all. Its
+# credentials therefore need no deployment-specific value; the chart's defaults
+# (charts/orce/values.yaml, flowImport.auth) are the upstream image's own admin
+# user. Only if you turn flowsFile off do they matter, and then the token URL
+# has to name this release: http://<release>-orce:1880/auth/token.

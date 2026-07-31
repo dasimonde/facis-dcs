@@ -48,7 +48,7 @@ const (
 	discrepancyFailed       = "verification_failed"
 )
 
-// stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-004) for the
+// stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-003) for the
 // given contract state into pdfBytes and returns the updated PDF plus the
 // renderer version pdf-core reports. It performs no IPFS storage or DB
 // bookkeeping — callers decide what to do with the result. This is the
@@ -60,14 +60,20 @@ const (
 //   - appendAndCache below, for lifecycle transitions that happen entirely
 //     before any PAdES signature exists (draft-state edits).
 //
-// A PDF that already carries a PAdES signature (DCS-FR-SM-16/B) must never be
-// passed to this function again: any incremental update to a referenced
-// embedded-file object (the C2PA manifest attachment) after signing, however
-// carefully byte-range-preserving, is treated as an unexplained/illegal
-// modification by standards-compliant PAdES validators (Adobe Reader,
-// pyHanko's diff-analysis) — even though the CMS signature itself stays
-// cryptographically valid. See exportcontract.go/verifycontract.go, which
-// freeze the PDF once its C2PA state is no longer "draft".
+// A PDF that already carries a PAdES signature must never be passed to this
+// function again: rewriting a referenced embedded-file object (the C2PA
+// manifest attachment) after signing, however carefully byte-range-preserving,
+// is treated as an unexplained modification by standards-compliant PAdES
+// validators (Adobe Reader, pyHanko's diff-analysis) — even though the CMS
+// signature itself stays cryptographically valid. See
+// exportcontract.go/verifycontract.go, which freeze the PDF once its C2PA
+// state is no longer "draft".
+//
+// This restriction is specific to re-stamping lifecycle state. It is not a
+// general "never append to a signed PDF" rule: DCS-OR-C2PA-002 mandates
+// appending via PDF incremental updates, and signingmanagement's finalize()
+// appends a provenance-only manifest after signing (ADR-26). (There is no
+// DCS-FR-SM-16/B sub-clause; the earlier citation here was wrong.)
 func stampLifecycle(
 	ctx context.Context,
 	did, state string,
@@ -242,8 +248,15 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	}
 
 	return &pdfgen.PDFVerifyResult{
-		Match:               match,
-		C2paManifestFound:   c2paManifestFound,
+		Match:             match,
+		C2paManifestFound: c2paManifestFound,
+		// The digests pdf-core reached its verdict on, carried through rather than
+		// recomputed here. They ride along with a 409 content mismatch too, where
+		// base and stored diverge and name which side moved; all three are empty
+		// only when pdf-core could not compute them at all.
+		JsonldHash:          result.JSONLDHash,
+		BasePdfHash:         result.BasePDFHash,
+		StoredBasePdfHash:   result.StoredBasePDFHash,
 		C2paSignatureStatus: c2paSignatureStatus,
 		VcProofStatus:       vcProofStatus,
 		StatusListURI:       ptrToString(statusListURI),

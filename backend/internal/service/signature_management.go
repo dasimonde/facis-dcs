@@ -351,12 +351,28 @@ func (s *signatureManagementsrvc) Verify(ctx context.Context, req *signaturemana
 		PDFCore:     s.PDFCore,
 		Credentials: s.Credentials,
 	}
-	_, err = handler.Handle(ctx, qry)
+	result, err := handler.Handle(ctx, qry)
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
 
-	return &signaturemanagement.SMContractVerifyResponse{}, nil
+	return verifyResponseFrom(req.Did, result), nil
+}
+
+// verifyResponseFrom carries the verifier's verdict — the re-render match, the
+// active signature count, and the findings that hold the C2PA claim-signature,
+// lifecycle-credential and revocation results — onto the wire response.
+func verifyResponseFrom(did string, result *query.SignatureVerifyResult) *signaturemanagement.SMContractVerifyResponse {
+	res := &signaturemanagement.SMContractVerifyResponse{Did: did}
+	if result == nil {
+		return res
+	}
+	res.Match = result.Match
+	res.SigCount = result.SigCount
+	res.Findings = result.Findings
+	res.JsonldHash = result.JsonldHash
+	res.BasePdfHash = result.BasePdfHash
+	return res
 }
 
 func (s *signatureManagementsrvc) Provenance(ctx context.Context, req *signaturemanagement.SMProvenanceRequest) (res *signaturemanagement.SMProvenanceResponse, err error) {

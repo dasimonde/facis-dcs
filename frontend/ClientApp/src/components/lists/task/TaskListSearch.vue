@@ -4,7 +4,7 @@ import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import ListSearch from '../ListSearch.vue'
 import type { Contract } from '@/models/contract/contract'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 type Searchable = PartialContractTemplate | Contract
 

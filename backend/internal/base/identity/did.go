@@ -526,15 +526,16 @@ func (d *DIDDocument) VerifyPeerChallenge(trustPool *EUTrustPool, content, signa
 // verifyCertificateOf validates the x5c certificate chain of one verification
 // method:
 //
-//  1. Chain validation leaf -> intermediates -> root. trustedRoots
-//     determines the trust anchor; nil means the system trust store.
+//  1. Chain validation leaf -> intermediates -> root against trustPool.
 //  2. The leaf certificate must match the hostname of the DID.
-//  3. The public key of the leaf must match the JWK (n/e).
+//  3. The public key of the leaf must match the JWK (x/y).
 //  4. The leaf must carry the eIDAS QcCompliance statement.
 //
-// Note: QCStatements are a self-declaration by the issuer. For a legally
-// binding eIDAS validation, trustedRoots must be populated from the EU
-// Trusted Lists (LOTL/TSL), e.g. via BuildEUTrustPool.
+// Steps 1 and 4 are performed only if trustPool holds a populated pool; a nil
+// or unrefreshed pool reduces the check to steps 2 and 3. QCStatements are a
+// self-declaration by the issuer, so a legally binding eIDAS validation
+// additionally requires the pool to be built from the EU Trusted Lists
+// (LOTL/TSL) via EUTrustPool.Refresh.
 func (d *DIDDocument) verifyCertificateOf(method *VerificationMethod, trustPool *EUTrustPool) error {
 	if method == nil {
 		return errors.New("no verification method to validate a certificate chain for")

@@ -12,7 +12,7 @@ import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
 import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import AuditView from './AuditView.vue'
 
 withDefaults(

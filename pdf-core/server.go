@@ -18,9 +18,6 @@ import (
 //go:embed docs/semantic-ontology/linkml/output/linkml.yaml.context.jsonld
 var ontologyContext []byte
 
-//go:embed docs/semantic-ontology/linkml/output/linkml.yaml.owl.ttl
-var ontologyOWL []byte
-
 //go:embed docs/semantic-ontology/linkml/output/linkml.yaml.shacl.merged.ttl
 var ontologySHACL []byte
 
@@ -52,7 +49,6 @@ func newServer() http.Handler {
 	mux.HandleFunc("POST /manifest/chain", svc.manifestChain)
 	mux.HandleFunc("POST /payload/extract", svc.extractPayload)
 	mux.HandleFunc("GET /ontology/dcs-pdf-core", svc.ontologyContext)
-	mux.HandleFunc("GET /ontology/dcs-pdf-core.owl", svc.ontologyOwl)
 	mux.HandleFunc("GET /swagger.json", handleSwagger)
 	mux.HandleFunc("GET /ui/", handleUI)
 	mux.HandleFunc("GET /index.html", handleUI)

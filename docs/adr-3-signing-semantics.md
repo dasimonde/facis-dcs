@@ -66,3 +66,14 @@ are externally unsettled.
   post-signature mutation of the signed byte range is illegal under PAdES,
   so every C2PA/lifecycle stamp must land before the signing call, not
   after.
+  **(Amended by [ADR-26](adr-26-provenance-reanchored-after-signing.md)
+  (2026-07-27): the clause "not after" is withdrawn. The lifecycle manifest
+  still lands before signing, so the signature commits to the provenance it
+  covers — that part stands. But one further C2PA action now runs *after*
+  the signing call: a provenance-only update manifest re-anchoring the hard
+  binding over the signed bytes, appended as a PDF incremental update that
+  leaves the signature's `/ByteRange` untouched. The sentence above remains
+  true as written of the *signed byte range*; it is false as a blanket
+  prohibition on post-signature C2PA stamps. Do not remove the re-anchor on
+  the authority of this bullet — without it every signed contract reports
+  `assertion.dataHash.mismatch`.)**

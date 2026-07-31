@@ -632,26 +632,6 @@ func TestOntologyContextIsValidJSONLD(t *testing.T) {
 	}
 }
 
-// ---- OntologyOwl ------------------------------------------------------------
-
-func TestOntologyOwl(t *testing.T) {
-	rec := doRequest(http.MethodGet, "/ontology/dcs-pdf-core.owl", nil, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-	res := rec.Body.Bytes()
-	if len(res) == 0 {
-		t.Fatal("expected non-empty OWL bytes")
-	}
-	ct := rec.Header().Get("Content-Type")
-	if !strings.HasPrefix(ct, "text/turtle") {
-		t.Fatalf("OWL endpoint must serve text/turtle, got %q", ct)
-	}
-	if !bytes.Contains(res, []byte("w3id.org/facis/dcs/ontology")) {
-		t.Error("OWL response must reference the canonical dcs ontology IRI")
-	}
-}
-
 // ---- Verify (amended document) ----------------------------------------------
 
 // TestVerify_AmendedDocument proves that /verify accepts a PDF produced by

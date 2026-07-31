@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, nextTick, reactive, ref, toRaw, watch } from 'vue'
 import {
   composeConstraintTree,
   type GroupDraft,
@@ -70,7 +70,7 @@ interface DutyDraft {
   consequences: { action: string; root: GroupDraft }[]
 }
 
-const draft = reactive<{
+interface RuleDraft {
   type: string
   actions: string[]
   assigneeId: string
@@ -78,19 +78,25 @@ const draft = reactive<{
   targetId: string
   root: GroupDraft
   duties: DutyDraft[]
-}>({
-  type: props.modelValue?.['@type'] ?? ODRL_RULE_TYPES[0]?.type ?? 'odrl:Permission',
-  actions: readActions(props.modelValue),
-  assigneeId: props.modelValue?.['odrl:assignee']?.['@id'] ?? props.parties[0]?.id ?? '',
-  assignerId: props.modelValue?.['odrl:assigner']?.['@id'] ?? props.parties[0]?.id ?? '',
-  targetId: props.modelValue?.['odrl:target']?.['@id'] ?? props.contractTargetId,
-  root: parseConstraintTree(props.modelValue?.['odrl:constraint'] ?? []),
-  duties: readDuties(props.modelValue),
-})
+}
 
-// Seeded once. Reading props.modelValue inside the emitting `rule` computed
-// would make each emit retrigger the computed (a reactive feedback loop).
-const ruleId = props.modelValue?.['@id'] ?? `urn:uuid:${crypto.randomUUID()}`
+function seed(rule: OdrlRule | null): RuleDraft {
+  return {
+    type: rule?.['@type'] ?? ODRL_RULE_TYPES[0]?.type ?? 'odrl:Permission',
+    actions: readActions(rule),
+    assigneeId: rule?.['odrl:assignee']?.['@id'] ?? props.parties[0]?.id ?? '',
+    assignerId: rule?.['odrl:assigner']?.['@id'] ?? props.parties[0]?.id ?? '',
+    targetId: rule?.['odrl:target']?.['@id'] ?? props.contractTargetId,
+    root: parseConstraintTree(rule?.['odrl:constraint'] ?? []),
+    duties: readDuties(rule),
+  }
+}
+
+const draft = reactive<RuleDraft>(seed(props.modelValue))
+
+// Not read inside the emitting `rule` computed as props.modelValue would be:
+// that would make each emit retrigger the computed (a reactive feedback loop).
+const ruleId = ref(props.modelValue?.['@id'] ?? `urn:uuid:${crypto.randomUUID()}`)
 
 const complete = computed(() => draft.actions.some((a) => !!a) && !!draft.assigneeId)
 
@@ -153,7 +159,7 @@ const rule = computed<OdrlRule | null>(() => {
   if (!complete.value) return null
   const actions = draft.actions.filter(Boolean)
   const built: OdrlRule = {
-    '@id': ruleId,
+    '@id': ruleId.value,
     '@type': draft.type as OdrlRule['@type'],
     'odrl:action': actions.length === 1 ? { '@id': actions[0] ?? '' } : actions.map((a) => ({ '@id': a })),
     'odrl:assigner': { '@id': draft.assignerId },
@@ -172,7 +178,38 @@ const rule = computed<OdrlRule | null>(() => {
   return built
 })
 
-watch(rule, (value) => emit('update:modelValue', value))
+// The builder outlives the clause it authors: the host clears the bound rule
+// when a clause is saved, and a draft kept from the previous clause would bind
+// fields the next clause never declares. `reseeding` holds until the flush that
+// the reseed schedules is over, so the pristine draft is not emitted straight
+// back as a new rule.
+let lastEmitted: OdrlRule | null = props.modelValue
+let reseeding = false
+
+watch(rule, (value) => {
+  if (reseeding) return
+  lastEmitted = value
+  emit('update:modelValue', value)
+})
+
+// Only a modelValue this builder did not itself emit is an external one worth
+// reseeding from: an in-progress rule that momentarily reads incomplete emits
+// null too, and must keep the draft the user is still editing. A host holding
+// the rule in a ref hands it back wrapped in a reactive proxy, so the rule this
+// builder emitted is recognised by its raw target, not by the reference.
+watch(
+  () => props.modelValue,
+  (value) => {
+    if (toRaw(value) === toRaw(lastEmitted)) return
+    lastEmitted = value
+    ruleId.value = value?.['@id'] ?? `urn:uuid:${crypto.randomUUID()}`
+    Object.assign(draft, seed(value))
+    reseeding = true
+    void nextTick(() => {
+      reseeding = false
+    })
+  },
+)
 </script>
 
 <template>

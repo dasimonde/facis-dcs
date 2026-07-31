@@ -52,9 +52,16 @@ func (a JWTAuthenticator) JWTAuth(ctx context.Context, token string, scheme *sec
 
 	// System caller: the background PDF regenerator runs on NATS events with no
 	// user JWT, yet must reach the internal PKCS#11 signing primitives
-	// (DCS-IR-HI-01). It presents the in-cluster service credential, granted
-	// exactly this endpoint's required scopes. The token is a secret only ever
-	// forwarded in-cluster (subscriber -> pdf-core -> backend), never externally.
+	// (DCS-IR-HI-01). It presents the deployment's system token and is granted
+	// exactly this endpoint's required scopes, ahead of token validation, the
+	// role check and the failed-attempt lockout.
+	//
+	// The intended path is in-cluster (subscriber -> pdf-core -> backend), but
+	// nothing here restricts it to one: this branch matches the token on any
+	// interface, from any caller, so a holder of the value is a full-authority
+	// caller on every authenticated route. Keeping it in-cluster is a property
+	// of the deployment (the value is a per-instance secret and the chart
+	// refuses to render without one), not of this check.
 	if sys := conf.SystemToken(); sys != "" && token == sys {
 		ctx = middleware.InjectAuthContext(ctx, scheme.RequiredScopes, "system", "system")
 		ctx = middleware.InjectBearerToken(ctx, token)

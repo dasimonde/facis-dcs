@@ -1,20 +1,20 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, useId, watch } from 'vue'
 import ClauseSegmentsPreview from '@template-repository/components/clauses-editor/ClauseSegmentsPreview.vue'
 import {
   getPlaceholderLabelFromConditions,
   parseSegmentsFromContent,
   type Segment,
 } from '@template-repository/composables/useClauseTextChips'
-import { TemplateType } from '@template-repository/models/contract-template.ts'
+import { TemplateType } from '@template-repository/models/contract-template'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { TemplateState } from '@/types/contract-template-state'
 import BlockPaletteItem from './document-block/BlockPaletteItem.vue'
-import type { ContractTemplate } from '@/models/contract-template'
+import type { ContractTemplate } from '@/models/contract-template/contract-template'
 import type { DcsClause } from '@/models/dcs-jsonld'
 import type { NewBlockType } from '@template-repository/models/template-draft-store'
 
@@ -62,6 +62,7 @@ const pendingPlacementClause = computed(() =>
   unusedClauses.value.find((clause) => clause['@id'] === pendingPlacementClauseBlockId.value),
 )
 const clauseSearch = ref('')
+const clauseSearchId = useId()
 const filteredUnusedClauses = computed((): DcsClause[] => {
   const query = clauseSearch.value.trim().toLowerCase()
   const clauses = unusedClauses.value.filter((clause) => clause['@id'] !== pendingPlacementClauseBlockId.value)
@@ -205,6 +206,7 @@ function handleAddClause(clauseBlockId: string) {
           <div class="mb-2 flex flex-col gap-2">
             <p class="text-sm text-base-content/70">Defined clauses:</p>
             <input
+              :id="clauseSearchId"
               v-model="clauseSearch"
               type="search"
               class="input-bordered input input-sm w-full"

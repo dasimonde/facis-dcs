@@ -218,7 +218,7 @@ func TestLifecycleChainSurvivesReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pre-signing lifecycle stamp: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), stamped); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), stamped); err != nil {
 		t.Fatalf("VerifyIncrementalUpdate: %v", err)
 	}
 }

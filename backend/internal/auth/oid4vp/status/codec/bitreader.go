@@ -2,7 +2,6 @@ package codec
 
 import (
 	"errors"
-	"fmt"
 )
 
 var (
@@ -64,22 +63,4 @@ func EntryCount(data []byte, width uint) uint64 {
 		return 0
 	}
 	return uint64(len(data)) * 8 / uint64(width)
-}
-
-func SetBitMSB(data []byte, index uint64) error {
-	byteIndex := index / 8
-	if byteIndex >= uint64(len(data)) {
-		return fmt.Errorf("index %d out of range", index)
-	}
-	data[byteIndex] |= 1 << (7 - (index % 8))
-	return nil
-}
-
-func SetBitLSB(data []byte, index uint64) error {
-	byteIndex := index / 8
-	if byteIndex >= uint64(len(data)) {
-		return fmt.Errorf("index %d out of range", index)
-	}
-	data[byteIndex] |= 1 << (index % 8)
-	return nil
 }

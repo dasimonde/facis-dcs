@@ -1,4 +1,4 @@
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 
 export interface ContractContentValuesState {
   semanticConditionValues: SemanticConditionValue[]

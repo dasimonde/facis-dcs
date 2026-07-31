@@ -136,7 +136,7 @@ spec:
               protocol: TCP
           env:
             - name: DCS_SYSTEM_TOKEN
-              value: {{ .Values.systemToken | default "dcs-dev-system-token" | quote }}
+              value: {{ required "systemToken must be set: the background PDF regenerator authenticates with it, and a chart default would be a credential published in this repository" .Values.systemToken | quote }}
             {{- if .Values.dss }}{{- if or .Values.dss.enabled .Values.dss.url }}
             # EU DSS for signature VALIDATION (DCS-FR-SM-18) and the
             # wallet-driven /signature/submit acceptance path (ADR-12). The DCS

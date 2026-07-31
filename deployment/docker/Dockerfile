@@ -45,6 +45,10 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o dcs ./cmd/dcs
 # with the in-cluster token via kubectl exec (no extractable private keys).
 RUN CGO_ENABLED=1 GOOS=linux go build -o gendid ./cmd/gendid && \
     CGO_ENABLED=1 GOOS=linux go build -o hsmsign ./cmd/hsmsign
+# pacmonitor runs one continuous-compliance sweep and exits; the CronJob in the
+# chart runs it on a schedule (DCS-FR-PACM-02). Same image as the server so the
+# sweep and the code it audits can never drift apart in a deployment.
+RUN CGO_ENABLED=1 GOOS=linux go build -o pacmonitor ./cmd/pacmonitor
 
 # gendid regenerates did.json from the HSM dcs-did token key (see dev-stack.sh);
 # the hsm-provision Job reuses the same binary so CI derives did.json from the
@@ -98,6 +102,9 @@ COPY --from=go-builder /build/gendid /app/gendid
 
 # Copy BDD/CI helper binaries (gendid, hsmsign) — see go-builder stage above.
 COPY --from=go-builder /build/gendid /build/hsmsign /app/
+
+# Scheduled continuous-compliance sweep (DCS-FR-PACM-02).
+COPY --from=go-builder /build/pacmonitor /app/pacmonitor
 
 # Copy OID4VP issuer trust for DCS.
 COPY --from=go-builder --chown=$DOCKER_USER:$DOCKER_USER \

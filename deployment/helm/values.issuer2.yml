@@ -1,0 +1,53 @@
+# Example values for the SECOND DCS instance's credential issuer.
+#
+# Identical in shape to values.issuer.yml — each instance runs its own issuer,
+# because a Power of Attorney is an organization attesting who may sign for it,
+# and the two instances are two organizations. Only the hostname differs, plus
+# the resource block below.
+#
+# THIS FILE IS AN EXAMPLE. Placeholders:
+#   dcs-b.example.org → the public hostname of the second DCS instance
+#   className         → your cluster's ingress class
+#   ingress.tls       → empty here; a reachable issuer needs a real certificate
+# The issuer generates its own key and DID on first boot; none is shipped here.
+
+flowsDir: flows-issuer
+
+extraEnv:
+  - name: ISSUER_PATH_PREFIX
+    value: /issuer
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/x-forwarded-prefix: /issuer
+  hosts:
+    - host: dcs-b.example.org
+      path: "/issuer(/|$)(.*)"
+  pathType: ImplementationSpecific
+  tls: []
+
+# Sized explicitly as an example for a namespace with a limits.cpu quota, which
+# is where a second instance often lands: an unsized container inherits the
+# LimitRange default and is refused once the rest of the release is admitted.
+# Drop both blocks on an unconstrained namespace, and check your namespace's
+# LimitRange minimum before lowering them — a request below it is refused
+# outright rather than clamped up.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 400m
+    memory: 768Mi
+# The hook Jobs (flow import, TSA provisioning) are separate pods from the
+# server and need their own sizing.
+jobResources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi

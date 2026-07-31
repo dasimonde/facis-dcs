@@ -30,7 +30,7 @@ func NewNegotiationActionFlag(s string) (NegotiationActionFlag, error) {
 	return flag, nil
 }
 
-// IsValid checks if the NegotiationActionFlag is a valid role
+// IsValid reports whether the value is one of the declared NegotiationActionFlag values.
 func (f NegotiationActionFlag) IsValid() bool {
 	upper := NegotiationActionFlag(strings.ToUpper(string(f)))
 	return validFlag[upper]

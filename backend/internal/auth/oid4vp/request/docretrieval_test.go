@@ -28,9 +28,9 @@ func TestBuildDocumentRetrievalJWTMatchesEUDIShape(t *testing.T) {
 	if c["response_type"] != "sign_response" {
 		t.Fatalf("response_type must be sign_response, got %v", c["response_type"])
 	}
-	// ARF profiles OpenID4VP 1.0 / HAIP (SRS line 727): the scheme is a prefix on
-	// the identifier, and a bare client_id alongside a client_id_scheme claim is
-	// the superseded pre-1.0 draft encoding an ARF wallet may reject.
+	// OpenID4VP 1.0 / HAIP encoding: the scheme is a prefix on the identifier,
+	// and a bare client_id alongside a client_id_scheme claim is the superseded
+	// pre-1.0 draft encoding an ARF wallet may reject.
 	if c["client_id"] != clientID {
 		t.Fatalf("client_id must carry its x509_san_dns prefix, got %v", c["client_id"])
 	}

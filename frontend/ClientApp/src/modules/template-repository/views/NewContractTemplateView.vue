@@ -8,7 +8,7 @@ import TemplateEditors from '@template-repository/components/TemplateEditors.vue
 import TemplateTypeSelect from '@template-repository/components/TemplateTypeSelect.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { TemplateState } from '@/types/contract-template-state'

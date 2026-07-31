@@ -45,13 +45,13 @@ func TestRetryOneSurvivesAFailedRegeneration(t *testing.T) {
 	})
 }
 
-// The retry sweep selects contracts by "no stored PDF" alone, and the
-// regeneration path's answer to a missing artifact is a FRESH render. For a
-// contract past signing — whose stored CID went missing because the
-// peer-receive transaction rolled back after the row committed — that render is
-// an UNSIGNED PDF, issued a new lifecycle VC and stamped as authoritative over
-// the counterparty's provenance, every sweep until it succeeds. A frozen
-// contract must never reach the fresh-render branch.
+// The retry sweep selects a contract on its record alone, and the regeneration
+// path's answer to a missing artifact is a FRESH render. For a contract past
+// signing — whose stored CID went missing because the peer-receive transaction
+// rolled back after the row committed — that render is an UNSIGNED PDF, issued
+// a new lifecycle VC and stamped as authoritative over the counterparty's
+// provenance, every sweep until it succeeds. A frozen contract must never reach
+// the fresh-render branch.
 func TestAFrozenContractWithoutAStoredPDFIsNeverFreshRendered(t *testing.T) {
 	frozen, err := frozenArtifactVerdict("did:contract:1", "SIGNED", "", "", "active", signed)
 	if err == nil {
@@ -141,7 +141,7 @@ func TestRetryBudgetBacksOffAndGivesUp(t *testing.T) {
 		t.Fatal("the entity must be attempted again once its backoff has elapsed")
 	}
 
-	for attempt := 1; attempt < missingPDFRetryAttempts; attempt++ {
+	for attempt := 1; attempt < regenerationRetryAttempts; attempt++ {
 		budget.failed("contract", "did:contract:1", now)
 	}
 	if budget.ready("contract", "did:contract:1", now.Add(24*time.Hour)) {

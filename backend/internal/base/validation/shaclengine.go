@@ -62,15 +62,14 @@ func validateAgainstHubShapes(ctx context.Context, contract map[string]any) ([]P
 }
 
 // validateAgainstShapeSource is validateAgainstHubShapes generalized over an
-// explicit ShapeSource — used directly (bypassing the process-wide
-// activeShapeSource) by VerifyAgainstOriginatorHub (Phase 4, DCS-to-DCS),
-// so a one-off remote-hub validation never mutates shared process state
+// explicit ShapeSource, so a caller can validate against a source other than
+// the process-wide activeShapeSource without mutating shared process state
 // under concurrent request handling.
 func validateAgainstShapeSource(ctx context.Context, contract map[string]any, source ShapeSource) ([]PolicyFinding, int, error) {
 	var shapesTTL string
 	var shapesVersion int
 	var err error
-	refs, refsErr := effectiveShapeRefs(contract)
+	refs, refsErr := EffectiveShapeRefs(contract)
 	if refsErr != nil {
 		return nil, 0, refsErr
 	}
@@ -79,7 +78,7 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 		if !ok {
 			return nil, 0, fmt.Errorf("shape source cannot resolve immutable effective bundle")
 		}
-		pinned := pinnedHubShapesVersion(contract)
+		pinned := pinnedHubShapesVersion(contract, source.CanonicalShapesName())
 		if pinned <= 0 || refs[0].Name != source.CanonicalShapesName() || refs[0].Version != pinned {
 			return nil, 0, fmt.Errorf("effective shapes bundle does not match sh:shapesGraph")
 		}

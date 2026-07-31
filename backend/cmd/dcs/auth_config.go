@@ -82,7 +82,7 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 	if v := strings.TrimSpace(os.Getenv("OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK")); strings.EqualFold(v, "true") {
 		xfscAllowUnsignedFallback = true
 	}
-	if err := oid4vp.ConfigureStatusListVerification(trustDataPath, xfscAllowUnsignedFallback); err != nil {
+	if err := oid4vp.ConfigureStatusListVerification(trustCfg, xfscAllowUnsignedFallback); err != nil {
 		return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
 	}
 

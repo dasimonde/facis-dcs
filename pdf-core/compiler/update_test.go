@@ -271,7 +271,7 @@ func TestVerifyIncrementalUpdate_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdatePDF: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
 		t.Errorf("VerifyIncrementalUpdate on valid amended PDF: %v", err)
 	}
 }
@@ -289,7 +289,7 @@ func TestVerifyIncrementalUpdate_CorruptedIncrement(t *testing.T) {
 	}
 	corrupted := append([]byte(nil), amended...)
 	corrupted[len(original)+50] ^= 0xFF
-	if err := VerifyIncrementalUpdate(testSigningContext(), corrupted); err == nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), corrupted); err == nil {
 		t.Error("expected VerifyIncrementalUpdate to reject a corrupted incremental section")
 	}
 }
@@ -301,7 +301,7 @@ func TestVerifyIncrementalUpdate_PlainPDF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompilePDF: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), plain); err == nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), plain); err == nil {
 		t.Error("expected VerifyIncrementalUpdate to reject a plain (non-incremental) PDF")
 	}
 }
@@ -325,14 +325,14 @@ func TestVerifyIncrementalUpdate_SignedThenAmended(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdatePDF on signed PDF: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
 		t.Errorf("VerifyIncrementalUpdate on signed-then-amended PDF: %v", err)
 	}
 
 	// Also verify that amending after a PAdES-re-signed amended PDF passes.
 	fakeSignature2 := []byte("\n% external-signature-appendix-2\nstartxref\n0\n%%EOF\n")
 	reSigned := append(append([]byte(nil), amended...), fakeSignature2...)
-	if err := VerifyIncrementalUpdate(testSigningContext(), reSigned); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), reSigned); err != nil {
 		t.Errorf("VerifyIncrementalUpdate on re-signed amended PDF: %v", err)
 	}
 }

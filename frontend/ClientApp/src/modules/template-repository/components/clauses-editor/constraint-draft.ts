@@ -6,6 +6,7 @@ import {
   type OdrlConstraintNode,
   type OdrlLogicalConstraint,
 } from '@/models/dcs-jsonld'
+import { XSD_DURATION } from '@/models/xsd-order'
 
 /**
  * The editor's recursive model of an ODRL constraint (ODRL IM §2.5/§2.6). A
@@ -35,6 +36,9 @@ export interface AtomicDraft {
   rightSource: string
   value: string
   values: OperandDraftValue[]
+  /** '' = no unit; otherwise the IRI of the unit the boundary is measured in
+   *  (odrl:unit, e.g. a currency concept). */
+  unit: string
 }
 
 export interface GroupDraft {
@@ -50,17 +54,28 @@ export function isGroupDraft(node: ConstraintNodeDraft): node is GroupDraft {
 }
 
 export function newAtomic(leftOperand: string, operator: string): AtomicDraft {
-  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '', values: [] }
+  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '', values: [], unit: '' }
 }
 
 export function newGroup(): GroupDraft {
   return { kind: 'group', combine: 'and', children: [] }
 }
 
-function typed(value: string): JsonLdTypedValue {
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return { '@value': value, '@type': 'xsd:dateTime' }
-  const isNumber = value !== '' && !Number.isNaN(Number(value))
-  return { '@value': value, '@type': isNumber ? 'xsd:decimal' : 'xsd:string' }
+/** The XSD datatype a typed-in boundary literal carries, so a target system
+ *  evaluating the constraint can tell a duration from a label and an integral
+ *  count from a decimal amount. */
+function literalDatatype(value: string): string {
+  if (/^-?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return 'xsd:dateTime'
+  if (/^-?\d{4}-\d{2}-\d{2}$/.test(value)) return 'xsd:date'
+  if (XSD_DURATION.test(value)) return 'xsd:duration'
+  if (value !== '' && !Number.isNaN(Number(value))) {
+    return /^[+-]?\d+$/.test(value) ? 'xsd:integer' : 'xsd:decimal'
+  }
+  return 'xsd:string'
+}
+
+export function typed(value: string): JsonLdTypedValue {
+  return { '@value': value, '@type': literalDatatype(value) }
 }
 
 function isSetOperator(operator: string): boolean {
@@ -102,6 +117,8 @@ function buildAtomic(atomic: AtomicDraft): OdrlConstraint {
   }
   const right = atomic.rightSource ? { '@id': atomic.rightSource } : fixedRightOperand(atomic)
   if (right !== undefined) constraint['odrl:rightOperand'] = right
+  const unit = atomic.unit.trim()
+  if (unit) constraint['odrl:unit'] = { '@id': unit }
   return constraint
 }
 
@@ -151,6 +168,7 @@ function operandLabel(value: OperandDraftValue): string {
 
 function readAtomic(constraint: OdrlConstraint): AtomicDraft {
   const right = constraint['odrl:rightOperand']
+  const unit = constraint['odrl:unit']?.['@id'] ?? ''
   if (right && '@id' in right) {
     return {
       kind: 'atomic',
@@ -159,6 +177,7 @@ function readAtomic(constraint: OdrlConstraint): AtomicDraft {
       rightSource: right['@id'],
       value: '',
       values: [],
+      unit,
     }
   }
   const values = Array.isArray(right) ? right.map((item) => ({ ...item })) : []
@@ -174,6 +193,7 @@ function readAtomic(constraint: OdrlConstraint): AtomicDraft {
     rightSource: '',
     value,
     values: values.length ? values : right && '@value' in right ? [{ ...right }] : [],
+    unit,
   }
 }
 

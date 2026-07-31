@@ -72,6 +72,17 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		}
 	}(tx)
 
+	// Serialize receipts per contract IRI: a peer ships once per render, so two
+	// ships of the same contract can be in flight at once. Both would read no
+	// local copy yet, both would insert, and the loser dies on the primary key
+	// with its payload — the newer document — dropped, leaving this instance
+	// holding the older one until a retry lands. Queuing here makes the second
+	// receipt see the first one's copy and update it. Released on tx
+	// commit/rollback.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", cmd.ContractIRI); err != nil {
+		return fmt.Errorf("could not acquire the per-contract receipt lock for %s: %w", cmd.ContractIRI, err)
+	}
+
 	existing, err := h.CRepo.ReadProcessDataByDIDOrNil(ctx, tx, cmd.ContractIRI)
 	if err != nil {
 		return fmt.Errorf("could not read local contract copy: %w", err)

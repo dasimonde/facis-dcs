@@ -116,8 +116,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("retrieve", func() {
 		Description("retrieve archived items.")
 		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05")
-		Meta("dcs:ui", "Archive Manager Dashboard", "Archive Access")
-		Meta("dcs:csa:components", "Signed Contract Archive")
 
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
@@ -141,8 +139,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("search", func() {
 		Description("search archived records. search records by criteria.")
 		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05", "DCS-FR-CSA-10", "DCS-FR-CSA-13")
-		Meta("dcs:ui", "Archive Manager Dashboard", "Archive Access")
-		Meta("dcs:csa:components", "Signed Contract Archive")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 			Scope("Contract Observer")
@@ -174,8 +170,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("store", func() {
 		Description("store new contract or evidence.")
 		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06")
-		Meta("dcs:ui", "Archive Manager Dashboard")
-		Meta("dcs:csa:components", "Signed Contract Archive")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 		})
@@ -192,8 +186,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("delete", func() {
 		Description("Permanently delete an archived contract entry (DCS-FR-CSA-17). This is a soft delete: the archive entry is marked deleted_at/deleted_by/deletion_reason rather than physically removed, so evidence remains discoverable for compliance/dispute resolution, and requires a justification that is logged with the deletion's audit event.")
 		Meta("dcs:requirements", "DCS-IR-CSA-03", "DCS-IR-CSA-06", "DCS-FR-CSA-17")
-		Meta("dcs:ui", "Archive Manager Dashboard")
-		Meta("dcs:csa:components", "Signed Contract Archive", "Automated Alerts")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 		})
@@ -221,8 +213,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("annotate", func() {
 		Description("Annotate an archived contract with a summary and tags (DCS-FR-CSA-11). The summary may be supplied by the caller or, when omitted, is generated from the archived contract's metadata; tags replace the entry's tag set when provided. Only the annotation is mutable — the archive entry's snapshot and evidence stay immutable.")
 		Meta("dcs:requirements", "DCS-FR-CSA-11")
-		Meta("dcs:ui", "Archive Manager Dashboard")
-		Meta("dcs:csa:components", "Signed Contract Archive")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 		})
@@ -249,8 +239,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("erasure_status", func() {
 		Description("Return the erasure state of a contract's content-encryption keys (DCS-NFR-COMP-03, DCS-NFR-SEC-13): whether the local wrapped CEKs are live or shredded (with timestamp, actor, and reason), and — for federated contracts — whether each counterparty instance has confirmed shredding its own CEKs or the erase request is still pending retry.")
 		Meta("dcs:requirements", "DCS-NFR-COMP-03", "DCS-NFR-SEC-13", "DCS-IR-CSA-03")
-		Meta("dcs:ui", "Archive Manager Dashboard")
-		Meta("dcs:csa:components", "Signed Contract Archive")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 			Scope("Auditor")
@@ -277,8 +265,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("statistics", func() {
 		Description("Archive dashboard overview (DCS-FR-CSA-21): archived-contract statistics, recent actions, storage volume, expiring contracts, and compliance status. Drill-down happens per contract via the retrieve/audit methods.")
 		Meta("dcs:requirements", "DCS-FR-CSA-21")
-		Meta("dcs:ui", "Archive Manager Dashboard")
-		Meta("dcs:csa:components", "")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Archive Manager")
@@ -300,8 +286,6 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("audit", func() {
 		Description("Retrieve the archive audit log: actor, timestamp, operation, and contract DID for every recorded archive-affecting event (store/retrieve/search/delete) — DCS-IR-CSA-04, UC-07-03.")
 		Meta("dcs:requirements", "DCS-IR-CSA-04")
-		Meta("dcs:ui", "Archive Manager Dashboard")
-		Meta("dcs:csa:components", "")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Archive Manager")

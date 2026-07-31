@@ -540,3 +540,8 @@ contractTargets:
     # admin UI, because the suite has no operator to click through it. A real
     # deployment issues the credential once and rotates it (ADR-27).
     oauth_client_id: "dcs-orce-target"
+
+# In-cluster service credential for the background PDF regenerator, which runs on
+# NATS events with no user JWT. Never a shared or committed value in a real
+# deployment: the chart refuses to render without one.
+systemToken: "dcs-local-dev-system-token"

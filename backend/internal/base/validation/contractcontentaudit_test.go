@@ -867,7 +867,7 @@ func hasFindingSeverity(findings []PolicyFinding, ruleID string, severity string
 }
 
 // TestAuditContractEvaluatesLogicalConstraint proves the enforcement engine
-// evaluates ODRL logical constraints (LogicalConstraint, IM §2.6) recursively:
+// evaluates ODRL logical constraints (LogicalConstraint, IM §2.5.2) recursively:
 // an odrl:or is satisfied when any branch holds and violated only when none do.
 func TestAuditContractEvaluatesLogicalConstraint(t *testing.T) {
 	fieldID := "urn:dcs:field:amount"
@@ -914,7 +914,7 @@ func TestAuditContractEvaluatesLogicalConstraint(t *testing.T) {
 }
 
 // TestAuditContractEvaluatesNestedDuty proves the enforcement engine audits a
-// Permission's nested duties (ODRL IM §2.5): the duty is recorded as a use-time
+// Permission's nested duties (ODRL IM §2.6.5): the duty is recorded as a use-time
 // obligation, and its own constraints are evaluated as obligations — satisfied
 // when the value holds, flagged when it does not.
 func TestAuditContractEvaluatesNestedDuty(t *testing.T) {
@@ -961,7 +961,7 @@ func TestAuditContractEvaluatesNestedDuty(t *testing.T) {
 }
 
 // TestAuditContractEvaluatesNestedConstraintTree proves the enforcement engine
-// evaluates an arbitrarily deep constraint tree (ODRL IM §2.6): an ALL over an
+// evaluates an arbitrarily deep constraint tree (ODRL IM §2.5.2): an ALL over an
 // atomic and a nested ANY holds only when the atomic and at least one branch of
 // the ANY hold.
 func TestAuditContractEvaluatesNestedConstraintTree(t *testing.T) {

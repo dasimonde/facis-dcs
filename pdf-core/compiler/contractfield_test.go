@@ -164,7 +164,7 @@ func TestCleanContractFieldRecompileMatchesPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("updatePDF: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
 		t.Fatalf("VerifyIncrementalUpdate rejected an honestly amended field PDF: %v", err)
 	}
 	// The recompiled visible content must carry the filled value, not the @id.

@@ -5,9 +5,11 @@
 # Starts a SECOND, independent DCS instance ("instance B") alongside the one
 # started by dev-stack.sh ("instance A"): its own Helm release (Postgres,
 # Keycloak, Hydra, NATS, statuslist-service, ORCE and IPFS — see
-# deployment/helm/values.dev2.yml for the full NodePort map). Federated
-# Catalogue is intentionally disabled for this local second-instance profile,
-# backend on :8992, frontend on :5174. Instance B holds its own private keys in
+# deployment/helm/values.dev2.yml for the full NodePort map). The Federated
+# Catalogue is NOT duplicated: instance B consumes instance A's, over the
+# NodePorts dev-stack.sh already publishes (see backend/.env.dev2), so A must
+# be up and its FC realm provisioned before B's backend starts.
+# Backend on :8992, frontend on :5174. Instance B holds its own private keys in
 # a separate SoftHSM2 token (provisioned below), never in the cluster.
 #
 # Run dev-stack.sh FIRST (instance A + the shared pdf-core process instance B

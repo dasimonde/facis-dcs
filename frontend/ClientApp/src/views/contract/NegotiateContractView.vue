@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { contractStory, toBannerActions } from '@core/workflow-story'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -32,8 +33,8 @@ import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
+import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
-import type { ContractData, SemanticConditionValue } from '@/models/contract-data'
 import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
@@ -207,6 +208,14 @@ function buildChangeRequest(): ContractChangeRequest {
 
 const negotiateContractChange = async () => {
   if (!contract.value || !editedContract.value || !issuer.value) return
+  // Same gate the forward-to-approval path applies: a counter-offer breaking the
+  // contract's machine-readable policy is refused at approval anyway, so it is
+  // reported here — naming the constraint — instead of shipping to the peer.
+  if (!verificationResult.value.isValid) {
+    verificationResult.value.errors.forEach((error) => errorStore.add(error.message))
+    contractEditorUiStore.setActiveTab('content')
+    return
+  }
   isSubmitting.value = true
   try {
     const response = await contractWorkflowService.negotiate({
@@ -567,7 +576,7 @@ const exportPDF = async () => {
                 <div v-show="activeTab === 'content'">
                   <div class="card border border-base-300 bg-base-100 shadow-sm">
                     <div class="card-body gap-5">
-                      <div>
+                      <div class="space-y-5">
                         <TemplatePreview
                           :layout="dcsDraftStore.layout"
                           :blocks="dcsDraftStore.blocks"
@@ -576,6 +585,15 @@ const exportPDF = async () => {
                           :verification-result="verificationResult"
                           :set-semantic-condition-value="setSemanticConditionValue"
                         />
+                        <template v-if="dcsDraftStore.contractData.length">
+                          <div class="divider text-xs text-base-content/40">semantic data objects</div>
+                          <DataObjectsEditor
+                            mode="contract"
+                            :editable="!!setSemanticConditionValue"
+                            :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                            :set-semantic-condition-value="setSemanticConditionValue ?? undefined"
+                          />
+                        </template>
                       </div>
                     </div>
                   </div>

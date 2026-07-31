@@ -354,7 +354,7 @@ def _c2pa_manifest_boxes(store_bytes: bytes):
     """Return the raw JUMBF superbox bytes (including their own 8-byte
     size+type header) for each manifest in a C2PA manifest store, in
     chain order — the same top-level 'jumb' children
-    backend/internal/pdfgeneration/manifest/chain.go's ParseChain walks.
+    pdf-core/manifest/chain.go's ParseChain walks.
     """
     root_boxes = _parse_jumbf_boxes(store_bytes)
     assert root_boxes and root_boxes[0]["type"] == b"jumb", (

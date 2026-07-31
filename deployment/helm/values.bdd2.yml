@@ -100,18 +100,49 @@ postgresql:
   persistence:
     enabled: false
 
-# Federated Catalogue / Keycloak / Neo4j: intentionally disabled. The backend
-# only initializes the FC client when FEDERATED_CATALOGUE_API_URL is
-# non-empty (backend/cmd/dcs/main.go ~:346-367 — fatal only if apiURL AND
-# clientID AND clientSecret are all set but FC_KEYCLOAK_REALM_URL is missing;
-# leaving apiURL empty skips FC entirely, no hard fail). Keycloak is only
-# needed by Hydra when NOT running in dev mode and by FC for its OAuth2
-# client-credentials flow — B's own Hydra (below) runs with config.dev: true
-# (self-issues tokens, no external IdP), so Federated Catalogue is not needed.
-# (Our own local keycloak/fuseki/fc-postgres charts this would also disable
-# stay off by default too — see Chart.yaml's federated-catalogue dependency.)
+# Federated Catalogue: CONSUMED from instance A, not co-deployed. The
+# A -> catalogue -> B template path is the thing the two-instance profile
+# exists to demonstrate, so B needs an FC client; what it must not do is
+# stand up a second Keycloak+Fuseki+Postgres+FC stack on a 4 vCPU runner.
+# fcservice stays at its default false, which switches off all four of the
+# federated-catalogue/keycloak/fuseki/fc-postgres sub-charts at once (they
+# share the single `fcservice.enabled` condition in Chart.yaml), so this
+# release renders no fc-service, fc-keycloak, fuseki or fc-postgres workload.
+#
+# Both releases live in namespace dcs-bdd, and instance A's FC Services are
+# named release-independently (fc-service, fc-keycloak-http — see
+# values.bdd.yml), so A's catalogue is reachable by service name from here.
+#
+# The backend treats FC config as all-or-nothing: if ANY of the four vars
+# below is set, all four must be, or it exits at startup
+# (backend/cmd/dcs/main.go, "incomplete Federated Catalogue configuration").
+# FEDERATED_CATALOGUE_REQUIRE_NATIVE_HEALTH is deliberately not rendered here
+# — the chart only emits it when fcservice.enabled, i.e. for the instance that
+# owns the catalogue and can therefore hold it to its own /health.
+#
+# ADR-18: the `federated-catalogue` service account still carries ADMIN_ALL,
+# so pointing a second DCS at a shared catalogue gives it administrative
+# rights over every entry in it, instance A's included. That is acceptable
+# here and only here: this is a throwaway BDD catalogue inside one kind
+# namespace, and both instances are ours. It is not tenant isolation, and it
+# is not a precedent for two independently operated deployments — those need
+# the per-deployment Keycloak client ADR-18 describes first.
 federatedCatalogue:
-  enabled: false
+  enabled: true
+  apiURL: "http://fc-service:8081"
+  oauth:
+    # The service account instance A's realm-provision job actually creates.
+    # Not "dcs-fc-client": nothing provisions that, and the token grant 401s.
+    clientID: "federated-catalogue"
+    clientSecret: "**********"
+  remote:
+    acknowledgeAdminAllTrustBoundary: true
+
+# Instance A's FC Keycloak realm, in-cluster (A's fcKeycloakApp.hostname is
+# empty in values.bdd.yml, so A's own issuer URL is this same Service URL —
+# the token B mints here therefore carries an `iss` fc-service accepts).
+fcKeycloak:
+  realmURL: "http://fc-keycloak-http:8080/auth/realms/federated-catalogue-realm"
 
 nats:
   enabled: true
@@ -254,9 +285,8 @@ orce:
 
 signing:
   # Shared with instance A: same RFC 3161 TSA, so both instances' C2PA/PAdES
-  # timestamps agree on trust. Wired as TSA_URL (backend) and
-  # DCS_PDF_CORE_TSA_URL (this release's own pdf-core); fatal on startup if
-  # empty.
+  # timestamps agree on trust. Wired as TSA_URL (backend); fatal on startup
+  # if empty.
   tsaURL: "http://dcs-orce:1880/tsa/"
   # Shares instance A's in-cluster dev TSA - trust the same provisioned cert.
   tsaTrustCertSecret: "dcs-orce-tsa-material"
@@ -322,3 +352,8 @@ contractTargets:
     # (ADR-27). A target registered through the API instead gets its credential
     # from POST /contract/targets/{id}/credential.
     oauth_client_id: "dcs-orce-target"
+
+# In-cluster service credential for the background PDF regenerator, which runs on
+# NATS events with no user JWT. Never a shared or committed value in a real
+# deployment: the chart refuses to render without one.
+systemToken: "dcs-local-dev-system-token"

@@ -64,7 +64,38 @@ func fetchSchemaFromURL(ctx context.Context, rawURL string) (string, error) {
 	if len(body) == 0 {
 		return "", fmt.Errorf("fetched schema from %s is empty", parsed.Redacted())
 	}
-	return string(body), nil
+	return unwrapHubSchemaItem(parsed, body), nil
+}
+
+// unwrapHubSchemaItem returns the schema document a DCS hub anchor serves.
+//
+// The anchor a template carries in sh:shapesGraph
+// (/semantic/shapes/{name}?version=N) dereferences to a SemanticSchemaItem
+// envelope, not to raw Turtle — so installing a peer's library straight from
+// the anchor the template declares would otherwise snapshot the JSON envelope
+// as the shapes graph. Recognized only on a /semantic/ path and only when the
+// body carries the envelope's full shape, so a schema document that happens
+// to have a "content" key is left verbatim.
+func unwrapHubSchemaItem(source *url.URL, body []byte) string {
+	if !strings.Contains(source.Path, "/semantic/") {
+		return string(body)
+	}
+	var item struct {
+		Name    *string `json:"name"`
+		Kind    *string `json:"kind"`
+		Version *int    `json:"version"`
+		Content *string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &item); err != nil {
+		return string(body)
+	}
+	if item.Name == nil || item.Kind == nil || item.Version == nil || item.Content == nil {
+		return string(body)
+	}
+	if strings.TrimSpace(*item.Content) == "" {
+		return string(body)
+	}
+	return *item.Content
 }
 
 // SemanticHub service implementation (DCS-FR-TR-03, UC-02-08).
@@ -125,8 +156,17 @@ func (s *semanticHubsrvc) Register(ctx context.Context, p *semantichubgen.Regist
 	defer func() { _ = tx.Rollback() }()
 
 	activate := p.Activate != nil && *p.Activate
-	version, err := s.Repo.Register(ctx, tx, p.Name, p.Kind, p.MediaType, content, middleware.GetParticipantID(ctx), activate)
+	requestedVersion := 0
+	if p.Version != nil {
+		requestedVersion = *p.Version
+	}
+	version, err := s.Repo.Register(ctx, tx, p.Name, p.Kind, p.MediaType, content, middleware.GetParticipantID(ctx), requestedVersion, activate)
 	if err != nil {
+		// An occupied version number is the registrant's mistake to correct,
+		// not a server fault: the hub already holds that immutable version.
+		if errors.Is(err, semantichub.ErrVersionTaken) {
+			return nil, semantichubgen.MakeBadRequest(err)
+		}
 		return nil, semantichubgen.MakeInternalError(err)
 	}
 	if err := tx.Commit(); err != nil {

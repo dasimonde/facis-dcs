@@ -8,7 +8,7 @@ import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { type ContractTemplateState, TemplateState } from '@/types/contract-template-state'
 import { reportActionError } from '@/utils/report-action-error'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 defineOptions({
   inheritAttrs: false,

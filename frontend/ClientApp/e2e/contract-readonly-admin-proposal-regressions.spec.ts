@@ -137,6 +137,10 @@ test('@REQ-contract-readonly-event-admin-diff-regressions-AC4 selected proposal 
   })
   expect(proposedDocument?.['dcs:policies']).toBeTruthy()
 
+  // The mutation response completes before the view reloads its negotiation
+  // list. Re-enter the route so the comparison opens from the persisted
+  // proposal rather than waiting on a list that is not live-updated.
+  await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
   await page.getByRole('button', { name: 'Show', exact: true }).first().click()
   const comparison = page.getByTestId('proposal-comparison')
   await expect(comparison).toBeVisible()

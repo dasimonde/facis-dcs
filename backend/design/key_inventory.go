@@ -30,7 +30,6 @@ var _ = Service("KeyInventory", func() {
 	Method("list", func() {
 		Description("List the HSM-held keys with purpose, active version from pki_active_key_version, and the version's last-change timestamp.")
 		Meta("dcs:requirements", "DCS-NFR-SEC-14")
-		Meta("dcs:ui", "System Administration")
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
 		})

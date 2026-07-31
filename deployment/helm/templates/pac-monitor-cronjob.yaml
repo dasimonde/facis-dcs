@@ -1,0 +1,63 @@
+{{- if .Values.complianceMonitor.enabled -}}
+{{- $name := printf "%s-pac-monitor" (include "digital-contracting-service.fullname" .) -}}
+# Continuous compliance monitoring (DCS-FR-PACM-02): the same detection logic
+# GET /pac/monitor exposes, driven by a schedule so a violation is found without
+# anyone asking. A CronJob rather than a goroutine in the server, because a
+# failed sweep is then a visible Kubernetes object rather than a log line, the
+# interval is changeable without a restart, and concurrencyPolicy: Forbid keeps
+# replicas from sweeping over each other.
+#
+# The pod only reaches the database. It deliberately does not join the event bus:
+# detections go to the transactional outbox, and the running server's
+# OutboxProcessor anchors them in the audit trail and fans them out to webhook
+# subscribers.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.complianceMonitor.schedule | quote }}
+  concurrencyPolicy: Forbid
+  # A missed sweep is not worth catching up on: the next run re-derives the
+  # current state from scratch, so a backlog would only re-detect what the
+  # following sweep would find anyway.
+  startingDeadlineSeconds: {{ .Values.complianceMonitor.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ $name }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: pac-monitor
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              # args, not command: the image entrypoint sets up the custom CA
+              # bundle a TLS database connection may need, then execs this.
+              args:
+                - /app/pacmonitor
+                - -timeout={{ .Values.complianceMonitor.timeout }}
+              env:
+                - name: DATABASE_URL
+                  {{- if .Values.database.secretRef.name }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.database.secretRef.name | quote }}
+                      key: {{ .Values.database.secretRef.key | quote }}
+                  {{- else }}
+                  value: {{ include "digital-contracting-service.databaseURL" . | quote }}
+                  {{- end }}
+              resources:
+                {{- toYaml .Values.complianceMonitor.resources | nindent 16 }}
+{{- end }}

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { ContractContentValuesState } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const storeId = 'contractContentValues'

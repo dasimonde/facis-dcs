@@ -8,12 +8,12 @@ import (
 
 // retryBudget paces and bounds the retry sweep's regeneration attempts per
 // entity: how many have failed, and the earliest time the next one may run.
-// The work list is the oldest fixed-size window of entities holding no stored
-// PDF, so without a budget an entity that can never render (an unrenderable
-// payload, a permanently rejected document) is re-attempted on every tick for
-// the lifetime of the process and keeps every recoverable failure behind it out
-// of the window. Attempts back off from the sweep interval and stop after
-// missingPDFRetryAttempts; an exhausted entity is then excluded from the work
+// The work list is the oldest fixed-size window of entities whose stored PDF is
+// not current, so without a budget an entity that can never render (an
+// unrenderable payload, a permanently rejected document) is re-attempted on
+// every tick for the lifetime of the process and keeps every recoverable
+// failure behind it out of the window. Attempts back off from the sweep interval and stop after
+// regenerationRetryAttempts; an exhausted entity is then excluded from the work
 // list query itself, which is what actually frees its slot.
 //
 // The state is per process and deliberately not persisted: a restart is the
@@ -43,7 +43,7 @@ func (b *retryBudget) ready(kind, did string, now time.Time) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	key := budgetKey(kind, did)
-	if b.attempts[key] >= missingPDFRetryAttempts {
+	if b.attempts[key] >= regenerationRetryAttempts {
 		return false
 	}
 	next, waiting := b.nextAt[key]
@@ -82,7 +82,7 @@ func (b *retryBudget) exhausted(kind string) []string {
 	prefix := kind + "\x00"
 	var dids []string
 	for key, attempts := range b.attempts {
-		if attempts >= missingPDFRetryAttempts && strings.HasPrefix(key, prefix) {
+		if attempts >= regenerationRetryAttempts && strings.HasPrefix(key, prefix) {
 			dids = append(dids, strings.TrimPrefix(key, prefix))
 		}
 	}
@@ -94,13 +94,13 @@ func (b *retryBudget) exhausted(kind string) []string {
 func (b *retryBudget) backoff(attempts int) time.Duration {
 	delay := b.interval
 	for i := 1; i < attempts; i++ {
-		if delay >= maxMissingPDFRetryBackoff {
+		if delay >= maxRegenerationRetryBackoff {
 			break
 		}
 		delay *= 2
 	}
-	if delay > maxMissingPDFRetryBackoff {
-		return maxMissingPDFRetryBackoff
+	if delay > maxRegenerationRetryBackoff {
+		return maxRegenerationRetryBackoff
 	}
 	return delay
 }

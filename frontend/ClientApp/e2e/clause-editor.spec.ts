@@ -214,8 +214,10 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
   const doc = (await created).postDataJSON().template_data as {
     'dcs:policies': {
       'odrl:permission'?: {
+        'dcs:prose': { '@id': string }
         'odrl:duty'?: {
           '@type': string
+          'dcs:prose'?: { '@id': string }
           'odrl:action': { '@id': string }
           'odrl:constraint'?: { '@type': string; 'odrl:or'?: { '@list': unknown[] } }[]
         }[]
@@ -227,6 +229,12 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
   const duties = permission?.['odrl:duty'] ?? []
   expect(duties.length, 'one duty attached to the permission').toBe(1)
   expect(duties[0]?.['@type']).toBe('odrl:Duty')
+  // A nested duty is an odrl:Duty like any other, so the hub shapes demand the
+  // prose it is backed by: the clause it was authored in, the same block its
+  // permission cites. Without it the template is refused at submit.
+  expect(duties[0]?.['dcs:prose']?.['@id'], 'the duty is backed by the clause it was authored in').toBe(
+    permission?.['dcs:prose']['@id'],
+  )
   expect(duties[0]?.['odrl:action']['@id'], 'the duty action').toBe('odrl:delete')
   // The duty's two constraints combined into a single logical (or) node.
   const dutyConstraints = duties[0]?.['odrl:constraint'] ?? []
@@ -332,18 +340,24 @@ test('a duty can carry a consequence duty', async ({ page, loginAs }) => {
   const doc = (await created).postDataJSON().template_data as {
     'dcs:policies': {
       'odrl:permission'?: {
+        'dcs:prose': { '@id': string }
         'odrl:duty'?: {
           'odrl:action': { '@id': string }
-          'odrl:consequence'?: { '@type': string; 'odrl:action': { '@id': string } }[]
+          'odrl:consequence'?: { '@type': string; 'dcs:prose'?: { '@id': string }; 'odrl:action': { '@id': string } }[]
         }[]
       }[]
     }
   }
 
-  const duties = (doc['dcs:policies']['odrl:permission'] ?? [])[0]?.['odrl:duty'] ?? []
+  const permission = (doc['dcs:policies']['odrl:permission'] ?? [])[0]
+  const duties = permission?.['odrl:duty'] ?? []
   expect(duties[0]?.['odrl:action']['@id'], 'the duty action').toBe('odrl:delete')
   const consequences = duties[0]?.['odrl:consequence'] ?? []
   expect(consequences.length, 'one consequence duty').toBe(1)
   expect(consequences[0]?.['@type']).toBe('odrl:Duty')
   expect(consequences[0]?.['odrl:action']['@id'], 'the consequence action').toBe('odrl:display')
+  // A consequence is a Duty too, so it owes prose as well.
+  expect(consequences[0]?.['dcs:prose']?.['@id'], 'the consequence is backed by the same clause').toBe(
+    permission?.['dcs:prose']['@id'],
+  )
 })

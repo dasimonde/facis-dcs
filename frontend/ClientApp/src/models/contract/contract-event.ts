@@ -1,5 +1,5 @@
-import type { ContractData } from '../contract-data'
 import type { ContractChangeRequest } from './contract'
+import type { ContractData } from './contract-data'
 import type { ContractResponsible } from './contract-responsible'
 import type { ComponentType } from '@/types/component-type'
 import type { ContractActionFlag } from '@/types/contract-action-flag'

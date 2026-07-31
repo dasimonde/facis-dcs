@@ -101,10 +101,8 @@ archiveNotary:
   baseURL: ""
   notaryPath: "/archive/notary"
   auditLogPath: "/archive-audit-events.jsonl"
-  auditLogBearerToken: ""
-  auditLogBearerTokenSecretRef:
-    name: ""
-    key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  # The audit-log bearer token is NOT configured here: the wired source is
+  # global.archiveAuditToken / global.archiveAuditTokenSecretRef below.
 
 # External PAC audit executor. The bundled ORCE endpoint is selected when URL
 # is empty and orce.enabled=true; a customer replaces it through configuration
@@ -568,7 +566,6 @@ pdfCore:
     x5ChainPEM: ""
     # Set to use an existing Secret instead of auto-creating one from the inline values above.
     existingSecret: ""
-    existingSecretSignerKeyKey: "signer-key-pem"
     existingSecretX5ChainKey: "x5chain-pem"
 
 ipfs:
@@ -710,6 +707,35 @@ acmeRenewal:
     size: "1Gi"
     accessModes: ["ReadWriteOnce"]
     storageClassName: ""
+
+# ---- Continuous compliance monitoring (DCS-FR-PACM-02) ----------------
+#
+# Runs the compliance sweep on a schedule instead of waiting for someone to call
+# GET /pac/monitor, so missing approvals, denied access attempts, breached KPIs
+# and failed deployments are detected unattended. Each violation alerts once,
+# when it first appears (and again if it recurs after being resolved), never on
+# every run.
+#
+# Keep enabled: with this off, risks are only ever found by someone asking, and
+# the "continuously monitor" requirement is not met.
+complianceMonitor:
+  enabled: true
+  # Every five minutes. The time-based rules (missing approvals, expiries) are
+  # served well by this; the event-driven ones (unauthorized access, failed
+  # deployment) are therefore reported with up to five minutes' delay. Kubernetes
+  # cannot schedule finer than one minute.
+  schedule: "*/5 * * * *"
+  # Skip a sweep that could not start on time rather than queueing it — the next
+  # run re-derives the same state anyway.
+  startingDeadlineSeconds: 120
+  timeout: "2m"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
 
 # ---- Shared supporting services for a resource-constrained peer -------
 # Exposes this instance's stateless services under https://<host>/shared/<name>

@@ -19,6 +19,7 @@ const emit = defineEmits<{
 
 const searchQuery = ref('')
 const isSearching = ref(false)
+const searchError = ref<string | null>(null)
 
 type FilterLabels = typeof props.filterLabels
 type FilterLabelKey = keyof FilterLabels
@@ -59,8 +60,14 @@ async function searchRequest() {
   }
 
   isSearching.value = true
+  searchError.value = null
   try {
     await retrieveSearch()
+  } catch (e: unknown) {
+    // A search that could not run has NOT established that nothing matches;
+    // reporting it as an empty result is how a 403 reads as "no results".
+    searchResults.value = []
+    searchError.value = e instanceof Error && e.message ? e.message : 'Search failed'
   } finally {
     isSearching.value = false
   }
@@ -78,6 +85,7 @@ async function searchList(event?: Event) {
       await searchRequest()
     }
   }
+  if (searchError.value) return
   if (searchQuery.value.trim().length > 0) {
     emit('searchResult', searchedItems.value)
   } else {
@@ -206,6 +214,7 @@ function handlePopoverToggle(event: ToggleEvent) {
           <ComboboxOption :value="inputValue" class="hidden"></ComboboxOption>
 
           <div v-if="isSearching" class="px-4 py-2 text-base-content/50">Searching...</div>
+          <div v-else-if="searchError" role="alert" class="px-4 py-2 text-error">{{ searchError }}</div>
           <template v-else-if="searchedItems.length > 0">
             <ComboboxOption
               v-for="item in searchedItems"

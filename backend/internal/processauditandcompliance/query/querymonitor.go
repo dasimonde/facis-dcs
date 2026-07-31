@@ -2,7 +2,9 @@ package qry
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -18,6 +20,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
+	pacdb "digital-contracting-service/internal/processauditandcompliance/db"
 	event2 "digital-contracting-service/internal/processauditandcompliance/event"
 )
 
@@ -49,6 +52,12 @@ const RiskTypeUnderperformance = "CONTRACT_UNDERPERFORMANCE"
 // The contract is in force on this side and absent on the other, and until this
 // existed the only trace was a line in the process log.
 const RiskTypeDeploymentFailed = "CONTRACT_DEPLOYMENT_FAILED"
+
+// SystemMonitorPrincipal attributes an unattended sweep (cmd/pacmonitor) in the
+// audit trail. Such a run carries no user roles on purpose: no operator
+// authorised it, the schedule did, and stamping a human role onto it would let
+// the trail claim someone was present who was not.
+const SystemMonitorPrincipal = "system:pac-monitor"
 
 // approvalPendingStates are the contract states in which an OPEN approval
 // task means the contract is waiting on a required approval decision.
@@ -103,6 +112,66 @@ type ComplianceMonitor struct {
 	DB     *sqlx.DB
 	ATRepo cwedb.ApprovalTaskRepo
 	CRepo  cwedb.ContractRepo
+	FRepo  pacdb.RiskFindingRepo
+}
+
+// findingOf is the persistent identity of a detected risk: the contract, the
+// rule that fired, and a hash of the detail text, which is what distinguishes
+// two risks of the same type on the same contract (a second outstanding
+// approver, a second denied actor). Detail is derived only from persisted
+// facts, never from the sweep's own clock, so the same violation hashes the
+// same on every sweep.
+func findingOf(risk event2.ComplianceRisk, detectedAt time.Time) pacdb.RiskFinding {
+	sum := sha256.Sum256([]byte(risk.Detail))
+	return pacdb.RiskFinding{
+		ContractDID:     risk.DID,
+		RiskType:        risk.RiskType,
+		DetailHash:      hex.EncodeToString(sum[:]),
+		Detail:          risk.Detail,
+		FirstDetectedAt: detectedAt,
+	}
+}
+
+// reconcile folds the sweep's findings into the risk register and returns the
+// ones that are NEW — first ever, or reoccurring after being resolved. Risks
+// that were already open are recorded as still seen but raise no second alert,
+// and open findings the sweep no longer detects are closed.
+//
+// This governs alerting only. The sweep response keeps listing every risk that
+// currently holds, because it answers a different question: not "what happened"
+// but "what is wrong right now".
+func (h *ComplianceMonitor) reconcile(ctx context.Context, tx *sqlx.Tx, risks []event2.ComplianceRisk, checkedAt time.Time) ([]event2.ComplianceRisk, error) {
+
+	open, err := h.FRepo.ListOpen(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("could not read open compliance findings: %w", err)
+	}
+
+	stillHolds := make(map[string]bool, len(risks))
+	newlyDetected := make([]event2.ComplianceRisk, 0)
+	for _, risk := range risks {
+		finding := findingOf(risk, checkedAt)
+		stillHolds[finding.ContractDID+"|"+finding.RiskType+"|"+finding.DetailHash] = true
+
+		isNew, err := h.FRepo.Record(ctx, tx, finding)
+		if err != nil {
+			return nil, fmt.Errorf("could not record compliance finding for %s: %w", risk.DID, err)
+		}
+		if isNew {
+			newlyDetected = append(newlyDetected, risk)
+		}
+	}
+
+	for _, finding := range open {
+		if stillHolds[finding.ContractDID+"|"+finding.RiskType+"|"+finding.DetailHash] {
+			continue
+		}
+		if err := h.FRepo.Resolve(ctx, tx, finding, checkedAt); err != nil {
+			return nil, fmt.Errorf("could not resolve compliance finding for %s: %w", finding.ContractDID, err)
+		}
+	}
+
+	return newlyDetected, nil
 }
 
 // Handle sweeps all OPEN approval tasks and flags those whose contract is in
@@ -111,6 +180,10 @@ type ComplianceMonitor struct {
 // UNAUTHORIZED_ACCESS risks. The sweep itself is recorded in the audit trail
 // via ComplianceMonitorEvent, risks included, so a detected risk is both
 // flagged (response) and reported (audit trail).
+//
+// Handle is driven both by GET /pac/monitor and, unattended, by the scheduled
+// sweep (cmd/pacmonitor). The response always lists every risk that currently
+// holds; alerting is deduplicated against the risk register, see reconcile.
 func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*MonitorResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -193,10 +266,18 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 	if err := event.Create(ctx, tx, evt, componenttype.ProcessAuditAndCompliance); err != nil {
 		return nil, fmt.Errorf("could not create monitor event: %w", err)
 	}
-	// Anchor each risk against the affected contract's PAC chain — the
-	// sweep event above has no resource DID and only reaches the global
-	// chain (see ComplianceRiskEvent doc).
-	for _, risk := range risks {
+	newlyDetected, err := h.reconcile(ctx, tx, risks, checkedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Anchor each NEWLY detected risk against the affected contract's PAC
+	// chain — the sweep event above has no resource DID and only reaches the
+	// global chain (see ComplianceRiskEvent doc). Risks that were already on
+	// record are not re-anchored: with the sweep running unattended every few
+	// minutes, that would bury the audit trail under repetitions of the same
+	// violation and make the moment it was actually detected unfindable.
+	for _, risk := range newlyDetected {
 		riskEvt := event2.ComplianceRiskEvent{
 			DID:         risk.DID,
 			RiskType:    risk.RiskType,

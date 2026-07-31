@@ -2,7 +2,7 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
-	cors "goa.design/plugins/v3/cors/dsl" // Kein Punkt, sondern Alias 'cors'
+	cors "goa.design/plugins/v3/cors/dsl"
 )
 
 // JWTAuth defines the JWT-based security scheme backed by Hydra OIDC.

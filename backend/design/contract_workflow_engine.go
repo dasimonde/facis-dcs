@@ -841,8 +841,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("create", func() {
 		Description("initiate a new contract draft from an approved template.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01", "DCS-IR-CWE-02")
-		Meta("dcs:cwe:components", "Contract Assembling")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -865,8 +863,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("update", func() {
 		Description("update contract draft before submitting.")
-		Meta("dcs:cwe:components", "Contract Assembling")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -891,9 +887,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Description("Overloaded state transition whose effect depends on the contract's current state: DRAFT/REJECTED -> NEGOTIATION; NEGOTIATION -> SUBMITTED once all negotiators have accepted (or stays in NEGOTIATION with contract_version+1 if accepted change requests still need merging); SUBMITTED -> REVIEWED or back to NEGOTIATION depending on action_flag; REVIEWED -> SUBMITTED (re-review). Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
 		Description(`With action flag { forwardTo: "approval" | "reject" } and optional comments. Allows a resubmission path with reviewer/approver comments.`)
 		Meta("dcs:requirements", "DCS-IR-CWE-01", "DCS-IR-CWE-03", "DCS-IR-CWE-06", "DCS-IR-CWE-09")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Creation", "Contract Review", "Contract Approval")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -926,8 +919,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("offer", func() {
 		Description("Transmit a draft contract to the counterparty for the first time (DRAFT -> OFFERED, SRS 2.2.6). Triggers the DCS-to-DCS PostSync broadcast. Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -951,8 +942,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("withdraw", func() {
 		Description("Initiator retracts a contract before it has been approved (allowed from OFFERED, NEGOTIATION, SUBMITTED, REVIEWED — never once APPROVED). Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Creation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -976,8 +965,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("negotiate", func() {
 		Description("propose changes.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03")
-		Meta("dcs:cwe:components", "Contract Assembling", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1015,8 +1002,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("save_negotiation_draft", func() {
 		Description("save (upsert) the calling party's staged change request for a contract in negotiation; it is shared among this party's authorized negotiators and not transmitted to the counterparty until proposed.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03")
-		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1044,8 +1029,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("retrieve_negotiation_draft", func() {
 		Description("retrieve the calling party's staged change request for a contract; change_request is absent when no draft is stored.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03")
-		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1074,8 +1057,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("delete_negotiation_draft", func() {
 		Description("discard the calling party's staged change request for a contract.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03")
-		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1104,8 +1085,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("respond", func() {
 		Description("Accept or reject a specific negotiation change request (action_flag: ACCEPTING | REJECTING). Forwarded to the contract's origin peer if the local node is not the origin. Unlike most other state-mutating contract endpoints, this one does not require updated_at and is therefore not covered by the optimistic-concurrency timestamp check.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-IR-CWE-05", "DCS-IR-CWE-06")
-		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Creator", "Contract Review")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1136,8 +1115,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("review", func() {
 		Description("Record that the contract's latest draft was opened for review. This does not return contract data (use retrieve_by_id for that) — it only logs a review-tracking event into the audit trail, as a write side effect behind a GET request.")
 		Meta("dcs:requirements", "DCS-IR-CWE-04")
-		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation", "Contract Review")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1166,8 +1143,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/retrieve
 	Method("retrieve", func() {
 		Description("fetch contracts and their review, approval, and negotiation tasks")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Negotiation", "Contract Review", "Contract Approval", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1203,7 +1178,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("kpi_observations", func() {
 		Description("The KPI values reported for a deployed contract as a JSON-LD observation set: dcs:KPIObservation nodes anchored to the Semantic Hub context, machine-readable alongside the human-facing kpis field of retrieve (DCS-FR-CWE-09/-31).")
 		Meta("dcs:requirements", "DCS-FR-CWE-09", "DCS-FR-CWE-31")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1272,9 +1246,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("retrieve_by_id", func() {
 		Description("fetch submitted contract. fetch reviewed contract. fetch contract(s).")
 		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Negotiation", "Contract Review", "Contract Approval", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1310,7 +1281,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/history/{did}
 	Method("retrieve_history_by_id", func() {
 		Description("fetch history of a contract")
-		Meta("dcs:cwe:components", "")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1344,8 +1314,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("search", func() {
 		Description("locate contracts by data or state. filter/search across lifecycle states.")
 		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Review", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1386,9 +1354,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("approve", func() {
 		Description("approve and forward contract.")
 		Meta("dcs:requirements", "DCS-IR-CWE-09", "DCS-IR-CWE-10")
-		Meta("dcs:cwe:components", "Contract Deployment for Service Provisioning")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Approval")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Approver")
@@ -1412,9 +1377,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("reject", func() {
 		Description("reject with explanation.")
 		Meta("dcs:requirements", "DCS-IR-CWE-09")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Approval")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Approver")
@@ -1438,8 +1400,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("store", func() {
 		Description("store evidence.")
 		Meta("dcs:requirements", "DCS-IR-CWE-12")
-		Meta("dcs:cwe:components", "Contract Performance Tracking")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -1463,8 +1423,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("terminate", func() {
 		Description("terminate a contract.")
 		Meta("dcs:requirements", "DCS-IR-CWE-12")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -1488,8 +1446,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("renew", func() {
 		Description("renew a contract: create a new linked contract instance from an existing one, retaining references to the original's DID, version, and signatures (DCS-FR-CWE-11/22, DCS-FR-CSA-15).")
 		Meta("dcs:requirements", "DCS-FR-CWE-11", "DCS-FR-CWE-22", "DCS-FR-CSA-15")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -1513,8 +1469,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("audit", func() {
 		Description("retrieve the audit trail (event log and policy trail) for a contract.")
 		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CWE-13")
-		Meta("dcs:cwe:components", "")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -1560,8 +1514,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("deploy", func() {
 		Description("Deploy a SIGNED contract to the configured Contract Target System (UC-05-01).")
 		Meta("dcs:requirements", "DCS-FR-SM-12")
-		Meta("dcs:cwe:components", "Contract Deployment for Service Provisioning")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -1587,7 +1539,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("listContractTargets", func() {
 		Description("List the registered Contract Target Systems a contract may be deployed to (ADR-25).")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-		Meta("dcs:ui", "Target System Administration")
 
 		// Readable by whoever has to pick one, writable only by the roles that
 		// configure integrations.
@@ -1613,7 +1564,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("createContractTarget", func() {
 		Description("Register a Contract Target System (UC-09-01 system configuration).")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-		Meta("dcs:ui", "Target System Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1637,7 +1587,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("updateContractTarget", func() {
 		Description("Change a registered Contract Target System (UC-09-01 system configuration).")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-		Meta("dcs:ui", "Target System Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1661,7 +1610,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("deleteContractTarget", func() {
 		Description("Remove a registered Contract Target System. Refused while a contract still designates it, so no contract is left undeployable with no record of where it was meant to go.")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-		Meta("dcs:ui", "Target System Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1684,7 +1632,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("designateContractTarget", func() {
 		Description("Designate the target system a contract deploys to (ADR-25). The automatic trigger on signing completion has no human present to choose one, so the destination belongs to the contract.")
 		Meta("dcs:requirements", "DCS-FR-SM-12", "DCS-IR-SI-05")
-		Meta("dcs:ui", "Contract Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -1708,7 +1655,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Method("rotateContractTargetSecret", func() {
 		Description("Issue a new callback credential for a registered Contract Target System. The secret is returned once and the previous one stops working immediately (ADR-27).")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-		Meta("dcs:ui", "Target System Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1731,8 +1677,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("listMachineIdentities", func() {
 		Description("List the registered machine identities: the SRS Table 5 System Users that reach DCS over its API (ADR-27).")
-		Meta("dcs:requirements", "DCS-FR-UM-01")
-		Meta("dcs:ui", "System User Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1754,8 +1698,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("createMachineIdentity", func() {
 		Description("Register a machine identity and issue its first credential. The secret is returned once and cannot be read back (ADR-27).")
-		Meta("dcs:requirements", "DCS-FR-UM-01")
-		Meta("dcs:ui", "System User Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1777,8 +1719,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("updateMachineIdentity", func() {
 		Description("Change a registered machine identity. Disabling one refuses its calls at once, without waiting for the secret to expire (ADR-27).")
-		Meta("dcs:requirements", "DCS-FR-UM-01")
-		Meta("dcs:ui", "System User Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1800,8 +1740,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("deleteMachineIdentity", func() {
 		Description("Remove a machine identity and the OAuth2 client behind it, so no credential outlives the entry that justified it (ADR-27).")
-		Meta("dcs:requirements", "DCS-FR-UM-01")
-		Meta("dcs:ui", "System User Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
@@ -1822,8 +1760,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("rotateMachineIdentitySecret", func() {
 		Description("Issue a new secret for a registered machine identity. It is returned once and the previous one stops working immediately (ADR-27).")
-		Meta("dcs:requirements", "DCS-FR-UM-01")
-		Meta("dcs:ui", "System User Administration")
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")

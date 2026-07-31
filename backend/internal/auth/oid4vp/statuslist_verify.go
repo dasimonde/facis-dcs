@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"digital-contracting-service/internal/auth/oid4vp/status"
@@ -13,26 +12,24 @@ import (
 
 var statusListVerifier *status.Verifier
 
-// ConfigureStatusListVerification wires the status-list verifier used by OID4VP.
+// ConfigureStatusListVerification wires the status-list verifier used by
+// OID4VP, off the trust config already loaded rather than off a second read of
+// the same file. The status-list path used to re-parse the trust document with
+// its own struct, which had no purposes and no organizations fields — so the
+// two paths could disagree about who is trusted without anything saying so.
 func ConfigureStatusListVerification(
-	trustDataPath string,
+	trustCfg *TrustConfig,
 	xfscAllowUnsignedFallback bool,
 ) error {
-	return configureStatusListVerification(trustDataPath, xfscAllowUnsignedFallback, os.Getenv)
-}
-
-func configureStatusListVerification(
-	trustDataPath string,
-	xfscAllowUnsignedFallback bool,
-	getenv func(string) string,
-) error {
-
 	var trust *status.TrustConfig
-	path := strings.TrimSpace(trustDataPath)
-	if path != "" {
-		cfg, err := status.LoadTrustConfig(path)
+	if trustCfg != nil {
+		bundled := map[string]json.RawMessage{}
+		for issuer, entry := range trustCfg.Issuers {
+			bundled[issuer] = entry.JWKS
+		}
+		cfg, err := status.NewTrustConfig(bundled)
 		if err != nil {
-			return fmt.Errorf("load status list trust config %q: %w", path, err)
+			return fmt.Errorf("status list trust config: %w", err)
 		}
 		trust = cfg
 	}

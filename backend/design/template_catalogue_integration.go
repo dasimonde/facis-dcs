@@ -93,6 +93,10 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			// The Template Manager owns the Template Catalogue view and the
+			// register that follows it; the contract roles read the catalogue
+			// to pick a template to draw a contract from.
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -120,6 +124,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -147,6 +152,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")

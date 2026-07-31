@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/validation"
 
 	"github.com/google/uuid"
@@ -477,4 +478,133 @@ func TestReviewDecisionReplayCannotReplacePersistedDecision(t *testing.T) {
 	require.False(t, sameReviewDecision(
 		persisted, persisted.Decision, persisted.Justification, "did:web:other.example",
 	))
+}
+
+// A contract derived from a federated template declares the canonical DCS
+// envelope graph AND the shape libraries its author modelled its data against,
+// so sh:shapesGraph is a list. Collapsing that list to a single anchor is what
+// blocked every federated offer.
+func TestShapesBundleConsistencyReadsTheMultiValuedDeclaration(t *testing.T) {
+	canonical := "https://dcs.test/semantic/shapes/facis-dcs?version=4"
+	library := "https://peer.test/semantic/shapes/partner-library?version=9"
+	content := map[string]any{
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": canonical},
+			map[string]any{"@id": library},
+		},
+		"dcs:effectiveShapes": []any{
+			map[string]any{"@id": canonical},
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/clause-catalog?version=2"},
+			map[string]any{"@id": library},
+		},
+	}
+	require.NoError(t, requireConsistentShapesBundle(content))
+
+	// The single-anchor form every contract without libraries carries.
+	require.NoError(t, requireConsistentShapesBundle(map[string]any{
+		"sh:shapesGraph":      map[string]any{"@id": canonical},
+		"dcs:effectiveShapes": []any{map[string]any{"@id": canonical}},
+	}))
+}
+
+// A hub asset is identified by its entry name and version, never by the URL it
+// is served from: a contract derived from a template imported off another
+// instance's federated catalogue names the very same graph under the publishing
+// instance's hostname. Comparing IRIs would block every federated contract.
+func TestShapesBundleConsistencyIdentifiesGraphsByNameAndVersionNotHost(t *testing.T) {
+	require.NoError(t, requireConsistentShapesBundle(map[string]any{
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": "https://dcs-ionos.test/api/semantic/shapes/facis-dcs?version=1"},
+			map[string]any{"@id": "https://dcs-ionos.test/api/semantic/shapes/sla-hosting?version=2"},
+		},
+		"dcs:effectiveShapes": []any{
+			map[string]any{"@id": "https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1"},
+			map[string]any{"@id": "https://dcs-osc.test/api/semantic/shapes/clause-catalog?version=1"},
+			map[string]any{"@id": "https://dcs-osc.test/api/semantic/shapes/sla-hosting?version=2"},
+		},
+	}))
+}
+
+func TestShapesBundleConsistencyFailsClosed(t *testing.T) {
+	canonical := "https://dcs.test/semantic/shapes/facis-dcs?version=4"
+	for name, content := range map[string]map[string]any{
+		"no declaration at all": {
+			"dcs:effectiveShapes": []any{map[string]any{"@id": canonical}},
+		},
+		"canonical pinned at another version than the bundle": {
+			"sh:shapesGraph":      map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=1"},
+			"dcs:effectiveShapes": []any{map[string]any{"@id": canonical}},
+		},
+		"a library the bundle does not carry": {
+			"sh:shapesGraph": []any{
+				map[string]any{"@id": canonical},
+				map[string]any{"@id": "https://peer.test/semantic/shapes/partner-library?version=9"},
+			},
+			"dcs:effectiveShapes": []any{map[string]any{"@id": canonical}},
+		},
+		"a library the bundle carries at another version": {
+			"sh:shapesGraph": []any{
+				map[string]any{"@id": canonical},
+				map[string]any{"@id": "https://peer.test/semantic/shapes/partner-library?version=9"},
+			},
+			"dcs:effectiveShapes": []any{
+				map[string]any{"@id": canonical},
+				map[string]any{"@id": "https://dcs.test/semantic/shapes/partner-library?version=3"},
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, requireConsistentShapesBundle(content))
+		})
+	}
+}
+
+// The live regression, end to end over one contract document: an OSC contract
+// drawn from a template imported off the IONOS federated catalogue could not be
+// submitted. Its pin is written at creation, a client save replaces the
+// document with the one its editor assembled — which models none of these
+// properties — and the gate then has nothing to build a snapshot from.
+func TestClientReplacedDocumentKeepsTheSnapshotBuildable(t *testing.T) {
+	imported, err := datatype.NewJSON(map[string]any{
+		"@id": "https://dcs-osc.test/api/contract/f30a2f9e",
+		"sh:shapesGraph": []any{
+			// The publishing instance's own anchors, as an imported template
+			// carries them.
+			map[string]any{"@id": "https://dcs-ionos.test/api/semantic/shapes/facis-dcs?version=1"},
+			map[string]any{"@id": "https://dcs-ionos.test/api/semantic/shapes/facis-sla-hosting?version=2"},
+		},
+	})
+	require.NoError(t, err)
+	created, err := validation.PinSemanticBundle(&imported,
+		"https://dcs-osc.test/api/semantic/context/facis-dcs?version=1",
+		"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
+		[]string{
+			"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
+			"https://dcs-osc.test/api/semantic/shapes/clause-catalog?version=1",
+		},
+		"https://dcs-osc.test/api/semantic/profile/facis.sla.basic?version=1")
+	require.NoError(t, err)
+	require.NoError(t, requireConsistentShapesBundle(decodeContent(t, created)))
+
+	// What the editor posts back: no bundle at all, and a canonical anchor
+	// still naming the instance the template came from.
+	saved, err := datatype.NewJSON(map[string]any{
+		"@id":            "https://dcs-osc.test/api/contract/f30a2f9e",
+		"@context":       "https://w3id.org/facis/dcs/context/v1",
+		"sh:shapesGraph": map[string]any{"@id": "https://dcs-ionos.test/api/semantic/shapes/facis-dcs?version=1"},
+	})
+	require.NoError(t, err)
+	stripped := decodeContent(t, &saved)
+	require.Nil(t, stripped["dcs:effectiveShapes"], "the client document is the one that carries no pin")
+
+	carried, err := validation.CarrySemanticBundle(created, &saved)
+	require.NoError(t, err)
+	require.NoError(t, requireConsistentShapesBundle(decodeContent(t, carried)))
+}
+
+func decodeContent(t *testing.T, raw *datatype.JSON) map[string]any {
+	t.Helper()
+	var content map[string]any
+	require.NoError(t, json.Unmarshal(*raw, &content))
+	return content
 }

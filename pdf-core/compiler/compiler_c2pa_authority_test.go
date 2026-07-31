@@ -72,7 +72,7 @@ func TestVerifyReproducesAuthorityFromTheDocument(t *testing.T) {
 	}
 
 	// A verifier's context carries no authority of its own.
-	if err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
 		t.Fatalf("VerifyIncrementalUpdate on a PDF carrying an authority: %v", err)
 	}
 }

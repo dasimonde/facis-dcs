@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, useId } from 'vue'
 import {
   type AtomicDraft,
   CONSTRAINT_COMBINATORS,
@@ -10,6 +11,7 @@ import {
   type OperandDraftValue,
 } from '@template-repository/components/clauses-editor/constraint-draft'
 import { ODRL_CONTEXT_OPERANDS, ODRL_OPERATORS } from '@template-repository/utils/odrl-vocabulary'
+import { ONTOLOGY_VALUE_CONSTRAINTS } from '@template-repository/utils/ontology-domain-fields'
 import { resolveConstraintForLeftOperand } from '@template-repository/utils/value-constraint-catalog'
 import {
   formatValueOption,
@@ -126,6 +128,22 @@ function resetFixedOperand(child: AtomicDraft) {
   child.value = ''
   child.values = []
 }
+
+const unitListId = `constraint-units-${useId()}`
+
+// odrl:unit takes an IRI, so the suggestions are the concept IRIs of the
+// currency schemes the Semantic Hub declares (the one unit vocabulary it
+// carries). Any other unit — one a template declares itself — is typed in.
+const unitOptions = computed(() => {
+  const options = new Map<string, string>()
+  for (const constraint of ONTOLOGY_VALUE_CONSTRAINTS) {
+    if (constraint.format !== 'iso-4217') continue
+    for (const option of constraint.valueOptions ?? []) {
+      if (option.iri) options.set(option.iri, `${option.label ?? option.value} (${option.value})`)
+    }
+  }
+  return [...options].map(([iri, label]) => ({ iri, label }))
+})
 </script>
 
 <template>
@@ -226,8 +244,21 @@ function resetFixedOperand(child: AtomicDraft) {
             </fieldset>
           </div>
         </details>
+        <input
+          v-model="child.unit"
+          data-testid="constraint-unit"
+          type="text"
+          :list="unitListId"
+          placeholder="unit IRI"
+          class="input-bordered input input-xs w-28"
+          title="Unit the boundary is measured in (an IRI) — optional"
+        />
         <button type="button" class="btn btn-ghost btn-xs" @click="removeChild(i)">✕</button>
       </div>
     </template>
+
+    <datalist :id="unitListId">
+      <option v-for="unit in unitOptions" :key="unit.iri" :value="unit.iri" :label="unit.label" />
+    </datalist>
   </div>
 </template>

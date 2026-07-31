@@ -10,7 +10,7 @@ import {
   fromDocumentSemanticValues,
 } from '@contract-workflow-engine/utils/semantic-condition-values'
 import { isDcsDocumentData } from '@/models/dcs-jsonld'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { DcsBlock, DcsClause, DcsLayoutNode } from '@/models/dcs-jsonld'
 import type { SemanticCondition } from '@template-repository/models/contract-template'
 

@@ -2,9 +2,7 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -59,35 +57,4 @@ func probeHTTPAny(urls ...string) error {
 		}
 	}
 	return lastErr
-}
-
-// probeTCP dials the host:port extracted from rawURL and returns an error if
-// the TCP connection cannot be established within 5 seconds. Use this for
-// services that don't expose a documented HTTP health endpoint.
-//
-//nolint:unused
-func probeTCP(rawURL string) error {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("parse URL: %w", err)
-	}
-	host := u.Hostname()
-	port := u.Port()
-	if port == "" {
-		switch u.Scheme {
-		case "https":
-			port = "443"
-		default:
-			port = "80"
-		}
-	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 5*time.Second)
-	if err != nil {
-		return err
-	}
-	err = conn.Close()
-	if err != nil {
-		return err
-	}
-	return nil
 }

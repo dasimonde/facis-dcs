@@ -31,6 +31,7 @@ const kind = ref<(typeof KINDS)[number]>('shapes')
 const source = ref<'inline' | 'url'>('inline')
 const content = ref('')
 const sourceUrl = ref('')
+const pinnedVersion = ref('')
 const activate = ref(true)
 const submitting = ref(false)
 const error = ref<string | null>(null)
@@ -39,6 +40,18 @@ const nameId = useId()
 const kindId = useId()
 const contentId = useId()
 const sourceUrlId = useId()
+const versionId = useId()
+
+/**
+ * A shape library published on another instance is pinned by version in every
+ * template that declares it, and the pin is the publisher's number — so
+ * installing it here has to land it at that number, not at this hub's next
+ * one. Blank keeps the ordinary behaviour: the next version.
+ */
+const requestedVersion = computed(() => {
+  const parsed = Number.parseInt(pinnedVersion.value.trim(), 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
+})
 
 const canSubmit = computed(
   () => !!name.value.trim() && (source.value === 'url' ? !!sourceUrl.value.trim() : !!content.value.trim()),
@@ -62,6 +75,7 @@ async function submit() {
       kind: kind.value,
       media_type: MEDIA_TYPE_BY_KIND[kind.value],
       ...(source.value === 'url' ? { source_url: sourceUrl.value.trim() } : { content: content.value }),
+      ...(requestedVersion.value ? { version: requestedVersion.value } : {}),
       activate: activate.value,
     })
     emit('published', name.value.trim(), kind.value, result.version)
@@ -69,6 +83,7 @@ async function submit() {
     name.value = ''
     content.value = ''
     sourceUrl.value = ''
+    pinnedVersion.value = ''
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Publishing failed'
   } finally {
@@ -150,6 +165,23 @@ async function submit() {
         class="input-bordered input input-sm w-full font-mono text-xs"
         placeholder="https://w3id.org/gaia-x/development#…"
         aria-label="Schema source URL"
+      />
+    </div>
+    <div class="form-control">
+      <label :for="versionId" class="label py-1 text-base-content/70">
+        <span class="label-text text-xs">Version (optional)</span>
+        <span class="label-text-alt text-xs text-base-content/70">
+          installing a library another instance published? use the version its templates pin
+        </span>
+      </label>
+      <input
+        :id="versionId"
+        v-model="pinnedVersion"
+        type="number"
+        min="1"
+        class="input-bordered input input-sm w-full sm:w-40"
+        placeholder="next version"
+        aria-label="Register at this version"
       />
     </div>
     <div class="flex items-center justify-between gap-3">

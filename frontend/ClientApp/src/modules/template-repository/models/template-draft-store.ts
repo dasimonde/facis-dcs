@@ -1,4 +1,4 @@
-import type { ContractTemplateResponsible } from '@/models/contract-template-responsible'
+import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type { DcsBlock, DcsContractDataObject, DcsContractField, DcsLayoutNode, OdrlRule } from '@/models/dcs-jsonld'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { MetaData, TemplateTypeValue } from '@template-repository/models/contract-template'

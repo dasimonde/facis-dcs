@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
 import { type Ref, ref } from 'vue'
 import { contractTemplateService } from '@/services/contract-template-service'
-import type { PartialContractTemplate } from '@/models/contract-template'
-import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
-import type { ContractTemplateReviewTask } from '@/models/contract-template-review-task'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractTemplateApprovalTask } from '@/models/contract-template/contract-template-approval-task'
+import type { ContractTemplateReviewTask } from '@/models/contract-template/contract-template-review-task'
 
 export const useContractTemplatesStore = defineStore('contractTemplates', () => {
   const contractTemplates: Ref<PartialContractTemplate[]> = ref([])

@@ -1,4 +1,4 @@
-import type { ContractTemplate } from '../contract-template'
+import type { ContractTemplate } from '../contract-template/contract-template'
 import type {
   ContractTemplateApproveRequest,
   ContractTemplateArchiveRequest,

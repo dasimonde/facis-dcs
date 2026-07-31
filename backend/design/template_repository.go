@@ -452,8 +452,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("create", func() {
 		Description("Create a new template.")
 		Meta("dcs:requirements", "DCS-IR-TR-01")
-		Meta("dcs:tr:components", "Single- or multi-tiered template generation")
-		Meta("dcs:ui", "Template Builder")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -477,7 +475,6 @@ var _ = Service("TemplateRepository", func() {
 	// POST /template/copy
 	Method("copy", func() {
 		Description("Copy a template. Behavior depends on the source template's state: if it is not yet REGISTERED/PUBLISHED, the copy starts a new, independent version lineage (version=1, base_template=own new DID); if the source is already REGISTERED/PUBLISHED, the copy becomes the next version of the same lineage (version+1, inherits the source's base_template). A DB guard rejects the copy if a REGISTERED/PUBLISHED template with that version already exists in the lineage.")
-		Meta("dcs:ui", "Template Builder")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -502,8 +499,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("submit", func() {
 		Description(`with action flag { forwardTo: "approval" | "draft" } and optional reviewComments. allow resubmission path with approver comments.`)
 		Meta("dcs:requirements", "DCS-IR-TR-03", "DCS-IR-TR-04", "DCS-IR-TR-05")
-		Meta("dcs:tr:components", "Single- or multi-tiered template generation")
-		Meta("dcs:ui", "Template Builder, Template Review, Template Approver")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -530,8 +525,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("update", func() {
 		Description("persist reviewer edits (template data/clauses/semantics).")
 		Meta("dcs:requirements", "DCS-IR-TR-03")
-		Meta("dcs:tr:components", "Template Versioning")
-		Meta("dcs:ui", "Template Builder, Template Review")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -557,9 +550,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("update_manage", func() {
 		Description("update template data.")
 		Meta("dcs:requirements", "DCS-IR-TR-07")
-		Meta("dcs:roles", "Template Manager")
-		Meta("dcs:tr:components", "Template Versioning")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
@@ -583,8 +573,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("search", func() {
 		Description("perform filtered searches.")
 		Meta("dcs:requirements", "DCS-IR-TR-02", "DCS-IR-TR-07")
-		Meta("dcs:tr:components", "Search Capabilities")
-		Meta("dcs:ui", "Template Builder, Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -621,8 +609,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("retrieve", func() {
 		Description("load submitted template and history/provenance summary. fetch reviewed template with metadata, review history, and validation results. fetch all template entries for dashboard view.")
 		Meta("dcs:requirements", "DCS-IR-TR-02", "DCS-IR-TR-03", "DCS-IR-TR-05", "DCS-IR-TR-08")
-		Meta("dcs:tr:components", "Template Versioning")
-		Meta("dcs:ui", "Template Builder, Template Approver, Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -651,7 +637,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("provenance", func() {
 		Description("DCS-FR-TR-09 Template Provenance and Versioning: the per-version signed W3C provenance credentials (creator/reviewer/approver/registrar claims, content hash, previous-credential linkage) a template user verifies a template's provenance with.")
 		Meta("dcs:requirements", "DCS-FR-TR-09")
-		Meta("dcs:tr:components", "Template Versioning")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -679,7 +664,6 @@ var _ = Service("TemplateRepository", func() {
 	// GET /template/history/{did}
 	Method("retrieve_history_by_id", func() {
 		Description("fetch history of a contract template")
-		Meta("dcs:tr:components", "Template Versioning")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -736,8 +720,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("retrieve_by_id", func() {
 		Description("Retrieve a template by template id.")
 		Meta("dcs:requirements", "DCS-IR-TR-02", "DCS-IR-TR-03", "DCS-FR-TR-19")
-		Meta("dcs:tr:components", "Template Versioning")
-		Meta("dcs:ui", "Template Builder, Template Approver, Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -766,8 +748,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("verify", func() {
 		Description("run policy, schema, and semantic validations; return findings.")
 		Meta("dcs:requirements", "DCS-IR-TR-03")
-		Meta("dcs:tr:components", "Semantic Hub")
-		Meta("dcs:ui", "Template Review")
 
 		Security(JWTAuth, func() {
 			Scope("Template Reviewer")
@@ -792,8 +772,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("approve", func() {
 		Description("mark template as approved, with optional decision notes.")
 		Meta("dcs:requirements", "DCS-IR-TR-05", "DCS-IR-TR-06")
-		Meta("dcs:tr:components", "Template Versioning")
-		Meta("dcs:ui", "Template Approver")
 
 		Security(JWTAuth, func() {
 			Scope("Template Approver")
@@ -818,8 +796,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("reject", func() {
 		Description("mark template as rejected, requiring reason field.")
 		Meta("dcs:requirements", "DCS-IR-TR-05")
-		Meta("dcs:tr:components", "")
-		Meta("dcs:ui", "Template Approver")
 
 		Security(JWTAuth, func() {
 			Scope("Template Approver")
@@ -844,8 +820,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("register", func() {
 		Description("Register a template with the Federated Catalogue integration. Two distinct modes depending on whether the given DID already exists locally: if it does, only its state is flipped to REGISTERED; if it does not, the template (identified by did + version) is pulled from the Federated Catalogue and imported as a brand-new local DID in state DRAFT.")
 		Meta("dcs:requirements", "DCS-IR-TR-07")
-		Meta("dcs:tr:components", "Contract Templates Storage & Provenance")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
@@ -869,8 +843,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("archive", func() {
 		Description("archive obsolete template.")
 		Meta("dcs:requirements", "DCS-IR-TR-07")
-		Meta("dcs:tr:components", "Contract Templates Storage & Provenance")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
@@ -894,8 +866,6 @@ var _ = Service("TemplateRepository", func() {
 	Method("audit", func() {
 		Description("retrieve audit history of template actions.")
 		Meta("dcs:requirements", "DCS-IR-TR-07", "DCS-IR-TR-08")
-		Meta("dcs:tr:components", "")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -920,7 +890,6 @@ var _ = Service("TemplateRepository", func() {
 	// POST /template/publish
 	Method("publish", func() {
 		Description("publish a local approved template to the XFSC Catalogue.")
-		Meta("dcs:tr:components", "Contract Templates Storage & Provenance")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")

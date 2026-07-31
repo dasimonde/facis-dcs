@@ -88,10 +88,12 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   let contractTemplateDid = ''
 
   // ---- Stage 1 [DCS-FR-TR-03 Semantic Hub for Schema Storage]: A publishes a
-  // non-trivial SHACL shape through its Semantic Hub so the vocabulary enters a
-  // running instance without a rebuild.
-  await test.step('Stage 1 [DCS-FR-TR-03]: A publishes a SHACL shape via the Semantic Hub UI', async () => {
+  // non-trivial SHACL shape through its Semantic Hub. Immutable shape pins are
+  // resolved locally at each workflow gate, so both participating DCS
+  // instances must host the same named version.
+  await test.step('Stage 1 [DCS-FR-TR-03]: both DCS instances publish the SHACL shape', async () => {
     await publishShapeOnInstance(a, shapeName)
+    await publishShapeOnInstance(b, shapeName)
   })
 
   // ---- Stage 2 [DCS-IR-TR-01 Template Builder / DCS-FR-TR-13 Template Creation]:

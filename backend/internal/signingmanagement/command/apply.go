@@ -919,9 +919,11 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		return nil, fmt.Errorf("signature application blocked: %w", err)
 	}
 
-	// A non-conformant contract must never be signed (DCS-FR-PACM-03) —
-	// submission already gates this, but signatures are the point of no
-	// return, so the invariant is re-checked here.
+	// A non-conformant contract must never be signed — submission already gates
+	// this, but signatures are the point of no return, so the invariant is
+	// re-checked here. This is the SHACL hub-conformance gate ADR-24 explicitly
+	// retains; it is not DCS-FR-PACM-03, which ADR-24 descopes (that is the
+	// autonomous *legal*-conformity assessment, which this check does not make).
 	if err := validation.RequireHubConformance(ctx, *data.ContractData); err != nil {
 		return nil, fmt.Errorf("signature application blocked: %w", err)
 	}
@@ -942,24 +944,31 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	}
 
 	// Stamp the "active" C2PA lifecycle assertion into the base PDF BEFORE
-	// signing it (update-then-sign), not after. The signed artefact must never
-	// be mutated again once it carries a PAdES signature: any subsequent
-	// incremental update to a referenced embedded-file object (the C2PA
-	// manifest attachment) — however carefully byte-range-preserving — is
-	// flagged as an unexplained/illegal modification by standards-compliant
-	// PAdES validators (Adobe Reader, pyHanko's diff-analysis), even though the
-	// CMS signature itself stays cryptographically valid. Stamping here means
-	// the signature commits to the PDF's FINAL lifecycle-bearing content, so
-	// exportcontract.go/verifycontract.go never need to touch it again for the
-	// SIGNED/ACTIVE C2PA state (DCS-OR-C2PA-004, DCS-FR-SM-16).
+	// signing it (update-then-sign), not after. Re-stamping a lifecycle
+	// assertion after signing rewrites a referenced embedded-file object (the
+	// C2PA manifest attachment), which standards-compliant PAdES validators
+	// (Adobe Reader, pyHanko's diff-analysis) flag as an unexplained
+	// modification even though the CMS signature itself stays cryptographically
+	// valid. Stamping here means the signature commits to the PDF's FINAL
+	// lifecycle-bearing content, so exportcontract.go/verifycontract.go never
+	// need to touch it again for the SIGNED/ACTIVE C2PA state.
 	//
-	// A PDF that already carries a PAdES signature is never stamped again — it
-	// was stamped before the FIRST signature, and any later mutation besides an
-	// incremental signature is an illegal modification: it would attach a C2PA
-	// manifest after the fact, breaking PDF/A-3 clause 6.8 (an embedded file no
-	// longer associated with the document). This is also the pass that re-embeds
-	// the machine-readable contract into the PDF, which is why the document above
-	// is only allowed to change when this runs.
+	// A PDF that already carries a PAdES signature is therefore never stamped
+	// again — it was stamped before the FIRST signature. This is also the pass
+	// that re-embeds the machine-readable contract into the PDF, which is why
+	// the document above is only allowed to change when this runs.
+	//
+	// This is NOT an "a signed PDF is never appended to again" rule, and must
+	// not be read as one: finalize() below appends a provenance-only manifest
+	// after signing (ADR-26), and further signatures are appended as incremental
+	// updates. DCS-OR-C2PA-002 requires exactly that ("It MUST use PDF
+	// incremental updates so existing legal signatures remain valid",
+	// verification method "Sign→append→verify test") and DCS-OR-C2PA-010
+	// requires appends not to break existing signatures. What is scoped here is
+	// only the lifecycle stamp. (Earlier revisions cited DCS-OR-C2PA-004 and
+	// DCS-FR-SM-16 for an absolute no-mutation rule; neither requirement
+	// addresses post-signature mutation — -004 is VC binding, SM-16 is applying
+	// the signature.)
 	rendererVersion := ""
 	if !artifactFrozen {
 		stampedPDF, rv, err := stampLifecycleForSigning(ctx, cmd.DID, *data.ContractData, basePDF, h.PDFCore, h.VCIssuer, h.IssuerDID)

@@ -1,3 +1,4 @@
+import type { XsdDatatype } from '@/models/dcs-jsonld'
 import type { DcsOperator, ParameterType, UiMetadata } from '@/models/semantic/facis-dcs-semantic'
 
 // ---- SemanticCondition ----
@@ -43,6 +44,10 @@ export interface SemanticParameterOperator {
    * { "operate": "GreaterThan", "value": "{{startDate}}" }
    */
   targets: unknown[]
+  /** @ids of contract fields the boundary reads from — a bound agreed while
+   *  the contract is filled in, resolved against the value those fields
+   *  currently hold rather than against a literal. */
+  targetRefs?: string[]
 }
 
 export interface SemanticConditionParameter {
@@ -98,6 +103,12 @@ export interface DomainFieldDefinition {
   /** The dcs:parameterName new requirement fields declare, derived from the field IRI's local name. */
   parameterName: string
   type: SemanticParameterType
+  /** The datatype the hub declares for the field (rdfs:range / sh:datatype).
+   *  It is what the emitted dcs:ContractField carries — `type` only picks the
+   *  input widget, and its vocabulary is narrower, so deriving the datatype
+   *  from it loses every declaration the widget set has no member for
+   *  (xsd:duration, xsd:dateTime) and comparisons then run on bytes. */
+  datatype?: XsdDatatype
   label: string
   /** The rdfs:domain class IRI grouping the field, when declared. */
   domain?: string

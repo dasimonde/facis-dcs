@@ -25,13 +25,15 @@ Feature: Semantic Hub — versioned schema storage, anchoring, and enforcement
     Then get http 200:Success code
     And the retrieved schema is version 1, active, of kind "shapes"
 
-  # The dereference target of the dcs: term IRIs: w3id.org/facis/dcs/...
-  # redirects (docs/w3id/facis) land on this public route.
-  Scenario: The genesis ontology is seeded and publicly resolvable
-    When the active "ontology" schema "facis-dcs" is retrieved from the Semantic Hub
+  # The dereference target of the dcst: taxonomy IRIs: w3id.org/facis/dcs/...
+  # redirects (docs/w3id/facis) land on this public route. The dcs: envelope
+  # terms have no ontology document; they dereference to the shapes graph
+  # above, which is what actually constrains them.
+  Scenario: The genesis domain-field ontology is seeded and publicly resolvable
+    When the active "ontology" schema "facis-sla" is retrieved from the Semantic Hub
     Then get http 200:Success code
     And the retrieved schema is version 1, active, of kind "ontology"
-    When the ontology "facis-dcs" is resolved from the Semantic Hub without authentication
+    When the ontology "facis-sla" is resolved from the Semantic Hub without authentication
     Then get http 200:Success code
 
   @REQ-semantic-catalog-grouped-constraints-AC6 @DCS-FR-TR-03

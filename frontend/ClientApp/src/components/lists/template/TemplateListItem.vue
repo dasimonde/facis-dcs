@@ -4,7 +4,7 @@ import { useTemplatePermissions } from '@template-repository/composables/useTemp
 import { ROUTES } from '@/router/router'
 import { TemplateState } from '@/types/contract-template-state'
 import { toProperCase } from '@/utils/string'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const props = defineProps<{
   template: PartialContractTemplate

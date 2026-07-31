@@ -1,0 +1,48 @@
+# Example values for the demo PID issuer — a third party to every DCS instance.
+#
+# A PID attests who a natural person is. The point of it is that somebody other
+# than the relying party says so: a DCS that issued the identity credential it
+# later accepts as proof of the signatory has attested nothing about them. So
+# this runs as its own Helm release with its own volume, its own key and its
+# own DID (did:web:<host>:pid-issuer), never as part of a `dcs` release.
+#
+# Install it ONCE for the whole demo, whichever cluster is convenient, the way a
+# national or QTSP issuer exists once for many relying parties. Every DCS
+# instance trusts it for `pid` and for nothing else — an identity document must
+# not grant access — so a second copy per instance would only make the demo
+# claim two identity authorities where a real deployment has one.
+#
+# It is a demo issuer: nobody proofs the person behind the credential, so the
+# credential it mints is not an EUDI PID and must not be presented as one.
+#
+# THIS FILE IS AN EXAMPLE. Placeholders:
+#   pid.example.org → the public hostname you publish this issuer under; it need
+#                     not be a DCS hostname, and it is clearer when it is not
+#   className       → your cluster's ingress class
+#   ingress.tls     → empty here; a reachable issuer needs a real certificate
+# It generates its own root CA and signing key into its volume on first boot.
+# That CA is what a DCS verifies the credential's x5c chain against, so after
+# the first boot fetch https://<host>/pid-issuer/pki/root-ca.pem and configure
+# it as each DCS's x5c trust anchor (see deployment/README.md).
+
+flowsDir: flows-pid-issuer
+
+# The flows build every URL they publish from this prefix, so it must match the
+# path the ingress routes.
+extraEnv:
+  - name: ISSUER_PATH_PREFIX
+    value: /pid-issuer
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/x-forwarded-prefix: /pid-issuer
+  hosts:
+    - host: pid.example.org
+      path: "/pid-issuer(/|$)(.*)"
+  pathType: ImplementationSpecific
+  tls: []
+
+# No flowImport block — see the note in values.issuer.yml.

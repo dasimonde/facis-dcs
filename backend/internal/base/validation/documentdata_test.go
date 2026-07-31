@@ -282,13 +282,14 @@ func permissionWithDuty(t *testing.T, duty any) datatype.JSON {
 }
 
 // TestNormalizeTemplateDataAcceptsPermissionWithNestedDuty proves a Permission
-// may carry a nested Duty fragment (ODRL IM §2.5): its own action plus a
+// may carry a nested Duty fragment (ODRL IM §2.6.5): its own action plus a
 // constraint on an existing data field, no parties of its own.
 func TestNormalizeTemplateDataAcceptsPermissionWithNestedDuty(t *testing.T) {
 	valid := permissionWithDuty(t, []any{
 		map[string]any{
 			"@type":       "odrl:Duty",
 			"odrl:action": map[string]any{"@id": "odrl:compensate"},
+			"dcs:prose":   map[string]any{"@id": "urn:uuid:block-clause-1"},
 			"odrl:constraint": []any{
 				map[string]any{
 					"@type":             "odrl:Constraint",
@@ -320,6 +321,7 @@ func TestNormalizeTemplateDataRejectsDutyConstraintOnUnknownField(t *testing.T) 
 		map[string]any{
 			"@type":       "odrl:Duty",
 			"odrl:action": map[string]any{"@id": "odrl:compensate"},
+			"dcs:prose":   map[string]any{"@id": "urn:uuid:block-clause-1"},
 			"odrl:constraint": []any{
 				map[string]any{
 					"@type":            "odrl:Constraint",
@@ -477,4 +479,160 @@ func TestPinSemanticBundleRecordsCompleteImmutableReferences(t *testing.T) {
 	require.Len(t, document["dcs:effectiveShapes"], 3)
 	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
 		document["dcterms:conformsTo"].(map[string]any)["@id"])
+}
+
+// A client that rebuilds the contract document from its editor state drops
+// every property it does not model, and the Semantic Hub pin is one of them —
+// which left the contract unable to say what it had been validated against.
+func TestCarrySemanticBundleRestoresThePinAClientReplacementDropped(t *testing.T) {
+	stored, err := datatype.NewJSON(map[string]any{
+		"@id":                 "did:web:example.test:contract",
+		"sh:shapesGraph":      map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		"dcs:effectiveShapes": []any{map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"}},
+		"dcterms:conformsTo":  map[string]any{"@id": "https://dcs.test/semantic/profile/facis.sla.basic?version=5"},
+		"dcs:policies":        []any{},
+	})
+	require.NoError(t, err)
+	replacement, err := datatype.NewJSON(map[string]any{
+		"@id":          "did:web:example.test:contract",
+		"dcs:policies": map[string]any{"@id": "did:web:example.test:contract#policy"},
+	})
+	require.NoError(t, err)
+
+	carried, err := CarrySemanticBundle(&stored, &replacement)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*carried, &document))
+	require.Equal(t, map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"}, document["sh:shapesGraph"])
+	require.Len(t, document["dcs:effectiveShapes"], 1)
+	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+		document["dcterms:conformsTo"].(map[string]any)["@id"])
+	// Only the pin travels; the replacement is otherwise the document.
+	require.Equal(t, map[string]any{"@id": "did:web:example.test:contract#policy"}, document["dcs:policies"])
+}
+
+// A federated template names the shape libraries its author modelled against.
+// Those anchors are what make it validate on a peer, so pinning keeps them —
+// under the peer's own hostname and at the peer's version — while the canonical
+// DCS envelope graph becomes this deployment's active one, and the effective
+// bundle covers both.
+func TestPinSemanticBundleKeepsDeclaredShapeLibraries(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@id": "did:web:example.test:contract",
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": "https://peer.test/semantic/shapes/facis-dcs?version=2"},
+			map[string]any{"@id": "https://peer.test/semantic/shapes/partner-library?version=9"},
+		},
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{"https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	require.Equal(t, []any{
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		map[string]any{"@id": "https://peer.test/semantic/shapes/partner-library?version=9"},
+	}, document["sh:shapesGraph"])
+	require.Equal(t, []any{
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		map[string]any{"@id": "https://peer.test/semantic/shapes/partner-library?version=9"},
+	}, document["dcs:effectiveShapes"])
+	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+		document["dcterms:conformsTo"].(map[string]any)["@id"])
+}
+
+// A template imported from a federated catalogue names the CANONICAL graph
+// under the publishing instance's hostname. That anchor resolves nowhere here,
+// so a contract derived from it takes this deployment's own canonical graph and
+// keeps only the libraries the upstream author modelled its data against.
+func TestPinSemanticBundleRepointsAnImportedTemplatesForeignCanonicalAnchor(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@id":            "did:web:osc.test:contract",
+		"sh:shapesGraph": map[string]any{"@id": "https://dcs-ionos.test/api/semantic/shapes/facis-dcs?version=1"},
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs-osc.test/api/semantic/context/facis-dcs?version=1",
+		"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
+		[]string{
+			"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
+			"https://dcs-osc.test/api/semantic/shapes/clause-catalog?version=1",
+		},
+		"https://dcs-osc.test/api/semantic/profile/facis.sla.basic?version=1",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	require.Equal(t,
+		map[string]any{"@id": "https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1"},
+		document["sh:shapesGraph"])
+
+	declared := DeclaredShapesGraphs(document)
+	effective, err := EffectiveShapeRefs(document)
+	require.NoError(t, err)
+	require.Equal(t, declared[0], effective[0])
+	require.Subset(t, effective, declared)
+}
+
+// Every anchor a contract declares has to be resolvable from the bundle the
+// workflow gate evaluates it against, so the two are derived together.
+func TestPinSemanticBundleAgreesWithTheWorkflowSnapshotInvariant(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@id": "did:web:example.test:contract",
+		"sh:shapesGraph": []any{
+			// Version-less: pins nothing, so the bundle's own entry supplies it.
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/customer-library"},
+			map[string]any{"@id": "https://peer.test/semantic/shapes/partner-library?version=9"},
+		},
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{
+			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
+			"https://dcs.test/semantic/shapes/customer-library?version=7",
+		},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+
+	declared := DeclaredShapesGraphs(document)
+	effective, err := EffectiveShapeRefs(document)
+	require.NoError(t, err)
+	require.Equal(t, VersionedShapeRef{Name: "facis-dcs", Version: 4}, declared[0])
+	require.Equal(t, declared[0], effective[0])
+	require.Subset(t, effective, declared)
+	require.Contains(t, effective, VersionedShapeRef{Name: "partner-library", Version: 9})
+	require.Contains(t, effective, VersionedShapeRef{Name: "clause-catalog", Version: 2})
+}
+
+// sh:shapesGraph is multi-valued, so the canonical anchor is found by name
+// among every declared anchor rather than assumed to be the sole value.
+func TestPinnedHubShapesVersionReadsArrayForm(t *testing.T) {
+	contract := map[string]any{
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/partner-library?version=9"},
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		},
+	}
+	require.Equal(t, 4, pinnedHubShapesVersion(contract, "facis-dcs"))
+	require.Equal(t, 9, pinnedHubShapesVersion(contract, "partner-library"))
+	require.Equal(t, 0, pinnedHubShapesVersion(contract, "absent-library"))
+
+	scalar := map[string]any{
+		"sh:shapesGraph": map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=7"},
+	}
+	require.Equal(t, 7, pinnedHubShapesVersion(scalar, "facis-dcs"))
 }

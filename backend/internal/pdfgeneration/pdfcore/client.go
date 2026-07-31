@@ -268,10 +268,10 @@ func (c *Client) Reanchor(ctx context.Context, pdf []byte, manifestURL string) (
 }
 
 // EmbedEvidence posts pdf + evidence to POST /evidence/embed and returns the
-// PDF with the evidence attached but NOT signed — the attach-only step a remote
-// DSS signer performs before it produces the PAdES signature (so the /ByteRange
-// covers the evidence). The default pdf-core signer embeds and signs in one
-// call (Sign); this seam splits the two for the DSS backend.
+// PDF with the evidence attached but NOT signed — the attach-only step before
+// an external PAdES signer (wallet/QTSP/DSS) produces the signature, so the
+// signature's /ByteRange covers the evidence (embed-first-sign-second,
+// DCS-FR-SM-08). pdf-core holds no key and never signs.
 func (c *Client) EmbedEvidence(ctx context.Context, pdf, evidence []byte) (embedded []byte, err error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -353,10 +353,31 @@ type VerifyResult struct {
 	// issuer. Whether the credential's proof VERIFIES is decided by the caller,
 	// against the issuer's published assertion key (provenance.CredentialVerifier).
 	VCPresent bool
+	// JSONLDHash, BasePDFHash and StoredBasePDFHash are the SHA-256 digests (hex)
+	// pdf-core reached its Match verdict on: the machine-readable payload embedded
+	// in the PDF, the deterministic re-render produced from it, and the stored
+	// bytes that re-render was compared against. The two PDF digests are equal
+	// exactly when the document reproduces, so on a mismatch they name which side
+	// diverged. Both are taken over pdf-core's COSE-zeroed normalization — the one
+	// the comparison itself uses, since a fresh compile carries a fresh randomized
+	// claim signature.
+	//
+	// pdf-core reports them on a 409 content mismatch too, so they are populated
+	// alongside the returned error; they are empty only when it could not compute
+	// them at all.
+	JSONLDHash        string
+	BasePDFHash       string
+	StoredBasePDFHash string
 }
 
+// verifyBodyLimit caps the /verify response read. The body carries a
+// base64-encoded witness PDF alongside the credential bytes, so it is sized for a
+// document rather than for a status line.
+const verifyBodyLimit = 64 << 20
+
 // Verify posts pdf to POST /verify and returns the structured verification result.
-// Returns an error on non-2xx (including 409 content-mismatch).
+// Returns an error on non-2xx (including 409 content-mismatch); on a mismatch the
+// returned result still carries the digests pdf-core refused on.
 func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/verify", bytes.NewReader(pdf))
@@ -370,25 +391,44 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 		return VerifyResult{}, fmt.Errorf("pdf-core verify: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := checkStatus(resp); err != nil {
-		return VerifyResult{}, err
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, verifyBodyLimit))
+	if err != nil {
+		return VerifyResult{}, fmt.Errorf("pdf-core verify read: %w", err)
 	}
+
 	var body struct {
 		Match              bool   `json:"match"`
 		C2PASignatureValid bool   `json:"c2pa_signature_valid"`
 		C2PASignatureError string `json:"c2pa_signature_error"`
 		VCBytes            string `json:"vc_bytes"`
 		VCPresent          bool   `json:"vc_present"`
+		JSONLDHash         string `json:"jsonld_hash"`
+		BasePDFHash        string `json:"base_pdf_hash"`
+		StoredBasePDFHash  string `json:"stored_base_pdf_hash"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return VerifyResult{}, fmt.Errorf("pdf-core verify decode: %w", err)
-	}
+	// A non-2xx body is pdf-core's Error schema carrying those same digest fields,
+	// so it is decoded before the status is turned into an error. What decodes is
+	// kept, what does not is absent, and the status stays the verdict either way.
+	decodeErr := json.Unmarshal(raw, &body)
+
 	result := VerifyResult{
-		Match:              body.Match,
-		C2PASignatureValid: body.C2PASignatureValid,
-		C2PASignatureError: body.C2PASignatureError,
-		VCPresent:          body.VCPresent,
+		JSONLDHash:        body.JSONLDHash,
+		BasePDFHash:       body.BasePDFHash,
+		StoredBasePDFHash: body.StoredBasePDFHash,
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return result, fmt.Errorf("pdf-core %s: status %d: %s",
+			resp.Request.URL.Path, resp.StatusCode, truncate(strings.TrimSpace(string(raw)), 512))
+	}
+	if decodeErr != nil {
+		return VerifyResult{}, fmt.Errorf("pdf-core verify decode: %w", decodeErr)
+	}
+
+	result.Match = body.Match
+	result.C2PASignatureValid = body.C2PASignatureValid
+	result.C2PASignatureError = body.C2PASignatureError
+	result.VCPresent = body.VCPresent
 	if body.VCBytes != "" {
 		decoded, err := base64.StdEncoding.DecodeString(body.VCBytes)
 		if err != nil {
@@ -568,6 +608,14 @@ func checkStatus(resp *http.Response) error {
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	return fmt.Errorf("pdf-core %s: status %d: %s", resp.Request.URL.Path, resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
+// truncate keeps an error message readable when the body it quotes is not.
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit]
 }
 
 // writeField writes data as a plain multipart form field.

@@ -172,6 +172,10 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			return nil, fmt.Errorf("invalid template type from Federated Catalogue: %w", err)
 		}
 
+		if err := requireDeclaredShapeLibraries(ctx, h.DB, templateData); err != nil {
+			return nil, err
+		}
+
 		tx, err := h.DB.BeginTxx(ctx, nil)
 		if err != nil {
 			return nil, fmt.Errorf("could not start transaction: %w", err)

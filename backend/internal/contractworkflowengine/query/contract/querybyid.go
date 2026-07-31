@@ -202,10 +202,28 @@ func callerMayReadContract(query GetByIDQry, data *db.Contract) bool {
 }
 
 // CallerMayReadContract is the party read-scoping rule shared by direct
-// retrieval and the bundle exporter's related/ member filter: retrievedBy is
-// the caller's organization, localPeer this instance's own peer DID (adopted
-// contracts whose Origin is a different peer are readable by construction),
-// and privileged org-independent roles bypass the party check.
+// retrieval and the bundle exporter's related/ member filter.
+//
+// A party has two identity keys and the rule uses both, because neither
+// implies the other:
+//
+//   - WHICH INSTANCE — the did:web. localPeer is this deployment's own peer
+//     DID; a contract whose Origin is a different peer was adopted from that
+//     peer and is readable here by construction, so the organization check
+//     never applies to it. This is the only key that crosses instances.
+//   - WHICH ORGANIZATION WITHIN IT — retrievedBy, the caller's OID4VP
+//     organization claim, matched against the creating organization and the
+//     dcs:legalName of the contract's party nodes. Several organizations
+//     share one instance and must not read each other's contracts, which is
+//     what the party read-scoping scenarios in features/03_contract_creation
+//     exercise: two callers of this same instance, same roles, differing only
+//     in that claim.
+//
+// Collapsing to did:web alone would make every organization on an instance a
+// reader of every contract on it. Collapsing to organization alone would
+// leave adopted contracts unreadable, since a peer's organizations are not
+// this instance's. Privileged org-independent roles bypass the organization
+// half only.
 func CallerMayReadContract(retrievedBy string, userRoles userrole.UserRoles, localPeer string, data *db.Contract) bool {
 	if localPeer != "" && data.Origin != "" && data.Origin != localPeer {
 		return true
@@ -226,9 +244,15 @@ func CallerMayReadContract(retrievedBy string, userRoles userrole.UserRoles, loc
 	return false
 }
 
-// contractParties reads the legal names of the typed dcs:CompanyParty
-// nodes under the contract document's top-level "dcs:parties". Absence
-// simply means no additional parties beyond the creating organization.
+// contractParties reads the organizations named by the typed dcs:CompanyParty
+// nodes under the contract document's top-level "dcs:parties". Absence simply
+// means no additional parties beyond the creating organization.
+//
+// A node contributes only if it carries dcs:legalName. Nodes keyed by did:web
+// carry it too since bindOriginatorParty stamps both keys, so the originator
+// is visible here; a node with a role but no name is an attribution node for
+// a party this instance cannot resolve to a local organization, and it grants
+// nobody read access.
 func contractParties(raw *datatype.JSON) []string {
 	if raw == nil {
 		return nil

@@ -27,9 +27,15 @@ export const ODRL_RULE_TYPES: { type: 'odrl:Permission' | 'odrl:Prohibition' | '
 
 /**
  * The full ODRL 2.2 core action vocabulary, plus the DCS-profile action for
- * data-field value obligations. An action is recorded, not evaluated, by the
- * policy checks; any further IRI (a profile action) is still reachable through
- * the clause builder's custom-IRI escape.
+ * data-field value obligations.
+ *
+ * This list is ENFORCED, not merely recorded: the Semantic Hub clause catalog
+ * constrains odrl:action with sh:in, so an action offered here but absent from
+ * dcs:odrlActionVocabulary (backend/internal/semantichub/assets/
+ * facis-dcs-clause-catalog.ttl) yields a template from which no valid contract
+ * can be derived. The two lists are pinned equal by a Go parity test; keep them
+ * in step when adding a profile action. For the same reason the clause
+ * builder's custom-IRI escape only carries IRIs that vocabulary also permits.
  */
 export const ODRL_ACTIONS: OdrlTerm[] = [
   { id: 'odrl:use', label: 'use' },
@@ -119,7 +125,11 @@ export const ODRL_CONTEXT_OPERANDS: OdrlTerm[] = [
   { id: 'odrl:version', label: 'version' },
 ]
 
-/** The full ODRL 2.2 Constraint operator vocabulary (relational + set + type). */
+/**
+ * The full ODRL 2.2 Constraint operator vocabulary (relational + set + type) —
+ * every one evaluated server-side by the policy engine and permitted by the
+ * clause catalog's odrl:operator sh:in, which the parity test holds equal.
+ */
 export const ODRL_OPERATORS: OdrlTerm[] = [
   { id: 'odrl:eq', label: 'equal to' },
   { id: 'odrl:neq', label: 'not equal to' },

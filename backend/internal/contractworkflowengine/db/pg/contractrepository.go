@@ -445,13 +445,30 @@ func (r *PostgresContractRepo) CountSignedSignatures(ctx context.Context, tx *sq
 	return count, nil
 }
 
-func (r *PostgresContractRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error) {
+func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error) {
 	var dids []string
-	// COALESCE: an empty Go slice binds as SQL NULL, and "did <> ALL (NULL)"
-	// is NULL — which would filter out every row and stall the sweep.
+	// The superseded arm hashes contract_data exactly as the regenerator and the
+	// ship gate hash it in Go: the jsonb column rendered to its text form, then
+	// SHA-256, then hex. A contract with no data hashes the empty string on both
+	// sides. Should the two ever disagree, the sweep over-selects and
+	// appendC2PA — which recomputes the hash itself and short-circuits when
+	// nothing changed — declines the work for the cost of two reads; it can
+	// never re-render a document that is already current.
+	//
+	// COALESCE on the exclude list: an empty Go slice binds as SQL NULL, and
+	// "did <> ALL (NULL)" is NULL — which would filter out every row and stall
+	// the sweep.
 	err := tx.SelectContext(ctx, &dids,
 		`SELECT c.did FROM contracts c
-		 WHERE (c.pdf_ipfs_cid IS NULL OR c.pdf_ipfs_cid = '')
+		 WHERE (
+		         (c.pdf_ipfs_cid IS NULL OR c.pdf_ipfs_cid = '')
+		      OR (
+		             COALESCE(c.pdf_c2pa_state, '') IN ('', 'draft')
+		         AND COALESCE(c.pdf_payload_hash, '') <> ''
+		         AND c.pdf_payload_hash <> encode(
+		                 sha256(convert_to(COALESCE(c.contract_data::text, ''), 'UTF8')), 'hex')
+		         )
+		       )
 		   AND NOT EXISTS (
 		       SELECT 1 FROM contract_signatures s
 		        WHERE s.contract_did = c.did AND s.status = 'SIGNED')

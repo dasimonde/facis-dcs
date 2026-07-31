@@ -92,7 +92,23 @@ func currentSHACLShapesRef() string {
 }
 
 // PinSemanticBundle stamps the immutable Semantic Hub bundle selected while a
-// new artifact is created.
+// new artifact is created: the hub context, the shapes graphs the artifact is
+// validated against, and the validation profile, each at an exact version that
+// no later activation or rollback moves.
+//
+// The canonical DCS envelope graph is this deployment's own, so the new
+// artifact gets the version active at its creation — the same rule the hub
+// context anchor above follows, and what makes an activation change what newly
+// created contracts are checked against. The shape LIBRARIES the document
+// declares are the opposite case: they are the authoring choice a federated
+// template carries, naming the graphs its author modelled its data against, and
+// they are what must validate it on a peer. Those are kept exactly as declared,
+// at the version declared (ADR-8 pin, ADR-23 libraries).
+//
+// dcs:effectiveShapes is derived from the result, so the two can never
+// disagree: it holds the selected bundle plus every library the document
+// declares beyond it, which is what makes a declared library resolve even when
+// this hub does not have it active.
 func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, effectiveShapeRefs []string, profileRef string) (*datatype.JSON, error) {
 	if raw == nil || strings.TrimSpace(contextRef) == "" || strings.TrimSpace(canonicalShapesRef) == "" ||
 		len(effectiveShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
@@ -115,13 +131,117 @@ func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string
 		contextEntries = append(contextEntries, current)
 	}
 	data["@context"] = contextEntries
-	data["sh:shapesGraph"] = map[string]any{"@id": canonicalShapesRef}
-	refs := make([]any, 0, len(effectiveShapeRefs))
-	for _, ref := range effectiveShapeRefs {
-		refs = append(refs, map[string]any{"@id": ref})
+	libraries := declaredShapeLibraryAnchors(data["sh:shapesGraph"], canonicalShapesRef, effectiveShapeRefs)
+	if len(libraries) == 0 {
+		data["sh:shapesGraph"] = map[string]any{"@id": canonicalShapesRef}
+	} else {
+		graphs := make([]any, 0, len(libraries)+1)
+		graphs = append(graphs, map[string]any{"@id": canonicalShapesRef})
+		for _, library := range libraries {
+			graphs = append(graphs, map[string]any{"@id": library})
+		}
+		data["sh:shapesGraph"] = graphs
 	}
-	data["dcs:effectiveShapes"] = refs
+	data["dcs:effectiveShapes"] = effectiveShapesBundle(effectiveShapeRefs, libraries)
 	data["dcterms:conformsTo"] = map[string]any{"@id": profileRef}
+	return encodeDocumentData(data)
+}
+
+// declaredShapeLibraryAnchors returns the anchors of the shape libraries a
+// document declares beside the canonical graph, in declaration order and as the
+// document wrote them. An anchor that names no version pins nothing, so it is
+// resolved to the bundle's entry of the same name; one this hub has no entry for
+// names a graph that resolves nowhere and is dropped rather than pinned.
+func declaredShapeLibraryAnchors(declared any, canonicalShapesRef string, bundleRefs []string) []string {
+	canonicalName, ok := anchorShapesName(canonicalShapesRef)
+	if !ok {
+		return nil
+	}
+	bundleByName := map[string]string{}
+	for _, ref := range bundleRefs {
+		if name, ok := anchorShapesName(ref); ok {
+			bundleByName[name] = ref
+		}
+	}
+	var libraries []string
+	for _, declaration := range declaredShapesGraphDeclarations(declared) {
+		if declaration.Name == canonicalName {
+			continue
+		}
+		anchor := declaration.IRI
+		if declaration.Version <= 0 {
+			active, registered := bundleByName[declaration.Name]
+			if !registered {
+				continue
+			}
+			anchor = active
+		}
+		libraries = append(libraries, anchor)
+	}
+	return libraries
+}
+
+// effectiveShapesBundle lists the selected bundle first — its canonical entry
+// leads, which is where the gate and validateAgainstShapeSource read the
+// canonical graph — followed by every declared library the bundle does not
+// already carry at that exact version.
+func effectiveShapesBundle(bundleRefs, libraries []string) []any {
+	refs := make([]any, 0, len(bundleRefs)+len(libraries))
+	pinned := map[shapesGraphAnchor]bool{}
+	for _, ref := range bundleRefs {
+		refs = append(refs, map[string]any{"@id": ref})
+		if name, ok := anchorShapesName(ref); ok {
+			pinned[shapesGraphAnchor{Name: name, Version: anchorVersion(ref)}] = true
+		}
+	}
+	for _, library := range libraries {
+		name, ok := anchorShapesName(library)
+		if !ok {
+			continue
+		}
+		anchor := shapesGraphAnchor{Name: name, Version: anchorVersion(library)}
+		if pinned[anchor] {
+			continue
+		}
+		pinned[anchor] = true
+		refs = append(refs, map[string]any{"@id": library})
+	}
+	return refs
+}
+
+// semanticBundleProperties are the document properties PinSemanticBundle owns.
+// They record which hub assets an artifact was produced against, so they are
+// written once at production time and are never the client's to restate.
+var semanticBundleProperties = []string{"sh:shapesGraph", "dcs:effectiveShapes", "dcterms:conformsTo"}
+
+// CarrySemanticBundle restores onto a replacement document the Semantic Hub
+// bundle the stored document is pinned to. Every command that lets a client
+// replace the document wholesale (a save, a submitted draft, a negotiated
+// redline) receives one the client assembled from its editor state, and that
+// document models none of these properties — so without this the contract loses
+// the bundle it was created under, and with it the ability to prove what it was
+// validated against.
+func CarrySemanticBundle(stored, replacement *datatype.JSON) (*datatype.JSON, error) {
+	pinned, err := decodeDocumentData(stored)
+	if err != nil {
+		return nil, err
+	}
+	data, err := decodeDocumentData(replacement)
+	if err != nil {
+		return nil, err
+	}
+	carried := false
+	for _, property := range semanticBundleProperties {
+		value, exists := pinned[property]
+		if !exists {
+			continue
+		}
+		data[property] = value
+		carried = true
+	}
+	if !carried {
+		return replacement, nil
+	}
 	return encodeDocumentData(data)
 }
 
@@ -996,7 +1116,7 @@ func compactConstraintLeaves(constraint map[string]any) []map[string]any {
 }
 
 // dutyConstraints collects the constraint nodes carried by a rule's duties and,
-// recursively, their consequence duties (ODRL IM §2.5) — so a duty constraint
+// recursively, their consequence duties (ODRL IM §2.6.6) — so a duty constraint
 // referencing a nonexistent data field is caught wherever it nests.
 func dutyConstraints(raw any) []map[string]any {
 	out := []map[string]any{}
@@ -1153,10 +1273,10 @@ func validateODRLRuleShape(rule map[string]any) error {
 	if strings.TrimSpace(proseID) == "" {
 		return errors.New("rule is missing dcs:prose — every machine-readable rule must reference the human-readable clause it is backed by")
 	}
-	// A Permission may carry duties (ODRL IM §2.5): obligations the assignee
+	// A Permission may carry duties (ODRL IM §2.6.5): obligations the assignee
 	// must fulfil to exercise it. Each is a fragment — its own odrl:action (and
 	// optional constraints/consequence), inheriting the enclosing rule's
-	// parties, so it declares no assigner/assignee/target/prose of its own.
+	// parties, so it declares no assigner/assignee/target of its own.
 	if rawDuty, hasDuty := rule["odrl:duty"]; hasDuty {
 		if compactTerm(fmt.Sprint(rule["@type"])) != "Permission" {
 			return errors.New("odrl:duty may only be attached to a Permission (a duty nests under the rule it obliges); a policy-level Duty belongs under odrl:obligation")
@@ -1171,9 +1291,10 @@ func validateODRLRuleShape(rule map[string]any) error {
 }
 
 // validateODRLDutyFragment validates a Duty nested under a Permission (ODRL IM
-// §2.5). Unlike a top-level rule, a duty fragment inherits its parties from the
-// enclosing rule, so it needs only an odrl:action; its consequence is itself a
-// duty, validated the same way (recursively).
+// §2.6.5). A duty fragment inherits its parties from the enclosing rule, so it
+// needs an odrl:action and the prose backing every odrl:Duty owes (the hub's
+// dcs:OdrlDutyProseShape refuses a document at submit otherwise); its
+// consequence is itself a duty, validated the same way (recursively).
 func validateODRLDutyFragment(duty map[string]any) error {
 	if t := compactTerm(fmt.Sprint(duty["@type"])); t != "" && t != "Duty" {
 		return fmt.Errorf("a duty must be an odrl:Duty, got %v", duty["@type"])
@@ -1184,6 +1305,10 @@ func validateODRLDutyFragment(duty map[string]any) error {
 	}
 	if items, ok := action.([]any); ok && len(items) == 0 {
 		return errors.New("duty must declare at least one odrl:action")
+	}
+	prose, _ := duty["dcs:prose"].(map[string]any)
+	if proseID, _ := prose["@id"].(string); strings.TrimSpace(proseID) == "" {
+		return errors.New("duty is missing dcs:prose — a nested duty is a machine-readable rule too, so it must reference the human-readable clause it is backed by")
 	}
 	if rawConsequence, ok := duty["odrl:consequence"]; ok {
 		for index, consequence := range policyConstraints(rawConsequence) {

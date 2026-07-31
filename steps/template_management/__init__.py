@@ -20,3 +20,6 @@ from . import template_notification_steps  # noqa: F401
 from . import template_provenance_steps  # noqa: F401
 from . import document_number_removal_steps  # noqa: F401
 from . import realistic_contract_field_artifact_flow_steps  # noqa: F401
+# Last: this module reaches into the peer-trust, deployment and contract
+# service packs, several of which import back into this package.
+from . import sla_federation_steps  # noqa: F401

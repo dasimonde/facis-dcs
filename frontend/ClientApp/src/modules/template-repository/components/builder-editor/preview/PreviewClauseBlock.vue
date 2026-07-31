@@ -7,10 +7,11 @@ import {
   parseSegmentsFromContent,
 } from '@template-repository/composables/useClauseTextChips'
 import { semanticParameterLabel } from '@template-repository/utils/semantic-parameter-label'
+import { findVerificationError as findValueVerificationError } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 import { PREVIEW_NEWLINE_SPAN_CLASS } from './preview-classes'
 import PreviewParamInput from './PreviewParamInput.vue'
 import PreviewTextBlock from './PreviewTextBlock.vue'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { DcsContentSegment } from '@/models/dcs-jsonld'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -95,12 +96,7 @@ function findSemanticValue(conditionId: string, parameterName: string): string |
 }
 
 function findVerificationError(conditionId: string, parameterName: string) {
-  if (!props.verificationResult) return null
-  return (
-    props.verificationResult.errors.find((item) => {
-      return item.blockId === props.blockId && item.conditionId === conditionId && item.parameterName === parameterName
-    }) ?? null
-  )
+  return findValueVerificationError(props.verificationResult, props.blockId, conditionId, parameterName)
 }
 </script>
 

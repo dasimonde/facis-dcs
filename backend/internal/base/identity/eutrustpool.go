@@ -56,12 +56,12 @@ type tsl struct {
 //
 // Typical usage:
 //
-//	tp := base.NewEUTrustPool()
+//	tp := identity.NewEUTrustPool()
 //	if err := tp.Refresh(ctx); err != nil { ... }   // initial build
-//	go tp.StartAutoRefresh(ctx, base.DefaultRefreshInterval)
+//	go tp.StartAutoRefresh(ctx, identity.DefaultRefreshInterval)
 //
 //	// per verification:
-//	err := doc.VerifyEIDASCertificate(tp.Pool())
+//	err := doc.VerifyEIDASCertificate(tp)
 type EUTrustPool struct {
 	mu          sync.RWMutex
 	pool        *x509.CertPool
@@ -77,20 +77,13 @@ func NewEUTrustPool() *EUTrustPool {
 }
 
 // Pool returns the current certificate pool, or nil if the pool has never
-// been successfully refreshed. Note that passing nil to
-// VerifyEIDASCertificate means "system trust store", which is almost
-// certainly NOT what you want in an eIDAS context — check Ready() first.
+// been successfully refreshed. With a nil pool VerifyEIDASCertificate skips
+// both chain validation and the eIDAS QcCompliance check entirely — only
+// hostname and JWK match remain, which is not an eIDAS validation.
 func (t *EUTrustPool) Pool() *x509.CertPool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.pool
-}
-
-// Ready reports whether the pool has been populated at least once.
-func (t *EUTrustPool) Ready() bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.pool != nil
 }
 
 // Stats returns the number of certificates in the pool, the time of the

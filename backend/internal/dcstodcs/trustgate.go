@@ -60,9 +60,9 @@ func (e *GateError) Unwrap() error { return e.Err }
 // pdpTimeout bounds every HTTP call the trust gate makes (policy-endpoint
 // consult and agreement-credential/did.json fetch): http.DefaultClient has no
 // timeout, so a policy endpoint or peer that accepts the connection and then
-// never responds (ADR-19 AC10's "silent" fail-closed simulation, or a
-// genuinely wedged peer) would otherwise hang the ship/receive attempt
-// indefinitely instead of denying — fail-closed requires eventually failing.
+// never responds — a silently wedged policy endpoint, or a wedged peer —
+// would otherwise hang the ship/receive attempt indefinitely instead of
+// denying, and ADR-19's fail-closed gate requires eventually failing.
 const pdpTimeout = 10 * time.Second
 
 // TrustGate implements ADR-19's federation trust gate — the third and final
@@ -262,9 +262,8 @@ func RecordDenialIncident(ctx context.Context, db *sqlx.DB, contractDID string, 
 // (contract DID, peer DID, direction) was already recorded — a terminal
 // policy-endpoint denial
 // (PolicyFailure) can be reached more than once for the same underlying
-// interaction (ADR-19 AC10: Offer and PDF_REGENERATED both firing a ship
-// attempt for the same offer, milliseconds apart), and only the first must
-// raise an incident.
+// interaction (Offer and PDF_REGENERATED both firing a ship attempt for the
+// same offer, milliseconds apart), and only the first must raise an incident.
 func RecordDenialIncidentTxDeduped(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, contractDID string, direction Direction, gateErr *GateError) error {
 	reporter := qry.TrustGateDenialReporter{DB: db}
 	return reporter.HandleTxDeduped(ctx, tx, denialQry(contractDID, direction, gateErr))

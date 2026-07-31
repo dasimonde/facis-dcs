@@ -163,17 +163,25 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	}
 
 	// A save replaces the document with the one the client assembled from its
-	// editor state, which carries no party nodes and no signature fields — the
-	// client neither authors nor models them. Put them back before the row is
-	// written, so a document that a save stripped is never stored without the
-	// nodes a later signature is attributed to (SeedPartiesAndSignatureFields).
-	if cmd.ContractData != nil && cmd.ContractData.IsNotNullValue() && oldData.Responsible != nil {
-		seeded, changed, err := SeedPartiesAndSignatureFields(*cmd.ContractData, oldData.Responsible.GetParties())
+	// editor state, which carries no party nodes, no signature fields and no
+	// Semantic Hub pin — the client neither authors nor models them. Put them
+	// back before the row is written, so a document that a save stripped is
+	// never stored without the nodes a later signature is attributed to
+	// (SeedPartiesAndSignatureFields) or without the bundle it was created
+	// against (CarrySemanticBundle).
+	if cmd.ContractData != nil && cmd.ContractData.IsNotNullValue() {
+		cmd.ContractData, err = validation.CarrySemanticBundle(oldData.ContractData, cmd.ContractData)
 		if err != nil {
-			return fmt.Errorf("could not seed contract parties and signature fields: %w", err)
+			return fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
 		}
-		if changed {
-			cmd.ContractData = &seeded
+		if oldData.Responsible != nil {
+			seeded, changed, err := SeedPartiesAndSignatureFields(*cmd.ContractData, oldData.Responsible.GetParties())
+			if err != nil {
+				return fmt.Errorf("could not seed contract parties and signature fields: %w", err)
+			}
+			if changed {
+				cmd.ContractData = &seeded
+			}
 		}
 	}
 

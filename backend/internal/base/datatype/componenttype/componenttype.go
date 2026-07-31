@@ -39,7 +39,7 @@ func NewComponentType(s string) (ComponentType, error) {
 	return flag, nil
 }
 
-// IsValid checks if the ComponentType is a valid role
+// IsValid reports whether the value is one of the declared ComponentType values.
 func (f ComponentType) IsValid() bool {
 	upper := ComponentType(strings.ToUpper(string(f)))
 	return validType[upper]

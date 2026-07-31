@@ -325,6 +325,141 @@ script will attempt a fresh install that collides with the existing objects.
 Either let `helm upgrade --install` adopt them deliberately, or uninstall and
 reinstall in a maintenance window. Plan this rather than discovering it.
 
+## Credential issuers
+
+A `dcs` release contains no credential issuer. The two credentials a signatory
+presents — the Power of Attorney that authorizes them to sign for their
+organization, and the person identification credential (PID) that says who they
+are — come from OID4VCI issuers deployed as **separate Helm releases** of the
+`orce` subchart, each with its own volume, its own key and its own DID. The
+chart ships example values for all three:
+
+| Release | Values file | Issues | Installed |
+|---|---|---|---|
+| `dcs-issuer` | `values.issuer.yml` | Power of Attorney (`urn:dcs:poa:v1`) | beside the first DCS instance, under its hostname |
+| `dcs-issuer` | `values.issuer2.yml` | the same, for the second instance | beside the second DCS instance, in its namespace |
+| `dcs-pid-issuer` | `values.pid-issuer.yml` | demo PID (`urn:dcs:pid:demo:v1`) | **once** for the whole deployment |
+
+`flowsDir` selects which flow set a release runs (`flows-issuer` /
+`flows-pid-issuer`, both under `charts/orce/`); a release serves one set, not
+both, because they claim overlapping routes.
+
+### Why the PID issuer is its own release, and only one of them
+
+A PID attests who a natural person is, and the value of that attestation is
+that somebody other than the relying party makes it. A DCS that issued the
+identity credential it later accepts as proof of its signatory has attested
+nothing. So the PID issuer is a third party to *every* DCS instance: never part
+of a `dcs` release, and installed once for the whole demo the way a national or
+QTSP issuer exists once for many relying parties. Each DCS trusts it for `pid`
+and for nothing else — an identity document must not grant access.
+
+The Power of Attorney issuer is the opposite case: it speaks *for* one
+organization about who may sign on its behalf, so each instance runs its own.
+
+The demo PID issuer proofs nobody. Its credential is not an EUDI PID and must
+not be presented as one.
+
+### What you must supply
+
+The repo gives you the shape of an issuer, never an identity:
+
+- **Your own hostnames.** Every host in the example values is a placeholder
+  (`dcs.example.org`, `dcs-b.example.org`, `pid.example.org`), as are the
+  ingress class and the empty `tls` list. A credential issuer is published under
+  the hostname of the DCS instance it serves, so its DID resolves as
+  `did:web:<host>:issuer`.
+- **Your own keys and DIDs.** Each issuer generates its root CA and signing key
+  into its own volume on first boot and publishes them under its path prefix at
+  `pki/root-ca.pem`, `pki/jwks.json` and `.well-known/did.json`. No key material
+  is in this repository, and a clone is therefore not deployable as-is.
+- **Your own trust document per DCS instance** (below). Nothing derives it
+  automatically: it names issuers by identifier, which only exist once the
+  issuers are running.
+
+### Order and commands
+
+Issuers first — the trust document a `dcs` release mounts quotes each issuer's
+published identifier and key, which do not exist until the issuer has booted.
+
+```bash
+# 1. the issuer beside each DCS instance (in that instance's namespace/cluster)
+helm install dcs-issuer ./deployment/helm/charts/orce \
+  -n <namespace> -f ./deployment/helm/values.issuer.yml
+
+# 2. the PID issuer — once, wherever it is convenient to publish it
+helm install dcs-pid-issuer ./deployment/helm/charts/orce \
+  -n <namespace> -f ./deployment/helm/values.pid-issuer.yml
+
+# 3. read back what they published (per issuer)
+curl https://<host>/issuer/.well-known/did.json
+curl https://<host>/issuer/pki/jwks.json
+curl https://<pid-host>/pid-issuer/pki/root-ca.pem
+```
+
+Then write each DCS instance's trust document, create it as a ConfigMap, and
+only afterwards install or upgrade the `dcs` release pointing at it:
+
+```bash
+kubectl create configmap dcs-oid4vp-trust -n <namespace> --from-file=trust.json=<your file>
+```
+
+```yaml
+oid4vp:
+  trust:
+    existingConfigMap: dcs-oid4vp-trust
+    # the PID's x5c chain is verified against the PID issuer's root CA; mount
+    # that PEM via the chart's `volumes`/`volumeMounts` values and point here
+    x5cAnchorsPath: /etc/dcs/oid4vp-x5c/root-ca.pem
+```
+
+### The trust document
+
+Trust is granted per purpose (ADR-31): `login` may grant a session here, `peer`
+lets a credential be verified in a signing ceremony, `pid` may attest a natural
+person. Each issuer is listed **twice** — under its `did:web:` identifier, whose
+key is resolved live from the issuer's own DID document, and under the `https:`
+identifier the issuer actually puts in `iss`, which is not `did:web`-resolvable
+and therefore carries its key by the mechanism you choose (`jwks` with the keys
+bundled, or `x5c` to verify a presented chain against the anchors above).
+
+```json
+{
+  "vcts": ["urn:dcs:poa:v1", "urn:dcs:pid:demo:v1"],
+  "peer_dynamic": false,
+  "issuers": {
+    "did:web:dcs.example.org:issuer": {
+      "purposes": ["login", "peer"],
+      "organizations": ["did:web:dcs.example.org"],
+      "mechanism": "did:web"
+    },
+    "https://dcs.example.org/issuer": {
+      "purposes": ["login", "peer"],
+      "organizations": ["did:web:dcs.example.org"],
+      "mechanism": "jwks",
+      "jwks": { "keys": [ "<the issuer's published JWKS>" ] }
+    },
+    "did:web:pid.example.org:pid-issuer": { "purposes": ["pid"], "mechanism": "x5c" },
+    "https://pid.example.org/pid-issuer": { "purposes": ["pid"], "mechanism": "x5c" }
+  }
+}
+```
+
+An instance grants `login`/`peer` to its **own** credential issuer: `peer` is
+what a signing ceremony checks the local signatory's Power of Attorney against,
+so granting it to another party's issuer would let that party authorize itself
+off a document it publishes about itself. Whether a counterparty is dealt with
+at all is the ADR-19 trust gate's decision, not a purpose granted here. The PID
+issuer appears in both instances' documents, with `pid` only.
+
+Leaving `existingConfigMap` unset makes the release fall back to the dev fixture
+baked into the image (`backend/config/oid4vp/trust.dev.json`), whose issuer keys
+are committed to this repository. The chart refuses to render in that case
+unless the release also declares `DCS_ALLOW_DEV_TRUST=true`, which belongs to a
+dev or CI stack only.
+
+---
+
 ## Production Deployment
 
 Backup and restore procedures — including how backup retention interacts with GDPR key-shredding erasure — are specified in the [backup integration guide](../docs/backup-integration-guide.md).

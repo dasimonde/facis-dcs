@@ -270,3 +270,60 @@ func TestRunVerifyReportsNoC2PAVerdictWhenVerifyDidNotAnswer(t *testing.T) {
 		t.Fatal("a 409 from /verify is a content mismatch, not a match")
 	}
 }
+
+// The three hash fields are Required on PDFVerifyResult and nothing ever set
+// them, so every response carried "" — which reads to a caller as "the hash is
+// blank" rather than "this is not computed". pdf-core reports them; they have to
+// reach the wire.
+func TestRunVerifyCarriesThePDFCoreDigests(t *testing.T) {
+	pdfCore := newStubPDFCore(t, http.StatusOK, map[string]any{
+		"match":                true,
+		"c2pa_signature_valid": true,
+		"vc_present":           false,
+		"jsonld_hash":          "1111",
+		"base_pdf_hash":        "2222",
+		"stored_base_pdf_hash": "2222",
+	})
+
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, "active")
+	if err != nil {
+		t.Fatalf("runVerify: %v", err)
+	}
+	if result.JsonldHash != "1111" {
+		t.Errorf("jsonld_hash = %q, want 1111", result.JsonldHash)
+	}
+	if result.BasePdfHash != "2222" {
+		t.Errorf("base_pdf_hash = %q, want 2222", result.BasePdfHash)
+	}
+	if result.StoredBasePdfHash != "2222" {
+		t.Errorf("stored_base_pdf_hash = %q, want 2222", result.StoredBasePdfHash)
+	}
+}
+
+// A tampered artifact is the case the digests exist for: the verdict is a
+// mismatch and the two PDF hashes say which side diverged. Reporting match=false
+// with three empty hashes would leave the finding unevidenced.
+func TestRunVerifyReportsDivergingDigestsOnAContentMismatch(t *testing.T) {
+	pdfCore := newStubPDFCore(t, http.StatusConflict, map[string]any{
+		"name":                 "conflict",
+		"message":              "embedded payload does not reproduce the submitted PDF",
+		"jsonld_hash":          "1111",
+		"base_pdf_hash":        "2222",
+		"stored_base_pdf_hash": "3333",
+	})
+
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, "active")
+	if err != nil {
+		t.Fatalf("runVerify: %v", err)
+	}
+	if result.Match {
+		t.Fatal("a 409 from /verify is a content mismatch, not a match")
+	}
+	if result.BasePdfHash == result.StoredBasePdfHash {
+		t.Errorf("a content mismatch must report diverging PDF digests: base=%q stored=%q",
+			result.BasePdfHash, result.StoredBasePdfHash)
+	}
+	if result.JsonldHash != "1111" {
+		t.Errorf("jsonld_hash = %q, want 1111 — the payload is still identified", result.JsonldHash)
+	}
+}

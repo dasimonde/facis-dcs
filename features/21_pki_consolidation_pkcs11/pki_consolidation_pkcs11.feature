@@ -9,10 +9,10 @@
 #     their respective HSM labels;
 #   - a PDF export's embedded Contract-Lifecycle-VC declares an ECDSA/ES256
 #     proof suite;
-#   - pdf-core holds NO signature material: it builds the COSE
-#     Sig_structure bytes and calls the authenticated backend endpoint
-#     POST /internal/c2pa/sign (backend/design/internal_signing.go), which
-#     signs via hsm.Signer("dcs-c2pa"); the embedded C2PA manifest declares
+#   - pdf-core holds NO signature material: its prepare step returns the
+#     COSE Sig_structure bytes, the DCS backend signs them in-process with
+#     the dcs-c2pa HSM key and posts them back to pdf-core's stateless
+#     POST /c2pa/embed; the embedded C2PA manifest declares
 #     COSE alg ES256(-7), not EdDSA(-8);
 #   - (two-instance) the did:web peer-sync challenge is signed with the HSM
 #     DID key and verified by the receiving instance against the

@@ -12,7 +12,9 @@ package dcstodcs
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +31,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
@@ -212,6 +215,16 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return s.recordShipOutcome(ctx, did,
 			fmt.Errorf("contract %s is shippable but its PDF is not stored yet; deferring ship to the retry scheduler", did), nil)
 	}
+	// The receiver adopts the JSON-LD carried in the shipped PDF as its own copy
+	// (ADR-13), so the PDF must be a render of the document as it now stands. A
+	// contract filled and offered while its genesis render is still in flight
+	// stores that render afterwards, and the render's own PDF-regenerated event
+	// would ship the pre-fill document. Defer to the retry scheduler as for a
+	// PDF not stored yet: the re-render's own ship carries the current document.
+	if holdsSupersededPDF(pdfState, contractData) {
+		return s.recordShipOutcome(ctx, did,
+			fmt.Errorf("contract %s holds a PDF rendered from a superseded document; deferring ship until it is re-rendered", did), nil)
+	}
 
 	recipients := contractData.Responsible.GetParties()
 
@@ -255,7 +268,8 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 
 // clearSyncFailWithIncident deletes any sync_fails retry entry for did and
 // records the terminal policy-endpoint denial incident in the same
-// transaction (ADR-19 AC10) — deduped per (did, peer, direction), since a
+// transaction (ADR-19 makes every trust-gate denial auditable through the
+// incident-report flow) — deduped per (did, peer, direction), since a
 // single offer's Offer and PDF_REGENERATED events each independently trigger
 // a ship attempt a few hundred ms apart and both can hit the same denial.
 func (s *DCSToDCSSynchronizer) clearSyncFailWithIncident(ctx context.Context, did string, gateErr *GateError) error {
@@ -276,6 +290,32 @@ func (s *DCSToDCSSynchronizer) clearSyncFailWithIncident(ctx context.Context, di
 		return fmt.Errorf("could not record trust gate denial incident: %w", err)
 	}
 	return tx.Commit()
+}
+
+// holdsSupersededPDF reports whether the stored PDF was rendered from a
+// document the contract has since moved past, which is what makes it unfit to
+// ship. A frozen artifact answers false — signed bytes are never re-rendered,
+// so their recorded hash is the one signing wrote, not a render's. So does a
+// contract whose PDF predates payload-hash recording: nothing is known about
+// what it was rendered from, and refusing to ship it would strand it.
+func holdsSupersededPDF(pdfState *db.ContractPDFState, contract *db.Contract) bool {
+	if pdfState == nil || provenance.IsFrozenC2PAState(pdfState.C2PAState) || pdfState.PayloadHash == "" {
+		return false
+	}
+	return pdfState.PayloadHash != contractDataHash(contract)
+}
+
+// contractDataHash is the payload hash of a contract's stored document, taken
+// exactly as the regenerator takes the one it records against a render
+// (pdfgeneration/event.Subscriber.appendC2PA) — the two are only comparable
+// while they hash the same bytes the same way.
+func contractDataHash(contract *db.Contract) string {
+	var payload []byte
+	if contract.ContractData != nil {
+		payload = []byte(*contract.ContractData)
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
 }
 
 // jadesForSignedContract returns the JAdES a signed contract's ship carries, or

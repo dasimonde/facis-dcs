@@ -26,6 +26,11 @@ var KnownEvents = []EventInfo{
 	{Name: "template.updated", Description: "A contract template was updated"},
 	{Name: "template.registered", Description: "A contract template version was registered (published)"},
 	{Name: "template.deprecated", Description: "A contract template was deprecated (archived)"},
+	// DCS-FR-PACM-02: the "alert" half of "flagged and reported in real-time
+	// via dashboards and alerts". Emitted by the continuous-monitoring sweep
+	// the first time it detects a given violation, not on every run — see
+	// querymonitor.go's reconcile.
+	{Name: "compliance.risk_detected", Description: "Continuous monitoring detected a compliance risk"},
 }
 
 // DCSEventMap maps internal NATS event types to webhook event names.
@@ -42,6 +47,7 @@ var DCSEventMap = map[string]string{
 	"UPDATE_CONTRACT_TEMPLATE":   "template.updated",
 	"REGISTER_CONTRACT_TEMPLATE": "template.registered",
 	"ARCHIVE_CONTRACT_TEMPLATE":  "template.deprecated",
+	"PAC_COMPLIANCE_RISK":        "compliance.risk_detected",
 }
 
 // EventInfo describes a subscribable event.

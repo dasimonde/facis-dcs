@@ -120,6 +120,9 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
 
   await test.step('setup: A drives a contract to SIGNED with B as counterparty (archived, CEK shipped)', async () => {
     await publishShapeOnInstance(a, shapeName)
+    // The contract keeps A's immutable shape pin when it crosses to B. B's
+    // workflow gate therefore needs the identical named version locally.
+    await publishShapeOnInstance(b, shapeName)
     const componentDid = await authorSemanticComponent(a, componentName)
     await submitReviewApproveTemplateOn(a, componentDid, componentName)
     const templateDid = await authorContractTemplate(a, templateName, componentName)

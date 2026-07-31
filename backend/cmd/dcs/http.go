@@ -142,10 +142,6 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, webhookPlatform *webhookplatform.Platform, wg *sync.WaitGroup,
 	errc chan error, dbg bool) {
 
-	// Provide the transport specific request decoder and response encoder.
-	// The goa http package has built-in support for JSON, XML and gob.
-	// Other encodings can be used by providing the corresponding functions,
-	// see goa.design/implement/encoding.
 	var (
 		dec = requestDecoderWithForm
 		enc = responseEncoder
@@ -166,10 +162,6 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	apiPrefix := getAPIPathPrefix()
 	apiMux := newPrefixedMuxer(mux, apiPrefix)
 
-	// Wrap the endpoints with the transport specific layers. The generated
-	// server packages contains code generated from the design which maps
-	// the service input and output data structures to HTTP requests and
-	// responses.
 	var (
 		authServer                         *authsvr.Server
 		contractStorageArchiveServer       *contractstoragearchivesvr.Server
@@ -203,10 +195,10 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		keyInventoryServer = keyinventorysvr.New(keyInventoryEndpoints, apiMux, dec, enc, eh, ef)
 	}
 
+	// did.json is served at the origin root (did:web well-known path), outside
+	// the API prefix.
 	didsvr.Mount(mux, didServer)
 	c2pasvr.Mount(apiMux, c2paServer)
-
-	// Configure the mux.
 	authsvr.Mount(apiMux, authServer)
 	contractstoragearchivesvr.Mount(apiMux, contractStorageArchiveServer)
 	contractworkflowenginesvr.Mount(apiMux, contractWorkflowEngineServer)
@@ -244,8 +236,6 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	}
 	handler = log.HTTP(ctx)(handler)
 
-	// Start HTTP server using default configuration, change the code to
-	// configure the server as required by your service.
 	srv := &http.Server{Addr: u.Host, Handler: handler, ReadHeaderTimeout: time.Second * 60}
 	for _, m := range authServer.Mounts {
 		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)

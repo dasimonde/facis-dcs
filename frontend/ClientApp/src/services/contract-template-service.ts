@@ -1,5 +1,5 @@
 import http from '@/api/http'
-import type { ContractTemplate } from '@/models/contract-template'
+import type { ContractTemplate } from '@/models/contract-template/contract-template'
 import type {
   ContractTemplateApproveRequest,
   ContractTemplateArchiveRequest,

@@ -182,15 +182,45 @@ The four resulting layers, and what anchors each:
   ([ADR-16](adr-16-audit-checkpoints-external-anchoring.md) anchoring
   applies).
 
-## Implementation state (2026-07-22)
+## Implementation state (verified shipped 2026-07-30)
+
+Every row below was "pending" as of 2026-07-22 and has since shipped. The table
+is kept only so the earlier revision is not mistaken for current scope.
 
 | Piece | State |
 | --- | --- |
 | ADR + design, research run-down | this document |
-| Embedded rules document (`go:embed`) + startup hash | pending |
-| `/.well-known/dcs-agreement-credential.json` endpoint (Goa design + HSM-signed VC) | pending |
-| Agreement verification in `PostPdf` and in the outbound ship path | pending |
-| `DCS_TRUST_PDP_URL` gate (fail-closed) + incident report on denial | pending |
-| Removal of `trusted_peers` table/migration, `DCS_TRUSTED_PEERS`, `CheckForUntrustedPeers` | pending |
-| Node-RED default flow (`200 OK`) wired into dev/CI stacks + documented GXDCH example flow | pending |
-| BDD scenarios in `features/17_peer_trust` (missing/invalid credential, denying policy stub, unset URL denies) | pending |
+| Embedded rules document (`go:embed`) + startup hash | shipped — `backend/internal/base/federation/credential.go`, checked in `dcstodcs/trustgate.go` |
+| `/.well-known/dcs-agreement-credential.json` endpoint (Goa design + HSM-signed VC) | shipped — `gen/http/did_service/server/server.go`, consumed in `dcstodcs/trustgate.go` |
+| Agreement verification in `PostPdf` and in the outbound ship path | shipped — `dcstodcs/trustgate.go` |
+| `DCS_TRUST_PDP_URL` gate (fail-closed) + incident report on denial | shipped — `dcstodcs/trustgate.go` |
+| Removal of `trusted_peers` table/migration, `DCS_TRUSTED_PEERS`, `CheckForUntrustedPeers` | shipped — `migrations/sql/20260722_drop_trusted_peers.sql` |
+| Node-RED default flow (`200 OK`) wired into dev/CI stacks + documented GXDCH example flow | shipped |
+| BDD scenarios in `features/17_peer_trust` (missing/invalid credential, denying policy stub, unset URL denies) | shipped — `features/17_peer_trust/two_instance_peer_trust.feature` |
+
+## Note on the "ADR-19 ACn" citations
+
+Eleven sites cite this ADR for numbered acceptance criteria — `trustgate.go`
+(AC10, three sites), `synchronizer.go` (AC10),
+`querytrustgatedenial.go` (AC10), and seven in
+`steps/peer_trust/dcs_peer_trust_steps.py` (AC4–AC11).
+
+**This document contains no numbered acceptance criteria, and no revision of it
+ever did** (verified across its full history, and across all 32 ADRs in the
+repo — none of them uses `ACn` numbering). The citations are misattributed:
+this ADR is not their authority and cannot be read as defining them.
+
+The numbering is real, though, and it is not this ADR's. It originates in the
+`@REQ-fed-agreement-ACn` tags on the scenarios of
+`features/17_peer_trust/two_instance_peer_trust.feature`, where each number
+resolves to a named, executing scenario — AC4 "PostPdf rejects a peer that
+publishes no agreement credential at all", AC10 "An unreachable policy endpoint
+fails closed with exactly one incident and no retry", AC11 "Mutual trust between
+instances runs through the default Node-RED policy flow", and so on. Every
+citation checked resolves consistently against those tags. **A reader chasing an
+`ACn` should read that feature file, not this document.**
+
+No criteria have been added here to make the citations resolve: writing them now
+would manufacture an authority after the fact and claim this ADR said something
+it never said. The behaviours are real, specified by the scenarios, and tested;
+only the attribution is wrong.

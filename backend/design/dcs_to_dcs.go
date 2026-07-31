@@ -98,7 +98,6 @@ var _ = Service("DcsToDcs", func() {
 
 	Method("post_pdf", func() {
 		Description("Receive a contract PDF shipped by the counterparty (ADR-13). The receiver verifies the sender via a did:web challenge-response signature (secret_value signed with the sender's private key, verified against its did:web document and eIDAS certificate chain) — not JWT, since there is no shared end-user identity across DCS instances run by different operators — then asks pdf-core to extract the embedded JSON-LD and upserts its own local copy of the contract. A bare PDF is a proposal (the local copy moves to negotiation); a PDF with a JAdES is the counterparty's signature.")
-		Meta("dcs:cwe:components", "DCS-to-DCS Synchronization")
 
 		Payload(DCSToDCSContractPdfRequest)
 		Result(DCSToDCSContractPdfResponse)
@@ -116,7 +115,6 @@ var _ = Service("DcsToDcs", func() {
 
 	Method("erase", func() {
 		Description("Shred this instance's wrapped CEKs for a contract on request of the authenticated counterparty (DCS-NFR-COMP-03, DCS-NFR-SEC-13). The requester is verified via the same did:web challenge-response signature as post_pdf and must be a party of the contract. All CEK records of the contract scope are marked destroyed (never hard-deleted — the shredded row is the destruction record) and a KEY_SHREDDED audit event is written. Idempotent: repeating the request against an already-shredded contract confirms again.")
-		Meta("dcs:cwe:components", "DCS-to-DCS Synchronization")
 
 		Payload(DCSToDCSContractEraseRequest)
 		Result(DCSToDCSContractEraseResponse)
@@ -134,7 +132,6 @@ var _ = Service("DcsToDcs", func() {
 
 	Method("get_provenance", func() {
 		Description("Return the stored JAdES provenance artifact for a contract this instance received from a peer (DCS-FR-SM-02): the sender's baseline-B compact JWS over the contract, verified at receipt and persisted for independent re-verification. JWT-secured — read by local users inspecting a received contract's cross-instance provenance.")
-		Meta("dcs:cwe:components", "DCS-to-DCS Synchronization")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")

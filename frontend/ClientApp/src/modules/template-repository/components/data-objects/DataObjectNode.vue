@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { type ShapeClass, type ShapeProperty } from '@template-repository/utils/shape-library'
 import { type DcsContractDataObject, localNameOf } from '@/models/dcs-jsonld'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 /**

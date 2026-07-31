@@ -13,7 +13,7 @@ import TaskListSearch from './TaskListSearch.vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
 import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
-import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
+import type { ContractTemplateApprovalTask } from '@/models/contract-template/contract-template-approval-task'
 
 type ApprovalTask = ContractTemplateApprovalTask | ContractApprovalTask
 

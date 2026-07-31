@@ -22,6 +22,7 @@ import (
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
+	pacdb "digital-contracting-service/internal/processauditandcompliance/db"
 	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
 	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	templatedb "digital-contracting-service/internal/templaterepository/db"
@@ -37,6 +38,7 @@ type processAuditAndCompliancesrvc struct {
 	CTRepo               templatedb.ContractTemplateRepo
 	CRepo                cwedb.ContractRepo
 	ATRepo               cwedb.ApprovalTaskRepo
+	FRepo                pacdb.RiskFindingRepo
 	AuditExecutor        auditexecutor.Client
 	WorkflowGate         *workflowgate.Coordinator
 	auditRunReader       func(context.Context, string, string) ([]byte, error)
@@ -103,8 +105,8 @@ type auditScopeConfig struct {
 	includeArchiveTrail            bool
 }
 
-func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo, executor auditexecutor.Client, gate *workflowgate.Coordinator) processauditandcompliance.Service {
-	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo, AuditExecutor: executor, WorkflowGate: gate}
+func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo, fRepo pacdb.RiskFindingRepo, executor auditexecutor.Client, gate *workflowgate.Coordinator) processauditandcompliance.Service {
+	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo, FRepo: fRepo, AuditExecutor: executor, WorkflowGate: gate}
 }
 
 func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processauditandcompliance.PACAuditRequest) (*processauditandcompliance.PACExternalAuditResponse, error) {
@@ -697,6 +699,7 @@ func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processa
 		DB:     s.DB,
 		ATRepo: s.ATRepo,
 		CRepo:  s.CRepo,
+		FRepo:  s.FRepo,
 	}
 	result, err := handler.Handle(ctx, qry2.MonitorQry{
 		MonitoredBy: middleware.GetParticipantID(ctx),

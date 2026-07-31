@@ -81,7 +81,7 @@ func immutableSemanticBundle(stored *datatype.JSON) (map[string]any, error) {
 			return nil, errors.New("stored immutable semantic bundle has an invalid sh:shapesGraph pin")
 		}
 	}
-	if _, err := effectiveShapeRefs(data); err != nil {
+	if _, err := EffectiveShapeRefs(data); err != nil {
 		return nil, fmt.Errorf("stored immutable semantic bundle has invalid dcs:effectiveShapes: %w", err)
 	}
 	profile := anchorIRI(data["dcterms:conformsTo"])

@@ -10,7 +10,7 @@ import {
   ONTOLOGY_DOMAIN_FIELDS,
   refreshOntologyDomainFields,
 } from '@template-repository/utils/ontology-domain-fields'
-import type { DcsContentSegment, OdrlRule } from '@/models/dcs-jsonld'
+import { type DcsContentSegment, localNameOf, type OdrlRule } from '@/models/dcs-jsonld'
 import type { DomainFieldDefinition, SemanticCondition } from '@template-repository/models/contract-template'
 
 /**
@@ -23,7 +23,7 @@ import type { DomainFieldDefinition, SemanticCondition } from '@template-reposit
  */
 
 const store = useDcsDraftStore()
-const { partyAnchors, contractTargetIri } = storeToRefs(store)
+const { partyAnchors, contractTargetIri, contractFields } = storeToRefs(store)
 
 // A schema registered in the hub after app startup becomes pickable here on
 // the next mount; a failed refresh keeps the startup vocabulary.
@@ -153,7 +153,24 @@ const proseConditions = computed<SemanticCondition[]>(() =>
   })),
 )
 
-const fieldAnchors = computed(() => clauseFields.value.map((cf) => ({ id: cf.id, label: fieldDisplayLabel(cf) })))
+/**
+ * Every field a rule authored here may bind: this clause's own declarations
+ * first, in declaration order, then the fields already declared elsewhere on
+ * this document. A negotiated boundary is a document-level object — the
+ * Service Credits clause caps a credit at the fee negotiated in the Charges
+ * clause — so confining a rule's operands to its own paragraph would force
+ * those boundaries back into fixed literals. Fields declared on a clause added
+ * later are absent until that clause is saved; the list follows the store, so
+ * it never goes stale afterwards.
+ */
+const fieldAnchors = computed(() => {
+  const own = clauseFields.value.map((cf) => ({ id: cf.id, label: fieldDisplayLabel(cf) }))
+  const ownIds = new Set(own.map((anchor) => anchor.id))
+  const elsewhere = contractFields.value
+    .filter((field) => !ownIds.has(field['@id']))
+    .map((field) => ({ id: field['@id'], label: field['dcs:label'] || localNameOf(field['@id']) }))
+  return [...own, ...elsewhere]
+})
 const assetAnchors = computed(() => clauseAssets.value.map((a) => ({ id: a.id, label: a.name })))
 
 const canSave = computed(() => !!title.value.trim() && content.value.length > 0)

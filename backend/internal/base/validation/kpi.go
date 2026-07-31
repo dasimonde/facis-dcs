@@ -10,10 +10,19 @@ import (
 // (DCS-FR-CWE-09/-31). The metric is the @id of the contract-data field
 // node the KPI reports on — the same IRI the ODRL odrl:leftOperand names — so
 // the binding is by node IRI, exactly like the content-audit enforcement path
-// (no fragile label-string hop). Every constraint whose odrl:leftOperand
-// references the bound node is evaluated with the reported value as the actual
-// value, under the same rule semantics as the content audit (a Prohibition is
-// violated when satisfied).
+// (no fragile label-string hop). A matching constraint is evaluated with the
+// reported value as the actual value, under the same rule semantics as the
+// content audit (a Prohibition is violated when satisfied).
+//
+// Scope, which is narrower than "every constraint": the loop below walks only
+// each rule's direct odrl:constraint list. A constraint nested inside a
+// LogicalConstraint (odrl:and/or/xone — such a node carries no
+// odrl:leftOperand of its own and is skipped) or under odrl:duty /
+// odrl:consequence is NOT reached, though auditConstraintBearingNode in the
+// content audit does walk both. An unbound metric also returns false. A false
+// return therefore means "not violated OR not evaluated"; the caller
+// (processauditandcompliance callback) stores it as Violation: false either
+// way, so the two are indistinguishable in contract_kpis.
 func EvaluateKPIViolation(ctx context.Context, contractDocument any, metric, value string) (bool, error) {
 	if strings.TrimSpace(metric) == "" {
 		return false, nil

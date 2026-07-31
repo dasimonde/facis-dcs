@@ -5,11 +5,13 @@ RewriteEngine on
 # DCS ODRL profile (must precede the ontology rule — same path prefix)
 RewriteRule ^dcs/ontology/v1/odrl-profile$ FACIS_PUBLIC_HOST/semantic/ontology/dcs-odrl-profile [R=302,L]
 
-# FACIS DCS ontology (terms are fragments on the served document)
-RewriteRule ^dcs/ontology/v1$ FACIS_PUBLIC_HOST/semantic/ontology/facis-dcs [R=302,L]
+# FACIS DCS envelope terms. There is no envelope ontology document: what
+# constrains a dcs: term is the shapes graph, so the term IRIs dereference
+# there rather than to a vocabulary that would state nothing enforceable.
+RewriteRule ^dcs/ontology/v1$ FACIS_PUBLIC_HOST/semantic/shapes/facis-dcs [R=302,L]
 
-# FACIS DCS taxonomy (values are fragments on the served ontology)
-RewriteRule ^dcs/taxonomy/v1$ FACIS_PUBLIC_HOST/semantic/ontology/facis-dcs [R=302,L]
+# FACIS DCS taxonomy (dcst: values are fragments on the domain-field ontology)
+RewriteRule ^dcs/taxonomy/v1$ FACIS_PUBLIC_HOST/semantic/ontology/facis-sla [R=302,L]
 
 # JSON-LD context
 RewriteRule ^dcs/context/v1$ FACIS_PUBLIC_HOST/semantic/context/facis-dcs [R=302,L]

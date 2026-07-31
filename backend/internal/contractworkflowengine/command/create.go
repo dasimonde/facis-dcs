@@ -203,7 +203,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	}
 
 	if cmd.OriginatorRole != "" {
-		normalizedContractData, err = bindOriginatorParty(normalizedContractData, localPeer, cmd.OriginatorRole)
+		normalizedContractData, err = bindOriginatorParty(normalizedContractData, localPeer, cmd.OriginatorRole, cmd.CreatedBy)
 		if err != nil {
 			return fmt.Errorf("could not bind originator party: %w", err)
 		}
@@ -309,7 +309,22 @@ func attachContractParties(raw *datatype.JSON, parties []string) (*datatype.JSON
 // resolvable identity from the moment the offer exists. If the rules do
 // not reference the role, a party node is still recorded so the
 // declaration is part of the document.
-func bindOriginatorParty(raw *datatype.JSON, originDID, role string) (*datatype.JSON, error) {
+//
+// The node it produces carries BOTH halves of a party's identity: "@id" is
+// the did:web of the instance the party acts on, and dcs:legalName is the
+// organization within that instance (the OID4VP organization claim, the
+// value read back as the caller's identity). Two keys are needed because
+// they answer different questions and neither implies the other — several
+// organizations share one instance, which is what the party read-scoping
+// scenarios in features/03_contract_creation exercise, while one
+// organization is reachable on exactly one instance's did:web.
+//
+// Writing both onto one node is what lets mergePartyNodes fold the
+// originator's attribution node together with its authorization node: the
+// merge keys on "@id", so a legal-name-only node under a #party-N IRI could
+// never fold into the DID node, and the read-ACL — which reads only
+// dcs:legalName — could never see the originator at all.
+func bindOriginatorParty(raw *datatype.JSON, originDID, role, legalName string) (*datatype.JSON, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(*raw, &doc); err != nil {
 		return nil, fmt.Errorf("could not decode contract data: %w", err)
@@ -317,19 +332,46 @@ func bindOriginatorParty(raw *datatype.JSON, originDID, role string) (*datatype.
 	placeholder := partyPlaceholderIRI(doc, role)
 	if placeholder != "" {
 		replaceNodeIRI(doc, placeholder, originDID)
+		setPartyLegalName(doc, originDID, legalName)
 	} else {
-		nodes, _ := doc["dcs:parties"].([]any)
-		doc["dcs:parties"] = append(nodes, map[string]any{
+		node := map[string]any{
 			"@id":      originDID,
 			"@type":    "dcs:CompanyParty",
 			"dcs:role": role,
-		})
+		}
+		if legalName != "" {
+			node["dcs:legalName"] = legalName
+		}
+		nodes, _ := doc["dcs:parties"].([]any)
+		doc["dcs:parties"] = append(nodes, node)
 	}
 	encoded, err := datatype.NewJSON(doc)
 	if err != nil {
 		return nil, fmt.Errorf("could not encode contract data: %w", err)
 	}
 	return &encoded, nil
+}
+
+// setPartyLegalName records the organization on the party node named by iri,
+// without overwriting a name the document already carries for it.
+func setPartyLegalName(doc map[string]any, iri, legalName string) {
+	if legalName == "" {
+		return
+	}
+	nodes, _ := doc["dcs:parties"].([]any)
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		if nodeIRI, _ := node["@id"].(string); nodeIRI != iri {
+			continue
+		}
+		if existing, _ := node["dcs:legalName"].(string); existing == "" {
+			node["dcs:legalName"] = legalName
+		}
+		return
+	}
 }
 
 // SeedPartiesAndSignatureFields seeds a contract's party nodes and the

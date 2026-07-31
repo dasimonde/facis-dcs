@@ -212,3 +212,52 @@ func TestClientMatchContentErrorPropagated(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, match)
 }
+
+// pdf-core reports the SHA-256 digests its match verdict was reached on. They
+// were being dropped on the floor, which is why the three hash fields on the
+// verify response encoded as "" on every single call.
+func TestClientVerifyCarriesTheDigestsTheVerdictWasReachedOn(t *testing.T) {
+	srv := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/verify", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"match":                true,
+			"c2pa_signature_valid": true,
+			"vc_present":           false,
+			"jsonld_hash":          "aa",
+			"base_pdf_hash":        "bb",
+			"stored_base_pdf_hash": "bb",
+		})
+	})
+
+	result, err := newClient(srv.URL).Verify(context.Background(), []byte("%PDF-"))
+	require.NoError(t, err)
+	assert.Equal(t, "aa", result.JSONLDHash)
+	assert.Equal(t, "bb", result.BasePDFHash)
+	assert.Equal(t, "bb", result.StoredBasePDFHash)
+}
+
+// A content mismatch is exactly the case where the two PDF digests are worth
+// reporting — they say WHICH side diverged. The 409 stays an error; the evidence
+// rides along with it rather than being discarded with the body.
+func TestClientVerifyKeepsTheDigestsFromAContentMismatch(t *testing.T) {
+	srv := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"name":                 "conflict",
+			"message":              "embedded payload does not reproduce the submitted PDF",
+			"jsonld_hash":          "aa",
+			"base_pdf_hash":        "bb",
+			"stored_base_pdf_hash": "cc",
+		})
+	})
+
+	result, err := newClient(srv.URL).Verify(context.Background(), []byte("%PDF-"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status 409")
+	assert.False(t, result.Match)
+	assert.Equal(t, "aa", result.JSONLDHash)
+	assert.Equal(t, "bb", result.BasePDFHash)
+	assert.Equal(t, "cc", result.StoredBasePDFHash)
+}

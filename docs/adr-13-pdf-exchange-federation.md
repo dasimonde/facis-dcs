@@ -133,13 +133,16 @@ never cross an instance boundary.
   sign) are driven by shipping/receiving a PDF, and review/approval become
   purely local.
 
-## Implementation state (2026-07-19)
+## Implementation state (verified shipped 2026-07-30)
+
+Every row below was "pending" as of 2026-07-19 and has since shipped. The table
+is kept only so the earlier revision is not mistaken for current scope.
 
 | Piece | State |
 | --- | --- |
 | ADR + design | this document |
-| New peer endpoint carrying the PDF (+ JAdES); receiver extracts JSON-LD via pdf-core | pending |
-| Remove `action`, `get_sync`, task-sync payloads + single-writer-origin | pending |
-| Counterparty (single did:web) replaces peer-DIDs-in-roles; party set = [origin, counterparty] | pending |
-| Localize tasks/RBAC; negotiation = turn-based PDF exchange, sign = accept | pending |
-| BDD (peer_trust, real_signing_vertical) + two-instance Playwright vertical on the new base | pending |
+| New peer endpoint carrying the PDF (+ JAdES); receiver extracts JSON-LD via pdf-core | shipped — `POST /peer/contracts/pdf`, `backend/design/dcs_to_dcs.go` |
+| Remove `action`, `get_sync`, task-sync payloads + single-writer-origin | shipped — no `get_sync` remains in `backend/` |
+| Counterparty (single did:web) replaces peer-DIDs-in-roles; party set = [origin, counterparty] | shipped |
+| Localize tasks/RBAC; negotiation = turn-based PDF exchange, sign = accept | shipped |
+| BDD (peer_trust, real_signing_vertical) + two-instance Playwright vertical on the new base | shipped — `features/17_peer_trust`, `frontend/ClientApp/e2e/full-vertical-2dcs.spec.ts` |

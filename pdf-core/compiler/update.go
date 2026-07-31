@@ -48,44 +48,6 @@ func lifecycleStatusFromVC(vcBytes []byte) string {
 	return vc.CredentialSubject.Status
 }
 
-// DiffNQuads returns the N-Quads present in newPayload but not oldPayload (added)
-// and those present in oldPayload but not newPayload (removed).
-func DiffNQuads(oldPayload, newPayload []byte) (added, removed []string, err error) {
-	oldNQuads, err := NormalizePayload(oldPayload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("normalize old payload: %w", err)
-	}
-	newNQuads, err := NormalizePayload(newPayload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("normalize new payload: %w", err)
-	}
-	oldSet := nquadsToSet(oldNQuads)
-	newSet := nquadsToSet(newNQuads)
-	for q := range newSet {
-		if !oldSet[q] {
-			added = append(added, q)
-		}
-	}
-	for q := range oldSet {
-		if !newSet[q] {
-			removed = append(removed, q)
-		}
-	}
-	sort.Strings(added)
-	sort.Strings(removed)
-	return added, removed, nil
-}
-
-func nquadsToSet(nquads []byte) map[string]bool {
-	set := make(map[string]bool)
-	for _, line := range strings.Split(string(nquads), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			set[line] = true
-		}
-	}
-	return set
-}
-
 var pdfTrailerSizeRE = regexp.MustCompile(`/Size (\d+)`)
 var pdfTrailerIDRE = regexp.MustCompile(`/ID\s*(\[[^\]]*\])`)
 var pdfTrailerRootRE = regexp.MustCompile(`/Root (\d+) 0 R`)
@@ -113,15 +75,15 @@ func currentRootObjID(pdf []byte) (int, bool) {
 	return id, true
 }
 
-// isPAdESSigned reports whether pdf already carries a PAdES signature: a
-// signature value dictionary (/Type /Sig) with a /ByteRange. A C2PA lifecycle
-// update over such a PDF must be provenance-only — re-rendering the pages or
-// re-stamping the AcroForm signature field would drop the signed field's /V and
-// invalidate the signature (DCS-OR-C2PA-010).
-// IsPAdESSigned reports whether pdf carries a PAdES signature. Exported for the
-// service layer's offline-tamper check on the plain re-render verify path.
+// IsPAdESSigned reports whether pdf carries a PAdES signature: a signature
+// value dictionary (/Type /Sig) with a /ByteRange. Exported for the service
+// layer's offline-tamper check on the plain re-render verify path.
 func IsPAdESSigned(pdf []byte) bool { return isPAdESSigned(pdf) }
 
+// isPAdESSigned: a C2PA lifecycle update over a signed PDF must be
+// provenance-only — re-rendering the pages or re-stamping the AcroForm
+// signature field would drop the signed field's /V and invalidate the
+// signature (DCS-OR-C2PA-010).
 func isPAdESSigned(pdf []byte) bool {
 	if !bytes.Contains(pdf, []byte("/ByteRange")) {
 		return false
@@ -249,8 +211,9 @@ func ExtractManifestStore(pdf []byte) ([]byte, error) {
 	return extractEmbeddedStreamByFileSpecName(pdf, "content_credential.c2pa")
 }
 
-// updatePDF is the shared implementation used by UpdatePDF and UpdatePDFWithVC.
-// The "no changes" guard is bypassed when vcBytes is non-nil.
+// updatePDF is the shared implementation behind all Update*/Reanchor entry
+// points. The "no changes" guard is bypassed when vcBytes is non-nil or the
+// call is a re-anchor.
 func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []byte, remoteManifestURL string, compiledAt time.Time, reanchor bool) ([]byte, error) {
 	oldPayload, err := ExtractEmbeddedJSONLD(oldPDF)
 	if err != nil {
@@ -409,16 +372,6 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	return result, nil
 }
 
-// buildUpdateAppendixBytes constructs the raw bytes of the PDF incremental
-// update section. It supersedes:
-//   - obj 2  (Pages)        — updated /Kids list pointing to new page objects
-//   - obj 9  (C2PA manifest) — updated hard-binding hash and provenance chain
-//   - obj 11 (embedded JSON-LD) — replaced with the new payload, carried verbatim
-//
-// New objects (page content streams, page dictionaries, annotations) are
-// appended with IDs beyond the existing maximum so originals are unreachable
-// via the updated xref chain but their bytes remain intact for signature
-// verification.
 // catalogWithAssociatedFile reads the document catalog (objID) from pdf and
 // returns its dictionary bytes with the filespec specObjID listed as the
 // associated file called fileName: appended to the /AF array and resolvable
@@ -471,6 +424,16 @@ var (
 	catalogEFRE = regexp.MustCompile(`(/EmbeddedFiles << /Names \[)([^\]]*)(\])`)
 )
 
+// buildUpdateAppendixBytes constructs the raw bytes of the PDF incremental
+// update section. It supersedes:
+//   - obj 2  (Pages)        — updated /Kids list pointing to new page objects
+//   - obj 9  (C2PA manifest) — updated hard-binding hash and provenance chain
+//   - obj 11 (embedded JSON-LD) — replaced with the new payload, carried verbatim
+//
+// New objects (page content streams, page dictionaries, annotations) are
+// appended with IDs beyond the existing maximum so originals are unreachable
+// via the updated xref chain but their bytes remain intact for signature
+// verification.
 func buildUpdateAppendixBytes(
 	baseLen, prevStartXref, oldSize int,
 	fileID string,
@@ -854,42 +817,50 @@ func incrementalUpdateMarkerOffsets(pdf []byte) []int {
 // where boundary[i] is the PDF prefix ending right after the i-th update's
 // appendix (boundary[N] == the full pdf). All hops together prove the current
 // visible state is reproducible, end to end, from its embedded payloads.
-func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
+//
+// The returned bytes are the deterministic reproduction the verdict was reached
+// on: the replay of the last hop when every hop held, and the replay of the hop
+// that diverged when one did not. A caller that must show WHY it decided as it
+// did (e.g. by digesting both sides) gets the evidence rather than having to
+// recompute it; nil is returned only when the chain failed before any
+// reproduction could be produced.
+func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) ([]byte, error) {
 	offsets := incrementalUpdateMarkerOffsets(pdf)
 	if len(offsets) == 0 {
-		return fmt.Errorf("no incremental update marker found")
+		return nil, fmt.Errorf("no incremental update marker found")
 	}
 
 	boundary := pdf[:offsets[0]]
+	var reproduced []byte
 
 	oldPayload, err := ExtractEmbeddedJSONLD(boundary)
 	if err != nil {
-		return fmt.Errorf("extract old payload from original prefix: %w", err)
+		return nil, fmt.Errorf("extract old payload from original prefix: %w", err)
 	}
 	originalC2PA, err := extractEmbeddedStreamByFileSpecName(boundary, "content_credential.c2pa")
 	if err != nil {
-		return fmt.Errorf("extract original C2PA: %w", err)
+		return nil, fmt.Errorf("extract original C2PA: %w", err)
 	}
 	originalCompiledAt, err := extractLifecycleEffectiveAt(originalC2PA, 0)
 	if err != nil {
-		return fmt.Errorf("extract original lifecycle timestamp: %w", err)
+		return nil, fmt.Errorf("extract original lifecycle timestamp: %w", err)
 	}
 	// The asserting instance's DID is carried by the manifest, not the payload,
 	// so a verifier that never saw it must read it back off the document for the
 	// recompilation to reproduce the stored bytes — as with the timestamp above.
 	originalAuthority, err := extractLifecycleAuthority(originalC2PA, 0)
 	if err != nil {
-		return fmt.Errorf("extract original lifecycle authority: %w", err)
+		return nil, fmt.Errorf("extract original lifecycle authority: %w", err)
 	}
 	freshOriginal, err := CompilePDF(WithLifecycleAuthority(ctx, originalAuthority), oldPayload, originalCompiledAt)
 	if err != nil {
-		return fmt.Errorf("recompile original payload: %w", err)
+		return nil, fmt.Errorf("recompile original payload: %w", err)
 	}
 	// boundary is the compiled PDF possibly followed by append-only PAdES
 	// signature updates. PAdES appends bytes after %%EOF without altering the
 	// preceding bytes, so the compiled output must be a byte-for-byte prefix.
 	if !bytes.HasPrefix(ZeroCOSESignatures(boundary), ZeroCOSESignatures(freshOriginal)) {
-		return fmt.Errorf("original PDF prefix does not match deterministic recompilation from its embedded payload")
+		return freshOriginal, fmt.Errorf("original PDF prefix does not match deterministic recompilation from its embedded payload")
 	}
 
 	for hop := 1; hop <= len(offsets); hop++ {
@@ -900,19 +871,19 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 
 		newPayload, err := ExtractLatestEmbeddedJSONLD(hopEnd)
 		if err != nil {
-			return fmt.Errorf("extract payload for update %d: %w", hop, err)
+			return nil, fmt.Errorf("extract payload for update %d: %w", hop, err)
 		}
 		hopC2PA, err := extractEmbeddedStreamByFileSpecName(hopEnd, "content_credential.c2pa")
 		if err != nil {
-			return fmt.Errorf("extract C2PA for update %d: %w", hop, err)
+			return nil, fmt.Errorf("extract C2PA for update %d: %w", hop, err)
 		}
 		updateCompiledAt, err := extractLifecycleEffectiveAt(hopC2PA, hop)
 		if err != nil {
-			return fmt.Errorf("extract lifecycle timestamp for update %d: %w", hop, err)
+			return nil, fmt.Errorf("extract lifecycle timestamp for update %d: %w", hop, err)
 		}
 		hopAuthority, err := extractLifecycleAuthority(hopC2PA, hop)
 		if err != nil {
-			return fmt.Errorf("extract lifecycle authority for update %d: %w", hop, err)
+			return nil, fmt.Errorf("extract lifecycle authority for update %d: %w", hop, err)
 		}
 		hopCtx := WithLifecycleAuthority(ctx, hopAuthority)
 
@@ -953,15 +924,16 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt)
 		}
 		if err != nil {
-			return fmt.Errorf("re-apply update %d: %w", hop, err)
+			return nil, fmt.Errorf("re-apply update %d: %w", hop, err)
 		}
 		if !bytes.HasPrefix(ZeroCOSESignatures(hopEnd), ZeroCOSESignatures(freshUpdated)) {
-			return fmt.Errorf("amended PDF does not match deterministic re-application of update %d", hop)
+			return freshUpdated, fmt.Errorf("amended PDF does not match deterministic re-application of update %d", hop)
 		}
 
 		boundary = hopEnd
+		reproduced = freshUpdated
 	}
-	return nil
+	return reproduced, nil
 }
 
 // pdfPagesRefRE matches a Catalog's /Pages reference.

@@ -9,10 +9,15 @@ import (
 	"strings"
 )
 
-// ShapeSource is the enforcement-time source for the SHACL shapes,
-// validation profile, and JSON-LD context AuditContractContent checks
-// produced documents against. HubShapeSource (internal/semantichub) is the
-// production implementation.
+// ShapeSource is the source for the SHACL shapes, validation profile, and
+// JSON-LD context AuditContractContent checks produced documents against.
+// HubShapeSource (internal/semantichub) is the production implementation.
+//
+// Only the shapes half is enforcement-time: RequireHubConformance blocks at
+// offer, submit and signing. The validation profile is NOT a gate on any
+// path — AuditContractContent's only non-test caller is the read-only
+// audit-trail query, so profile findings are reported, never blocking. Do not
+// read "EnforceValidationProfile" as a blocking switch.
 type ShapeSource interface {
 	// CanonicalShapesName is the hub entry name of the canonical DCS envelope
 	// shapes graph — the one graph every document is validated against
@@ -55,7 +60,11 @@ type EffectiveBundleShapeSource interface {
 	ProfileAt(context.Context, int) (string, error)
 }
 
-func effectiveShapeRefs(contract map[string]any) ([]VersionedShapeRef, error) {
+// EffectiveShapeRefs returns the immutable shapes bundle a document pins in
+// dcs:effectiveShapes — the exact hub entries and versions it is validated
+// against, whatever those entries are active at now. Absent (a document
+// produced before the bundle was pinned) yields no refs and no error.
+func EffectiveShapeRefs(contract map[string]any) ([]VersionedShapeRef, error) {
 	raw, ok := contract["dcs:effectiveShapes"]
 	if !ok {
 		return nil, nil
@@ -110,8 +119,18 @@ func requireShapeSource() (ShapeSource, error) {
 // parameter semantichub.AnchorURL encodes into a hub-served schema URL.
 var pinnedVersionPattern = regexp.MustCompile(`[?&]version=(\d+)`)
 
-func pinnedHubShapesVersion(contract map[string]any) int {
-	return anchorVersion(anchorIRI(contract["sh:shapesGraph"]))
+// pinnedHubShapesVersion reads the canonical shapes version a document pins.
+// sh:shapesGraph is multi-valued — a document names the shape libraries its
+// data is modelled against beside the canonical DCS shapes (ADR-23) — so the
+// canonical anchor is located by name among every declared anchor rather than
+// assumed to be the sole value.
+func pinnedHubShapesVersion(contract map[string]any, canonicalName string) int {
+	for _, anchor := range declaredShapesGraphs(contract) {
+		if anchor.Name == canonicalName {
+			return anchor.Version
+		}
+	}
+	return 0
 }
 
 // hubShapesAnchorPath marks a hub-served shapes URL
@@ -125,18 +144,27 @@ type shapesGraphAnchor struct {
 	Version int
 }
 
-// declaredShapesGraphs reads the shapes graphs a document declares in
-// sh:shapesGraph — SHACL's own data-graph→shapes-graph link, multi-valued,
-// so a document whose data is modelled against a registered hub library
-// names that library beside the canonical DCS shapes (ADR-8 pin, ADR-23
-// libraries). A document is validated against exactly these graphs and
-// nothing else; anchors that are not hub-served shapes URLs (the
-// compile-time w3id default an unanchored document carries) declare nothing.
-func declaredShapesGraphs(data map[string]any) []shapesGraphAnchor {
-	var anchors []shapesGraphAnchor
+// shapesGraphDeclaration is one anchor as a document actually wrote it: the
+// hub entry and version it resolves to, plus the IRI itself. A federated
+// document names its libraries under the authoring instance's hostname, so the
+// IRI cannot be reconstructed from name and version here.
+type shapesGraphDeclaration struct {
+	Name    string
+	Version int
+	IRI     string
+}
+
+// declaredShapesGraphDeclarations reads an sh:shapesGraph value — SHACL's own
+// data-graph→shapes-graph link, multi-valued, so a document whose data is
+// modelled against a registered hub library names that library beside the
+// canonical DCS shapes (ADR-8 pin, ADR-23 libraries) — in declaration order.
+// Anchors that are not hub-served shapes URLs (the compile-time w3id default an
+// unanchored document carries) declare nothing and are skipped.
+func declaredShapesGraphDeclarations(value any) []shapesGraphDeclaration {
+	var declarations []shapesGraphDeclaration
 	seen := map[shapesGraphAnchor]bool{}
-	collect := func(value any) {
-		iri := anchorIRI(value)
+	collect := func(entry any) {
+		iri := anchorIRI(entry)
 		name, ok := anchorShapesName(iri)
 		if !ok {
 			return
@@ -146,16 +174,47 @@ func declaredShapesGraphs(data map[string]any) []shapesGraphAnchor {
 			return
 		}
 		seen[anchor] = true
-		anchors = append(anchors, anchor)
+		declarations = append(declarations, shapesGraphDeclaration{Name: anchor.Name, Version: anchor.Version, IRI: iri})
 	}
-	if declared, ok := data["sh:shapesGraph"].([]any); ok {
-		for _, entry := range declared {
+	if list, ok := value.([]any); ok {
+		for _, entry := range list {
 			collect(entry)
 		}
-		return anchors
+		return declarations
 	}
-	collect(data["sh:shapesGraph"])
+	collect(value)
+	return declarations
+}
+
+// declaredShapesGraphs reads the shapes graphs a document declares in
+// sh:shapesGraph. A document is validated against exactly these graphs and
+// nothing else.
+func declaredShapesGraphs(data map[string]any) []shapesGraphAnchor {
+	declarations := declaredShapesGraphDeclarations(data["sh:shapesGraph"])
+	if len(declarations) == 0 {
+		return nil
+	}
+	anchors := make([]shapesGraphAnchor, 0, len(declarations))
+	for _, declaration := range declarations {
+		anchors = append(anchors, shapesGraphAnchor{Name: declaration.Name, Version: declaration.Version})
+	}
 	return anchors
+}
+
+// DeclaredShapesGraphs returns the shapes graphs a document declares, in
+// declaration order. The first is the canonical DCS envelope graph:
+// PinSemanticBundle writes it there, ahead of the libraries the document's own
+// data objects are modelled against.
+func DeclaredShapesGraphs(data map[string]any) []VersionedShapeRef {
+	anchors := declaredShapesGraphs(data)
+	if len(anchors) == 0 {
+		return nil
+	}
+	refs := make([]VersionedShapeRef, 0, len(anchors))
+	for _, anchor := range anchors {
+		refs = append(refs, VersionedShapeRef(anchor))
+	}
+	return refs
 }
 
 // anchorShapesName reads the hub entry name out of a shapes anchor URL

@@ -1,5 +1,33 @@
 # ADR-11: OPA/Rego as the ODRL evaluation engine, replacing the hand-rolled operator switch
 
+## Status (verified 2026-07-30) — read this before the sections below
+
+This ADR is **implemented**. OPA is the production evaluator: `opaodrl.go`
+embeds Rego and runs `rego.PreparedEvalQuery`; `odrlexpanded.go` and `kpi.go`
+call it; `evaluateODRLConstraint` survives only in `opaodrl_test.go` as the
+parity oracle. The sections below were written before the work landed and
+still read as prospective. Four statements in them are now wrong and are
+corrected here rather than by rewriting the record:
+
+1. **"Own a minimal Go ODRL→Rego compiler"** overstates what shipped. There is
+   no compiler: one *static* Rego module answers a single-constraint boolean,
+   one constraint at a time. No contract policy is ever compiled to Rego.
+   Every deontic decision — prohibition-violated-when-satisfied, `and`/`or`/
+   `xone`, `andSequence`, duty recursion, context-operand deferral — is Go in
+   `base/validation/odrlexpanded.go`.
+2. **The pre-signatory call chain named in Context is not the chain that
+   runs.** The blocking gates (`approve.go`, `signingmanagement/command/apply.go`)
+   call `ValidateContractPolicySatisfaction`, which evaluates the embedded ODRL
+   directly. It does not call `AuditContractContent`; that function's only
+   non-test caller is the read-only audit-trail query. There is likewise no
+   `/contract/verify` flow — the endpoint referenced in Context does not exist.
+3. **The state of the world is `dcs:value`, not `dcs:parameterValue`.**
+   Production reads `dcs:value` throughout (`odrlexpanded.go`,
+   `contractclosedness.go`). `dcs:parameterValue` survives only as a mapping in
+   the served JSON-LD context and has no production reader.
+4. **The import path is `github.com/open-policy-agent/opa/v1/rego`**, not
+   `opa/rego`.
+
 ## Context
 
 ADR-6 established the *shape* of policy in this system — real ODRL emitted as
@@ -114,7 +142,11 @@ The evaluator's "state of the world" is:
 Both feed the same OPA query; only the source of the value differs — matching
 the SRS's two enforcement moments over one policy set.
 
-## Verification gate (mandatory, before wiring in — prospective)
+## Verification gate — met; OPA is wired in
+
+*(Written prospectively. The gate was met and OPA is the production evaluator;
+the parity oracle it describes lives in `opaodrl_test.go`. Retained as the
+record of what was required, not as an open item.)*
 
 Mirroring ADR-9's goRDFlib gate, OPA is not wired into enforcement until:
 
@@ -137,10 +169,13 @@ Mirroring ADR-9's goRDFlib gate, OPA is not wired into enforcement until:
 If the gate cannot be met, the hand-rolled evaluator remains and this ADR is
 revised — the gate is the trigger to switch, not an assumption that it works.
 
-## Integration (planned)
+## Integration — done
 
-- New dependency `github.com/open-policy-agent/opa/rego`, pinned by version in
-  `go.mod`; upgrades re-run the parity gate.
+*(Written prospectively; the work below has shipped. See Status above for the
+four points where this section's wording no longer matches the code.)*
+
+- New dependency `github.com/open-policy-agent/opa/v1/rego`, pinned by version
+  in `go.mod`; upgrades re-run the parity gate.
 - `evaluateODRLConstraint` and its expanded/compact call sites
   (`odrlexpanded.go` `auditExpandedODRLRule`, `kpi.go` `EvaluateKPIViolation`)
   are replaced by an OPA query built from the compiled Rego for the contract's

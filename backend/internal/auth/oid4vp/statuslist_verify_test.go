@@ -18,13 +18,36 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	_ = ConfigureStatusListVerification("", true)
+	_ = ConfigureStatusListVerification(nil, true)
 	os.Exit(m.Run())
 }
 
-func TestConfigureStatusListVerification_AllowsXFSCFallbackOutsideProduction(t *testing.T) {
-	err := configureStatusListVerification("", true, func(string) string { return "development" })
+// The status-list verifier is built from the trust config already parsed for
+// OID4VP, not from a second read of the same file. Only issuers carrying a
+// bundled JWKS can sign a status list: an issuer whose key is resolved by x5c,
+// did:web or ORCE has no key to check a list signature against, so it must be
+// absent from the projection rather than present and unusable.
+func TestConfigureStatusListVerificationTakesOnlyIssuersWithABundledKey(t *testing.T) {
+	trustCfg := &TrustConfig{Issuers: map[string]TrustedIssuer{
+		"did:web:example:issuer:bundled": {
+			Mechanism: MechanismJWKS,
+			JWKS:      json.RawMessage(`{"keys":[{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0","kid":"bundled"}]}`),
+		},
+		"did:web:example:issuer:x5c": {
+			Mechanism: MechanismX5C,
+		},
+	}}
+
+	require.NoError(t, ConfigureStatusListVerification(trustCfg, true))
+	t.Cleanup(func() { _ = ConfigureStatusListVerification(nil, true) })
+
+	projected, err := status.NewTrustConfig(map[string]json.RawMessage{
+		"did:web:example:issuer:bundled": trustCfg.Issuers["did:web:example:issuer:bundled"].JWKS,
+		"did:web:example:issuer:x5c":     trustCfg.Issuers["did:web:example:issuer:x5c"].JWKS,
+	})
 	require.NoError(t, err)
+	assert.Contains(t, projected.Issuers, "did:web:example:issuer:bundled")
+	assert.NotContains(t, projected.Issuers, "did:web:example:issuer:x5c")
 }
 
 func makeXFSCListBody(bitstring []byte) []byte {

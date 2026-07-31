@@ -51,8 +51,18 @@ func TestSubmitterContractDataForSemanticValidationPersistsSubmittedData(t *test
 	if err := json.Unmarshal(*repo.updated.ContractData, &decoded); err != nil {
 		t.Fatalf("could not decode persisted contract data: %v", err)
 	}
+	// The submitted document is what is stored — the stale stored one is only
+	// consulted for the Semantic Hub bundle the contract is pinned to, which a
+	// client-assembled document never carries.
 	if decoded["@id"] != did {
 		t.Fatalf("persisted contract data @id = %v, want %s", decoded["@id"], did)
+	}
+	if _, ok := decoded["semanticConditionValues"]; ok {
+		t.Fatalf("stored contract data leaked into the submitted document: %v", decoded)
+	}
+	effectiveShapes, _ := decoded["dcs:effectiveShapes"].([]any)
+	if len(effectiveShapes) != 1 {
+		t.Fatalf("pinned effective shapes were not carried forward: %v", decoded["dcs:effectiveShapes"])
 	}
 }
 
