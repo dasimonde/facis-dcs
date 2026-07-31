@@ -58,6 +58,10 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	if strings.TrimSpace(metadata.PolicyVersion) != "" {
 		policy.Version = metadata.PolicyVersion
 	}
+	cacheKey := contractContentAuditCacheKey(contract, policy)
+	if findings, ok := cachedContractContentAudit(cacheKey); ok {
+		return findings, nil
+	}
 
 	source, err := requireShapeSource()
 	if err != nil {
@@ -134,6 +138,7 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 		findings[i].PolicySetID = policy.PolicySetID
 		findings[i].PolicyVersion = policy.Version
 	}
+	cacheContractContentAudit(cacheKey, findings)
 	return findings, nil
 }
 

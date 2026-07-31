@@ -14,9 +14,38 @@ from __future__ import annotations
 
 import base64
 import os
+import time
 
 from steps.support.api_client import post_json
 from steps.support.services.auth_service import AuthService
+
+
+_REGENERATION_IN_FLIGHT = "PDF is still being regenerated; retry signing shortly"
+
+
+def _prepare_with_regeneration_retry(context, url, body, headers):
+    """Retry only the documented transient PDF-regeneration condition."""
+    timeout_seconds = max(
+        0.0,
+        float(os.getenv("BDD_SIGNATURE_PREPARE_RETRY_SECONDS", "45")),
+    )
+    retry_interval_seconds = max(
+        0.0,
+        float(os.getenv("BDD_SIGNATURE_PREPARE_RETRY_INTERVAL_SECONDS", "1")),
+    )
+    deadline = time.monotonic() + timeout_seconds
+
+    while True:
+        response = post_json(context, url, body, headers=headers)
+        if (
+            response.status_code != 500
+            or _REGENERATION_IN_FLIGHT not in response.text
+        ):
+            return response
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return response
+        time.sleep(min(retry_interval_seconds, remaining))
 
 
 def wallet_sign(
@@ -60,7 +89,12 @@ def wallet_sign(
     if ceremony_id is not None:
         body["ceremony_id"] = ceremony_id
 
-    prepare_resp = post_json(context, f"{base}/signature/prepare", body, headers=signer_headers)
+    prepare_resp = _prepare_with_regeneration_retry(
+        context,
+        f"{base}/signature/prepare",
+        body,
+        signer_headers,
+    )
     if prepare_resp.status_code != 200:
         return prepare_resp
 

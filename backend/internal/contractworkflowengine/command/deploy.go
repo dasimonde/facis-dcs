@@ -90,6 +90,27 @@ type PeerSignatures interface {
 	GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*db2.SyncSignature, error)
 }
 
+// HasDesignatedTarget reports whether an automatic deployment exists to be
+// gated at all. A signed contract with no target is an ordinary non-deploying
+// agreement; the event subscriber uses this before creating a deployment gate
+// run.
+func (h *Deployer) HasDesignatedTarget(ctx context.Context, did string) (bool, error) {
+	tx, err := h.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	data, err := h.CRepo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return false, fmt.Errorf("could not read contract %s: %w", did, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("could not commit target lookup: %w", err)
+	}
+	return data.TargetID != nil && strings.TrimSpace(*data.TargetID) != "", nil
+}
+
 func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, error) {
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {

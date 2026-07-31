@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -88,6 +89,16 @@ func (f fixtureShapeSource) ActiveDomainOntology(context.Context) (string, int, 
 		return f.ontologyTTL, 1, nil
 	}
 	return mustReadRepoFile("backend/internal/semantichub/assets/facis-sla-ontology.ttl"), 1, nil
+}
+
+type countingContextShapeSource struct {
+	fixtureShapeSource
+	activeContextCalls atomic.Int32
+}
+
+func (s *countingContextShapeSource) ActiveContext(ctx context.Context) (string, int, error) {
+	s.activeContextCalls.Add(1)
+	return s.fixtureShapeSource.ActiveContext(ctx)
 }
 
 // mustReadRepoFile climbs from the package directory to find a repo-root
@@ -358,6 +369,75 @@ func TestAuditContractContentLoadsDefaultPolicyDocument(t *testing.T) {
 		}
 	}
 	require.Positive(t, policy.ProfileVersion)
+}
+
+func TestAuditContractContentCachesOnlyImmutablePinnedDocuments(t *testing.T) {
+	base := fixtureShapeSource{
+		profileYAML: "id: test\nversion: v1\nrules: []\n",
+		contextJSON: mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-context.jsonld"),
+	}
+	source := &countingContextShapeSource{fixtureShapeSource: base}
+	restore := swapShapeSource(t, source)
+	defer restore()
+
+	contract := canonicalAuditContract()
+	contract["dcs:effectiveShapes"] = []any{
+		map[string]any{"@id": "http://dcs.test/semantic/shapes/facis-dcs?version=1"},
+	}
+	contract["dcterms:conformsTo"] = map[string]any{
+		"@id": "http://dcs.test/semantic/profiles/facis-sla-basic?version=1",
+	}
+
+	first, err := AuditContractContent(
+		context.Background(),
+		contract,
+		emptyPolicy(),
+		ContractContentAuditMetadata{},
+	)
+	require.NoError(t, err)
+	callsAfterFirst := source.activeContextCalls.Load()
+	require.Positive(t, callsAfterFirst)
+
+	second, err := AuditContractContent(
+		context.Background(),
+		contract,
+		emptyPolicy(),
+		ContractContentAuditMetadata{},
+	)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	require.Equal(t, callsAfterFirst, source.activeContextCalls.Load(),
+		"an unchanged pinned document should reuse its immutable audit result")
+
+	ResetDomainOntologyCache()
+	_, err = AuditContractContent(
+		context.Background(),
+		contract,
+		emptyPolicy(),
+		ContractContentAuditMetadata{},
+	)
+	require.NoError(t, err)
+	require.Greater(t, source.activeContextCalls.Load(), callsAfterFirst,
+		"activating Semantic Hub content must invalidate cached audit results")
+}
+
+func TestAuditContractContentDoesNotCacheUnpinnedDrafts(t *testing.T) {
+	source := &countingContextShapeSource{fixtureShapeSource: fixtureShapeSource{
+		profileYAML: "id: test\nversion: v1\nrules: []\n",
+		contextJSON: mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-context.jsonld"),
+	}}
+	restore := swapShapeSource(t, source)
+	defer restore()
+
+	contract := canonicalAuditContract()
+	_, err := AuditContractContent(context.Background(), contract, emptyPolicy(), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	callsAfterFirst := source.activeContextCalls.Load()
+
+	_, err = AuditContractContent(context.Background(), contract, emptyPolicy(), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	require.Greater(t, source.activeContextCalls.Load(), callsAfterFirst,
+		"an unpinned draft must continue to observe active Semantic Hub content")
 }
 
 func TestAuditContractContentSHACLReportsRealSHACLCoreViolations(t *testing.T) {

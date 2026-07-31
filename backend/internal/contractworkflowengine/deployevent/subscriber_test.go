@@ -12,7 +12,14 @@ import (
 )
 
 type recordingDeployer struct {
-	commands []command.DeployCmd
+	commands   []command.DeployCmd
+	designated bool
+	lookupDIDs []string
+}
+
+func (r *recordingDeployer) HasDesignatedTarget(_ context.Context, did string) (bool, error) {
+	r.lookupDIDs = append(r.lookupDIDs, did)
+	return r.designated, nil
 }
 
 func (r *recordingDeployer) Handle(_ context.Context, cmd command.DeployCmd) (*command.DeployResult, error) {
@@ -36,7 +43,7 @@ func appliedSignatureEvent(t *testing.T, did string) cloudevent.Event {
 // only in the counterparty's database — was demanded from ours, so a fully
 // countersigned contract could never auto-deploy at all.
 func TestAutoDeployPassesThisInstancesOwnPeerIdentity(t *testing.T) {
-	deployer := &recordingDeployer{}
+	deployer := &recordingDeployer{designated: true}
 	sub := &Subscriber{Deployer: deployer, LocalPeer: "did:web:dcs-a.localhost"}
 
 	require.NoError(t, sub.handle(context.Background(), appliedSignatureEvent(t, "did:web:example#contract")))
@@ -47,10 +54,21 @@ func TestAutoDeployPassesThisInstancesOwnPeerIdentity(t *testing.T) {
 	require.Equal(t, "system:auto-deploy", deployer.commands[0].RequestedBy)
 }
 
+func TestAutoDeployWithoutDesignatedTargetCreatesNoDeployment(t *testing.T) {
+	deployer := &recordingDeployer{}
+	sub := &Subscriber{Deployer: deployer, LocalPeer: "did:web:dcs-a.localhost"}
+
+	require.NoError(t, sub.handle(context.Background(), appliedSignatureEvent(t, "did:web:example#contract")))
+
+	require.Equal(t, []string{"did:web:example#contract"}, deployer.lookupDIDs)
+	require.Empty(t, deployer.commands)
+}
+
 func TestAutoDeployIgnoresAnEventWithoutAContract(t *testing.T) {
 	deployer := &recordingDeployer{}
 	sub := &Subscriber{Deployer: deployer, LocalPeer: "did:web:dcs-a.localhost"}
 
 	require.NoError(t, sub.handle(context.Background(), appliedSignatureEvent(t, "")))
+	require.Empty(t, deployer.lookupDIDs)
 	require.Empty(t, deployer.commands)
 }

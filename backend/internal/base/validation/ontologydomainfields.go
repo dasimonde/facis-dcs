@@ -57,8 +57,9 @@ func requireDomainOntology(ctx context.Context) (*domainOntology, error) {
 // activation (service.RefreshValidationAnchors).
 func ResetDomainOntologyCache() {
 	domainOntologyMu.Lock()
-	defer domainOntologyMu.Unlock()
 	cachedDomainOntology = nil
+	domainOntologyMu.Unlock()
+	resetContractContentAuditCache()
 }
 
 func parseDomainOntology(content string) (*domainOntology, error) {

@@ -125,6 +125,39 @@ class PacAuditEvidenceServiceTest(unittest.TestCase):
             [{"did": "did:contract:archive", "event_type": "ARCHIVED"}],
         )
 
+    def test_reads_timeline_from_versioned_executor_result(self) -> None:
+        payload = {
+            "contract_version": "v1",
+            "timeline": [
+                {"did": "did:contract:1", "event_type": "MATCH"},
+                {"did": "did:contract:2", "event_type": "OTHER"},
+                None,
+                "not-an-entry",
+            ],
+        }
+
+        entries = PacAuditEvidenceService.result_audit_entries(
+            payload,
+            "did:contract:1",
+        )
+
+        self.assertEqual(
+            entries,
+            [{"did": "did:contract:1", "event_type": "MATCH"}],
+        )
+
+    def test_rejects_legacy_or_malformed_executor_results(self) -> None:
+        self.assertEqual(
+            PacAuditEvidenceService.result_audit_entries(
+                [{"audit_trail": [{"event_type": "LEGACY"}]}]
+            ),
+            [],
+        )
+        self.assertEqual(
+            PacAuditEvidenceService.result_audit_entries({"timeline": "invalid"}),
+            [],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

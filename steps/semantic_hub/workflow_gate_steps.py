@@ -23,6 +23,7 @@ from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (
 )
 from steps.support.api_client import (
     contract_approve_url,
+    contract_deploy_url,
     contract_offer_url,
     contract_retrieve_by_id_url,
     contract_submit_url,
@@ -97,14 +98,26 @@ def _prepare(context, name: str, gate: str) -> None:
     elif gate == "deployment":
         ContractService._create_contract_in_draft(context, physical_name)
         _advance_to_approved(context, physical_name)
-        _ensure_target_designated(context, physical_name)
-        ContractService._refresh_contract(context, physical_name)
         _run_full_ceremony(
             context,
             physical_name,
             ContractService._local_peer_did(context),
             "BDD Workflow Gate Signer",
         )
+        presentation = context.pid_presentations[physical_name]
+        signed = _apply_signature(
+            context,
+            physical_name,
+            signer_did=presentation["subject_did"],
+            ceremony_id=context.ceremony_ids[physical_name],
+            signatory="BDD Workflow Gate Signer",
+        )
+        assert signed.status_code == 200, (
+            f"Could not prepare deployment gate in SIGNED state: "
+            f"{signed.status_code} {signed.text}"
+        )
+        ContractService._refresh_contract(context, physical_name)
+        _ensure_target_designated(context, physical_name)
     else:
         raise AssertionError(f"Unknown workflow gate {gate!r}")
     ContractService._refresh_contract(context, physical_name)
@@ -148,24 +161,12 @@ def _request_gate(context, gate: str, name: str):
             signatory="BDD Workflow Gate Signer",
         )
     elif gate == "deployment":
-        review_deployment = getattr(context, "workflow_gate_mode", None) == "review"
-        if review_deployment:
-            # Signature is its own synchronous gate. Let that gate succeed,
-            # then switch the executor before the asynchronous auto-deploy
-            # subscriber evaluates the deployment gate.
-            OrceAuditControlService.set_mode(context, CHANNEL, "success_empty")
-        presentation = context.pid_presentations[name]
-        response = _apply_signature(
+        response = post_json(
             context,
-            name,
-            signer_did=presentation["subject_did"],
-            ceremony_id=context.ceremony_ids[name],
-            signatory="BDD Workflow Gate Signer",
+            contract_deploy_url(context),
+            {"did": did, "updated_at": updated_at},
+            headers=AuthService.get_headers_for_roles(["Contract Manager"]),
         )
-        if review_deployment:
-            ContractService._refresh_contract(context, name)
-            context.workflow_pre_states[name] = "SIGNED"
-            OrceAuditControlService.set_mode(context, CHANNEL, "review")
     else:
         raise AssertionError(f"Unknown workflow gate {gate!r}")
     context.requests_response = response

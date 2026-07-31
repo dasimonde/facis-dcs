@@ -34,6 +34,7 @@ type Subscriber struct {
 // ContractDeployer is the deployment implementation this subscriber shares with
 // the manual POST /contract/deploy endpoint (command.Deployer).
 type ContractDeployer interface {
+	HasDesignatedTarget(ctx context.Context, did string) (bool, error)
 	Handle(ctx context.Context, cmd command.DeployCmd) (*command.DeployResult, error)
 }
 
@@ -73,6 +74,17 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 	if envelope.DID == "" {
 		return nil
 	}
+	// Deployment is opt-in. Do not create a workflow-gate run for a signed
+	// contract that names no target: there is no deployment transition to
+	// authorize, and persisting that run would make a later explicit deploy
+	// reuse a decision made before the target was even designated.
+	designated, err := s.Deployer.HasDesignatedTarget(ctx, envelope.DID)
+	if err != nil {
+		return err
+	}
+	if !designated {
+		return nil
+	}
 	if s.Gate != nil {
 		if _, _, err := s.Gate.Execute(ctx, workflowgate.Input{
 			Gate: "deployment", ContractDID: envelope.DID,
@@ -83,7 +95,7 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 		}
 	}
 
-	_, err := s.Deployer.Handle(ctx, command.DeployCmd{
+	_, err = s.Deployer.Handle(ctx, command.DeployCmd{
 		DID:         envelope.DID,
 		RequestedBy: "system:auto-deploy",
 		LocalPeer:   s.LocalPeer,

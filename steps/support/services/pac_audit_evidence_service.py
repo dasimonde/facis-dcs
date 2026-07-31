@@ -77,3 +77,23 @@ class PacAuditEvidenceService:
         if did is not None:
             entries = [entry for entry in entries if entry.get("did") == did]
         return entries
+
+    @staticmethod
+    def result_audit_entries(payload, did: str | None = None) -> list[dict]:
+        """Read audit entries from the versioned executor result envelope.
+
+        POST /pac/audit no longer returns the legacy list of per-scope
+        ``audit_trail`` objects. Its DCS-procured entries are exposed as the
+        executor run's ``timeline``. Keep this parsing in one place so steps do
+        not accidentally iterate the envelope's string keys.
+        """
+        if not isinstance(payload, dict):
+            return []
+        entries = [
+            entry
+            for entry in (payload.get("timeline") or [])
+            if isinstance(entry, dict)
+        ]
+        if did is not None:
+            entries = [entry for entry in entries if entry.get("did") == did]
+        return entries

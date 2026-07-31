@@ -214,11 +214,8 @@ def step_then_risk_audited_once(context, risk_type, name):
         assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
         return [
             entry
-            for scope_result in resp.json()
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict)
-            and entry.get("event_type") == "PAC_COMPLIANCE_RISK"
-            and entry.get("did") == did
+            for entry in PacAuditEvidenceService.result_audit_entries(resp.json(), did)
+            if entry.get("event_type") == "PAC_COMPLIANCE_RISK"
             and (entry.get("event_data") or {}).get("risk_type") == risk_type
         ]
 
