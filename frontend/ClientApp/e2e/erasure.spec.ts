@@ -64,11 +64,10 @@ async function expectKeyShredded(inst: Instance, contractDid: string): Promise<v
           },
         })
         if (!resp.ok()) return `HTTP ${resp.status()}`
-        const payload = (await resp.json()) as
-          | { audit_trail?: { did?: string; event_type?: string }[] }
-          | { audit_trail?: { did?: string; event_type?: string }[] }[]
-        const scopes = Array.isArray(payload) ? payload : [payload]
-        const types = scopes.flatMap((s) => s.audit_trail ?? []).filter((e) => e.did === contractDid)
+        // POST /pac/audit returns one executor-run envelope, not a list of
+        // per-scope trails; the DCS-procured entries live under `timeline`.
+        const run = (await resp.json()) as { timeline?: { did?: string; event_type?: string }[] }
+        const types = (run.timeline ?? []).filter((e) => e.did === contractDid)
         return types.some((e) => e.event_type === 'KEY_SHREDDED')
           ? 'found'
           : JSON.stringify(types.map((e) => e.event_type))

@@ -329,8 +329,20 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 		// bare value with no unit of its own, so nothing here can confirm the
 		// two quantities are commensurable. Record the gap rather than let the
 		// unit imply a check that does not happen.
+		//
+		// Only an unagreed negotiated unit is a warning: the author can close it
+		// by agreeing the value, and ValidateContractClosed refuses to seal
+		// until they do. That a compared value carries no unit of its own is a
+		// property of every ContractField, not of this contract, so it is stated
+		// as info — a warning there makes the workflow gate REVIEW every
+		// contract that denominates a boundary at all, which is every correct
+		// use of odrl:unit.
 		if unit := resolveConstraintUnit(constraint, fieldIndex); unit.token != "" {
-			findings = append(findings, contractFinding(ruleID, ruleID, "warning",
+			severity := "info"
+			if unit.fieldID != "" && !unit.agreed {
+				severity = "warning"
+			}
+			findings = append(findings, contractFinding(ruleID, ruleID, severity,
 				unitUncheckedMessage(ruleID, unit), operandID, odrlIRI+"unit"))
 		}
 

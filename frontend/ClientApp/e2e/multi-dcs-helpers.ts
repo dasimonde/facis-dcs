@@ -584,6 +584,14 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   // reviewer's local semantic precheck withheld confirmation and the settle could
   // never complete.
   await constraint.locator('input[placeholder="value"]').fill('50000')
+  // Denominate the boundary. A bare bound never reaches resolveConstraintUnit,
+  // so every unit-related audit finding was unreachable from this vertical: a
+  // declared unit was reported at warning severity, the workflow gate turns any
+  // warning into REVIEW, and REVIEW refuses the offer — meaning no contract that
+  // denominated a boundary could be offered at all, while this suite stayed
+  // green. Stage 5 is the assertion: if the gate withholds the offer, B never
+  // reaches OFFERED.
+  await constraint.getByTestId('constraint-unit').fill('https://w3id.org/facis/dcs/taxonomy/v1#currency-EUR')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')

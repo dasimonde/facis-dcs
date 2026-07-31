@@ -163,6 +163,29 @@ func TestAuditContractRefusesToCompareAFixedUnitAgainstANegotiatedOne(t *testing
 	}
 }
 
+// An agreed negotiated unit is the intended modelling: the boundary is
+// denominated in the currency the parties settled on. It blocked the workflow
+// gate at REVIEW because the finding was raised as a warning, which made every
+// contract that denominates a boundary need a manual review it can never clear.
+func TestAuditContractDoesNotSendAnAgreedNegotiatedUnitToReview(t *testing.T) {
+	ruleID := "FACIS-PAY-AGREED-CURRENCY"
+
+	contract := payAmountContract(float64(400),
+		[]any{currencyField(payCurrencyFieldID, "Payment Currency", "EUR")},
+		[]any{payAmountDuty(ruleID, "odrl:lteq", 500, map[string]any{"@id": payCurrencyFieldID})})
+
+	findings, err := AuditContractContent(context.Background(), contract, emptyPolicy(), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+
+	messages := findingMessages(findings, ruleID)
+	require.True(t, someMessageContains(messages, "Payment Currency", "agreed as EUR"),
+		"an agreed unit is still stated as unverified: %v", messages)
+	require.False(t, hasFindingSeverity(findings, ruleID, "warning"),
+		"an agreed unit must not send the contract to manual review: %v", messages)
+	require.False(t, hasFindingSeverity(findings, ruleID, "error"),
+		"an agreed unit must not fail the boundary closed: %v", messages)
+}
+
 func TestAuditContractDefersAnUnagreedNegotiatedUnitWithoutFailingClosed(t *testing.T) {
 	ruleID := "FACIS-PAY-UNAGREED-CURRENCY"
 
