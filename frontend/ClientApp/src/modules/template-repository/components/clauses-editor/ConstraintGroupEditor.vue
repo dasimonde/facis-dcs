@@ -244,7 +244,19 @@ const unitOptions = computed(() => {
             </fieldset>
           </div>
         </details>
+        <select
+          v-model="child.unitSource"
+          data-testid="constraint-unit-source"
+          class="select-bordered select select-xs"
+          title="What the unit is"
+        >
+          <option value="">in a fixed unit</option>
+          <optgroup v-if="fields.length" label="Agreed at negotiation">
+            <option v-for="f in fields" :key="f.id" :value="f.id">in the “{{ f.label }}”</option>
+          </optgroup>
+        </select>
         <input
+          v-if="!child.unitSource"
           v-model="child.unit"
           data-testid="constraint-unit"
           type="text"

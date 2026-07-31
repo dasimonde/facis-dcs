@@ -68,6 +68,13 @@ func ValidateContractClosed(contractDocument any) error {
 						add(fmt.Sprintf("negotiated boundary %q has no agreed value", right))
 					}
 				}
+				// So must a negotiated unit (an odrl:unit referencing a field):
+				// a boundary whose unit was never agreed states no bound.
+				if unit := nodeReferenceID(leaf["odrl:unit"]); unit != "" {
+					if info, ok := fields[unit]; ok && !info.hasValue {
+						add(fmt.Sprintf("negotiated unit %q has no agreed value", unit))
+					}
+				}
 			}
 		}
 	}

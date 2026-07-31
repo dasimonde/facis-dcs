@@ -80,6 +80,11 @@ interface RuleDraft {
   duties: DutyDraft[]
 }
 
+/** The @ids a constraint may reference as a negotiated boundary or unit. */
+function declaredFieldIds(): string[] {
+  return props.fields.map((field) => field.id)
+}
+
 function seed(rule: OdrlRule | null): RuleDraft {
   return {
     type: rule?.['@type'] ?? ODRL_RULE_TYPES[0]?.type ?? 'odrl:Permission',
@@ -87,7 +92,7 @@ function seed(rule: OdrlRule | null): RuleDraft {
     assigneeId: rule?.['odrl:assignee']?.['@id'] ?? props.parties[0]?.id ?? '',
     assignerId: rule?.['odrl:assigner']?.['@id'] ?? props.parties[0]?.id ?? '',
     targetId: rule?.['odrl:target']?.['@id'] ?? props.contractTargetId,
-    root: parseConstraintTree(rule?.['odrl:constraint'] ?? []),
+    root: parseConstraintTree(rule?.['odrl:constraint'] ?? [], declaredFieldIds()),
     duties: readDuties(rule),
   }
 }
@@ -125,10 +130,10 @@ function removeAction(index: number) {
 function readDuties(rule: OdrlRule | null): DutyDraft[] {
   return (rule?.['odrl:duty'] ?? []).map((duty) => ({
     action: firstActionId(duty['odrl:action']),
-    root: parseConstraintTree(duty['odrl:constraint'] ?? []),
+    root: parseConstraintTree(duty['odrl:constraint'] ?? [], declaredFieldIds()),
     consequences: (duty['odrl:consequence'] ?? []).map((consequence) => ({
       action: firstActionId(consequence['odrl:action']),
-      root: parseConstraintTree(consequence['odrl:constraint'] ?? []),
+      root: parseConstraintTree(consequence['odrl:constraint'] ?? [], declaredFieldIds()),
     })),
   }))
 }

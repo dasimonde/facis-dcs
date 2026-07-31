@@ -23,8 +23,27 @@ const NODE_UNIT = 'https://w3id.org/facis/sla/hosting/v1#unit-node'
 const REGION_EMEA = 'https://w3id.org/facis/dcs/taxonomy/v1#service-region-EMEA'
 
 function atomic(leftOperand: string, operator: string, extra: Partial<AtomicDraft> = {}): AtomicDraft {
-  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '', values: [], unit: '', ...extra }
+  return {
+    kind: 'atomic',
+    leftOperand,
+    operator,
+    rightSource: '',
+    value: '',
+    values: [],
+    unitSource: '',
+    unit: '',
+    ...extra,
+  }
 }
+
+/** The negotiated fields the SLA's constraints reference. */
+const SLA_FIELDS = [
+  `${TEMPLATE_IRI}#field-provisioned-nodes`,
+  `${TEMPLATE_IRI}#field-service-region`,
+  `${TEMPLATE_IRI}#field-contract-end-date`,
+  `${TEMPLATE_IRI}#field-monthly-fee`,
+  `${TEMPLATE_IRI}#field-service-credit-rate`,
+]
 
 function group(combine: GroupDraft['combine'], children: ConstraintNodeDraft[]): GroupDraft {
   return { kind: 'group', combine, children }
@@ -103,11 +122,11 @@ describe('composeConstraintTree — SLA constraints', () => {
   it('round-trips: compose → parse → compose is stable', () => {
     const first = composeConstraintTree(workloadConstraintRoot())
     expect(first).toBeDefined()
-    const reparsed = parseConstraintTree(first!)
+    const reparsed = parseConstraintTree(first!, SLA_FIELDS)
     const second = composeConstraintTree(reparsed)
     expect(second).toEqual(first)
     // And once more, so a loss that only shows on the second pass is caught.
-    expect(composeConstraintTree(parseConstraintTree(second!))).toEqual(first)
+    expect(composeConstraintTree(parseConstraintTree(second!, SLA_FIELDS))).toEqual(first)
   })
 })
 

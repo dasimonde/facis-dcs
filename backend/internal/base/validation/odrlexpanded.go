@@ -329,10 +329,9 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 		// bare value with no unit of its own, so nothing here can confirm the
 		// two quantities are commensurable. Record the gap rather than let the
 		// unit imply a check that does not happen.
-		if unit := constraintUnitIRI(constraint); unit != "" {
+		if unit := resolveConstraintUnit(constraint, fieldIndex); unit.token != "" {
 			findings = append(findings, contractFinding(ruleID, ruleID, "warning",
-				fmt.Sprintf("ODRL policy %q denominates its boundary in %s, but the compared value declares no unit, so this audit does not verify the two are the same quantity", ruleID, shaclLocalName(unit)),
-				operandID, odrlIRI+"unit"))
+				unitUncheckedMessage(ruleID, unit), operandID, odrlIRI+"unit"))
 		}
 
 		// ODRL context operands (spatial, dateTime, purpose, …) are evaluated
@@ -439,8 +438,8 @@ func applyDeclaredUnits(fieldIndex map[string]odrlFieldInfo, rules []map[string]
 			}
 			return
 		}
-		unit := constraintUnitIRI(constraint)
-		if unit == "" {
+		unit := resolveConstraintUnit(constraint, fieldIndex)
+		if unit.token == "" {
 			return
 		}
 		leftOperand, ok := expandedFirst(constraint, odrlIRI+"leftOperand")
@@ -449,10 +448,10 @@ func applyDeclaredUnits(fieldIndex map[string]odrlFieldInfo, rules []map[string]
 		}
 		operandID, _ := leftOperand["@id"].(string)
 		info, known := fieldIndex[operandID]
-		if !known || slices.Contains(info.units, unit) {
+		if !known || slices.Contains(info.units, unit.token) {
 			return
 		}
-		info.units = append(info.units, unit)
+		info.units = append(info.units, unit.token)
 		fieldIndex[operandID] = info
 	}
 	var walkNode func(node map[string]any)
@@ -474,18 +473,68 @@ func applyDeclaredUnits(fieldIndex map[string]odrlFieldInfo, rules []map[string]
 	}
 }
 
-// constraintUnitIRI returns the odrl:unit a constraint denominates its
-// boundary in (ODRL IM §2.5), empty when it declares none.
-func constraintUnitIRI(constraint map[string]any) string {
+// odrlUnit is a constraint's resolved odrl:unit.
+type odrlUnit struct {
+	// token identifies the unit for the "are these the same unit?" test: the
+	// declared IRI of a fixed unit, the agreed value of a negotiated one, and
+	// the field @id while that field is unfilled — so constraints naming the
+	// same unagreed field stay one unit, whichever unit it turns out to be.
+	//
+	// A dcs:ContractField holds a literal, so a negotiated unit's agreed value
+	// is a notation ("EUR"), never the concept IRI a fixed unit names. The two
+	// therefore never compare equal, and must not: mapping one to the other
+	// would be guessing which scheme the notation came from.
+	token string
+	// fieldID is the contract field a negotiated unit names, empty for a fixed
+	// unit; label is that field's label and agreed reports whether it is filled.
+	fieldID string
+	label   string
+	agreed  bool
+}
+
+// resolveConstraintUnit returns the unit a constraint denominates its boundary
+// in (ODRL IM §2.5), zero when it declares none. A unit naming a declared
+// contract field is negotiated — the parties agree it the way they agree a
+// right-operand boundary — and resolves to that field's filled value, mirroring
+// resolveRightOperand.
+func resolveConstraintUnit(constraint map[string]any, fieldIndex map[string]odrlFieldInfo) odrlUnit {
 	for _, raw := range expandedValues(constraint, odrlIRI+"unit") {
-		if id := expandedID(raw); id != "" {
-			return id
+		id := expandedID(raw)
+		if id == "" {
+			if literal, ok := expandedLiteral(raw).(string); ok && literal != "" {
+				return odrlUnit{token: literal}
+			}
+			continue
 		}
-		if literal, ok := expandedLiteral(raw).(string); ok && literal != "" {
-			return literal
+		info, negotiated := fieldIndex[id]
+		if !negotiated {
+			return odrlUnit{token: id}
 		}
+		if info.hasValue {
+			return odrlUnit{token: fmt.Sprint(info.value), fieldID: id, label: info.label, agreed: true}
+		}
+		return odrlUnit{token: id, fieldID: id, label: info.label}
 	}
-	return ""
+	return odrlUnit{}
+}
+
+// unitUncheckedMessage states what the audit did not check about a boundary's
+// unit. A dcs:ContractField carries a bare value with no unit of its own, so a
+// declared unit is never compared against anything. A negotiated unit adds a
+// second gap while unagreed — nothing yet says what the boundary is in — which
+// ValidateContractClosed refuses to seal, so the audit states it and moves on.
+func unitUncheckedMessage(ruleID string, unit odrlUnit) string {
+	if unit.fieldID == "" {
+		return fmt.Sprintf("ODRL policy %q denominates its boundary in %s, but the compared value declares no unit, so this audit does not verify the two are the same quantity", ruleID, shaclLocalName(unit.token))
+	}
+	name := unit.label
+	if name == "" {
+		name = shaclLocalName(unit.fieldID)
+	}
+	if !unit.agreed {
+		return fmt.Sprintf("ODRL policy %q denominates its boundary in the negotiated unit %q, which has no agreed value, so this audit cannot tell what the boundary is measured in", ruleID, name)
+	}
+	return fmt.Sprintf("ODRL policy %q denominates its boundary in the negotiated unit %q, agreed as %s, but the compared value declares no unit, so this audit does not verify the two are the same quantity", ruleID, name, unit.token)
 }
 
 func localNames(iris []string) []string {
