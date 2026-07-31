@@ -7,6 +7,16 @@ export function bindReportedHttpError(error: object, messageId: number): void {
   reportedHttpErrors.set(error, messageId)
 }
 
+/** Transfers ownership of an interceptor-reported HTTP failure to a local,
+ * persistent error surface so the same failure is not announced twice. */
+export function dismissReportedHttpError(error: unknown): void {
+  if (typeof error !== 'object' || error === null) return
+  const messageId = reportedHttpErrors.get(error)
+  if (messageId === undefined) return
+  useErrorStore().remove(messageId)
+  reportedHttpErrors.delete(error)
+}
+
 /**
  * Gives an action failure user-facing context while preserving the HTTP
  * interceptor as the single owner of Axios error toasts.

@@ -17,12 +17,12 @@ func TestSubmitterContractDataForSemanticValidationPersistsSubmittedData(t *test
 	ctx := context.Background()
 	did := "did:web:facis.example:contract:submit"
 	submitted := minimalCanonicalContractData(t, "did:web:facis.example:contract:stale")
-	storedInvalid := datatype.JSON(`{"semanticConditionValues":[{"parameterName":"provider.country","parameterValue":"USA"}]}`)
+	stored := semanticBundleContractData(t, did)
 
 	repo := &submitContractRepoFake{
 		stored: &db.Contract{
 			DID:          did,
-			ContractData: &storedInvalid,
+			ContractData: &stored,
 		},
 	}
 	submitter := Submitter{CRepo: repo}
@@ -34,8 +34,8 @@ func TestSubmitterContractDataForSemanticValidationPersistsSubmittedData(t *test
 	if err != nil {
 		t.Fatalf("contractDataForSemanticValidation returned error: %v", err)
 	}
-	if repo.readDataCalled {
-		t.Fatalf("stored contract data was read even though submitted data was provided")
+	if !repo.readDataCalled {
+		t.Fatalf("stored semantic bundle was not read")
 	}
 	if repo.updated == nil || repo.updated.ContractData == nil {
 		t.Fatalf("submitted contract data was not persisted")
@@ -54,6 +54,22 @@ func TestSubmitterContractDataForSemanticValidationPersistsSubmittedData(t *test
 	if decoded["@id"] != did {
 		t.Fatalf("persisted contract data @id = %v, want %s", decoded["@id"], did)
 	}
+}
+
+func semanticBundleContractData(t *testing.T, id string) datatype.JSON {
+	t.Helper()
+	raw := minimalCanonicalContractData(t, id)
+	pinned, err := validation.PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{"https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	if err != nil {
+		t.Fatalf("could not pin semantic bundle: %v", err)
+	}
+	return *pinned
 }
 
 func TestCanSubmitUpdatedContractDataOnlyAllowsCreatorSubmitStates(t *testing.T) {

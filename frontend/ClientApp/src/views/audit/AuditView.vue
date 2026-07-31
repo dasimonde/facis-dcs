@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { watchDebounced } from '@vueuse/core'
+import { isAxiosError } from 'axios'
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { type ArchiveErasureStatus, archiveService } from '@/services/archive-service'
 import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob as saveBlob } from '@/utils/download-blob'
+import { dismissReportedHttpError } from '@/utils/report-action-error'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
 
@@ -208,9 +210,16 @@ const executeAudit = async () => {
     selectedFindingId.value = null
   } catch (err) {
     console.error('Audit Error:', err)
+    dismissReportedHttpError(err)
+    const responseMessage = isAxiosError(err) ? err.response?.data?.message : undefined
     auditErrorsByScope.value = {
       ...auditErrorsByScope.value,
-      [scope]: err instanceof Error ? err.message : 'Audit could not be executed.',
+      [scope]:
+        typeof responseMessage === 'string' && responseMessage.trim()
+          ? responseMessage
+          : err instanceof Error
+            ? err.message
+            : 'Audit could not be executed.',
     }
   } finally {
     auditLoadingScope.value = null

@@ -333,8 +333,19 @@ def _revoke_signature(context, name):
 
 
 def _terminate_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
+    did, _ = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
+    # Approval also schedules PDF/provenance work. Read the concurrency token
+    # immediately before termination instead of reusing the cached token from
+    # the preceding state transition, which may already have been superseded
+    # by that background update.
+    retrieve = get_with_headers(
+        context,
+        contract_retrieve_by_id_url(context, did),
+        headers=manager_h,
+    )
+    assert retrieve.status_code == 200, retrieve.text
+    updated_at = retrieve.json().get("updated_at")
     resp = post_json(
         context,
         contract_terminate_url(context),

@@ -9,6 +9,7 @@ from behave import given, then, when
 
 from steps.support.services.template_service import TemplateService
 from support.api_client import get_with_headers, pac_audit_url, post_json, template_search_url
+from support.services.pac_audit_evidence_service import PacAuditEvidenceService
 from support.services.auth_service import AuthService
 
 @given('I hold an expired credential with roles: "{roles}"')
@@ -200,11 +201,10 @@ def step_then_login_presentation_audited(context):
         )
         matches = [
             entry
-            for scope_result in response.json()
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict)
-            and entry.get("event_type") == "OID4VP_PRESENTATION_SUCCEEDED"
-            and entry.get("did") == state
+            for entry in PacAuditEvidenceService.observed_audit_entries(
+                context, "SYSTEM", state
+            )
+            if entry.get("event_type") == "OID4VP_PRESENTATION_SUCCEEDED"
         ]
         if matches:
             break

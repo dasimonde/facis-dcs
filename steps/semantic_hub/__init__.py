@@ -2,3 +2,4 @@
 
 from . import semantic_hub_steps  # noqa: F401
 from . import workflow_gate_steps  # noqa: F401
+from . import immutable_bundle_pin_steps  # noqa: F401

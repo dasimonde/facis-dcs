@@ -361,7 +361,7 @@ test.describe('admin UI accessibility hardening', () => {
     const cases = [
       {
         path: '/ui/admin/targets',
-        api: '**/contract/targets/target-1',
+        api: '**/contract/targets',
         trigger: 'target-delete',
         name: /remove target system “archive gateway”/i,
       },

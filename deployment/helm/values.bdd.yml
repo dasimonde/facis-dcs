@@ -243,6 +243,22 @@ fcservice:
   enabled: true
   realmProvision:
     enabled: true
+  # The isolated fresh-install lifecycle deploys all dependencies
+  # concurrently. Keep the JVM from exiting once before PostgreSQL, Fuseki,
+  # and Keycloak have opened their sockets; a clean first start is part of
+  # the lifecycle acceptance contract.
+  dependencyWait:
+    enabled: true
+    endpoints:
+      - name: PostgreSQL
+        host: fc-postgres
+        port: 5432
+      - name: Fuseki
+        host: fc-fuseki
+        port: 3030
+      - name: Keycloak
+        host: fc-keycloak-http
+        port: 8080
   resources:
     requests:
       cpu: 500m

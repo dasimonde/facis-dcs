@@ -226,6 +226,13 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			}
 
 			if hasNegotiations {
+				stored, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+				if err != nil {
+					return fmt.Errorf("could not read stored semantic bundle: %w", err)
+				}
+				if err := validation.ValidateImmutableSemanticBundle(stored.ContractData); err != nil {
+					return fmt.Errorf("stored contract data validation failed: %w", err)
+				}
 				// All negotiators have responded and there are accepted change
 				// requests to fold in: snapshot the current row to contract_history,
 				// merge the changes, and bump contract_version. The contract stays in
@@ -248,6 +255,12 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				if updatedData.ContractData != nil {
 					if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
 						return err
+					}
+					updatedData.ContractData, err = validation.NormalizeContractMutationForPersistence(
+						updatedData.ContractData, stored.ContractData, cmd.DID, true,
+					)
+					if err != nil {
+						return fmt.Errorf("merged contract data validation failed: %w", err)
 					}
 				}
 
@@ -401,7 +414,13 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *sqlx.Tx, cmd SubmitCmd) (*datatype.JSON, error) {
 	if cmd.ContractData != nil && cmd.ContractData.IsNotNullValue() {
-		normalizedContractData, err := validation.NormalizeContractDataForPersistence(cmd.ContractData, cmd.DID, false)
+		stored, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+		if err != nil {
+			return nil, fmt.Errorf("could not read stored semantic bundle: %w", err)
+		}
+		normalizedContractData, err := validation.NormalizeContractMutationForPersistence(
+			cmd.ContractData, stored.ContractData, cmd.DID, false,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("contract data validation failed: %w", err)
 		}

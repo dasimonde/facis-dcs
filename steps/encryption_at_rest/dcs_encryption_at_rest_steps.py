@@ -44,6 +44,7 @@ from steps.support.api_client import (
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+from steps.support.services.pac_audit_evidence_service import PacAuditEvidenceService
 from steps.support.tamper_seam import ipfs_cat_bytes
 from steps.peer_trust.dcs_peer_trust_steps import _as_instance
 
@@ -113,15 +114,12 @@ def _pac_audit_entries(context, base_url, scope, did):
         f"POST /pac/audit scope={scope} did={did} on {base_url} failed: "
         f"{resp.status_code} {resp.text}"
     )
-    body = resp.json()
-    assert isinstance(body, list), f"expected a list of audit scopes, got: {body}"
-    return [
-        entry
-        for scope_result in body
-        if isinstance(scope_result, dict)
-        for entry in (scope_result.get("audit_trail") or [])
-        if isinstance(entry, dict) and entry.get("did") == did
-    ]
+    return PacAuditEvidenceService.observed_audit_entries(
+        context,
+        scope,
+        did,
+        api_base=base_url,
+    )
 
 
 def _merkle_node(left: bytes, right: bytes) -> bytes:

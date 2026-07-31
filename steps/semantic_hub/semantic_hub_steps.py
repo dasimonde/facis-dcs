@@ -19,6 +19,7 @@ from steps.support.api_client import (
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+from steps.support.services.pac_audit_evidence_service import PacAuditEvidenceService
 from steps.support.services.template_service import TemplateService
 
 
@@ -420,14 +421,13 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
-    body = context.requests_response.json()
-    resource = next((r for r in body if r.get("did") == did), None)
-    assert resource is not None, (
+    entries = PacAuditEvidenceService.observed_audit_entries(context, "contracts", did)
+    assert entries, (
         f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-        f"got DIDs: {[r.get('did') for r in body]}"
+        "but the ORCE-observed DCS evidence contained none"
     )
     severities = []
-    for entry in resource.get("audit_trail") or []:
+    for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
             continue
         event_data = entry.get("event_data")

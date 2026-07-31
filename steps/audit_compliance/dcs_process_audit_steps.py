@@ -18,20 +18,11 @@ from steps.support.api_client import (
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
 from steps.support.services.orce_audit_control_service import OrceAuditControlService
+from steps.support.services.pac_audit_evidence_service import PacAuditEvidenceService
 
 
 def _observed_audit_entries(context, evidence_scope: str) -> list[dict]:
-    entries = []
-    for observation in OrceAuditControlService.observations(context, "audit"):
-        request = observation.get("request", observation) if isinstance(observation, dict) else {}
-        for scope_result in ((request.get("evidence") or {}).get(evidence_scope) or []):
-            if isinstance(scope_result, dict):
-                entries.extend(
-                    entry
-                    for entry in (scope_result.get("audit_trail") or [])
-                    if isinstance(entry, dict)
-                )
-    return entries
+    return PacAuditEvidenceService.observed_audit_entries(context, evidence_scope)
 
 
 @when('the Auditor triggers a process audit with scope "{scope}"')

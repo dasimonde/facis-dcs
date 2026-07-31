@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isAxiosError } from 'axios'
 import { computed, onMounted, ref, useId, useTemplateRef } from 'vue'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import {
@@ -12,6 +13,7 @@ import {
 } from '@/services/signature-management-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob } from '@/utils/download-blob'
+import { dismissReportedHttpError } from '@/utils/report-action-error'
 import {
   dssIndicator,
   findingIndicator,
@@ -70,6 +72,13 @@ const canExport = computed(
     pendingRevocations.value.size === 0,
 )
 
+function localErrorDetail(error: unknown): string {
+  dismissReportedHttpError(error)
+  const responseMessage = isAxiosError(error) ? error.response?.data?.message : undefined
+  if (typeof responseMessage === 'string' && responseMessage.trim()) return responseMessage
+  return error instanceof Error ? error.message : String(error)
+}
+
 const statuses = computed(() => {
   const set = new Set<string>()
   for (const c of contracts.value) {
@@ -92,8 +101,8 @@ onMounted(async () => {
   try {
     contracts.value = await signatureManagementService.retrieveContracts()
     contractsLoaded.value = true
-  } catch {
-    error.value = 'Failed to load contracts.'
+  } catch (e: unknown) {
+    error.value = `Failed to load contracts: ${localErrorDetail(e)}`
   } finally {
     loadingContracts.value = false
   }
@@ -117,7 +126,7 @@ async function selectContract(contract: SignatureContract) {
     viewLoaded.value = true
   } catch (e: unknown) {
     if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
-    error.value = `Failed to load signature data: ${e instanceof Error ? e.message : String(e)}`
+    error.value = `Failed to load signature data: ${localErrorDetail(e)}`
   } finally {
     if (requestSequence === viewRequestSequence) loadingView.value = false
   }
@@ -130,7 +139,7 @@ async function runValidate() {
   try {
     validateResult.value = await signatureManagementService.validateSignature(selected.value.did)
   } catch (e: unknown) {
-    error.value = `Validation failed: ${e instanceof Error ? e.message : String(e)}`
+    error.value = `Validation failed: ${localErrorDetail(e)}`
   } finally {
     busy.value = false
   }
@@ -143,7 +152,7 @@ async function runCompliance() {
   try {
     complianceResult.value = await signatureManagementService.complianceCheck(selected.value.did)
   } catch (e: unknown) {
-    error.value = `Compliance check failed: ${e instanceof Error ? e.message : String(e)}`
+    error.value = `Compliance check failed: ${localErrorDetail(e)}`
   } finally {
     busy.value = false
   }
@@ -180,7 +189,7 @@ async function revoke(sig: SignatureViewItem) {
     }
   } catch (e: unknown) {
     if (selected.value?.did === contractDid) {
-      error.value = `Revocation failed: ${e instanceof Error ? e.message : String(e)}`
+      error.value = `Revocation failed: ${localErrorDetail(e)}`
     }
   } finally {
     const next = new Set(pendingRevocations.value)
@@ -200,7 +209,7 @@ async function loadAudit() {
   try {
     auditEntries.value = await signatureManagementService.getAudit(selected.value.did)
   } catch (e: unknown) {
-    error.value = `Failed to load audit report: ${e instanceof Error ? e.message : String(e)}`
+    error.value = `Failed to load audit report: ${localErrorDetail(e)}`
   } finally {
     busy.value = false
   }

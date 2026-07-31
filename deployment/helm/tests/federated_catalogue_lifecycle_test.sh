@@ -258,16 +258,20 @@ fi
 fc_service_doc="$(awk -v RS='---' '
   /kind: Deployment/ && /name: fc-service([[:space:]]|$)/ { print; exit }
 ' "$TMP_DIR/enabled-a.yaml")"
+fc_service_container_doc="$(awk '
+  $1 == "containers:" { containers=1 }
+  containers { print }
+' <<<"$fc_service_doc")"
 fc_cpu_request="$(awk '
   $1 == "requests:" { section="requests"; next }
   $1 == "limits:" { section="limits"; next }
   section == "requests" && $1 == "cpu:" { gsub(/"/, "", $2); print $2; exit }
-' <<<"$fc_service_doc")"
+' <<<"$fc_service_container_doc")"
 fc_cpu_limit="$(awk '
   $1 == "requests:" { section="requests"; next }
   $1 == "limits:" { section="limits"; next }
   section == "limits" && $1 == "cpu:" { gsub(/"/, "", $2); print $2; exit }
-' <<<"$fc_service_doc")"
+' <<<"$fc_service_container_doc")"
 cpu_millicores() {
   local quantity="$1"
   if [[ "$quantity" == *m ]]; then
@@ -301,7 +305,9 @@ if grep -Eqi 'neo4j|n10s(\.graphconfig\.show)?' "$TMP_DIR/enabled-runtime.yaml";
 fi
 
 helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.dev.yml" >"$TMP_DIR/disabled.yaml"
+  -f "$CHART_DIR/values.dev.yml" \
+  --set federatedCatalogue.enabled=false \
+  --set fcservice.enabled=false >"$TMP_DIR/disabled.yaml"
 if grep -q 'name: FEDERATED_CATALOGUE_API_URL' "$TMP_DIR/disabled.yaml"; then
   fail "disabled deployment still configures the backend FC startup gate"
 fi

@@ -27,6 +27,7 @@ const editorLabelId = useId()
 
 const inputText = ref('')
 const acknowledged = ref(false)
+const confirming = ref(false)
 
 const inputTextId = useId()
 const inputHelpId = useId()
@@ -37,7 +38,7 @@ const inputRequired = computed(() => !!modalData.value.editor?.requiredText && !
 
 const acknowledgementRequired = computed(() => !!modalData.value.acknowledgement && !acknowledged.value)
 
-const confirmDisabled = computed(() => inputRequired.value || acknowledgementRequired.value)
+const confirmDisabled = computed(() => inputRequired.value || acknowledgementRequired.value || confirming.value)
 
 const { isRevealed, reveal, confirm, cancel, onReveal } = useConfirmDialog<ModalData, string | undefined>()
 
@@ -51,6 +52,7 @@ watch(isRevealed, (value) => {
   if (value) {
     inputText.value = ''
     acknowledged.value = false
+    confirming.value = false
     actionModal.value?.showModal()
     focusFirstControl()
   } else {
@@ -75,6 +77,9 @@ function focusFirstControl() {
 
 const handleConfirm = () => {
   if (confirmDisabled.value) return
+  // Disable synchronously so a double click cannot resolve the same
+  // confirmation twice before the dialog closes.
+  confirming.value = true
   if (hasEditor.value) {
     confirm(inputText.value)
   } else {

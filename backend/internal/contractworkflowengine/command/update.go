@@ -61,15 +61,6 @@ type Updater struct {
 }
 
 func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
-
-	if cmd.ContractData != nil && cmd.ContractData.IsNotNullValue() {
-		normalizedContractData, err := validation.NormalizeContractDataForPersistence(cmd.ContractData, cmd.DID, true)
-		if err != nil {
-			return fmt.Errorf("contract data validation failed: %w", err)
-		}
-		cmd.ContractData = normalizedContractData
-	}
-
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("could not start transaction: %w", err)
@@ -83,6 +74,15 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	oldData, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read contract data: %w", err)
+	}
+	if cmd.ContractData != nil && cmd.ContractData.IsNotNullValue() {
+		normalizedContractData, err := validation.NormalizeContractMutationForPersistence(
+			cmd.ContractData, oldData.ContractData, cmd.DID, true,
+		)
+		if err != nil {
+			return fmt.Errorf("contract data validation failed: %w", err)
+		}
+		cmd.ContractData = normalizedContractData
 	}
 
 	localPeer, err := h.DIDDocument.GetID()

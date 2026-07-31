@@ -36,9 +36,12 @@ IS_WSL := $(shell grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && e
 ifeq ($(IS_WSL),1)
 BDD_CHECKPOINT_SINK_HOST ?= $(shell ip -4 -o addr show dev veth-rd-wsl 2>/dev/null | awk '$$3 == "inet" { split($$4, address, "/"); print address[1]; exit }')
 else
-BDD_CHECKPOINT_SINK_HOST ?= host.docker.internal
+# GitHub's Linux runner does not add Docker Desktop's host.docker.internal
+# alias to kind nodes. Resolve the host through the control-plane container's
+# kind-network gateway after kind_create has started that container.
+BDD_CHECKPOINT_SINK_HOST ?= $(shell docker inspect "$(KIND_CLUSTER_NAME)-control-plane" --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' 2>/dev/null)
 endif
-BDD_HELM_SET := \
+BDD_HELM_SET = \
 	--set-string hydra.config.selfIssuerURL="$(BDD_PUBLIC_ORIGIN)" \
 	--set-string route.publicBaseURL="$(BDD_DCS_BASE_URL)" \
 	--set-string hydra.config.loginURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/ui/" \

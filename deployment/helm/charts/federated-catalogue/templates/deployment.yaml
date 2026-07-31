@@ -27,6 +27,34 @@ spec:
         app.kubernetes.io/name: federated-catalogue
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.dependencyWait.enabled }}
+      initContainers:
+        - name: wait-for-catalogue-dependencies
+          image: "{{ .Values.dependencyWait.image.repository }}:{{ .Values.dependencyWait.image.tag }}"
+          imagePullPolicy: {{ .Values.dependencyWait.image.pullPolicy | default "IfNotPresent" }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              {{- range .Values.dependencyWait.endpoints }}
+              until nc -z -w 2 {{ .host | quote }} {{ .port }}; do
+                echo "Waiting for {{ .name }} at {{ .host }}:{{ .port }}"
+                sleep 2
+              done
+              {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65534
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+      {{- end }}
       containers:
         # Container name matches fc-realm-provision-job.yaml's hardcoded
         # FC_CONTAINER="fcservice" (its patch_env targets this container by

@@ -725,7 +725,7 @@ export interface ContractDocumentInput {
  * state drops them — and posting that back discards data the server put there:
  * the party nodes a signature is attributed to (with the signatory and Power of
  * Attorney already recorded on them), the signature fields naming those
- * parties, and the shapes graph the document is pinned to.
+ * parties, and the immutable semantic bundle the document is pinned to.
  */
 export function buildContractDocument(input: ContractDocumentInput): DcsContractData {
   const { storedDocument, ...editorState } = input
@@ -738,7 +738,14 @@ export function buildContractDocument(input: ContractDocumentInput): DcsContract
   if (storedDocument['dcs:signatureFields'] !== undefined) {
     document['dcs:signatureFields'] = storedDocument['dcs:signatureFields']
   }
+  if (storedDocument['@context'] !== undefined) document['@context'] = storedDocument['@context']
   if (storedDocument['sh:shapesGraph'] !== undefined) document['sh:shapesGraph'] = storedDocument['sh:shapesGraph']
+  if (storedDocument['dcs:effectiveShapes'] !== undefined) {
+    document['dcs:effectiveShapes'] = storedDocument['dcs:effectiveShapes']
+  }
+  if (storedDocument['dcterms:conformsTo'] !== undefined) {
+    document['dcterms:conformsTo'] = storedDocument['dcterms:conformsTo']
+  }
   return document
 }
 

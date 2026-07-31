@@ -128,6 +128,17 @@ func workflowRoles(ctx context.Context) []string {
 	return result
 }
 
+func (s *contractWorkflowEnginesrvc) deployer() *command.Deployer {
+	return &command.Deployer{
+		DB:             s.DB,
+		CRepo:          s.CRepo,
+		DeploymentRepo: s.DeploymentRepo,
+		TargetRepo:     s.TargetRepo,
+		Target:         s.TargetClient,
+		PeerSigs:       s.SRepo,
+	}
+}
+
 func (s *contractWorkflowEnginesrvc) runWorkflowGate(ctx context.Context, gate, did string, updatedAt time.Time, continuation map[string]any) (time.Time, bool, error) {
 	_, reused, snapshotUpdatedAt, err := s.WorkflowGate.ExecuteSnapshot(ctx, workflowgate.Input{
 		Gate: gate, ContractDID: did, ExpectedUpdatedAt: updatedAt,
@@ -176,10 +187,7 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Cont
 			UserRoles: roles, CauserDID: stringValue("causer_did"),
 		})
 	case "deployment":
-		_, err := (&command.Deployer{
-			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
-			TargetRepo: s.TargetRepo, Target: s.TargetClient,
-		}).Handle(ctx, command.DeployCmd{
+		_, err := s.deployer().Handle(ctx, command.DeployCmd{
 			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
 			RequestedBy: stringValue("requested_by"), LocalPeer: stringValue("causer_did"),
 			TargetIDOverride: stringValue("target_id"),
@@ -1691,15 +1699,7 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		return nil, err
 	}
 
-	handler := command.Deployer{
-		DB:             s.DB,
-		CRepo:          s.CRepo,
-		DeploymentRepo: s.DeploymentRepo,
-		TargetRepo:     s.TargetRepo,
-		Target:         s.TargetClient,
-		PeerSigs:       s.SRepo,
-	}
-	result, err := handler.Handle(ctx, command.DeployCmd{
+	result, err := s.deployer().Handle(ctx, command.DeployCmd{
 		DID:              req.Did,
 		UpdatedAt:        updatedAt,
 		RequestedBy:      middleware.GetParticipantID(ctx),

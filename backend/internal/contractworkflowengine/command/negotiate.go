@@ -107,6 +107,27 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 		}
 	}
 
+	var normalizedRedline *datatype.JSON
+	if cmd.ChangeRequest != nil {
+		var change negotiationmerging.ChangeRequest
+		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
+			if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+				return err
+			}
+			proposed := datatype.JSON(*change.ContractData)
+			stored, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+			if err != nil {
+				return fmt.Errorf("could not read stored semantic bundle: %w", err)
+			}
+			normalizedRedline, err = validation.NormalizeContractMutationForPersistence(
+				&proposed, stored.ContractData, cmd.DID, true,
+			)
+			if err != nil {
+				return fmt.Errorf("proposed contract data validation failed: %w", err)
+			}
+		}
+	}
+
 	negotiators, err := h.NTRepo.ReadNegotiatorsForDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read negotiators: %w", err)
@@ -134,30 +155,13 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// ChangeRequest carrying a contract_data redline. Only a structured redline
 	// is applied immediately and re-shipped as a PDF; a free-text note (which
 	// does not decode into the struct) has nothing to apply, so it is skipped.
-	if cmd.ChangeRequest != nil {
-		var change negotiationmerging.ChangeRequest
-		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
-			// A redline on a settled agreement is the wedge: the document changes
-			// but the artifact is the peer's signed PDF and cannot be re-rendered,
-			// so the proposal would ship the OLD signed bytes while this copy's own
-			// document moved on. Refuse it here — a free-text note (no
-			// change.ContractData) leaves the document alone and still carries this
-			// copy out of OFFERED towards its own countersignature.
-			if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
-				return err
-			}
-			proposed := datatype.JSON(*change.ContractData)
-			normalized, err := validation.NormalizeContractDataForPersistence(&proposed, cmd.DID, true)
-			if err != nil {
-				return fmt.Errorf("proposed contract data validation failed: %w", err)
-			}
-			if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
-				DID:             cmd.DID,
-				ContractData:    normalized,
-				ContractVersion: processData.ContractVersion + 1,
-			}); err != nil {
-				return fmt.Errorf("could not apply proposed change to contract data: %w", err)
-			}
+	if normalizedRedline != nil {
+		if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
+			DID:             cmd.DID,
+			ContractData:    normalizedRedline,
+			ContractVersion: processData.ContractVersion + 1,
+		}); err != nil {
+			return fmt.Errorf("could not apply proposed change to contract data: %w", err)
 		}
 	}
 

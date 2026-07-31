@@ -14,15 +14,21 @@ class OrceAuditControlService:
     """Use the existing audit-executor test seam for all PAC executor modes."""
 
     @staticmethod
-    def base_url(context) -> str:
+    def base_url(context, api_base: str | None = None) -> str:
         configured = os.getenv("BDD_ORCE_AUDIT_CONTROL_URL", "").strip()
         return configured.rstrip("/") if configured else (
-            f"{origin_url(context.base_url)}/orce/audit-executor/test"
+            f"{origin_url(api_base or context.base_url)}/orce/audit-executor/test"
         )
 
     @classmethod
-    def request(cls, context, path: str, payload: dict | None = None):
-        url = f"{cls.base_url(context)}{path}"
+    def request(
+        cls,
+        context,
+        path: str,
+        payload: dict | None = None,
+        api_base: str | None = None,
+    ):
+        url = f"{cls.base_url(context, api_base)}{path}"
         deadline = time.monotonic() + 90
         while True:
             try:
@@ -62,8 +68,17 @@ class OrceAuditControlService:
         cls.request(context, "/mode", {"channel": channel, "mode": mode})
 
     @classmethod
-    def observations(cls, context, channel: str) -> list[dict]:
-        body = cls.request(context, f"/requests?channel={channel}").json()
+    def observations(
+        cls,
+        context,
+        channel: str,
+        api_base: str | None = None,
+    ) -> list[dict]:
+        body = cls.request(
+            context,
+            f"/requests?channel={channel}",
+            api_base=api_base,
+        ).json()
         observations = body.get("requests") if isinstance(body, dict) else body
         assert isinstance(observations, list), (
             f"Expected ORCE {channel} observations, got {body!r}"

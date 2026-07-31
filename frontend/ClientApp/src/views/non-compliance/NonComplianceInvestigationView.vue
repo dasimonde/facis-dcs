@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { isAxiosError } from 'axios'
 import { computed, ref } from 'vue'
 import { pacNonComplianceService } from '@/services/pac-non-compliance-service'
+import { dismissReportedHttpError } from '@/utils/report-action-error'
 import type { PACComplianceRisk } from '@/models/responses/pac-non-compliance-response'
 
 const risks = ref<PACComplianceRisk[]>([])
@@ -27,7 +29,14 @@ const runMonitoringSweep = async () => {
     checkedAt.value = response.checked_at
     risks.value = response.risks
   } catch (err) {
-    sweepError.value = err instanceof Error ? err.message : 'Monitoring sweep could not be executed.'
+    dismissReportedHttpError(err)
+    const responseMessage = isAxiosError(err) ? err.response?.data?.message : undefined
+    sweepError.value =
+      typeof responseMessage === 'string' && responseMessage.trim()
+        ? responseMessage
+        : err instanceof Error
+          ? err.message
+          : 'Monitoring sweep could not be executed.'
   } finally {
     sweepLoading.value = false
   }
@@ -99,7 +108,9 @@ const submitIncidentReport = async () => {
         </button>
       </div>
 
-      <div v-if="sweepLoading" class="alert rounded-box alert-info" role="status">Running monitoring sweep…</div>
+      <div v-if="sweepLoading" class="alert rounded-box alert-info" role="status" aria-label="Running monitoring sweep">
+        Running monitoring sweep…
+      </div>
       <div v-else-if="sweepError" class="alert rounded-box alert-error" role="alert">{{ sweepError }}</div>
       <div
         v-else-if="!hasCompletedSweep"

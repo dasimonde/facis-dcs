@@ -8,6 +8,11 @@ async function gotoAs(page: Page, loginAs: LoginAs, role: DcsRole, url: string):
   await page.goto(url)
 }
 
+async function fillRequiredTemplateDetails(page: Page, name: string): Promise<void> {
+  await page.getByTestId('template-global-name').fill(name)
+  await page.getByTestId('template-base-description').fill('Playwright clause-editor fixture.')
+}
+
 interface Ref {
   '@id': string
 }
@@ -40,7 +45,7 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
 
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Access ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Access ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -129,7 +134,7 @@ test('the builder emits a logical (or) constraint when constraints are combined 
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Logical ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Logical ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -174,7 +179,7 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Duty ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Duty ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -237,7 +242,7 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Tree ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Tree ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -301,7 +306,7 @@ test('a duty can carry a consequence duty', async ({ page, loginAs }) => {
   page.setDefaultTimeout(15_000)
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
-  await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(`FV Conseq ${Date.now()}`)
+  await fillRequiredTemplateDetails(page, `FV Conseq ${Date.now()}`)
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
