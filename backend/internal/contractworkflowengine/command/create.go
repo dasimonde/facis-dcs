@@ -197,6 +197,11 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		}
 	}
 
+	normalizedContractData, err = resolvePendingTargets(normalizedContractData)
+	if err != nil {
+		return fmt.Errorf("could not resolve the contract's own rule targets: %w", err)
+	}
+
 	localPeer, err := h.DIDDocument.GetID()
 	if err != nil {
 		return fmt.Errorf("could not get DID: %w", err)
@@ -302,6 +307,61 @@ func attachContractParties(raw *datatype.JSON, parties []string) (*datatype.JSON
 	}
 	return &encoded, nil
 }
+
+// resolvePendingTargets points every rule that targets "the contract" at this
+// contract. The builder cannot know the contract IRI while a template is being
+// authored, so it writes a pending-target placeholder; derivation rebases it
+// onto the TEMPLATE, which is not what the rule means and resolves to nothing
+// in the contract. Left alone, a deployed policy names an asset the target
+// system cannot dereference — and the target system is the party that has to
+// act on it (SRS §1.2).
+func resolvePendingTargets(raw *datatype.JSON) (*datatype.JSON, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(*raw, &doc); err != nil {
+		return nil, fmt.Errorf("could not decode contract data: %w", err)
+	}
+	contractIRI, _ := doc["@id"].(string)
+	if strings.TrimSpace(contractIRI) == "" {
+		return raw, nil
+	}
+	policies, ok := doc["dcs:policies"].(map[string]any)
+	if !ok {
+		return raw, nil
+	}
+	rewritten := false
+	for _, bucket := range []string{"odrl:permission", "odrl:prohibition", "odrl:obligation"} {
+		rules, ok := policies[bucket].([]any)
+		if !ok {
+			continue
+		}
+		for _, rawRule := range rules {
+			rule, ok := rawRule.(map[string]any)
+			if !ok {
+				continue
+			}
+			target, ok := rule["odrl:target"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if iri, _ := target["@id"].(string); strings.HasSuffix(iri, "#pending-target") || iri == pendingTargetURN {
+				target["@id"] = contractIRI
+				rewritten = true
+			}
+		}
+	}
+	if !rewritten {
+		return raw, nil
+	}
+	encoded, err := datatype.NewJSON(doc)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode contract data: %w", err)
+	}
+	return &encoded, nil
+}
+
+// pendingTargetURN is what the template builder writes for "the contract"
+// before a contract IRI exists (dcsDraftStore.ts contractTargetIri).
+const pendingTargetURN = "urn:uuid:pending-target"
 
 // bindOriginatorParty rewrites the role-derived placeholder party IRI for
 // the role the creating organization declares for itself to the origin
