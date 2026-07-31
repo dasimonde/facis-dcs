@@ -1,2 +1,6 @@
 PyJWT[crypto]>=2.8.0
 cryptography>=42.0.0
+jwcrypto>=1.5.0
+nats-py>=2.6.0
+Pillow>=10.0.0
+pypdf>=4.0.0

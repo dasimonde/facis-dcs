@@ -1,0 +1,71 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/suites/jws-2020/v1"
+  ],
+  "assertionMethod": [
+    "did:web:localhost%3A8991#dev-key-1",
+    "did:web:localhost%3A8991#dcs-vc"
+  ],
+  "authentication": [
+    "did:web:localhost%3A8991#dev-key-1"
+  ],
+  "id": "did:web:localhost%3A8991",
+  "keyAgreement": [
+    "did:web:localhost%3A8991#dcs-ecdh"
+  ],
+  "services": [
+    {
+      "id": "did:web:localhost%3A8991#dcs",
+      "serviceEndpoint": "http://localhost:8991/api",
+      "type": "DigitalContractingService"
+    }
+  ],
+  "verificationMethod": [
+    {
+      "controller": "did:web:localhost%3A8991",
+      "id": "did:web:localhost%3A8991#dev-key-1",
+      "publicKeyJwk": {
+        "alg": "ES256",
+        "crv": "P-256",
+        "kid": "dev-key-1",
+        "kty": "EC",
+        "x": "NewrGpZ5XHYfWCeVjZ51NUP0LhK33oPaGEnoipX7788",
+        "x5c": [
+          "MIIBrDCCAVOgAwIBAgIIGMbgzqk0I0EwCgYIKoZIzj0EAwIwODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkxMB4XDTI2MDcyOTIwNDQ0MFoXDTI4MDcyOTIxNDQ0MFowODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkxMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENewrGpZ5XHYfWCeVjZ51NUP0LhK33oPaGEnoipX77895Gbmo9Pd9xPofk3cD4LxHbYp1IFIphuNvkBgvLptKzqNHMEUwDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAUBgNVHREEDTALgglsb2NhbGhvc3QwCgYIKoZIzj0EAwIDRwAwRAIgXC7yU6Gk3tzVOoIr8y71CjeDV7LTuPBcGz529XZS9MACIDV8A+pMkUf1ShG8xpFPKAygy0JKHMlWiwdv6QZ4L9cQ"
+        ],
+        "y": "eRm5qPT3fcT6H5N3A-C8R22KdSBSKYbjb5AYLy6bSs4"
+      },
+      "type": "JsonWebKey2020"
+    },
+    {
+      "controller": "did:web:localhost%3A8991",
+      "id": "did:web:localhost%3A8991#dcs-vc",
+      "publicKeyJwk": {
+        "alg": "ES256",
+        "crv": "P-256",
+        "kid": "dcs-vc",
+        "kty": "EC",
+        "x": "zFfMMh3Bkd86PKYs9O68yKQ_h0oiD8dEAxYGYXDCyXI",
+        "x5c": [
+          "MIIBrTCCAVOgAwIBAgIIGMbgzqldIg8wCgYIKoZIzj0EAwIwODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkxMB4XDTI2MDcyOTIwNDQ0MFoXDTI4MDcyOTIxNDQ0MFowODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkxMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzFfMMh3Bkd86PKYs9O68yKQ/h0oiD8dEAxYGYXDCyXIQ81wsuTz1ujsV5VUCBT4QaBGB2jA1iunk6NBJg9Nhw6NHMEUwDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAUBgNVHREEDTALgglsb2NhbGhvc3QwCgYIKoZIzj0EAwIDSAAwRQIhAMHF+0ZkIFALL+vBHIg1ZZNusl1iBrvvItKzj/C+UEgJAiA7SXVCqfeBN0AqwnxJK1Ge7BZUk6hEDJQPDVPTc0/6Cw=="
+        ],
+        "y": "EPNcLLk89bo7FeVVAgU-EGgRgdowNYrp5OjQSYPTYcM"
+      },
+      "type": "JsonWebKey2020"
+    },
+    {
+      "controller": "did:web:localhost%3A8991",
+      "id": "did:web:localhost%3A8991#dcs-ecdh",
+      "publicKeyJwk": {
+        "crv": "P-256",
+        "kid": "dcs-ecdh",
+        "kty": "EC",
+        "use": "enc",
+        "x": "_VV4i_AADTPYPfE6pqyPZNp8rFqUXZih_IEgp91MABI",
+        "y": "Dn2FUwpjDoRXZa0aUHrUw-Nhcn83BrTayR2mPRHq8fo"
+      },
+      "type": "JsonWebKey2020"
+    }
+  ]
+}

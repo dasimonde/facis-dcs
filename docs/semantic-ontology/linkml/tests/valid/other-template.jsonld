@@ -1,0 +1,121 @@
+{
+    "@context": {
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "odrl": "http://www.w3.org/ns/odrl/2/",
+        "xsd": "http://www.w3.org/2001/XMLSchema#"
+    },
+    "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db",
+    "@type": "dcs:ContractTemplate",
+    "dcs:contractFields": [
+        {
+            "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.jurisdiction",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Contract Jurisdiction",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"
+            },
+            "dcs:required": true
+        },
+        {
+            "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.disputeResolution.method",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Dispute Resolution Method",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-disputeResolution-method"
+            },
+            "dcs:required": true
+        },
+        {
+            "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.disputeResolution.venue",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Dispute Venue",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-disputeResolution-venue"
+            },
+            "dcs:required": true
+        },
+        {
+            "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.governingLaw",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Governing Law",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-governingLaw"
+            },
+            "dcs:required": true
+        }
+    ],
+    "dcs:documentStructure": {
+        "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#document-structure",
+        "@type": "dcs:DocumentStructure",
+        "dcs:blocks": {
+            "@list": [
+                {
+                    "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#block-a853f27e-39ee-476e-b249-973deee45661",
+                    "@type": "dcs:Clause",
+                    "dcs:content": {
+                        "@list": [
+                            "Contract Jurisdiction: ",
+                            {
+                                "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.jurisdiction"
+                            },
+                            "\nDispute Resolution Method: ",
+                            {
+                                "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.disputeResolution.method"
+                            },
+                            "\nDispute Venue: ",
+                            {
+                                "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.disputeResolution.venue"
+                            },
+                            "\nGoverning Law: ",
+                            {
+                                "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#field-contract.governingLaw"
+                            }
+                        ]
+                    },
+                    "dcs:title": "Legal Terms"
+                },
+                {
+                    "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#block-8ff03d08-52d4-455f-b4af-1e7793f036a6",
+                    "@type": "dcs:Section"
+                }
+            ]
+        },
+        "dcs:layout": [
+            {
+                "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#block-71ce8fde-db4b-4626-924b-beefb19e75a9",
+                "@type": "dcs:LayoutNode",
+                "dcs:children": {
+                    "@list": [
+                        {
+                            "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#block-8ff03d08-52d4-455f-b4af-1e7793f036a6"
+                        },
+                        {
+                            "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#block-a853f27e-39ee-476e-b249-973deee45661"
+                        }
+                    ]
+                },
+                "dcs:isRoot": true
+            },
+            {
+                "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#block-8ff03d08-52d4-455f-b4af-1e7793f036a6",
+                "@type": "dcs:LayoutNode",
+                "dcs:children": {
+                    "@list": []
+                }
+            }
+        ]
+    },
+    "dcs:metadata": {
+        "@id": "did:web:localhost:template:1f71177f-d52c-4450-a446-be6478a167db#metadata",
+        "@type": "dcs:TemplateMetadata",
+        "dcs:description": "asdasd",
+        "dcs:templateType": "dcs:SubContract",
+        "dcs:title": "asdasdasd"
+    },
+    "dcs:policies": [],
+    "http://localhost:8080/ontology/dcs-pdf-core#title": "asdasdasd"
+}

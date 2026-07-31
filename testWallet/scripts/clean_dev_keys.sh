@@ -1,37 +1,13 @@
 #!/usr/bin/env bash
-# Remove generated OID4VP demo material (safe to re-create with generate_dev_keys.py).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 
-delete_glob() {
-  local pattern="$1"
-  shopt -s nullglob
-  local files=($pattern)
-  shopt -u nullglob
-  if ((${#files[@]} == 0)); then
-    echo "skip (none): $pattern"
-    return
-  fi
-  for f in "${files[@]}"; do
-    rm -f "$f"
-    echo "deleted: $f"
-  done
-}
+rm -f "$ROOT"/keys/*.jwk
+rm -f "$ROOT"/credentials/*.jwt
+rm -f "$ROOT"/trust.dev.json
+rm -f "$REPO_ROOT"/backend/config/oid4vp/trust.dev.json
 
-delete_file() {
-  local path="$1"
-  if [[ -f "$path" ]]; then
-    rm -f "$path"
-    echo "deleted: $path"
-  else
-    echo "skip (missing): $path"
-  fi
-}
-
-delete_glob "$ROOT/testWallet/keys/"*.jwk
-delete_glob "$ROOT/testWallet/credentials/"*.json
-delete_file "$ROOT/backend/config/oid4vp/trust.dev.json"
-delete_file "$ROOT/deployment/helm/files/oid4vp/trust.dev.json"
-
-echo "done"
+echo "Cleaned generated keys, JWT credentials, and trust.dev.json files."
+echo "Templates were kept: $ROOT/credentials/*.template.json"

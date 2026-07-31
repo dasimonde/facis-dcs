@@ -1,6 +1,6 @@
 {
   "policySetId": "facis.dcs.contract.structure-semantics",
   "version": "v1",
-  "shaclShapeFiles": ["docs/semantic-ontology/shapes/facis-dcs-shapes.ttl"],
-  "validationProfiles": ["docs/semantic-ontology/validation/facis.sla.basic.v1.ttl"]
+  "enforceCanonicalShapes": true,
+  "enforceValidationProfile": true
 }

@@ -40,6 +40,8 @@ type GetHistoryByIDResult struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ContractData    *datatype.JSON
+	TemplateDID     string
+	TemplateVersion int
 	StartDate       *time.Time
 	ExpDate         *time.Time
 	ExpPolicy       *expirationpolicy.ExpirationPolicy

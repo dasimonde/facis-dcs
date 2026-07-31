@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import ContractAuditList from '@/components/lists/contract/ContractAuditList.vue'
-import type { ContractAuditResponse } from '@/models/responses/contract-response'
-import { contractWorkflowService } from '@/services/contract-workflow-service'
-import { ref, watch, type Ref } from 'vue'
-import { useContractEditorUiStore } from '../store/contractEditorUiStore'
+import { type Ref, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
+import ContractAuditList from '@/components/lists/contract/ContractAuditList.vue'
+import { contractWorkflowService } from '@/services/contract-workflow-service'
+import type { ContractAuditResponse } from '@/models/responses/contract-response'
 
 const route = useRoute()
 const editorStore = useContractEditorUiStore()

@@ -1,9 +1,9 @@
-import { computed, ref, unref, onBeforeUnmount, type MaybeRef, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import type { DocumentOutline } from '@/modules/template-repository/models/contract-template'
+import { type Component, computed, type MaybeRef, onBeforeUnmount, ref, unref } from 'vue'
 import IconMoveLeft from '@template-repository/components/builder-editor/toolbar/icons/IconMoveLeft.vue'
 import IconMoveRight from '@template-repository/components/builder-editor/toolbar/icons/IconMoveRight.vue'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import type { DcsLayoutNode } from '@/models/dcs-jsonld'
 
 const VERTICAL_ENTER_MS = 100
 const VERTICAL_LEAVE_MS = 120
@@ -15,13 +15,13 @@ function indentWidth(depth: number): string {
   return `${depth * INDENT_PER_LEVEL}px`
 }
 
-function collectDescendantBlockIds(outline: DocumentOutline, blockId: string): Set<string> {
+function collectDescendantBlockIds(layout: DcsLayoutNode[], blockId: string): Set<string> {
   const set = new Set<string>()
-  const block = outline.find((b) => b.blockId === blockId)
-  const childIds = block?.children ?? []
+  const node = layout.find((n) => n['@id'] === blockId)
+  const childIds = node ? node['dcs:children']['@list'].map((r) => r['@id']) : []
   for (const id of childIds) {
     set.add(id)
-    collectDescendantBlockIds(outline, id).forEach((desc) => set.add(desc))
+    collectDescendantBlockIds(layout, id).forEach((desc) => set.add(desc))
   }
   return set
 }
@@ -54,17 +54,17 @@ export interface BlockMovementPreviewToolbarHandlers {
  * - Pass outline to get derived state for EditorBlocks (fade set, swap target, indent width, arrows).
  * - Call createToolbarHandlers(getContext) to get handlers for BlockToolbar (timers + set/clear preview).
  */
-export function useBlockMovementPreview(outline?: MaybeRef<DocumentOutline>) {
+export function useBlockMovementPreview(layout?: MaybeRef<DcsLayoutNode[]>) {
   const uiStore = useTemplateEditorUiStore()
   const { blockMovementPreview } = storeToRefs(uiStore)
 
-  const verticalFadeOutSet = outline
+  const verticalFadeOutSet = layout
     ? computed(() => {
         const preview = blockMovementPreview.value
         if (preview?.type !== 'vertical') return new Set<string>()
-        const outlineVal = unref(outline)
-        const sourceDesc = collectDescendantBlockIds(outlineVal, preview.sourceBlockId)
-        const targetDesc = collectDescendantBlockIds(outlineVal, preview.targetBlockId)
+        const layoutVal = unref(layout)
+        const sourceDesc = collectDescendantBlockIds(layoutVal, preview.sourceBlockId)
+        const targetDesc = collectDescendantBlockIds(layoutVal, preview.targetBlockId)
         return new Set([...sourceDesc, ...targetDesc])
       })
     : undefined

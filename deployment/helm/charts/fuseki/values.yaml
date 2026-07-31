@@ -1,0 +1,32 @@
+# Fuseki is fc-service's graph store (GRAPHSTORE_IMPL=fuseki, see
+# ../federated-catalogue). Deliberately NOT neo4j: neo4j's n10s plugin
+# (graphconfig.show, called by fc-service at startup) has no build compatible
+# with neo4j image tags beyond 5.18-community — a confirmed crash-loop cause.
+# Fuseki has no such plugin surface.
+# "5.5.0" (matching upstream's chart.appVersion convention) is not a real
+# published tag on ghcr.io/eclipse-xfsc/federated-catalogue/fc-fuseki — only
+# main/latest/sha-<gitsha> exist (verified via the registry's own tags/list
+# API; confirmed again live: ImagePullBackOff "not found" pulling 5.5.0).
+image:
+  repository: ghcr.io/eclipse-xfsc/federated-catalogue/fc-fuseki
+  tag: "sha-c243a65@sha256:98660d5ecb27afa457afae103c80ad1d44964801ad4883f5e480b2b5caa0b95f"
+  pullPolicy: IfNotPresent
+
+dataset: "ds"
+javaOptions: "-Xmx1g"
+
+service:
+  port: 3030
+
+persistence:
+  enabled: false
+  size: 10Gi
+  storageClassName: ""
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    cpu: "1"
+    memory: 2Gi

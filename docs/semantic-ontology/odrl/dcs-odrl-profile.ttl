@@ -1,0 +1,34 @@
+@prefix dcs:  <https://w3id.org/facis/dcs/ontology/v1#> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# The DCS ODRL profile: the vocabulary extensions a FACIS DCS document's
+# odrl:profile declaration commits its policies to. Every produced
+# template carries one enclosing odrl:Offer, every contract instance one
+# odrl:Agreement; rules live under odrl:permission / odrl:prohibition /
+# odrl:obligation and each carries exactly one odrl:action plus
+# odrl:assigner, odrl:assignee, and odrl:target.
+
+<https://w3id.org/facis/dcs/ontology/v1/odrl-profile>
+  a owl:Ontology, odrl:Profile ;
+  rdfs:label "FACIS DCS ODRL Profile" ;
+  dcterms:description """ODRL 2.2 profile for FACIS Digital Contracting
+Service policies. Constraint left operands are dcs:ContractField
+instances declared in the same document's dcs:contractFields. A constraint
+governs the field's optional inline dcs:value. Reported KPI metrics bind to
+constraints by the left-operand field IRI.""" ;
+  owl:imports <http://www.w3.org/ns/odrl/2/> .
+
+dcs:provideCompliantValue
+  a odrl:Action ;
+  rdfs:label "provide compliant value" ;
+  skos:definition "The assignee provides a value for the constraint's left-operand field that satisfies the declared constraint." ;
+  skos:inScheme <https://w3id.org/facis/dcs/ontology/v1/odrl-profile> ;
+  odrl:includedIn odrl:use .
+
+# A dcs:ContractField referenced as odrl:leftOperand is a left operand:
+# its runtime value is carried as dcs:value on that field.
+dcs:ContractField rdfs:subClassOf odrl:LeftOperand .

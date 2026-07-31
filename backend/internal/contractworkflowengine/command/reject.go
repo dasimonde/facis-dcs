@@ -8,6 +8,10 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base/identity"
+
+	db2 "digital-contracting-service/internal/dcstodcs/db"
+
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
@@ -20,19 +24,22 @@ import (
 )
 
 type RejectCmd struct {
-	DID        string
-	UpdatedAt  time.Time
-	RejectedBy string
-	Reason     string
-	HolderDID  string
-	UserRoles  userrole.UserRoles
+	DID        string             `json:"did"`
+	UpdatedAt  time.Time          `json:"updated_at"`
+	RejectedBy string             `json:"rejected_by"`
+	Reason     string             `json:"reason"`
+	HolderDID  string             `json:"holder_did"`
+	UserRoles  userrole.UserRoles `json:"user_roles"`
+	CauserDID  string             `json:"causer_did"`
 }
 
 type Rejecter struct {
-	DB     *sqlx.DB
-	CRepo  db.ContractRepo
-	RTRepo db.ReviewTaskRepo
-	ATRepo db.ApprovalTaskRepo
+	DB          *sqlx.DB
+	CRepo       db.ContractRepo
+	RTRepo      db.ReviewTaskRepo
+	ATRepo      db.ApprovalTaskRepo
+	SRepo       db2.SyncRepository
+	DIDDocument identity.DIDDocument
 }
 
 func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
@@ -47,20 +54,30 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 		}
 	}(tx)
 
-	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
 
+	localPeer, err := h.DIDDocument.GetID()
+	if err != nil {
+		return err
+	}
+
+	// Optimistic concurrency: reject if the caller's view of the contract is
+	// older than what's stored (see package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+		if localPeer != cmd.CauserDID {
+			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+		}
 		return errors.New("contract was updated elsewhere, please reload")
 	}
 
-	if processData.State != contractstate.Reviewed.String() || processData.State == contractstate.Terminated.String() {
-		return errors.New("invalid contract state")
+	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventReject); err != nil {
+		return err
 	}
 
-	exist, err := h.ATRepo.IsValidApprover(ctx, tx, cmd.DID, cmd.RejectedBy)
+	exist, err := h.ATRepo.IsValidApprover(ctx, tx, cmd.DID, cmd.CauserDID)
 	if err != nil {
 		return err
 	}
@@ -69,7 +86,7 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 		return errors.New("invalid user")
 	}
 
-	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.RejectedBy, approvaltaskstate.Rejected.String())
+	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.CauserDID, approvaltaskstate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}

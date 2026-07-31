@@ -1,0 +1,5 @@
+apiVersion: v2
+name: fuseki
+description: Apache Jena Fuseki graph store for the owned Federated Catalogue (fc-service)
+type: application
+version: 0.1.0

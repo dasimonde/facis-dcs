@@ -1,0 +1,287 @@
+{
+  "@type": "dcs:ContractTemplate",
+  "@id": "did:web:example:template:sla-hosting",
+  "dcs:metadata": {
+    "@type": "dcs:TemplateMetadata",
+    "@id": "did:web:example:template:sla-hosting#metadata",
+    "dcs:title": "SLA Hosting",
+    "dcs:description": "Managed Kubernetes hosting SLA",
+    "dcs:templateType": "dcs:Component"
+  },
+  "dcs:documentStructure": {
+    "@type": "dcs:DocumentStructure",
+    "@id": "did:web:example:template:sla-hosting#document-structure",
+    "dcs:blocks": {
+      "@list": [
+        {
+          "@type": "dcs:Clause",
+          "@id": "did:web:example:template:sla-hosting#block-00000000-0000-4000-8000-000000000004",
+          "dcs:content": {
+            "@list": [
+              "The provider operates the managed Kubernetes environment agreed below."
+            ]
+          },
+          "dcs:title": "Hosting environment"
+        },
+        {
+          "@type": "dcs:Clause",
+          "@id": "did:web:example:template:sla-hosting#block-00000000-0000-4000-8000-000000000005",
+          "dcs:content": {
+            "@list": [
+              "The customer pays the monthly fee for the billing period."
+            ]
+          },
+          "dcs:title": "Charges"
+        }
+      ]
+    },
+    "dcs:layout": {
+      "@list": [
+        {
+          "@id": "urn:uuid:block-00000000-0000-4000-8000-000000000003",
+          "@type": "dcs:LayoutNode",
+          "dcs:isRoot": true,
+          "dcs:children": {
+            "@list": []
+          }
+        }
+      ]
+    }
+  },
+  "dcs:contractFields": [
+    {
+      "@id": "did:web:example:template:sla-hosting#field-provisioned-nodes",
+      "@type": "dcs:ContractField",
+      "dcs:label": "Provisioned nodes",
+      "dcs:datatype": "xsd:string",
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#provisionedNodes"
+      },
+      "dcs:required": true
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-service-region",
+      "@type": "dcs:ContractField",
+      "dcs:label": "Service region",
+      "dcs:datatype": "xsd:string",
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#serviceRegion"
+      },
+      "dcs:required": true
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-monthly-fee",
+      "@type": "dcs:ContractField",
+      "dcs:label": "Payment Amount",
+      "dcs:datatype": "xsd:string",
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#field-service-monthlyFee"
+      },
+      "dcs:required": true
+    }
+  ],
+  "dcs:contractData": [
+    {
+      "@id": "did:web:example:template:sla-hosting#asset-hosting-environment",
+      "@type": "https://w3id.org/facis/sla/hosting/v1#ManagedKubernetesEnvironment",
+      "https://w3id.org/facis/sla/hosting/v1#provisionedNodes": {
+        "@id": "did:web:example:template:sla-hosting#field-provisioned-nodes"
+      },
+      "https://w3id.org/facis/sla/hosting/v1#serviceRegion": {
+        "@id": "did:web:example:template:sla-hosting#field-service-region"
+      }
+    }
+  ],
+  "dcs:policies": {
+    "@id": "did:web:example:template:sla-hosting#policy-set",
+    "@type": "odrl:Offer",
+    "odrl:profile": {
+      "@id": "https://w3id.org/facis/dcs/ontology/v1/odrl-profile"
+    },
+    "odrl:obligation": [
+      {
+        "@id": "urn:uuid:00000000-0000-4000-8000-000000000002",
+        "@type": "odrl:Duty",
+        "odrl:action": {
+          "@id": "odrl:compensate"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting"
+        },
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-00000000-0000-4000-8000-000000000005"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:payAmount"
+            },
+            "odrl:operator": {
+              "@id": "odrl:eq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-monthly-fee"
+            },
+            "odrl:unit": {
+              "@id": "http://publications.europa.eu/resource/authority/currency/EUR"
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:elapsedTime"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@value": "P14D",
+              "@type": "xsd:duration"
+            }
+          }
+        ]
+      }
+    ],
+    "odrl:permission": [
+      {
+        "@id": "urn:uuid:00000000-0000-4000-8000-000000000001",
+        "@type": "odrl:Permission",
+        "odrl:action": {
+          "@id": "odrl:execute"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting#asset-hosting-environment"
+        },
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-00000000-0000-4000-8000-000000000004"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:count"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-provisioned-nodes"
+            },
+            "odrl:unit": {
+              "@id": "https://w3id.org/facis/sla/hosting/v1#unit-node"
+            }
+          },
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:or": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "odrl:spatial"
+                  },
+                  "odrl:operator": {
+                    "@id": "odrl:eq"
+                  },
+                  "odrl:rightOperand": {
+                    "@id": "did:web:example:template:sla-hosting#field-service-region"
+                  }
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "odrl:spatial"
+                  },
+                  "odrl:operator": {
+                    "@id": "odrl:isAnyOf"
+                  },
+                  "odrl:rightOperand": [
+                    {
+                      "@id": "https://w3id.org/facis/dcs/taxonomy/v1#service-region-EMEA"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:dateTime"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-contract-end-date"
+            }
+          }
+        ],
+        "odrl:duty": [
+          {
+            "@type": "odrl:Duty",
+            "odrl:action": {
+              "@id": "dcs:provideCompliantValue"
+            },
+            "odrl:constraint": [
+              {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                  "@id": "odrl:percentage"
+                },
+                "odrl:operator": {
+                  "@id": "odrl:gteq"
+                },
+                "odrl:rightOperand": {
+                  "@value": "99.5",
+                  "@type": "xsd:decimal"
+                }
+              }
+            ],
+            "odrl:consequence": [
+              {
+                "@type": "odrl:Duty",
+                "odrl:action": {
+                  "@id": "odrl:compensate"
+                },
+                "odrl:constraint": [
+                  {
+                    "@type": "odrl:Constraint",
+                    "odrl:leftOperand": {
+                      "@id": "odrl:percentage"
+                    },
+                    "odrl:operator": {
+                      "@id": "odrl:eq"
+                    },
+                    "odrl:rightOperand": {
+                      "@id": "did:web:example:template:sla-hosting#field-service-credit-rate"
+                    }
+                  }
+                ],
+                "dcs:prose": {
+                  "@id": "did:web:example:template:sla-hosting#block-00000000-0000-4000-8000-000000000004"
+                }
+              }
+            ],
+            "dcs:prose": {
+              "@id": "did:web:example:template:sla-hosting#block-00000000-0000-4000-8000-000000000004"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

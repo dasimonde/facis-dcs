@@ -1,19 +1,19 @@
 <script setup lang="ts">
-import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
-import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
+import { computed, onUnmounted, type Ref, ref } from 'vue'
 import { ROUTES } from '@/router/router'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useApprovalTaskStateFilterStore } from '@/stores/state-filter-store'
 import { ApprovalTaskState, approvalTaskStates } from '@/types/approval-task-state'
+import { ContractState } from '@/types/contract-state'
 import { TemplateState } from '@/types/contract-template-state'
 import { compareValues } from '@/utils/comparison'
 import { toProperCase } from '@/utils/string'
-import { computed, onUnmounted, ref, type Ref } from 'vue'
+import TaskListSearch from './TaskListSearch.vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
-import TaskListSearch from './TaskListSearch.vue'
-import { ContractState } from '@/types/contract-state'
+import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
+import type { ContractTemplateApprovalTask } from '@/models/contract-template/contract-template-approval-task'
 
 type ApprovalTask = ContractTemplateApprovalTask | ContractApprovalTask
 
@@ -92,64 +92,65 @@ const resolveViewRouteName = (task: ApprovalTask) => {
   }
 }
 
-const applySearchResult = (searchResult: ApprovalTask[]) => {
-  isSearchActive.value = searchResult.length !== props.tasks.length
-  searchedTasks.value = searchResult
+const applySearchResult = (searchResult: ApprovalTask[] | null) => {
+  isSearchActive.value = !!searchResult
+  if (searchResult) {
+    searchedTasks.value = searchResult
+  }
 }
 
 onUnmounted(() => stateFilterStore.reset())
 </script>
 
 <template>
-  <ul class="list">
-    <li class="flex flex-col justify-end px-4 tracking-wide sm:flex-row">
-      <TaskListSearch class="flex-1" :tasks="tasks" @search-result="applySearchResult" />
-      <ListStateFilter
-        label="Approval Task"
-        :filters="approvalTaskStates"
-        store-type="approvalTasks"
-        :disabled="!hasTasks"
-      />
-      <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
-    </li>
-    <template v-if="filteredTasks.length > 0">
-      <li v-for="task in filteredTasks" :key="task.did" class="list-row">
-        <div class="list-col-grow card border-base-content/10 bg-base-100 card-border hover:bg-base-300">
-          <div class="card-body">
-            <h2 class="card-title flex-wrap justify-between">
-              <div v-if="task.type === 'template'">Template Name: {{ getTemplateName(task) }}</div>
-              <div v-else>Contract Name: {{ getContractName(task) }}</div>
-              <div class="flex-1"></div>
-              <div class="badge badge-accent">{{ toProperCase(task.type) }} Task</div>
-              <div class="badge badge-secondary">{{ task.state }}</div>
-            </h2>
-            <div class="flex justify-between">
-              <div v-if="task.type === 'template' && task.document_number">
-                Document number: {{ task.document_number }}
+  <div class="flex h-full min-h-0 flex-col">
+    <ul class="list flex-1 overflow-y-auto">
+      <li class="flex flex-col justify-end px-4 tracking-wide sm:flex-row">
+        <TaskListSearch class="flex-1" :tasks="tasks" @search-result="applySearchResult" />
+        <ListStateFilter
+          label="Approval Task"
+          :filters="approvalTaskStates"
+          store-type="approvalTasks"
+          :disabled="!hasTasks"
+        />
+        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+      </li>
+      <template v-if="filteredTasks.length > 0">
+        <li v-for="task in filteredTasks" :key="task.did" class="list-row">
+          <div class="list-col-grow card border-base-content/10 bg-base-100 card-border hover:bg-base-300">
+            <div class="card-body">
+              <h2 class="card-title flex-wrap justify-between">
+                <div v-if="task.type === 'template'">Template Name: {{ getTemplateName(task) }}</div>
+                <div v-else>Contract Name: {{ getContractName(task) }}</div>
+                <div class="flex-1"></div>
+                <div class="badge badge-accent">{{ toProperCase(task.type) }} Task</div>
+                <div class="badge badge-secondary">{{ task.state }}</div>
+              </h2>
+              <div class="flex justify-between">
+                <div v-if="task.type === 'template' && task.version">Version: {{ task.version }}</div>
+                <div v-else-if="task.type === 'contract' && task.contract_version">
+                  Version: {{ task.contract_version }}
+                </div>
               </div>
-              <div v-if="task.type === 'template' && task.version">Version: {{ task.version }}</div>
-              <div v-else-if="task.type === 'contract' && task.contract_version">
-                Version: {{ task.contract_version }}
-              </div>
-            </div>
-            <div class="flex justify-between">
-              <div>Creation date: {{ new Date(task.created_at).toLocaleDateString() }}</div>
-              <div class="card-actions justify-end">
-                <RouterLink
-                  :to="{
-                    name: resolveViewRouteName(task),
-                    params: { did: task.did },
-                  }"
-                  class="btn btn-sm btn-primary"
-                >
-                  View
-                </RouterLink>
+              <div class="flex justify-between">
+                <div>Creation date: {{ new Date(task.created_at).toLocaleDateString() }}</div>
+                <div class="card-actions justify-end">
+                  <RouterLink
+                    :to="{
+                      name: resolveViewRouteName(task),
+                      params: { did: task.did },
+                    }"
+                    class="btn btn-sm btn-primary"
+                  >
+                    View
+                  </RouterLink>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </li>
-    </template>
-    <li v-else class="px-4">No approval tasks found.</li>
-  </ul>
+        </li>
+      </template>
+      <li v-else class="px-4">No approval tasks found.</li>
+    </ul>
+  </div>
 </template>

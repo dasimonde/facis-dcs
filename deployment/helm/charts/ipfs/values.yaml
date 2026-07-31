@@ -1,5 +1,11 @@
 image:
   repository: ipfs/kubo
+  # Left mutable deliberately for now. A pin is the right end state, but it must
+  # be to the digest a healthy node is actually running -- pinning to a guessed
+  # version tag rolled the node back eleven minor releases and broke every
+  # scenario that stores a PDF. Pin to sha256:8907cb0cc1ad5798f6bb1bb1341a8009
+  # 90c268e021cedfa317e8aa1a33864214 (the digest running on the demo instances)
+  # once the chart supports a digest reference.
   tag: "latest"
   pullPolicy: IfNotPresent
 
@@ -32,5 +38,8 @@ persistence:
   size: 5Gi
   accessModes:
     - ReadWriteOnce
+  # Empty uses the cluster default StorageClass. Set an encrypted class per
+  # environment; the Kubo repo stores all pinned artifact ciphertext.
+  storageClassName: ""
 
 resources: {}

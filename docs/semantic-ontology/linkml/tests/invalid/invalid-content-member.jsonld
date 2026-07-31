@@ -1,0 +1,29 @@
+{
+    "@context": {
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#"
+    },
+    "@id": "did:web:localhost:template:test-invalid-content",
+    "@type": "dcs:ContractTemplate",
+    "dcs:documentStructure": {
+        "@id": "did:web:localhost:template:test-invalid-content#document-structure",
+        "@type": "dcs:DocumentStructure",
+        "dcs:blocks": {
+            "@list": [
+                {
+                    "@id": "did:web:localhost:template:test-invalid-content#clause-1",
+                    "@type": "dcs:Clause",
+                    "dcs:title": "Bad Content",
+                    "dcs:content": {
+                        "@list": [
+                            "some text",
+                            {
+                                "@type": "dcs:Section",
+                                "dcs:title": "nested section is not allowed in content"
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+}

@@ -10,6 +10,7 @@ Feature: Template Identity and Traceability
     Then the template is assigned a UUID
     And the UUID is unique across the system
 
+  @DCS-FR-TR-19
   Scenario: Retrieve template by DID
     Given I am authenticated with roles: "Template Reviewer"
     And template "Standard NDA" has a DID assigned

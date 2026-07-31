@@ -1,0 +1,59 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:lifecycle-update-test",
+    "@type": "ContractTemplate",
+    "documentTitle": "Lifecycle Update Test",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Lifecycle Update Test"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:lifecycle-update-test#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:lifecycle-update-test#s1",
+                "children": [
+                    "urn:doc:lifecycle-update-test#c1",
+                    "urn:doc:lifecycle-update-test#c2"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:lifecycle-update-test#s1",
+                "title": "1. Original"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:lifecycle-update-test#c1",
+                "content": [
+                    "Original clause."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:lifecycle-update-test#c2",
+                "content": [
+                    "Amended clause."
+                ]
+            }
+        ]
+    }
+}

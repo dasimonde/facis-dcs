@@ -1,0 +1,256 @@
+{{- if .Values.acmeRenewal.enabled -}}
+{{- $name := printf "%s-acme" (include "digital-contracting-service.fullname" .) -}}
+{{- if not .Values.acmeRenewal.host -}}
+{{- fail "acmeRenewal.enabled=true requires acmeRenewal.host" -}}
+{{- end -}}
+{{- if not .Values.acmeRenewal.email -}}
+{{- fail "acmeRenewal.enabled=true requires acmeRenewal.email (Let's Encrypt rejects registration without one)" -}}
+{{- end -}}
+{{- if not .Values.acmeRenewal.secretName -}}
+{{- fail "acmeRenewal.enabled=true requires acmeRenewal.secretName, the TLS secret the ingress serves" -}}
+{{- end -}}
+{{- if .Values.acmeRenewal.rbac.create -}}
+{{- if .Values.acmeRenewal.serviceAccountName -}}
+{{- fail "acmeRenewal.serviceAccountName is for reusing an existing account; set acmeRenewal.rbac.create=false with it" -}}
+{{- end -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+---
+{{- else -}}
+{{- if not .Values.acmeRenewal.serviceAccountName -}}
+{{- fail "acmeRenewal.rbac.create=false requires acmeRenewal.serviceAccountName naming an existing account that may write the TLS secret" -}}
+{{- end -}}
+{{- end -}}
+# The challenge responder is the renewal pod itself: the Service selects the
+# CronJob's pod, so it has endpoints only while a renewal is running and returns
+# 503 the rest of the time, which nothing reads.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - port: {{ .Values.acmeRenewal.challengePort }}
+      targetPort: http01
+---
+# A dedicated Ingress rather than a path on the release's own: /.well-known/
+# acme-challenge is more specific than the "/" rule, so nginx prefers it without
+# the main Ingress having to know this exists. ssl-redirect must be off —
+# validation arrives over port 80 and the TLS port may still be serving the
+# ingress controller's placeholder certificate, which is exactly the situation
+# renewal is meant to get out of.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    {{- with .Values.acmeRenewal.ingressAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.acmeRenewal.ingressClassName | default .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.acmeRenewal.host | quote }}
+      http:
+        paths:
+          - path: /.well-known/acme-challenge
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: {{ .Values.acmeRenewal.challengePort }}
+---
+# certbot's account key and certificate history live here. Without it every run
+# registers a new ACME account and re-issues from scratch, which burns Let's
+# Encrypt rate limits and loses the renewal window certbot computes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.acmeRenewal.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.acmeRenewal.persistence.size }}
+  {{- with .Values.acmeRenewal.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+data:
+  renew.sh: |
+    #!/bin/sh
+    set -eu
+
+    # certbot exits 0 and does nothing when the certificate is not near expiry,
+    # so the job is safe to run on any schedule.
+    certbot certonly \
+      --standalone \
+      --http-01-port "$CHALLENGE_PORT" \
+      --config-dir /state \
+      --work-dir /state/work \
+      --logs-dir /state/logs \
+      --non-interactive \
+      --agree-tos \
+      --keep-until-expiring \
+      --email "$ACME_EMAIL" \
+      --server "$ACME_SERVER" \
+      -d "$ACME_HOST"
+
+    LIVE="/state/live/$ACME_HOST"
+    [ -f "$LIVE/fullchain.pem" ] || { echo "certbot produced no certificate" >&2; exit 1; }
+
+    python3 /scripts/publish_secret.py "$LIVE/fullchain.pem" "$LIVE/privkey.pem"
+
+  publish_secret.py: |
+    """Write the renewed certificate into the TLS Secret the ingress serves.
+
+    Uses the pod's own ServiceAccount token against the API server directly, so
+    the image needs nothing but Python — certbot's image carries no kubectl.
+    """
+    import base64
+    import json
+    import os
+    import ssl
+    import sys
+    import urllib.error
+    import urllib.request
+
+    chain_path, key_path = sys.argv[1], sys.argv[2]
+    namespace = open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read().strip()
+    token = open("/var/run/secrets/kubernetes.io/serviceaccount/token").read().strip()
+    secret = os.environ["TLS_SECRET_NAME"]
+
+    def b64(path):
+        with open(path, "rb") as fh:
+            return base64.b64encode(fh.read()).decode()
+
+    body = json.dumps({
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "type": "kubernetes.io/tls",
+        "metadata": {"name": secret},
+        "data": {"tls.crt": b64(chain_path), "tls.key": b64(key_path)},
+    }).encode()
+
+    host = "https://kubernetes.default.svc"
+    url = "%s/api/v1/namespaces/%s/secrets/%s" % (host, namespace, secret)
+    ctx = ssl.create_default_context(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+
+    req = urllib.request.Request(url, data=body, method="PUT")
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, context=ctx) as resp:
+            print("updated secret %s (%s)" % (secret, resp.status))
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        create = urllib.request.Request(
+            "%s/api/v1/namespaces/%s/secrets" % (host, namespace), data=body, method="POST")
+        create.add_header("Authorization", "Bearer " + token)
+        create.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(create, context=ctx) as resp:
+            print("created secret %s (%s)" % (secret, resp.status))
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.acmeRenewal.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ $name }}
+        spec:
+          serviceAccountName: {{ .Values.acmeRenewal.serviceAccountName | default $name }}
+          restartPolicy: Never
+          containers:
+            - name: certbot
+              image: {{ .Values.acmeRenewal.image | quote }}
+              command: ["/bin/sh", "/scripts/renew.sh"]
+              env:
+                - name: ACME_HOST
+                  value: {{ .Values.acmeRenewal.host | quote }}
+                - name: ACME_EMAIL
+                  value: {{ .Values.acmeRenewal.email | quote }}
+                - name: ACME_SERVER
+                  value: {{ .Values.acmeRenewal.server | quote }}
+                - name: CHALLENGE_PORT
+                  value: {{ .Values.acmeRenewal.challengePort | quote }}
+                - name: TLS_SECRET_NAME
+                  value: {{ .Values.acmeRenewal.secretName | quote }}
+              ports:
+                - name: http01
+                  containerPort: {{ .Values.acmeRenewal.challengePort }}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: state
+                  mountPath: /state
+              resources:
+                {{- toYaml .Values.acmeRenewal.resources | nindent 16 }}
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ $name }}
+            - name: state
+              persistentVolumeClaim:
+                claimName: {{ $name }}
+{{- end }}

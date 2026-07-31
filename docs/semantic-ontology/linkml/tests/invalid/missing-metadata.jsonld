@@ -1,0 +1,47 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:req-missing-metadata",
+    "@type": "ContractTemplate",
+    "documentTitle": "Missing Metadata",
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:req-missing-metadata#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:req-missing-metadata#s1",
+                "children": [
+                    "urn:doc:req-missing-metadata#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:req-missing-metadata#s1",
+                "title": "1. Intro"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:req-missing-metadata#c1",
+                "content": [
+                    "Clause text."
+                ]
+            }
+        ]
+    }
+}

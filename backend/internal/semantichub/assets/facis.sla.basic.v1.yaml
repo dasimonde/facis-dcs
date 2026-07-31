@@ -1,0 +1,27 @@
+# Statement-level business rules for FACIS DCS contract documents. The
+# profile applies to what documents actually are — a dcs:Contract root with
+# dcs:CompanyParty nodes under dcs:parties — so its rules can genuinely
+# fire; structural requirements (metadata, envelope, semantic values) are
+# the SHACL shapes' job, not duplicated here.
+id: facis.sla.basic
+version: "2"
+description: Statement rules for FACIS DCS contract documents.
+appliesTo:
+  - "https://w3id.org/facis/dcs/ontology/v1#Contract"
+rules:
+  - id: company-party-role-vocabulary
+    type: value_in
+    severity: error
+    message: A contract party's role must come from the DCS role vocabulary.
+    where:
+      "@type": "https://w3id.org/facis/dcs/ontology/v1#CompanyParty"
+    target: role
+    values:
+      - provider
+      - customer
+      - assigner
+      - assignee
+      - "https://w3id.org/facis/dcs/taxonomy/v1#role-provider"
+      - "https://w3id.org/facis/dcs/taxonomy/v1#role-customer"
+      - "https://w3id.org/facis/dcs/taxonomy/v1#role-assigner"
+      - "https://w3id.org/facis/dcs/taxonomy/v1#role-assignee"

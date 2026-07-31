@@ -1,99 +1,83 @@
 <script setup lang="ts">
-import type { AuditMode, AuditScope } from '@/models/requests/auditing-request'
-import type { AuditFinding } from '@/models/responses/auditing-response'
-import { auditingService } from '@/services/auditing-service'
+import { watchDebounced } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { type ArchiveErasureStatus, archiveService } from '@/services/archive-service'
+import { auditingService } from '@/services/auditing-service'
+import { useAuthStore } from '@/stores/auth-store'
+import { downloadBlob as saveBlob } from '@/utils/download-blob'
+import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
+import type { AuditFinding } from '@/models/responses/auditing-response'
 
-const findings = ref<AuditFinding[]>([])
+const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
+const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})
+const successfulAuditQueries = ref<Partial<Record<AuditScope, string>>>({})
 const selectedFindingId = ref<number | string | null>(null)
-const report = ref<unknown>(null)
-const auditLoading = ref(false)
-const reportLoading = ref(false)
-const error = ref<string | null>(null)
+const auditLoadingScope = ref<AuditScope | null>(null)
+const reportLoadingScope = ref<AuditScope | null>(null)
+const reportLoadingFormat = ref<AuditReportFormat | null>(null)
 const selectedScope = ref<AuditScope>('contracts')
-const selectedAuditMode = ref<AuditMode>('repository_trail')
-const hasExecutedAudit = ref(false)
-type AuditResult = 'passed' | 'failed' | 'review'
-type AuditTab = 'checks' | 'timeline'
-type TableFilterKey = 'result' | 'category' | 'status' | 'component' | 'did'
+const didFilter = ref('')
+
+// Deep-link drill-down (DCS-FR-CSA-21): the archive dashboard links here
+// with ?scope=archive&did=<did> so a row lands on that contract's trail.
+const route = useRoute()
+if (
+  typeof route.query.scope === 'string' &&
+  ['templates', 'contracts', 'archive', 'signatures'].includes(route.query.scope)
+) {
+  selectedScope.value = route.query.scope as AuditScope
+}
+if (typeof route.query.did === 'string' && route.query.did) {
+  didFilter.value = route.query.did
+}
+const justification = ref('')
+const authStore = useAuthStore()
+const isArchiveManagerOnly = computed(
+  () => authStore.user?.roles.includes('ARCHIVE_MANAGER') && !authStore.user?.roles.includes('AUDITOR'),
+)
+type AuditResult = 'passed' | 'failed' | 'review' | 'not_evaluated'
+type TableFilterKey = 'result' | 'category' | 'component' | 'did'
 
 const emptyValueLabel = '-'
-const activeAuditTab = ref<AuditTab>('checks')
 const tableFilters = ref<Record<TableFilterKey, Record<string, boolean>>>({
   result: {},
   category: {},
-  status: {},
   component: {},
   did: {},
 })
-const contractDid = ref('urn:facis:dcs:contract:sla:example-001')
-const contractVersion = ref('v1')
-const policyVersion = ref('2026-05-18')
-const contractDocumentText = ref(`{
-  "@context": [],
-  "@id": "facis-contract-with-demo-errors",
-  "@type": [
-    "sla:ServiceLevelAgreement"
-  ],
-  "parties": [
-    {
-      "@id": "urn:facis:party:supplier-001",
-      "@type": "dcs:Organization",
-      "role": "supplier",
-      "legalName": "Example Supplier GmbH",
-      "location": {
-        "country": "RUS"
-      }
-    },
-    {
-      "@id": "urn:facis:party:customer-001",
-      "@type": "dcs:CompanyParty",
-      "role": "customer",
-      "legalName": "Example Customer AG",
-      "location": {
-        "country": "DEU"
-      }
-    }
-  ],
-  "contract": {
-    "type": "serviceAgreement",
-    "governingLaw": "DE"
-  },
-  "service": {
-    "sla": {
-      "availability": 99.72,
-      "responseTime": 20,
-      "resolutionTime": 180,
-      "supportHours": "24x7"
-    }
-  },
-  "signature": {
-    "requiredLevel": "AES"
-  }
-}`)
 
-const scopeOptions: { value: AuditScope; label: string }[] = [
+const allScopeOptions: { value: AuditScope; label: string }[] = [
   { value: 'templates', label: 'Templates' },
   { value: 'contracts', label: 'Contracts' },
+  { value: 'signatures', label: 'Signatures' },
+  { value: 'archive', label: 'Archive' },
 ]
+const scopeOptions = computed(() =>
+  isArchiveManagerOnly.value ? allScopeOptions.filter((scope) => scope.value === 'archive') : allScopeOptions,
+)
+watch(
+  isArchiveManagerOnly,
+  (restricted) => {
+    if (restricted) selectedScope.value = 'archive'
+  },
+  { immediate: true },
+)
 
-const auditModeOptions: { value: AuditMode; label: string }[] = [
-  { value: 'repository_trail', label: 'Repository Trail' },
-  { value: 'static_contract', label: 'JSON-LD / SHACL Contract' },
-]
-
-watch(selectedAuditMode, (mode) => {
-  if (mode === 'static_contract') {
-    selectedScope.value = 'contracts'
-  }
-})
+const findings = computed(() => auditFindingsByScope.value[selectedScope.value] ?? [])
+const error = computed(() => auditErrorsByScope.value[selectedScope.value] ?? null)
+const currentAuditQuery = computed(() => `${selectedScope.value}:${didFilter.value.trim()}`)
+const hasExecutedAudit = computed(() => successfulAuditQueries.value[selectedScope.value] === currentAuditQuery.value)
+const auditLoading = computed(() => auditLoadingScope.value !== null)
+const reportLoading = computed(() => reportLoadingScope.value !== null)
+const selectedAuditLoading = computed(() => auditLoadingScope.value === selectedScope.value)
+const selectedReportLoading = computed(() => reportLoadingScope.value === selectedScope.value)
 
 const filteredFindings = computed(() => {
-  return checkFindings.value.filter((finding) => {
+  return findings.value.filter((finding) => {
     return (
       tableFilterEnabled('result', auditResultLabel(finding)) &&
       tableFilterEnabled('category', finding.category) &&
-      tableFilterEnabled('status', finding.status) &&
       tableFilterEnabled('component', finding.component) &&
       tableFilterEnabled('did', finding.did)
     )
@@ -102,79 +86,72 @@ const filteredFindings = computed(() => {
 const selectedFinding = computed(() => {
   return findings.value.find((finding) => String(finding.id) === String(selectedFindingId.value)) ?? null
 })
-const selectedFindingKind = computed(() => (selectedFinding.value ? auditItemKind(selectedFinding.value) : null))
-const selectedFindingEventData = computed(() => {
-  if (!selectedFinding.value) {
-    return null
+watch(filteredFindings, (visibleFindings) => {
+  if (
+    selectedFindingId.value !== null &&
+    !visibleFindings.some((finding) => String(finding.id) === String(selectedFindingId.value))
+  ) {
+    selectedFindingId.value = null
   }
-  if (isObjectRecord(selectedFinding.value.details)) {
-    const eventData = selectedFinding.value.details.event_data ?? selectedFinding.value.details.eventData
-    return isObjectRecord(eventData) ? eventData : null
-  }
-  return null
 })
 const selectedFindingDetailRows = computed(() => {
   const finding = selectedFinding.value
-  const eventData = selectedFindingEventData.value
   if (!finding) {
     return []
   }
-  if (selectedFindingKind.value === 'event') {
-    return [
-      { label: 'Event Type', value: stringDetail(rawEventType(finding)) },
-      { label: 'Actor', value: stringDetail(actorFromEventData(eventData)) },
-      { label: 'Timestamp', value: stringDetail(formatDateTime(finding.created_at)) },
-      { label: 'Component', value: stringDetail(finding.component) },
-      { label: 'DID', value: stringDetail(finding.did) },
-    ].filter((row) => row.value !== emptyValueLabel)
-  }
+  const details = findingDetails(finding)
   return [
     { label: 'Checked', value: stringDetail(checkAssertion(finding)) },
-    { label: 'Rule ID', value: stringDetail(eventData?.ruleId) },
-    { label: 'Policy Set', value: stringDetail(eventData?.policySetId) },
-    { label: 'Policy Version', value: stringDetail(eventData?.policyVersion) },
-    { label: 'Semantic Path', value: stringDetail(eventData?.semanticPath) },
-    { label: 'Path', value: stringDetail(eventData?.path) },
-    { label: 'Ontology Term', value: stringDetail(eventData?.ontologyTerm) },
-    { label: 'Object Type', value: stringDetail(eventData?.objectType ?? finding.object_type) },
-    { label: 'Contract Version', value: stringDetail(eventData?.contractVersion) },
-    { label: 'Audited By', value: stringDetail(eventData?.auditedBy) },
+    { label: 'Rule ID', value: stringDetail(details?.rule_id ?? details?.ruleId) },
+    { label: 'Policy Set', value: stringDetail(details?.policySetId) },
+    { label: 'Policy Version', value: stringDetail(details?.policyVersion) },
+    { label: 'Requirement', value: detailValue(details?.requirement) },
+    { label: 'Actual value', value: detailValue(details?.actualValue) },
+    { label: 'Expected value', value: detailValue(details?.expectedValue) },
+    { label: 'Expected values', value: detailValue(details?.expectedValues) },
+    { label: 'Operator', value: detailValue(details?.operator) },
+    { label: 'Field IRI', value: stringDetail(details?.fieldIri) },
+    { label: 'Path', value: stringDetail(details?.path) },
+    { label: 'Ontology Term', value: stringDetail(details?.ontologyTerm) },
+    { label: 'Object Type', value: stringDetail(details?.objectType ?? finding.object_type) },
+    { label: 'Contract Version', value: stringDetail(details?.contractVersion) },
+    { label: 'Audited By', value: stringDetail(details?.auditedBy) },
     { label: 'Component', value: stringDetail(finding.component) },
     { label: 'DID', value: stringDetail(finding.did) },
   ].filter((row) => row.value !== emptyValueLabel)
 })
 
-const checkFindings = computed(() => findings.value.filter((finding) => auditItemKind(finding) === 'check'))
-const timelineEvents = computed(() => {
-  return [...findings.value]
-    .filter((finding) => auditItemKind(finding) === 'event')
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
-})
-const failedCheckCount = computed(
-  () => checkFindings.value.filter((finding) => auditResult(finding) === 'failed').length,
+const failedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'failed').length : 0,
 )
-const passedCheckCount = computed(
-  () => checkFindings.value.filter((finding) => auditResult(finding) === 'passed').length,
+const passedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'passed').length : 0,
 )
-const reviewCheckCount = computed(
-  () => checkFindings.value.filter((finding) => auditResult(finding) === 'review').length,
+const reviewCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'review').length : 0,
 )
+const notEvaluatedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'not_evaluated').length : 0,
+)
+const auditIsEmpty = computed(() => hasExecutedAudit.value && findings.value.length === 0 && !error.value)
 const auditHasPassed = computed(
-  () => hasExecutedAudit.value && !auditLoading.value && !error.value && checkFindings.value.length === 0,
+  () =>
+    hasExecutedAudit.value &&
+    findings.value.length > 0 &&
+    passedCheckCount.value === findings.value.length &&
+    !error.value,
 )
 const tableFilterGroups: { key: TableFilterKey; label: string }[] = [
-  { key: 'result', label: 'Result' },
+  { key: 'result', label: 'Status' },
   { key: 'category', label: 'Finding' },
-  { key: 'status', label: 'Severity' },
   { key: 'component', label: 'Component' },
   { key: 'did', label: 'DID' },
 ]
 const tableFilterOptions = computed<Record<TableFilterKey, string[]>>(() => ({
-  result: uniqueTableValues(checkFindings.value.map((finding) => auditResultLabel(finding))),
-  category: uniqueTableValues(checkFindings.value.map((finding) => finding.category)),
-  status: uniqueTableValues(checkFindings.value.map((finding) => finding.status)),
-  component: uniqueTableValues(checkFindings.value.map((finding) => finding.component)),
-  did: uniqueTableValues(checkFindings.value.map((finding) => finding.did)),
+  result: uniqueTableValues(findings.value.map((finding) => auditResultLabel(finding))),
+  category: uniqueTableValues(findings.value.map((finding) => finding.category)),
+  component: uniqueTableValues(findings.value.map((finding) => finding.component)),
+  did: uniqueTableValues(findings.value.map((finding) => finding.did)),
 }))
 
 watch(
@@ -192,63 +169,81 @@ watch(
   { immediate: true },
 )
 
+watch(selectedScope, () => {
+  selectedFindingId.value = null
+})
+
+// Key-erasure state of the inspected archive entry (DCS-NFR-SEC-13): shown
+// whenever the archive scope is filtered to one contract DID, so the entry's
+// "Keys destroyed" record stays visible after the entry itself left the
+// archive listing.
+const erasureStatus = ref<ArchiveErasureStatus | null>(null)
+watchDebounced(
+  [selectedScope, didFilter],
+  async ([scope, did]) => {
+    erasureStatus.value = null
+    if (scope !== 'archive' || !did.trim()) return
+    try {
+      erasureStatus.value = await archiveService.erasureStatus(did.trim())
+    } catch {
+      // no erasure record to show — the panel simply stays hidden
+    }
+  },
+  { debounce: 400, immediate: true },
+)
+
 const executeAudit = async () => {
-  auditLoading.value = true
-  error.value = null
-  report.value = null
-  hasExecutedAudit.value = true
+  const scope = selectedScope.value
+  const query = currentAuditQuery.value
+  auditLoadingScope.value = scope
+  auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: undefined }
+  successfulAuditQueries.value = { ...successfulAuditQueries.value, [scope]: undefined }
+  auditFindingsByScope.value = { ...auditFindingsByScope.value, [scope]: [] }
+  selectedFindingId.value = null
   try {
-    const request =
-      selectedAuditMode.value === 'static_contract'
-        ? {
-            scope: selectedScope.value,
-            audit_mode: selectedAuditMode.value,
-            contract_document: parseJSONInput(contractDocumentText.value, 'Contract document'),
-            contract_did: contractDid.value.trim() || undefined,
-            contract_version: contractVersion.value.trim() || undefined,
-            policy_version: policyVersion.value.trim() || undefined,
-          }
-        : { scope: selectedScope.value, audit_mode: selectedAuditMode.value }
-    findings.value = await auditingService.audit(request)
+    const scopeFindings = await auditingService.audit({
+      scope,
+      did: didFilter.value.trim() || undefined,
+      justification: justification.value.trim(),
+    })
+    auditFindingsByScope.value = { ...auditFindingsByScope.value, [scope]: scopeFindings }
+    successfulAuditQueries.value = { ...successfulAuditQueries.value, [scope]: query }
     selectedFindingId.value = null
-    activeAuditTab.value = checkFindings.value.length > 0 ? 'checks' : 'timeline'
   } catch (err) {
     console.error('Audit Error:', err)
-    error.value = err instanceof Error ? err.message : 'Audit could not be executed.'
+    auditErrorsByScope.value = {
+      ...auditErrorsByScope.value,
+      [scope]: err instanceof Error ? err.message : 'Audit could not be executed.',
+    }
   } finally {
-    auditLoading.value = false
+    auditLoadingScope.value = null
   }
 }
 
-const generateReport = async () => {
-  reportLoading.value = true
-  error.value = null
+const generateReport = async (format: AuditReportFormat) => {
+  const scope = selectedScope.value
+  reportLoadingScope.value = scope
+  reportLoadingFormat.value = format
+  auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: undefined }
   try {
-    report.value = await auditingService.report({ scope: selectedScope.value })
+    const artifact = await auditingService.report({
+      scope,
+      format,
+      did: didFilter.value.trim() || undefined,
+      justification: justification.value.trim(),
+    })
+    downloadBlob(artifact.bytes, artifact.contentType, artifact.filename)
   } catch (err) {
     console.error('Audit Report Error:', err)
-    error.value = 'Audit report could not be generated.'
+    auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: 'Audit report could not be generated.' }
   } finally {
-    reportLoading.value = false
+    reportLoadingScope.value = null
+    reportLoadingFormat.value = null
   }
 }
 
 const formatLabel = (value: string) => value.split('_').join(' ')
 
-const parseJSONInput = (value: string, label: string) => {
-  try {
-    return JSON.parse(value)
-  } catch {
-    throw new Error(`${label} is not valid JSON.`)
-  }
-}
-
-const reportText = computed(() => {
-  if (!report.value) {
-    return ''
-  }
-  return typeof report.value === 'string' ? report.value : JSON.stringify(report.value, null, 2)
-})
 const selectedFindingRawDetails = computed(() => {
   if (!selectedFinding.value?.details) {
     return ''
@@ -280,13 +275,12 @@ function setAllTableFilters(key: TableFilterKey, enabled: boolean): void {
   }
 }
 
-function selectFinding(finding: AuditFinding): void {
-  selectedFindingId.value = finding.id
+function downloadBlob(content: BlobPart, contentType: string, filename: string): void {
+  saveBlob(new Blob([content], { type: contentType }), filename)
 }
 
-function selectTab(tab: AuditTab): void {
-  activeAuditTab.value = tab
-  selectedFindingId.value = null
+function selectFinding(finding: AuditFinding): void {
+  selectedFindingId.value = finding.id
 }
 
 function stringDetail(value: unknown): string {
@@ -299,11 +293,28 @@ function stringDetail(value: unknown): string {
   return emptyValueLabel
 }
 
+function detailValue(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  if (Array.isArray(value)) {
+    const values = value.map((item) => detailValue(item)).filter((item) => item !== emptyValueLabel)
+    return values.length ? values.join(', ') : emptyValueLabel
+  }
+  if (isObjectRecord(value)) {
+    return JSON.stringify(value)
+  }
+  return emptyValueLabel
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-error' | 'badge-warning' {
+function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-error' | 'badge-warning' | 'badge-ghost' {
   const result = auditResult(finding)
   if (result === 'passed') {
     return 'badge-success'
@@ -311,58 +322,28 @@ function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-erro
   if (result === 'failed') {
     return 'badge-error'
   }
-  return 'badge-warning'
+  // A not-evaluated finding shares the neutral badge with an unknown one: it is
+  // neither a pass nor a review task (ADR-33).
+  return result === 'review' ? 'badge-warning' : 'badge-ghost'
 }
 
-function auditItemKind(finding: AuditFinding): 'check' | 'event' {
-  const eventType = rawEventType(finding)?.toUpperCase()
-  const eventData = eventDataFromFinding(finding)
-  if (eventType?.includes('POLICY_AUDIT_FINDING') || eventType?.includes('COMPLIANCE_FINDING')) {
-    return 'check'
-  }
-  if (eventData?.ruleId || eventData?.policySetId || eventData?.semanticPath || eventData?.severity) {
-    return 'check'
-  }
-  return 'event'
-}
-
-function auditResult(finding: AuditFinding): AuditResult {
-  const value = finding.status?.trim().toLowerCase()
-  if (
-    value === 'passed' ||
-    value === 'pass' ||
-    value === 'success' ||
-    value === 'successful' ||
-    value === 'ok' ||
-    value === 'compliant' ||
-    value === 'info'
-  ) {
+function auditResult(finding: AuditFinding): AuditResult | null {
+  if (finding.status === 'PASSED') {
     return 'passed'
   }
-  if (
-    value === 'failed' ||
-    value === 'fail' ||
-    value === 'error' ||
-    value === 'critical' ||
-    value === 'blocking' ||
-    value === 'violation' ||
-    value === 'non_compliant'
-  ) {
+  if (finding.status === 'FAILED') {
     return 'failed'
   }
-  if (value === 'warning' || value === 'warn') {
+  if (finding.status === 'REVIEW') {
     return 'review'
   }
-  if (finding.category === 'violation') {
-    return 'failed'
+  if (finding.status === 'NOT_EVALUATED') {
+    return 'not_evaluated'
   }
-  if (finding.category === 'inconsistency') {
-    return 'review'
-  }
-  return 'review'
+  return null
 }
 
-function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs review' {
+function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs Review' | 'Not Evaluated' | 'Unknown' {
   const result = auditResult(finding)
   if (result === 'passed') {
     return 'Passed'
@@ -370,7 +351,10 @@ function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs r
   if (result === 'failed') {
     return 'Failed'
   }
-  return 'Needs review'
+  if (result === 'not_evaluated') {
+    return 'Not Evaluated'
+  }
+  return result === 'review' ? 'Needs Review' : 'Unknown'
 }
 
 function auditResultSummary(finding: AuditFinding): string {
@@ -382,12 +366,20 @@ function auditResultSummary(finding: AuditFinding): string {
   if (result === 'failed') {
     return assertion ? `Failed: ${assertion}` : 'Check failed'
   }
-  return assertion ? `Review: ${assertion}` : 'Review required'
+  if (result === 'review') {
+    return assertion ? `Review: ${assertion}` : 'Review required'
+  }
+  if (result === 'not_evaluated') {
+    return assertion
+      ? `Not evaluated here: ${assertion}`
+      : 'Not evaluated here - the executing target system reports this verdict'
+  }
+  return assertion ? `Unknown result: ${assertion}` : 'Unknown result'
 }
 
 function checkAssertion(finding: AuditFinding): string {
-  const eventData = eventDataFromFinding(finding)
-  const message = stringDetail(eventData?.message)
+  const details = findingDetails(finding)
+  const message = stringDetail(details?.message ?? details?.reason)
   if (message !== emptyValueLabel) {
     return message
   }
@@ -396,17 +388,26 @@ function checkAssertion(finding: AuditFinding): string {
     .map((line) => line.trim())
     .find(
       (line) =>
-        line && !line.startsWith('Object DID:') && !line.startsWith('Rule:') && !line.startsWith('Semantic path:'),
+        line &&
+        !line.startsWith('Object DID:') &&
+        !line.startsWith('Rule:') &&
+        !line.startsWith('Semantic path:') &&
+        !line.startsWith('Requirement:') &&
+        !line.startsWith('Actual value:') &&
+        !line.startsWith('Expected value:') &&
+        !line.startsWith('Expected values:') &&
+        !line.startsWith('Operator:'),
     )
   return descriptionLine ?? ''
 }
 
 function severityLabel(finding: AuditFinding): string {
-  return finding.status?.trim() ?? 'not set'
+  return stringDetail(findingDetails(finding)?.severity)
 }
 
 function severityBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-error' | 'badge-warning' | 'badge-ghost' {
-  const severity = finding.status?.trim().toLowerCase()
+  const severityValue = findingDetails(finding)?.severity
+  const severity = typeof severityValue === 'string' ? severityValue.trim().toLowerCase() : ''
   if (
     severity === 'error' ||
     severity === 'critical' ||
@@ -420,48 +421,28 @@ function severityBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-err
     return 'badge-warning'
   }
   if (
+    severity === 'satisfied' ||
     severity === 'passed' ||
     severity === 'pass' ||
     severity === 'success' ||
     severity === 'ok' ||
-    severity === 'compliant' ||
-    severity === 'info'
+    severity === 'compliant'
   ) {
     return 'badge-success'
   }
+  // 'deferred' falls through to the neutral badge: the DCS reached no verdict,
+  // so it must not read as a passing check (ADR-33).
   return 'badge-ghost'
 }
 
-function eventDataFromFinding(finding: AuditFinding): Record<string, unknown> | null {
+function findingDetails(finding: AuditFinding): Record<string, unknown> | null {
   if (!isObjectRecord(finding.details)) {
     return null
   }
-  const eventData = finding.details.event_data ?? finding.details.eventData
-  return isObjectRecord(eventData) ? eventData : null
-}
-
-function rawEventType(finding: AuditFinding): string | undefined {
-  if (!isObjectRecord(finding.details)) {
-    return undefined
+  if (isObjectRecord(finding.details.finding)) {
+    return finding.details.finding
   }
-  const eventType = finding.details.event_type ?? finding.details.eventType
-  return typeof eventType === 'string' ? eventType : undefined
-}
-
-function actorFromEventData(eventData: Record<string, unknown> | null): string | undefined {
-  if (!eventData) {
-    return undefined
-  }
-  const explicitActor = eventData.actor ?? eventData.user ?? eventData.username ?? eventData.auditedBy
-  if (typeof explicitActor === 'string') {
-    return explicitActor
-  }
-  for (const [key, value] of Object.entries(eventData)) {
-    if (key.endsWith('_by') && typeof value === 'string') {
-      return value
-    }
-  }
-  return undefined
+  return finding.details
 }
 
 function formatDateTime(value?: string): string {
@@ -477,36 +458,56 @@ function formatDateTime(value?: string): string {
 </script>
 
 <template>
-  <div class="mb-4 flex justify-between p-4">
+  <div class="mb-4 flex justify-between border-b border-base-content/10 bg-base-100 p-4">
     <h2 class="text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight">
       {{ $route.meta.name }}
     </h2>
   </div>
 
   <section class="space-y-4 px-4">
-    <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-      <div class="stats stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal">
+    <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
+      <div
+        v-if="hasExecutedAudit"
+        class="stats max-w-full stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal"
+      >
         <div class="stat">
-          <div class="stat-title">Failed Checks</div>
-          <div class="stat-value text-2xl text-error">{{ failedCheckCount }}</div>
+          <div class="stat-title flex items-center gap-2 text-base-content/70">
+            <span class="size-2 rounded-full bg-error/50"></span>
+            Failed Checks
+          </div>
+          <div class="stat-value text-2xl text-base-content">{{ failedCheckCount }}</div>
         </div>
         <div class="stat">
-          <div class="stat-title">Passed Checks</div>
-          <div class="stat-value text-2xl text-success">{{ passedCheckCount }}</div>
+          <div class="stat-title flex items-center gap-2 text-base-content/70">
+            <span class="size-2 rounded-full bg-success/50"></span>
+            Passed Checks
+          </div>
+          <div class="stat-value text-2xl text-base-content">{{ passedCheckCount }}</div>
         </div>
         <div class="stat">
-          <div class="stat-title">Needs Review</div>
-          <div class="stat-value text-2xl text-warning">{{ reviewCheckCount }}</div>
+          <div class="stat-title flex items-center gap-2 text-base-content/70">
+            <span class="size-2 rounded-full bg-warning/50"></span>
+            Needs Review
+          </div>
+          <div class="stat-value text-2xl text-base-content">{{ reviewCheckCount }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-title flex items-center gap-2 text-base-content/70">
+            <span class="size-2 rounded-full bg-base-content/30"></span>
+            Not Evaluated
+          </div>
+          <div class="stat-value text-2xl text-base-content">{{ notEvaluatedCheckCount }}</div>
         </div>
       </div>
 
-      <div class="flex flex-col gap-3 sm:flex-row">
+      <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap">
         <label class="form-control w-full sm:w-48">
           <span class="label-text mb-1">Scope</span>
           <select
+            id="select-scope"
             v-model="selectedScope"
             class="select-bordered select rounded-box"
-            :disabled="auditLoading || reportLoading || selectedAuditMode === 'static_contract'"
+            :disabled="auditLoading || reportLoading"
           >
             <option v-for="scope in scopeOptions" :key="scope.value" :value="scope.value">
               {{ scope.label }}
@@ -514,112 +515,155 @@ function formatDateTime(value?: string): string {
           </select>
         </label>
 
-        <label class="form-control w-full sm:w-48">
-          <span class="label-text mb-1">Mode</span>
-          <select
-            v-model="selectedAuditMode"
-            class="select-bordered select rounded-box"
+        <label class="form-control w-full sm:w-64">
+          <span class="label-text mb-1">DID (optional)</span>
+          <input
+            id="input-did"
+            v-model="didFilter"
+            class="input-bordered input rounded-box"
             :disabled="auditLoading || reportLoading"
-          >
-            <option v-for="mode in auditModeOptions" :key="mode.value" :value="mode.value">
-              {{ mode.label }}
-            </option>
-          </select>
+          />
+        </label>
+
+        <label class="form-control w-full sm:w-72">
+          <span class="label-text mb-1">Audit justification</span>
+          <input
+            id="input-justification"
+            v-model="justification"
+            required
+            class="input-bordered input rounded-box"
+            :disabled="auditLoading || reportLoading"
+          />
         </label>
 
         <button
           class="btn rounded-box btn-primary sm:self-end"
-          :disabled="auditLoading || reportLoading"
+          :disabled="auditLoading || reportLoading || !justification.trim()"
           @click="executeAudit"
         >
-          <span v-if="auditLoading" class="loading loading-sm loading-spinner"></span>
+          <span v-if="selectedAuditLoading" class="loading loading-sm loading-spinner"></span>
           <span v-else>Execute Audit</span>
         </button>
 
-        <button
-          class="btn rounded-box btn-secondary sm:self-end"
-          :disabled="reportLoading || auditLoading || !hasExecutedAudit"
-          @click="generateReport"
-        >
-          <span v-if="reportLoading" class="loading loading-sm loading-spinner"></span>
-          <span v-else>Generate Report</span>
-        </button>
-      </div>
-    </div>
-
-    <div v-if="selectedAuditMode === 'static_contract'" class="space-y-3">
-      <div class="space-y-3">
-        <div class="grid gap-3 sm:grid-cols-3">
-          <label class="form-control">
-            <span class="label-text mb-1">Contract DID</span>
-            <input
-              v-model="contractDid"
-              class="input-bordered input rounded-box"
-              :disabled="auditLoading || reportLoading"
-            />
-          </label>
-          <label class="form-control">
-            <span class="label-text mb-1">Contract Version</span>
-            <input
-              v-model="contractVersion"
-              class="input-bordered input rounded-box"
-              :disabled="auditLoading || reportLoading"
-            />
-          </label>
-          <label class="form-control">
-            <span class="label-text mb-1">Policy Version</span>
-            <input
-              v-model="policyVersion"
-              class="input-bordered input rounded-box"
-              :disabled="auditLoading || reportLoading"
-            />
-          </label>
+        <div class="flex flex-nowrap gap-2 sm:self-end">
+          <button
+            class="btn rounded-box whitespace-nowrap btn-outline"
+            :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
+            @click="generateReport('json')"
+          >
+            <span
+              v-if="selectedReportLoading && reportLoadingFormat === 'json'"
+              class="loading loading-sm loading-spinner"
+            ></span>
+            <span v-else>JSON</span>
+          </button>
+          <button
+            class="btn rounded-box whitespace-nowrap btn-outline"
+            :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
+            @click="generateReport('csv')"
+          >
+            <span
+              v-if="selectedReportLoading && reportLoadingFormat === 'csv'"
+              class="loading loading-sm loading-spinner"
+            ></span>
+            <span v-else>CSV</span>
+          </button>
+          <button
+            class="btn rounded-box whitespace-nowrap btn-outline"
+            :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
+            @click="generateReport('pdf')"
+          >
+            <span
+              v-if="selectedReportLoading && reportLoadingFormat === 'pdf'"
+              class="loading loading-sm loading-spinner"
+            ></span>
+            <span v-else>PDF</span>
+          </button>
         </div>
-        <label class="form-control">
-          <span class="label-text mb-1">Contract JSON-LD</span>
-          <textarea
-            v-model="contractDocumentText"
-            class="textarea-bordered textarea min-h-96 rounded-box font-mono text-xs leading-5"
-            spellcheck="false"
-            :disabled="auditLoading || reportLoading"
-          ></textarea>
-        </label>
       </div>
     </div>
 
-    <div v-if="auditLoading" class="p-4">Executing audit...</div>
-    <div v-else-if="error" class="alert rounded-box alert-error">{{ error }}</div>
-    <div v-if="auditHasPassed" class="alert rounded-box alert-success">
-      Audit passed. No failed checks or review findings were returned.
+    <div v-if="selectedAuditLoading" class="p-4" role="status">Executing audit...</div>
+    <div v-else-if="error" class="alert rounded-box alert-error" role="alert">{{ error }}</div>
+    <div v-if="auditHasPassed" class="alert rounded-box alert-success" role="status">
+      Audit passed. Every check returned a verdict, and none failed or needs review.
+    </div>
+    <div v-if="notEvaluatedCheckCount > 0" class="alert rounded-box alert-info" role="status">
+      {{ notEvaluatedCheckCount }} check(s) were not evaluated here. Their verdict belongs to the target system that
+      executes the contract, which observes the facts they depend on.
+    </div>
+    <div v-if="auditIsEmpty" class="alert rounded-box alert-info" role="status">
+      Audit completed. No matching entries were found.
     </div>
 
-    <div v-if="!auditLoading && !error" class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div class="overflow-x-auto rounded-box border border-base-content/10">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 px-4 py-3">
-          <div role="tablist" class="tabs-box tabs">
-            <button
-              type="button"
-              role="tab"
-              class="tab"
-              :class="activeAuditTab === 'checks' ? 'tab-active' : ''"
-              @click="selectTab('checks')"
-            >
-              Checks
-              <span class="ml-2 badge badge-sm">{{ checkFindings.length }}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              class="tab"
-              :class="activeAuditTab === 'timeline' ? 'tab-active' : ''"
-              @click="selectTab('timeline')"
-            >
-              Timeline
-              <span class="ml-2 badge badge-sm">{{ timelineEvents.length }}</span>
-            </button>
+    <!-- Erasure state of the inspected archive entry (DCS-NFR-SEC-13) -->
+    <section
+      v-if="erasureStatus"
+      class="rounded-box border border-base-content/10 bg-base-100 p-4"
+      data-testid="erasure-status"
+    >
+      <div class="flex flex-wrap items-center gap-3">
+        <h3 class="font-bold">Encryption keys</h3>
+        <span
+          v-if="erasureStatus.local_status === 'shredded'"
+          class="badge badge-error"
+          data-testid="erasure-status-badge"
+        >
+          Keys destroyed
+        </span>
+        <span v-else class="badge badge-ghost" data-testid="erasure-status-badge">Keys live</span>
+      </div>
+      <details class="collapse-arrow collapse mt-2 rounded-box border border-base-content/10">
+        <summary class="collapse-title text-sm font-medium">Erasure details</summary>
+        <div class="collapse-content space-y-3 text-sm" data-testid="erasure-status-details">
+          <div v-if="erasureStatus.local_status === 'shredded'">
+            Destroyed {{ formatDateTime(erasureStatus.shredded_at) }} by {{ erasureStatus.shredded_by }} —
+            {{ erasureStatus.shred_reason }}
           </div>
+          <div v-else>The local encryption keys are live — the archived content is decryptable.</div>
+          <p v-if="erasureStatus.peers.length === 0" class="opacity-70">No counterparty instance holds keys.</p>
+          <table v-else class="table table-xs">
+            <thead>
+              <tr>
+                <th>Peer</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Confirmed</th>
+                <th>Retries</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="peer in erasureStatus.peers"
+                :key="peer.peer_did"
+                :data-testid="`erasure-peer-${peer.peer_did}`"
+              >
+                <td class="font-mono text-xs">{{ peer.peer_did }}</td>
+                <td>
+                  <span class="badge badge-sm" :class="peer.status === 'confirmed' ? 'badge-success' : 'badge-warning'">
+                    {{ peer.status }}
+                  </span>
+                </td>
+                <td>{{ formatDateTime(peer.requested_at) }}</td>
+                <td>{{ peer.confirmed_at ? formatDateTime(peer.confirmed_at) : '—' }}</td>
+                <td>
+                  {{ peer.retry_count }}
+                  <span v-if="peer.last_tried_at" class="opacity-70">
+                    (last tried {{ formatDateTime(peer.last_tried_at) }})
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
 
-          <div v-if="activeAuditTab === 'checks'" class="flex flex-wrap items-center gap-2">
+    <div v-if="!selectedAuditLoading && !error" class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="min-w-0 overflow-x-auto rounded-box border border-base-content/10">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 px-4 py-3">
+          <h3 class="font-bold">Findings</h3>
+          <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-medium opacity-70">Table filters</span>
             <details v-for="group in tableFilterGroups" :key="group.key" class="dropdown">
               <summary class="btn rounded-box btn-outline btn-sm">
@@ -657,11 +701,10 @@ function formatDateTime(value?: string): string {
             </details>
           </div>
         </div>
-        <table v-if="activeAuditTab === 'checks'" class="table table-zebra">
+        <table class="table table-zebra">
           <thead>
-            <tr>
-              <th>Result</th>
-              <th>Severity</th>
+            <tr class="text-base-content/70">
+              <th>Status</th>
               <th>DID</th>
               <th>Details</th>
             </tr>
@@ -683,11 +726,6 @@ function formatDateTime(value?: string): string {
                 </span>
                 <div class="mt-1 text-xs opacity-70">{{ formatLabel(finding.category) }}</div>
               </td>
-              <td>
-                <span class="badge badge-outline" :class="severityBadgeClass(finding)">
-                  {{ severityLabel(finding) }}
-                </span>
-              </td>
               <td>{{ finding.did ?? '-' }}</td>
               <td class="max-w-xl min-w-72">
                 <div class="font-medium">{{ checkAssertion(finding) || finding.title || 'Audit finding' }}</div>
@@ -698,46 +736,10 @@ function formatDateTime(value?: string): string {
               </td>
             </tr>
             <tr v-if="filteredFindings.length === 0">
-              <td colspan="4" class="py-8 text-center opacity-70">
+              <td colspan="3" class="py-8 text-center opacity-70">
                 {{
-                  hasExecutedAudit ? 'No checks match the selected filters.' : 'Select a scope and execute an audit.'
+                  hasExecutedAudit ? 'No findings match the selected filters.' : 'Select a scope and execute an audit.'
                 }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <table v-else class="table table-zebra">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Event</th>
-              <th>Actor</th>
-              <th>DID</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="event in timelineEvents"
-              :key="event.id"
-              class="cursor-pointer"
-              :class="String(selectedFindingId) === String(event.id) ? 'bg-primary/10' : ''"
-              tabindex="0"
-              @click="selectFinding(event)"
-              @keydown.enter.prevent="selectFinding(event)"
-              @keydown.space.prevent="selectFinding(event)"
-            >
-              <td class="whitespace-nowrap">{{ formatDateTime(event.created_at) }}</td>
-              <td class="max-w-xl min-w-72">
-                <div class="font-medium">{{ event.title ?? formatLabel(rawEventType(event) ?? 'Audit event') }}</div>
-                <div class="text-xs opacity-70">{{ event.component ?? '-' }}</div>
-              </td>
-              <td>{{ actorFromEventData(eventDataFromFinding(event)) ?? '-' }}</td>
-              <td>{{ event.did ?? '-' }}</td>
-            </tr>
-            <tr v-if="timelineEvents.length === 0">
-              <td colspan="4" class="py-8 text-center opacity-70">
-                {{ hasExecutedAudit ? 'No timeline events were returned.' : 'Select a scope and execute an audit.' }}
               </td>
             </tr>
           </tbody>
@@ -746,7 +748,7 @@ function formatDateTime(value?: string): string {
 
       <aside class="min-h-80 rounded-box border border-base-content/10 bg-base-100 xl:sticky xl:top-4 xl:self-start">
         <div class="flex items-center justify-between border-b border-base-content/10 px-4 py-3">
-          <h3 class="font-bold">{{ selectedFindingKind === 'event' ? 'Event Details' : 'Check Details' }}</h3>
+          <h3 class="font-bold">Finding Details</h3>
           <button v-if="selectedFinding" type="button" class="btn btn-ghost btn-xs" @click="selectedFindingId = null">
             Close
           </button>
@@ -755,7 +757,7 @@ function formatDateTime(value?: string): string {
           Select a row to inspect the corresponding audit evidence.
         </div>
         <div v-else class="space-y-4 p-4">
-          <div v-if="selectedFindingKind === 'check'">
+          <div>
             <div class="mb-2 badge" :class="findingBadgeClass(selectedFinding)">
               {{ auditResultLabel(selectedFinding) }}
             </div>
@@ -773,15 +775,7 @@ function formatDateTime(value?: string): string {
             </div>
           </div>
 
-          <div v-else>
-            <div class="mb-2 badge badge-outline">Timeline event</div>
-            <h4 class="leading-snug font-bold">
-              {{ selectedFinding.title ?? formatLabel(rawEventType(selectedFinding) ?? 'Audit event') }}
-            </h4>
-            <div class="mt-2 text-xs opacity-80">{{ formatDateTime(selectedFinding.created_at) }}</div>
-          </div>
-
-          <p class="text-sm break-words whitespace-pre-wrap opacity-80">{{ selectedFinding.description }}</p>
+          <p class="text-sm wrap-break-word whitespace-pre-wrap opacity-80">{{ selectedFinding.description }}</p>
 
           <dl class="divide-y divide-base-content/10 text-sm">
             <div
@@ -790,7 +784,7 @@ function formatDateTime(value?: string): string {
               class="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2"
             >
               <dt class="font-medium opacity-70">{{ row.label }}</dt>
-              <dd class="break-words">{{ row.value }}</dd>
+              <dd class="wrap-break-word">{{ row.value }}</dd>
             </div>
           </dl>
 
@@ -800,16 +794,11 @@ function formatDateTime(value?: string): string {
           >
             <summary class="collapse-title text-sm font-medium">Raw Details</summary>
             <div class="collapse-content">
-              <pre class="text-xs break-words whitespace-pre-wrap">{{ selectedFindingRawDetails }}</pre>
+              <pre class="text-xs wrap-break-word whitespace-pre-wrap">{{ selectedFindingRawDetails }}</pre>
             </div>
           </details>
         </div>
       </aside>
-    </div>
-
-    <div v-if="report" class="rounded-box border border-base-content/10 bg-base-200 p-4">
-      <h3 class="mb-3 font-bold">Structured Audit Report</h3>
-      <pre class="text-xs break-words whitespace-pre-wrap">{{ reportText }}</pre>
     </div>
   </section>
 </template>

@@ -1,152 +1,22 @@
 package contracttemplate
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
-	"github.com/jmoiron/sqlx"
-
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/validation"
-	"digital-contracting-service/internal/contractworkflowengine/db"
-	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 )
 
-type GetTemplateDataByDIDQry struct {
-	DID string
-}
-
-type GetTemplateDataByDIDHandler struct {
-	Ctx      context.Context
-	DB       *sqlx.DB
-	CTRepo   db.ContractTemplateRepo
-	FCClient *fcclient.FederatedCatalogueClient
-}
-
-var templateDataAllowedKeys = []string{
-	"documentOutline",
-	"documentBlocks",
-	"semanticConditions",
-	"schemaRefs",
-	"policyRefs",
-	"validation",
-	"semanticProfile",
-	"templateVariables",
-	"placeholderBindings",
-	"semanticRules",
-	"contractStatements",
-	"sla",
-	"subTemplateSnapshots",
-	"templateDataVersion",
-}
-
-const getTemplateDataJSONByDIDStatement = `
-MATCH (ct:ContractTemplate)
-WHERE ct.did = $did
-RETURN {
-  template_data_json: ct.templateDataJSON
-} AS n
-LIMIT 1
-`
-
-func (h *GetTemplateDataByDIDHandler) Handle(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-	templateData, err := h.getTemplateData(ctx, qry)
-	if err != nil {
-		return nil, err
-	}
-	return convertTemplateDataToContractData(templateData, qry.DID)
-}
-
-func (h *GetTemplateDataByDIDHandler) getTemplateData(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-
-	templateData, err := h.getFrameContractTemplateDataFromDB(ctx, qry.DID)
-	if err != nil {
-		return nil, fmt.Errorf("could not read template data from DB: %w", err)
-	}
-
-	if templateData == nil && h.FCClient != nil {
-		templateData, err = h.getTemplateDataFromFC(qry)
-		if err != nil {
-			return nil, fmt.Errorf("could not read template data from FC: %w", err)
-		}
-	}
-
-	return templateData, nil
-}
-
-func (h *GetTemplateDataByDIDHandler) getFrameContractTemplateDataFromDB(ctx context.Context, templateDID string) (*datatype.JSON, error) {
-
-	tx, err := h.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("could not create transaction: %w", err)
-	}
-	defer func(tx *sqlx.Tx) {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Printf("could not rollback transaction: %v", err)
-		}
-	}(tx)
-
-	templateData, err := h.CTRepo.ReadFrameContractTemplateDataByID(ctx, tx, templateDID)
-	if err != nil {
-		return nil, fmt.Errorf("could not read frame contract template data: %w", err)
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("could not commit transaction: %w", err)
-	}
-	return templateData, nil
-}
-
-func (h *GetTemplateDataByDIDHandler) getTemplateDataFromFC(qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-	resp, err := h.FCClient.Query(h.Ctx, fcclient.QueryRequest{
-		Statement: getTemplateDataJSONByDIDStatement,
-		Parameters: map[string]string{
-			"did": qry.DID,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if resp.TotalCount == 0 || len(resp.Items) == 0 {
-		return nil, fmt.Errorf("template data not found for did %s", qry.DID)
-	}
-
-	var projection map[string]interface{}
-	for _, v := range resp.Items[0] {
-		if m, ok := v.(map[string]interface{}); ok {
-			projection = m
-			break
-		}
-	}
-	if projection == nil {
-		return nil, fmt.Errorf("query projection missing projected map for did=%s", qry.DID)
-	}
-
-	templateDataJSONString, _ := projection["template_data_json"].(string)
-	if strings.TrimSpace(templateDataJSONString) == "" {
-		return nil, fmt.Errorf("templateDataJSON is empty for did %s", qry.DID)
-	}
-
-	var templateDataMap map[string]interface{}
-	if err := json.Unmarshal([]byte(templateDataJSONString), &templateDataMap); err != nil {
-		return nil, fmt.Errorf("unmarshal templateDataJSON failed: %w", err)
-	}
-
-	templateData, err := datatype.NewJSON(templateDataMap)
-	if err != nil {
-		return nil, fmt.Errorf("marshal template data failed: %w", err)
-	}
-
-	return &templateData, nil
-}
-
-func convertTemplateDataToContractData(raw *datatype.JSON, templateDID string) (*datatype.JSON, error) {
+// ConvertTemplateDataToContractData derives a contract document from a
+// stored template document: @type becomes dcs:Contract, dcs:metadata's
+// @type becomes dcs:ContractMetadata, derivedFromTemplate provenance is
+// attached, and every party IRI the ODRL rules reference is materialized
+// as a typed dcs:CompanyParty node.
+func ConvertTemplateDataToContractData(raw *datatype.JSON, templateDID string, templateVersions ...int) (*datatype.JSON, error) {
 	if raw == nil || !raw.IsNotNullValue() {
 		return raw, nil
 	}
@@ -156,20 +26,92 @@ func convertTemplateDataToContractData(raw *datatype.JSON, templateDID string) (
 		return nil, fmt.Errorf("unmarshal template data failed: %w", err)
 	}
 
-	contractDataMap := make(map[string]interface{}, len(templateDataAllowedKeys))
-	for _, key := range templateDataAllowedKeys {
-		if value, ok := templateDataMap[key]; ok {
-			contractDataMap[key] = value
+	if _, ok := templateDataMap["dcs:documentStructure"]; !ok {
+		return nil, errors.New("template data must use the canonical dcs:documentStructure envelope")
+	}
+
+	templateDataMap["@type"] = "dcs:Contract"
+	if metadata, ok := templateDataMap["dcs:metadata"].(map[string]interface{}); ok {
+		metadata["@type"] = "dcs:ContractMetadata"
+	}
+
+	provenance := map[string]interface{}{"@id": base.ResourceIRI("template", templateDID)}
+	if len(templateVersions) > 0 && templateVersions[0] > 0 {
+		provenance["version"] = templateVersions[0]
+	} else if metadata, ok := templateDataMap["dcs:metadata"].(map[string]interface{}); ok {
+		if version, exists := metadata["dcs:templateVersion"]; exists {
+			provenance["version"] = version
 		}
 	}
-	contractDataMap["sourceTemplate"] = map[string]interface{}{
-		"did": templateDID,
-	}
-	contractDataMap["derivedFromTemplate"] = templateDID
+	templateDataMap["derivedFromTemplate"] = provenance
+	materializeRuleParties(templateDataMap)
 
-	contractData, err := datatype.NewJSON(contractDataMap)
+	contractData, err := datatype.NewJSON(templateDataMap)
 	if err != nil {
 		return nil, fmt.Errorf("marshal converted contract data failed: %w", err)
 	}
+
 	return validation.NormalizeContractData(&contractData, false)
+}
+
+// materializeRuleParties ensures every role-derived party IRI referenced as
+// odrl:assigner/odrl:assignee resolves to a typed dcs:CompanyParty node in
+// the document's dcs:parties.
+func materializeRuleParties(doc map[string]interface{}) {
+	policies, ok := doc["dcs:policies"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	roles := map[string]string{}
+	order := []string{}
+	for _, bucket := range []string{"odrl:permission", "odrl:prohibition", "odrl:obligation"} {
+		rules, ok := policies[bucket].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, rawRule := range rules {
+			rule, ok := rawRule.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			for _, side := range []string{"odrl:assigner", "odrl:assignee"} {
+				ref, ok := rule[side].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				iri, _ := ref["@id"].(string)
+				_, role, found := strings.Cut(iri, "#party-")
+				if !found || role == "" {
+					continue
+				}
+				if _, seen := roles[iri]; !seen {
+					roles[iri] = role
+					order = append(order, iri)
+				}
+			}
+		}
+	}
+	if len(order) == 0 {
+		return
+	}
+	parties, _ := doc["dcs:parties"].([]interface{})
+	existing := map[string]bool{}
+	for _, rawParty := range parties {
+		if party, ok := rawParty.(map[string]interface{}); ok {
+			if iri, _ := party["@id"].(string); iri != "" {
+				existing[iri] = true
+			}
+		}
+	}
+	for _, iri := range order {
+		if existing[iri] {
+			continue
+		}
+		parties = append(parties, map[string]interface{}{
+			"@id":      iri,
+			"@type":    "dcs:CompanyParty",
+			"dcs:role": roles[iri],
+		})
+	}
+	doc["dcs:parties"] = parties
 }

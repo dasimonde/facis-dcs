@@ -17,7 +17,8 @@ docker run -d \
   -e HYDRA_POST_LOGOUT_REDIRECT_URI=http://localhost:8991${DCS_API_PATH}/auth/logout-complete \
   -e DATABASE_URL="host=host.docker.internal port=5432 user=dcs password=dcs dbname=dcs sslmode=disable" \
   -e NATS_URL=nats://host.docker.internal:4222 \
-  -e HYDRA_ISSUER_URL=http://localhost:30444 \
+  -e HYDRA_PUBLIC_ISSUER_URL=http://localhost:5173 \
+  -e HYDRA_INTERNAL_ISSUER_URL=http://localhost:30444 \
   -e HYDRA_CLIENT_SECRET=dcs-secret \
   -e HYDRA_ADMIN_URL=http://localhost:30085 \
   -e FC_KEYCLOAK_REALM_URL=https://keycloak.xfsc.local/realms/gaia-x \

@@ -1,0 +1,17 @@
+{
+  "@context": {
+    "dcs": "https://w3id.org/facis/dcs/ontology/v1#"
+  },
+  "@id": "did:web:localhost:template:minimal",
+  "@type": "dcs:ContractTemplate",
+  "dcs:metadata": {
+    "@id": "did:web:localhost:template:minimal#metadata",
+    "@type": "dcs:TemplateMetadata",
+    "dcs:title": "Minimal Template"
+  },
+  "dcs:policies": [
+    {
+      "@id": "did:web:localhost:template:minimal#policy-1"
+    }
+  ]
+}

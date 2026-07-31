@@ -1,38 +1,48 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/20/solid'
 
 defineOptions({
   name: 'AppPagination',
 })
 
-const emit = defineEmits<{
-  pageChange: [value: number]
-}>()
-
 defineProps<{
-  pages: number
+  currentPage: number
+  hasNextPage: boolean
 }>()
 
-const currentPage = ref(1)
-
-watch(currentPage, (newPage, oldPage) => {
-  if (newPage !== oldPage) {
-    emit('pageChange', currentPage.value)
-  }
-})
+defineEmits<{
+  previousPage: []
+  nextPage: []
+}>()
 </script>
 
 <template>
-  <div v-if="pages > 0" class="join w-full justify-center">
-    <template v-for="page in pages" :key="page">
-      <button
-        type="button"
-        class="btn join-item btn-outline btn-accent"
-        :class="{ 'btn-active': page === currentPage }"
-        @click="currentPage = page"
-      >
-        {{ page }}
-      </button>
-    </template>
+  <div class="flex w-full justify-center gap-2">
+    <button
+      type="button"
+      class="btn px-4 btn-outline btn-sm"
+      :disabled="currentPage === 1"
+      aria-label="Go to previous page"
+      @click="$emit('previousPage')"
+    >
+      <ChevronLeftIcon class="size-5" />
+    </button>
+    <button
+      type="button"
+      class="btn btn-active w-13.5 px-4 btn-outline btn-sm btn-primary"
+      aria-current="page"
+      :aria-label="`Current page, page ${currentPage}`"
+    >
+      {{ currentPage }}
+    </button>
+    <button
+      type="button"
+      class="btn px-4 btn-outline btn-sm"
+      :disabled="!hasNextPage"
+      aria-label="Go to next page"
+      @click="$emit('nextPage')"
+    >
+      <ChevronRightIcon class="size-5" />
+    </button>
   </div>
 </template>

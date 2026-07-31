@@ -1,0 +1,19 @@
+{{- if .Values.pdfCore.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-pdf-core
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pdf-core
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.pdfCore.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "digital-contracting-service.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: pdf-core
+{{- end }}

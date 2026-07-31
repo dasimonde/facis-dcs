@@ -26,3 +26,18 @@ func loadDotenvIfPresent() error {
 
 	return nil
 }
+
+func loadDotenvFile(dotenvFile string) error {
+	if _, err := os.Stat(dotenvFile); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat %s: %w", dotenvFile, err)
+	}
+
+	if err := godotenv.Load(dotenvFile); err != nil {
+		return fmt.Errorf("failed to load %s: %w", dotenvFile, err)
+	}
+
+	return nil
+}

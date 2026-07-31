@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { PageLayout } from '@core/layouts/page'
-import { useSyncPageTitle } from '@core/composables/useSyncPageTitle'
-import { RouterView, useRoute } from 'vue-router'
 import { computed } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
+import { useSyncPageTitle } from '@core/composables/useSyncPageTitle'
+import { PageLayout } from '@core/layouts/page'
 import ErrorToast from './components/ErrorToast.vue'
 
 useSyncPageTitle()

@@ -1,11 +1,13 @@
 tmp
+__debug_bin*
 
 .idea
 .vscode
 .DS_Store
 .claude/
-.codex
+.codex/
 node_modules
+__pycache__/
 backend/gen
 
 frontend/node_modules
@@ -15,6 +17,7 @@ frontend/.env.local
 frontend/.env.development
 frontend/.env.production
 frontend/.env.test
+backend/certs/dev/orce-tsa-cert.pem
 frontend/.DS_Store
 frontend/.eslintcache
 frontend/.prettiercache
@@ -23,10 +26,17 @@ frontend/ClientApp/.vite
 
 deployment/certs
 
+# Dev PKI provisioning artifacts (CA private key + generated x5chain), created
+# by scripts/c2pa-cert-provision.sh at dev-stack time. Never commit private keys.
+pdf-core/certs/
+
+testWallet/.venv
+
 # OID4VP demo secrets, generate via testWallet/scripts/generate_dev_keys.py
 testWallet/dcs_wallet/__pycache__/
 
 # BDD test build artifacts
+tests/integration/artifacts/generated/
 bdd-executor
 tests/bdd/.coverage*
 tests/bdd/.tmp
@@ -35,12 +45,14 @@ tests/bdd/.reports
 steps/__pycache__
 steps/**/__pycache__
 
-tests/bdd/.venv
-tests/bdd/.tmp
-tests/bdd/.reports
 tests/bdd/.coverage
 tests/bdd/.coverage.*
 
 # Root coverage artifacts
 .coverage
 .coverage.*
+.claude/*
+docs/anforderung.md
+testWallet/keys/signing/
+.agents/
+/AGENTS.md

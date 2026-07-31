@@ -1,3 +1,7 @@
+// Package approvaltaskstate is the per-peer sub-state-machine for a
+// contract's approval tasks (OPEN -> APPROVED/REJECTED). A contract only
+// advances past REVIEWED once every responsible peer's approval task is no
+// longer OPEN (fan-in, see contractworkflowengine/command).
 package approvaltaskstate
 
 import (
@@ -28,7 +32,7 @@ func NewApprovalTaskState(s string) (ApprovalTaskState, error) {
 	return ts, nil
 }
 
-// IsValid checks if the ApprovalTaskState is a valid role
+// IsValid reports whether the value is one of the declared ApprovalTaskState values.
 func (s ApprovalTaskState) IsValid() bool {
 	upper := ApprovalTaskState(strings.ToUpper(string(s)))
 	return validStates[upper]

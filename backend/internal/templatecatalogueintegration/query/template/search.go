@@ -2,56 +2,54 @@ package template
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
-	"strconv"
+	"log"
 	"strings"
+	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
-	"digital-contracting-service/internal/templatecatalogueintegration/internal/ptr"
+	catalogueevents "digital-contracting-service/internal/templatecatalogueintegration/event"
 )
 
 type SearchQry struct {
-	DID            string
-	DocumentNumber string
-	Version        int
-	Name           string
-	Description    string
-	Offset         int
-	Limit          int
+	DID         string
+	Version     int
+	Name        string
+	Description string
+	Offset      int
+	Limit       int
+	RetrievedBy string
+	HolderDID   string
+	UserRoles   userrole.UserRoles
 }
 
 type SearchHandler struct {
-	Ctx      context.Context
+	DB       *sqlx.DB
 	FCClient *client.FederatedCatalogueClient
 }
 
 const searchTemplatesCountStatementTemplate = `
-MATCH (ct:ContractTemplate)
-%s
-RETURN count(ct) AS total
+SELECT (COUNT(DISTINCT ?template_uuid) AS ?total) WHERE {
+%s%s}
 `
 
 const searchTemplatesStatementTemplate = `
-MATCH (ct:ContractTemplate)
-%s
-RETURN {
-  did: ct.did,
-  document_number: ct.documentNumber,
-  version: ct.version,
-  schema_version: ct.schemaVersion,
-  name: ct.name,
-  description: ct.description,
-  template_type: ct.templateType,
-  participant_id: ct.participantId,
-  created_at: ct.createdAt,
-  updated_at: ct.updatedAt
-} AS n
-SKIP %d
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
+%s%s}
+ORDER BY ?s
+OFFSET %d
 LIMIT %d
 `
 
-func (h *SearchHandler) Handle(qry SearchQry) (*templatecatalogueintegration.TemplateCatalogueRetrieveResponse, error) {
+func (h *SearchHandler) Handle(ctx context.Context, qry SearchQry) (*templatecatalogueintegration.TemplateCatalogueRetrieveResponse, error) {
 	if h.FCClient == nil {
 		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
@@ -59,59 +57,65 @@ func (h *SearchHandler) Handle(qry SearchQry) (*templatecatalogueintegration.Tem
 		return nil, fmt.Errorf("offset must be >= 0")
 	}
 
-	whereClause, params := buildSearchWhereClause(qry)
-	where := formatSearchWhereSection(whereClause)
+	filters := buildSearchFilters(qry)
 
-	countStatement := fmt.Sprintf(searchTemplatesCountStatementTemplate, where)
-	countResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
-		Statement:  countStatement,
-		Parameters: params,
+	countStatement := fmt.Sprintf(searchTemplatesCountStatementTemplate, coreFieldTriples(), filters)
+	countResp, err := h.FCClient.Query(ctx, client.QueryRequest{
+		Statement: countStatement,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	totalCount := countResp.TotalCount
+	totalCount := countFromResults(countResp.Items, "total")
 
 	limit := qry.Limit
 	if limit < 1 {
 		limit = totalCount
 	}
 
-	statement := fmt.Sprintf(searchTemplatesStatementTemplate, where, qry.Offset, limit)
-	dataResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
-		Statement:  statement,
-		Parameters: params,
+	statement := fmt.Sprintf(searchTemplatesStatementTemplate, coreFieldTriples(), filters, qry.Offset, limit)
+	dataResp, err := h.FCClient.Query(ctx, client.QueryRequest{
+		Statement: statement,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	if h.DB != nil {
+		tx, err := h.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("could not create transaction: %w", err)
+		}
+		defer func(tx *sqlx.Tx) {
+			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+				log.Printf("could not rollback transaction: %v", err)
+			}
+		}(tx)
+
+		evt := catalogueevents.SearchEvent{
+			RetrievedBy: qry.RetrievedBy,
+			OccurredAt:  time.Now().UTC(),
+			HolderDID:   qry.HolderDID,
+			UserRoles:   qry.UserRoles,
+		}
+		err = event.Create(ctx, tx, evt, componenttype.TemplateCatalogueIntegration)
+		if err != nil {
+			return nil, fmt.Errorf("could not create event: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("could not commit transaction: %w", err)
+		}
+	}
+
 	items := make([]*templatecatalogueintegration.TemplateCatalogueItem, 0, len(dataResp.Items))
 	for _, item := range dataResp.Items {
-		var ct map[string]interface{}
-		// Extract the template projection map from the item
-		for _, v := range item {
-			if m, ok := v.(map[string]interface{}); ok {
-				ct = m
-				break
+		if ct := projectionMap(item); ct != nil {
+			if mapped := mapCatalogueItem(ct); mapped != nil {
+				items = append(items, mapped)
 			}
 		}
-		if ct == nil {
-			continue
-		}
-		items = append(items, &templatecatalogueintegration.TemplateCatalogueItem{
-			Did:            ptr.StringFromMap(ct, "did"),
-			DocumentNumber: ptr.Ref(ptr.StringFromMap(ct, "document_number")),
-			Version:        ptr.Ref(ptr.IntFromMap(ct, "version")),
-			SchemaVersion:  ptr.Ref(ptr.IntFromMap(ct, "schema_version")),
-			Name:           ptr.Ref(ptr.StringFromMap(ct, "name")),
-			Description:    ptr.Ref(ptr.StringFromMap(ct, "description")),
-			TemplateType:   ptr.Ref(ptr.StringFromMap(ct, "template_type")),
-			ParticipantID:  ptr.Ref(ptr.StringFromMap(ct, "participant_id")),
-			CreatedAt:      ptr.Ref(ptr.StringFromMap(ct, "created_at")),
-			UpdatedAt:      ptr.Ref(ptr.StringFromMap(ct, "updated_at")),
-		})
 	}
 
 	return &templatecatalogueintegration.TemplateCatalogueRetrieveResponse{
@@ -120,37 +124,25 @@ func (h *SearchHandler) Handle(qry SearchQry) (*templatecatalogueintegration.Tem
 	}, nil
 }
 
-func formatSearchWhereSection(whereClause string) string {
-	if whereClause == "" {
-		return ""
-	}
-	return "WHERE " + whereClause + "\n"
-}
-
-func buildSearchWhereClause(qry SearchQry) (string, map[string]string) {
-	conditions := make([]string, 0, 5)
-	params := make(map[string]string)
+// buildSearchFilters renders SPARQL FILTER clauses for the search query's
+// optional conditions. Values are inlined (escaped) rather than bound as
+// query parameters — FC's SPARQL backend does not support parameterized
+// queries the way the old Neo4j/Cypher backend did (see sparql.go).
+func buildSearchFilters(qry SearchQry) string {
+	var b strings.Builder
 
 	if value := strings.TrimSpace(qry.DID); value != "" {
-		conditions = append(conditions, "toLower(ct.did) CONTAINS toLower($did)")
-		params["did"] = value
-	}
-	if value := strings.TrimSpace(qry.DocumentNumber); value != "" {
-		conditions = append(conditions, "toLower(ct.documentNumber) CONTAINS toLower($document_number)")
-		params["document_number"] = value
+		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?template_uuid), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 	if qry.Version > 0 {
-		conditions = append(conditions, "ct.version = $version")
-		params["version"] = strconv.Itoa(qry.Version)
+		fmt.Fprintf(&b, "  FILTER(?version = \"%d\")\n", qry.Version)
 	}
 	if value := strings.TrimSpace(qry.Name); value != "" {
-		conditions = append(conditions, "toLower(ct.name) CONTAINS toLower($name)")
-		params["name"] = value
+		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?name), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 	if value := strings.TrimSpace(qry.Description); value != "" {
-		conditions = append(conditions, "toLower(ct.description) CONTAINS toLower($description)")
-		params["description"] = value
+		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?description), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 
-	return strings.Join(conditions, " AND "), params
+	return b.String()
 }

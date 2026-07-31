@@ -1,0 +1,31 @@
+@prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# gen-shacl cannot model rdf:List member validation: it emits sh:or directly
+# on the property path, which sees only the list-head blank node and fails.
+# These shapes use the property path  p / rdf:rest* / rdf:first  to iterate
+# every member of an @list and validate each member individually.
+# The corresponding slots (content, blocks, children, layout) are intentionally
+# omitted from their parent class's slot list in linkml.yaml so gen-shacl emits
+# no conflicting constraint.
+
+dcs:LayoutNode sh:property [
+    sh:path ( dcs:children [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
+    sh:nodeKind sh:IRI
+] .
+
+dcs:DocumentStructure sh:property [
+    sh:path ( dcs:layout [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
+    sh:class dcs:LayoutNode
+] .
+
+# A clause content member is a literal text run or a bare IRI reference to a
+# contract field — never an embedded (blank) node.
+dcs:Clause sh:property [
+    sh:path ( dcs:content [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
+    sh:or ( [ sh:nodeKind sh:Literal ] [ sh:nodeKind sh:IRI ] )
+] .
+
+dcs:SignatureField sh:nodeKind sh:IRI .

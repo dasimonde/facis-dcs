@@ -3,7 +3,7 @@ Feature: Search and Retrieve Contract Templates
   Users search and access existing contract templates
   filtered by role-based access rights.
 
-  @clean_db
+  @clean_db @DCS-IR-TR-02
   Scenario: Search templates by name
     Given I am authenticated with roles: "Template Manager"
     And template with name "Test template version 1A" and description "Test description 1" exists
@@ -21,7 +21,7 @@ Feature: Search and Retrieve Contract Templates
     When I search for templates with description "3-3"
     Then the result is one template where its description contains "3-3"
 
-  @clean_db
+  @clean_db @DCS-IR-TR-02
   Scenario: Search in template details
     Given I am authenticated with roles: "Template Reviewer"
     And template with name "Test template version 1A" and template_data title "Test description 1-1" exists

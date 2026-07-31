@@ -1,0 +1,436 @@
+id: https://w3id.org/facis/dcs/schema
+name: dcs-schema
+description: Digital Contracting Service semantic schema
+
+prefixes:
+  linkml: "https://w3id.org/linkml/"
+  dcs: "https://w3id.org/facis/dcs/ontology/v1#"
+  odrl: "http://www.w3.org/ns/odrl/2/"
+  xsd: "http://www.w3.org/2001/XMLSchema#"
+  taxonomy: "https://w3id.org/facis/dcs/taxonomy/v1#"
+  dcterms: "http://purl.org/dc/terms/"
+  prov: "http://www.w3.org/ns/prov#"
+
+# emit_prefixes controls which prefixes appear as explicit entries in the
+# generated JSON-LD context. dcs is intentionally excluded: it is the
+# default_prefix and is therefore emitted as @vocab; having it also as an
+# explicit named prefix would cause json-gold to prefer the dcs:-prefixed form
+# over bare term names during compaction. schema is omitted here because
+# linkml:types already defines it as https://schema.org/; re-declaring it
+# causes a prefix-mismatch error in the generator.
+emit_prefixes:
+  - xsd
+  - dcterms
+  - linkml
+  - odrl
+  - prov
+  - schema
+  - taxonomy
+
+imports:
+  - linkml:types
+
+default_prefix: dcs
+default_range: string
+
+classes:
+  
+  ContractTemplate:
+    class_uri: dcs:ContractTemplate
+    close_mappings:
+      - schema:CreativeWork
+    slot_usage:
+      metadata:
+        required: true
+    slots:
+      - documentTitle
+      - contractFields
+      - contractData
+      - documentStructure
+      - metadata
+      - policies
+      - signatureFields
+
+  Contract:
+    class_uri: dcs:Contract
+    is_a: ContractTemplate
+    slot_usage:
+      metadata:
+        range: ContractMetadata
+
+  ContractField:
+    class_uri: dcs:ContractField
+    slot_usage:
+      label:
+        required: true
+      datatype:
+        required: true
+      required:
+        required: true
+    slots:
+      - label
+      - datatype
+      - shape
+      - required
+      - value
+
+  SignatureField:
+    class_uri: dcs:SignatureField
+    slot_usage:
+      signatoryName:
+        required: true
+    slots:
+      - signatoryName
+      - title
+
+  DocumentStructure:
+    class_uri: dcs:DocumentStructure
+
+  Clause:
+    class_uri: dcs:Clause
+    close_mappings:
+      - schema:Article
+    slots:
+      - title
+
+  Section:
+    class_uri: dcs:Section
+    close_mappings:
+      - schema:Article
+    slots:
+      - title
+
+  TextBlock:
+    class_uri: dcs:TextBlock
+    close_mappings:
+      - schema:Text
+    slots:
+      - text
+
+  ContractMetadata:
+    class_uri: dcs:ContractMetadata
+    slot_usage:
+      title:
+        required: true
+    slots:
+      - title
+      - description
+
+  TemplateMetadata:
+    class_uri: dcs:TemplateMetadata
+    slot_usage:
+      title:
+        required: true
+    slots:
+      - createdAt
+      - createdBy
+      - description
+      - did
+      - name
+      - schemaVersion
+      - sourceSystemType
+      - state
+      - templateType
+      - templateVersion
+      - title
+      - updatedAt
+      - uuid
+
+  LayoutNode:
+    class_uri: dcs:LayoutNode
+    slots:
+      - isRoot
+
+  KPIObservation:
+    class_uri: dcs:KPIObservation
+    description: One KPI value a contract target system reported for a deployed contract.
+    close_mappings:
+      - schema:Observation
+    slot_usage:
+      metricName:
+        required: true
+      observedValue:
+        required: true
+    slots:
+      - aboutContract
+      - metricName
+      - observedAt
+      - observedValue
+      - violation
+
+  KPIObservationSet:
+    class_uri: dcs:KPIObservationSet
+    description: The KPI observations reported for one contract.
+    slots:
+      - observation
+
+slots:
+
+  documentTitle:
+    slot_uri: dcs:documentTitle
+    range: string
+
+  contractData:
+    slot_uri: dcs:contractData
+    range: uriorcurie
+    multivalued: true
+    description: Typed domain objects whose properties reference ContractField nodes by @id; validated by the DCS document gate.
+
+  contractFields:
+    slot_uri: dcs:contractFields
+    range: ContractField
+    multivalued: true
+
+  documentStructure:
+    slot_uri: dcs:documentStructure
+    range: DocumentStructure
+
+  metadata:
+    slot_uri: dcs:metadata
+    range: TemplateMetadata
+
+  policies:
+    slot_uri: dcs:policies
+    range: uriorcurie
+    multivalued: true
+    close_mappings:
+      - odrl:hasPolicy
+
+  signatureFields:
+    slot_uri: dcs:signatureFields
+    range: SignatureField
+    multivalued: true
+
+  signatoryName:
+    slot_uri: dcs:signatoryName
+    range: string
+    description: Machine-readable identifier for the signatory role; used as the AcroForm /T field name.
+
+  name:
+    slot_uri: dcs:name
+    range: string
+    close_mappings:
+      - schema:name
+
+  schemaVersion:
+    slot_uri: dcs:schemaVersion
+    range: string
+    close_mappings:
+      - schema:schemaVersion
+
+  blocks:
+    slot_uri: dcs:blocks
+    multivalued: true
+    list_elements_ordered: true
+    close_mappings:
+      - schema:hasPart
+    any_of:
+      - range: Clause
+      - range: Section
+      - range: TextBlock
+
+  blockId:
+    slot_uri: dcs:blockId
+    range: string
+    description: The document block the value was captured in.
+
+  required:
+    slot_uri: dcs:required
+    range: boolean
+    close_mappings:
+      - schema:valueRequired
+
+  semanticPath:
+    slot_uri: dcs:semanticPath
+    range: string
+
+  title:
+    slot_uri: dcs:title
+    range: string
+    exact_mappings:
+      - dcterms:title
+
+  text:
+    slot_uri: dcs:text
+    range: string
+    close_mappings:
+      - schema:text
+
+  label:
+    slot_uri: dcs:label
+    range: string
+    description: The human-readable label for the placeholder field.
+    close_mappings:
+      - schema:name
+
+  datatype:
+    slot_uri: dcs:datatype
+    range: string
+    description: The literal datatype of the placeholder value, e.g. "xsd:decimal"; carried inline from the shape's sh:datatype.
+
+  shape:
+    slot_uri: dcs:shape
+    range: uriorcurie
+    description: The SHACL shape this placeholder's value is typed by.
+
+  templateType:
+    slot_uri: dcs:templateType
+    range: string
+    close_mappings:
+      - dcterms:type
+
+  templateVersion:
+    slot_uri: dcs:templateVersion
+    range: integer
+    close_mappings:
+      - schema:version
+
+  createdAt:
+    slot_uri: dcs:createdAt
+    range: string
+    exact_mappings:
+      - dcterms:created
+
+  createdBy:
+    slot_uri: dcs:createdBy
+    range: string
+    close_mappings:
+      - dcterms:creator
+
+  did:
+    slot_uri: dcs:did
+    range: string
+    close_mappings:
+      - dcterms:identifier
+
+  sourceSystemType:
+    slot_uri: dcs:sourceSystemType
+    range: string
+
+  state:
+    slot_uri: dcs:state
+    range: string
+
+  updatedAt:
+    slot_uri: dcs:updatedAt
+    range: string
+    exact_mappings:
+      - dcterms:modified
+
+  uuid:
+    slot_uri: dcs:uuid
+    range: string
+    close_mappings:
+      - dcterms:identifier
+
+  description:
+    slot_uri: dcs:description
+    range: string
+    exact_mappings:
+      - dcterms:description
+
+  layout:
+    slot_uri: dcs:layout
+    range: LayoutNode
+    multivalued: true
+    list_elements_ordered: true
+
+  children:
+    slot_uri: dcs:children
+    multivalued: true
+    list_elements_ordered: true
+    close_mappings:
+      - schema:hasPart
+    any_of:
+      - range: LayoutNode
+      - range: Section
+      - range: Clause
+      - range: TextBlock
+
+  isRoot:
+    slot_uri: dcs:isRoot
+    range: boolean
+
+  content:
+    slot_uri: dcs:content
+    multivalued: true
+    list_elements_ordered: true
+    any_of:
+      - range: string
+      - range: uriorcurie
+
+  value:
+    slot_uri: dcs:value
+    description: Optional filled scalar value of a ContractField; validated against dcs:datatype by the DCS document gate.
+    # double is listed because a fractional JSON number is xsd:double in
+    # JSON-LD; the DCS document gate still checks the fill against the
+    # field's declared dcs:datatype.
+    any_of:
+      - range: string
+      - range: decimal
+      - range: double
+      - range: integer
+      - range: boolean
+      - range: date
+      - range: datetime
+
+  wasDerivedFrom:
+    abstract: true
+    slot_uri: prov:wasDerivedFrom
+    range: uriorcurie
+
+  wasRevisionOf:
+    abstract: true
+    slot_uri: prov:wasRevisionOf
+    range: uriorcurie
+
+  derivedFromTemplate:
+    slot_uri: dcs:derivedFromTemplate
+    is_a: wasDerivedFrom
+    range: uriorcurie
+    description: The template this contract instance was derived from.
+
+  renewsContract:
+    slot_uri: dcs:renewsContract
+    is_a: wasRevisionOf
+    range: uriorcurie
+    description: The prior contract instance this renewal supersedes.
+
+  metricName:
+    slot_uri: dcs:metricName
+    range: string
+    close_mappings:
+      - schema:name
+
+  observedValue:
+    slot_uri: dcs:observedValue
+    range: string
+    close_mappings:
+      - schema:value
+
+  observedAt:
+    slot_uri: dcs:observedAt
+    range: datetime
+
+  violation:
+    slot_uri: dcs:violation
+    range: boolean
+    description: Whether the observed value violates an obligation the contract's own ODRL policies declare for the metric.
+
+  aboutContract:
+    slot_uri: dcs:aboutContract
+    range: uriorcurie
+    close_mappings:
+      - schema:about
+
+  observation:
+    slot_uri: dcs:observation
+    range: KPIObservation
+    multivalued: true
+
+  prose:
+    slot_uri: dcs:prose
+    range: uriorcurie
+    description: The human-readable clause node this machine-readable rule is backed by; every ODRL rule a document carries must reference the audited prose it operationalizes.
+    close_mappings:
+      - dcterms:source

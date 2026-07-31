@@ -1,0 +1,34 @@
+{{- if .Values.localTSA.enabled }}
+# Self-contained RFC3161 dev TSA for the ORCE /tsa flow: the flow answers
+# timestamp queries locally via `openssl ts -reply` instead of forwarding to an
+# external TSA (freetsa.org proved unreachable/rate-limited from CI and is a
+# hard external dependency for every audit-anchor, archive timestamp and PAdES
+# signature). Signing material comes from the <release>-orce-tsa-material
+# Secret (job-tsa-provision.yaml) so verifiers (DCS backend via
+# TSA_TRUST_CERT_FILE) can trust the same certificate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-orce-tsa
+data:
+  openssl-tsa.cnf: |
+    oid_section = new_oids
+
+    [ new_oids ]
+    tsa_policy1 = 1.3.6.1.4.1.99999.1
+
+    [ tsa ]
+    default_tsa = tsa_config1
+
+    [ tsa_config1 ]
+    serial = /data/tsa-state/serial
+    signer_cert = /data/tsa-certs/tsa-cert.pem
+    signer_key = /data/tsa-certs/tsa-key.pem
+    default_policy = tsa_policy1
+    digests = sha256, sha384, sha512
+    accuracy = secs:1
+    ordering = yes
+    tsa_name = yes
+    ess_cert_id_chain = no
+    signer_digest = sha256
+{{- end }}

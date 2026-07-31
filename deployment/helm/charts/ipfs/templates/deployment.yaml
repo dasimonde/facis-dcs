@@ -4,6 +4,14 @@ metadata:
   name: {{ .Release.Name }}-ipfs
 spec:
   replicas: 1
+  # The repo volume is RWO, so an update must terminate the current pod before
+  # creating its replacement. Keeping RollingUpdate avoids an invalid
+  # server-side-apply migration from the chart's previous strategy.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: ipfs
@@ -35,6 +43,13 @@ spec:
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '{{ toJson .Values.api.cors.allowHeaders }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Credentials '["{{ .Values.api.cors.allowCredentials }}"]'
               chown -R 1000:100 /data/ipfs
+          {{- with .Values.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so mirroring the main block here costs nothing while an
+          # unset one lets a LimitRange default size the whole pod.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: ipfs-data
               mountPath: /data/ipfs

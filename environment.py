@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 import psycopg2
 
+from steps.support import localhost_resolver
+
 
 SKIP_TAGS = {"skip", "skipped"}
 
@@ -48,20 +50,38 @@ def _scenario_has_skip_tag(scenario):
 def cleanup_database(context):
 	cursor = context.db.cursor()
 
-	cursor.execute("DELETE FROM login_attempts")
+	try:
+		_cleanup_database(cursor)
+	except Exception:
+		# Leave the shared connection usable for the rest of the suite; the
+		# scenario itself still fails with the original error.
+		context.db.rollback()
+		cursor.close()
+		raise
+
+	context.db.commit()
+	cursor.close()
+
+
+def _cleanup_database(cursor):
+	cursor.execute("DELETE FROM access_attempts")
 	cursor.execute("DELETE FROM ip_lockouts")
 
 	cursor.execute("DELETE FROM contract_negotiation_task")
 	cursor.execute("DELETE FROM contract_approval_task")
 	cursor.execute("DELETE FROM contract_review_task")
+	cursor.execute("DELETE FROM contract_negotiations")
+	cursor.execute("TRUNCATE contract_archive_entry_events, contract_archive_entries")
+	cursor.execute("DELETE FROM contract_kpis")
+	cursor.execute("DELETE FROM contract_deployments")
+	cursor.execute("DELETE FROM contract_signatures")
+	cursor.execute("DELETE FROM signature_ceremonies")
 	cursor.execute("DELETE FROM contracts")
 
 	cursor.execute("DELETE FROM contract_templates_approval_task")
 	cursor.execute("DELETE FROM contract_templates_review_task")
+	cursor.execute("DELETE FROM template_provenance_credentials")
 	cursor.execute("DELETE FROM contract_templates")
-
-	context.db.commit()
-	cursor.close()
 
 
 
@@ -74,18 +94,34 @@ def before_scenario(context, scenario):
 
 
 def before_all(context):
+	localhost_resolver.install()
+
 	steps_dir = Path(__file__).resolve().parent / "steps"
 	steps_dir_str = str(steps_dir)
 	if steps_dir_str not in sys.path:
 		sys.path.insert(0, steps_dir_str)
 
 	# Shared request defaults for step definitions.
-	context.base_url = os.getenv("BDD_DCS_BASE_URL", "http://127.0.0.1:8991").rstrip("/")
-	context.http_timeout_seconds = float(os.getenv("BDD_HTTP_TIMEOUT_SECONDS", "20"))
+	# Default to the Vite dev-server proxy (:5173), not the backend port
+	# directly (:8991): Hydra has no fixed URLS_SELF_PUBLIC configured, so it
+	# derives its OAuth redirect target dynamically from the Host header of
+	# whichever caller reaches it first in the login chain. Requests that hit
+	# the backend port directly leak that host into Hydra's redirect_to
+	# response, which the backend then can't serve (404 on /oauth2/auth) —
+	# the whole login flow only works end-to-end when everything consistently
+	# goes through the same origin the dev stack's Hydra client is registered
+	# against (localhost:5173, see deployment/helm/values.dev.yml).
+	context.base_url = os.getenv("BDD_DCS_BASE_URL", "http://localhost:5173/api").rstrip("/")
+	# 60s: component-wide audit reads (POST /pac/audit) walk every per-DID
+	# hash chain over IPFS; mid-suite that legitimately exceeds 20s on slower
+	# runners without being wrong.
+	context.http_timeout_seconds = float(os.getenv("BDD_HTTP_TIMEOUT_SECONDS", "60"))
 	context.aliases = {}
 
 	try:
-		context.db = psycopg2.connect(os.getenv("DATABASE_URL"))
+		context.db = psycopg2.connect(
+			os.getenv("DATABASE_URL", "host=localhost port=30432 user=dcs password=dcs dbname=dcs sslmode=disable")
+		)
 		context.db.cursor().execute("SELECT 1")
 		print("DB connection successful")
 	except psycopg2.OperationalError as e:

@@ -1,0 +1,45 @@
+# ArgoCD Application manifest (DCS-OE-03, previously absent). Example for
+# the acceptance environment — duplicate and swap valueFiles/destination for
+# production (values.prod.yml).
+#
+# Apply with: kubectl apply -n argocd -f deployment/argocd/application.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dcs-acceptance
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: git@github.com:arnemileswinter/facis-dcs.git
+    targetRevision: main
+    path: deployment/helm
+    helm:
+      valueFiles:
+        - values.yaml
+        - values.acceptance.yml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dcs-acceptance
+
+  syncPolicy:
+    # Automated sync is deliberately NOT enabled by default — this is a PoC
+    # chart with HSM/PKCS#11 and archive-immutability semantics; an
+    # unattended auto-heal could mask a deliberate operational action
+    # (e.g. a manual key-rotation drill, ADR-1/A5) as configuration drift.
+    # Enable automated.prune/selfHeal once the operator has validated that
+    # assumption for their environment.
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

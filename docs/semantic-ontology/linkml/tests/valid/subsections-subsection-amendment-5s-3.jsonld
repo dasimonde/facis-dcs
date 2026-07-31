@@ -1,0 +1,170 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:subsection-amendment",
+    "@type": "ContractTemplate",
+    "documentTitle": "Procurement Policy v2 (Amended)",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Procurement Policy v2 (Amended)"
+    },
+    "signatureFields": [
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-cpo",
+            "@id": "urn:doc:subsection-amendment#sig-cpo"
+        }
+    ],
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:subsection-amendment#s1",
+                    "urn:doc:subsection-amendment#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-amendment#s1",
+                "children": [
+                    "urn:doc:subsection-amendment#c1",
+                    "urn:doc:subsection-amendment#s1-1",
+                    "urn:doc:subsection-amendment#s1-2",
+                    "urn:doc:subsection-amendment#s1-3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-amendment#s1-1",
+                "children": [
+                    "urn:doc:subsection-amendment#c2",
+                    "urn:doc:subsection-amendment#c3",
+                    "urn:doc:subsection-amendment#c4"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-amendment#s1-2",
+                "children": [
+                    "urn:doc:subsection-amendment#c5"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-amendment#s1-3",
+                "children": [
+                    "urn:doc:subsection-amendment#c6",
+                    "urn:doc:subsection-amendment#c7"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-amendment#s2",
+                "children": [
+                    "urn:doc:subsection-amendment#c8",
+                    "urn:doc:subsection-amendment#c9"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-amendment#s1",
+                "title": "1. Supplier Selection"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c1",
+                "content": [
+                    "Suppliers shall be assessed against cost, quality, and delivery criteria."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-amendment#s1-1",
+                "title": "1.1 Tendering Threshold"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c2",
+                "content": [
+                    "Contracts exceeding twenty-five thousand (25,000) GBP require a formal tender process."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c3",
+                "content": [
+                    "The Procurement Committee shall evaluate all tenders."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c4",
+                "content": [
+                    "Sole-source justification must be documented for single-supplier awards."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-amendment#s1-2",
+                "title": "1.2 Preferred Suppliers"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c5",
+                "content": [
+                    "The preferred supplier list shall be reviewed annually."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-amendment#s1-3",
+                "title": "1.3 Emergency Procurement"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c6",
+                "content": [
+                    "In circumstances of operational emergency, the CEO may waive tender requirements."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c7",
+                "content": [
+                    "Emergency procurement shall be ratified by the Board within thirty (30) days."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-amendment#s2",
+                "title": "2. Contract Management"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c8",
+                "content": [
+                    "All contracts shall be managed by a designated Contract Owner."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-amendment#c9",
+                "content": [
+                    "Contract renewals require approval from the Finance Director."
+                ]
+            }
+        ]
+    }
+}

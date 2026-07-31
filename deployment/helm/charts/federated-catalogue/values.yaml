@@ -1,8 +1,8 @@
 replicaCount: 1
 
 image:
-  repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/catalogue/fc-service-server
-  tag: "latest"
+  repository: ghcr.io/eclipse-xfsc/federated-catalogue/fc-service-server
+  tag: "sha-c243a65@sha256:535024f1b92fa8e48b59e93bc7040c0a32aed0d06f73c35260eb408dc4ff3594"
   pullPolicy: IfNotPresent
 
 service:
@@ -10,62 +10,79 @@ service:
   port: 8081
   nodePort: null
 
+# Route path when fc-service is behind a reverse proxy at a subpath
+# (e.g. via this DCS chart's own ingress, see fcserviceRoutePath helper).
 route:
   path: ""
 
-# Neo4j connection.
-# uri: if empty, auto-wired to bolt://{{ .Release.Name }}-neo4j:7687
-neo4j:
-  uri: ""
-  username: ""    # falls back to "neo4j"
-  password: ""    # falls back to "changeme"
+# Fuseki graph store (see ../fuseki). Deliberately not neo4j — see
+# ../fuseki/values.yaml's comment for why.
+fuseki:
+  uri: ""       # auto-wired to http://fc-fuseki:3030/ds when empty
+  dataset: "ds"
 
-# PostgreSQL connection.
-# database.url: if empty, auto-wired to the co-deployed postgresql sub-chart
+# PostgreSQL connection (see ../fc-postgres, shared with the owned Keycloak).
 database:
-  url: ""
-  name: "fc"
-  username: ""    # falls back to "dcs"
-  password: ""    # falls back to "dcs"
+  url: ""       # auto-wired to jdbc:postgresql://fc-postgres:5432/postgres when empty
+  username: ""  # falls back to "keycloak"
+  password: ""  # falls back to "keycloak" (fc-postgres Secret's "password" key)
 
-# Keycloak connection.
-# internalUrl: if empty, auto-wired to http://{{ .Release.Name }}-keycloak:8080
-# hostname:    set to KC_HOSTNAME when Keycloak is behind a reverse proxy;
+# Keycloak connection (see ../keycloak).
+# internalUrl: if empty, auto-wired to http://fc-keycloak-http:8080/auth
+# hostname:    set when Keycloak is reachable behind a reverse proxy;
 #              used to build the JWT issuer URL visible to clients
-# issuerUrl:   explicit override for SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
-#              (takes precedence over hostname-based derivation)
+# issuerUrl:   Keycloak auth-server ROOT the JWT issuer is derived from, e.g.
+#              https://host/auth — "/realms/<realm>" is appended to it, exactly
+#              as it is to the hostname-derived form. Takes precedence over
+#              hostname. It is NOT the full issuer URI: passing one that already
+#              ends in the realm yields ".../realms/<realm>/realms/<realm>",
+#              every FC token 401s, and the backend crash-loops on catalogue sync.
 keycloak:
   internalUrl: ""
   hostname: ""
   issuerUrl: ""
-  issuerScheme: "https"   # scheme used when building issuer URL from hostname
-  realm: "gaia-x"
+  issuerScheme: "https"
+  realm: "federated-catalogue-realm"
   clientId: "federated-catalogue"
-  clientSecret: "federated-catalogue-secret"
+  # Literal placeholder committed in the federated-catalogue-realm's own
+  # `federated-catalogue` client representation (chart content, not
+  # server-generated) — Keycloak's import takes it at face value, not a
+  # real secret to generate or rotate. See ../keycloak/files/fc-realm.json.
+  clientSecret: "**********"
 
 security:
   enabled: true
 
-verifySignatures: false
 # VP/VC signature verification on self-description ingest.
+verifySignatures: false
 verificationVpSignature: false
 verificationVcSignature: false
 extraEnv: []
 
+# Persistent file store for non-RDF asset binaries and persisted schema
+# files. The mount path MUST equal DATASTORE_FILE_PATH below.
+persistence:
+  enabled: false
+  size: 10Gi
+  storageClassName: ""
+
 resources:
   requests:
-    cpu: 100m
+    # Semantic JSON-LD verification is CPU-bound during the JVM cold path.
+    # Live measurement with one core exceeded the DCS client's single-call
+    # budget; reserve half a core and allow two without changing memory.
+    cpu: 500m
     memory: 256Mi
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: "2"
+    memory: 1Gi
 
 portal:
-  enabled: false
+  enabled: true
   replicaCount: 1
   image:
-    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/catalogue/fc-demo-portal
-    tag: "latest"
+    repository: ghcr.io/eclipse-xfsc/federated-catalogue/fc-demo-portal
+    tag: "sha-c243a65@sha256:a9a16cbc9cdcdf991551d49bbedcb42df5e1d7371edd013c42f4de95d0a1c4c5"
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP

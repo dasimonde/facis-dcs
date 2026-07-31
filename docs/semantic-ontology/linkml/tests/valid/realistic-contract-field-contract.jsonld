@@ -1,0 +1,418 @@
+{
+  "@context": {
+    "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  },
+  "@id": "did:web:example:contract:realistic-service",
+  "@type": "dcs:Contract",
+  "dcs:contractData": [
+    {
+      "@id": "did:web:example:contract:realistic-service#data-parties",
+      "@type": "dcs:ContractParties",
+      "dcs:customer": {
+        "@id": "did:web:example:contract:realistic-service#field-customer-name"
+      },
+      "dcs:provider": {
+        "@id": "did:web:example:contract:realistic-service#field-provider-name"
+      }
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#data-service",
+      "@type": "dcs:ServiceDescription",
+      "dcs:description": {
+        "@id": "did:web:example:contract:realistic-service#field-service-description"
+      },
+      "dcs:termMonths": {
+        "@id": "did:web:example:contract:realistic-service#field-term-months"
+      }
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#data-payment",
+      "@type": "dcs:PaymentTerms",
+      "dcs:currency": {
+        "@id": "did:web:example:contract:realistic-service#field-currency"
+      },
+      "dcs:monthlyFee": {
+        "@id": "did:web:example:contract:realistic-service#field-monthly-fee"
+      },
+      "dcs:paymentTermDays": {
+        "@id": "did:web:example:contract:realistic-service#field-payment-term-days"
+      }
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#data-service-level",
+      "@type": "dcs:ServiceLevel",
+      "dcs:availability": {
+        "@id": "did:web:example:contract:realistic-service#field-availability"
+      },
+      "dcs:reactionTimeHours": {
+        "@id": "did:web:example:contract:realistic-service#field-reaction-time-hours"
+      }
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#data-jurisdiction",
+      "@type": "dcs:Jurisdiction",
+      "dcs:venue": {
+        "@id": "did:web:example:contract:realistic-service#field-venue"
+      }
+    }
+  ],
+  "dcs:contractFields": [
+    {
+      "@id": "did:web:example:contract:realistic-service#field-customer-name",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Auftraggeber",
+      "dcs:required": true,
+      "dcs:value": "Beispiel Handel GmbH"
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-provider-name",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Auftragnehmer",
+      "dcs:required": true,
+      "dcs:value": "FACIS Services GmbH"
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-service-description",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Leistungsbeschreibung",
+      "dcs:required": true,
+      "dcs:value": "Betrieb und Support der digitalen Vertragsplattform"
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-monthly-fee",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:decimal",
+      "dcs:label": "Monatliche Vergütung",
+      "dcs:required": true,
+      "dcs:value": 12500
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-currency",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Währung",
+      "dcs:required": true,
+      "dcs:value": "EUR"
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-payment-term-days",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:integer",
+      "dcs:label": "Zahlungsziel in Tagen",
+      "dcs:required": true,
+      "dcs:value": 30
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-term-months",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:integer",
+      "dcs:label": "Vertragslaufzeit in Monaten",
+      "dcs:required": true,
+      "dcs:value": 24
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-availability",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:decimal",
+      "dcs:label": "Verfügbarkeit in Prozent",
+      "dcs:required": true,
+      "dcs:value": 99.9
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-reaction-time-hours",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:integer",
+      "dcs:label": "Reaktionszeit in Stunden",
+      "dcs:required": true,
+      "dcs:value": 4
+    },
+    {
+      "@id": "did:web:example:contract:realistic-service#field-venue",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Gerichtsstand",
+      "dcs:required": true,
+      "dcs:value": "Berlin"
+    }
+  ],
+  "dcs:documentStructure": {
+    "@id": "did:web:example:contract:realistic-service#document-structure",
+    "@type": "dcs:DocumentStructure",
+    "dcs:blocks": {
+      "@list": [
+        {
+          "@id": "did:web:example:contract:realistic-service#block-parties",
+          "@type": "dcs:Section",
+          "dcs:title": "1. Vertragsparteien"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-parties",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Der Vertrag wird geschlossen zwischen ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-customer-name"
+              },
+              " und ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-provider-name"
+              },
+              "."
+            ]
+          },
+          "dcs:title": "Vertragsparteien"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-service",
+          "@type": "dcs:Section",
+          "dcs:title": "2. Leistung und Laufzeit"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-service",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Der Auftragnehmer erbringt folgende Leistung: ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-service-description"
+              },
+              "."
+            ]
+          },
+          "dcs:title": "Leistungsgegenstand"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-term",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Die Vertragslaufzeit beträgt ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-term-months"
+              },
+              " Monate."
+            ]
+          },
+          "dcs:title": "Laufzeit"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-payment",
+          "@type": "dcs:Section",
+          "dcs:title": "3. Vergütung"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-payment",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Die monatliche Vergütung beträgt ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-monthly-fee"
+              },
+              " ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-currency"
+              },
+              ". Rechnungen sind innerhalb von ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-payment-term-days"
+              },
+              " Tagen fällig."
+            ]
+          },
+          "dcs:title": "Vergütung und Zahlungsziel"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-sla",
+          "@type": "dcs:Section",
+          "dcs:title": "4. Service Level"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-sla",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Die zugesicherte Verfügbarkeit beträgt ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-availability"
+              },
+              " Prozent; die Reaktionszeit beträgt höchstens ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-reaction-time-hours"
+              },
+              " Stunden."
+            ]
+          },
+          "dcs:title": "Verfügbarkeit und Reaktionszeit"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-legal",
+          "@type": "dcs:Section",
+          "dcs:title": "5. Schlussbestimmungen"
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-legal",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Ausschließlicher Gerichtsstand ist ",
+              {
+                "@id": "did:web:example:contract:realistic-service#field-venue"
+              },
+              "."
+            ]
+          },
+          "dcs:title": "Gerichtsstand"
+        }
+      ]
+    },
+    "dcs:layout": {
+      "@list": [
+        {
+          "@id": "did:web:example:contract:realistic-service#block-root",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-parties"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-service"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-payment"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-sla"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-legal"
+              }
+            ]
+          },
+          "dcs:isRoot": true
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-parties",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-parties"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-parties",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-service",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-service"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-term"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-service",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-term",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-payment",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-payment"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-payment",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-sla",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-sla"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-sla",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-legal",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-legal"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-legal",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        }
+      ]
+    }
+  },
+  "dcs:metadata": {
+    "@id": "did:web:example:contract:realistic-service#metadata",
+    "@type": "dcs:ContractMetadata",
+    "dcs:description": "Servicevertrag mit Vergütung, Laufzeit, SLA und Gerichtsstand",
+    "dcs:templateType": "dcs:Contract",
+    "dcs:title": "Realistischer Plattform-Servicevertrag"
+  },
+  "dcs:policies": [],
+  "derivedFromTemplate": {
+    "@id": "did:web:example:template:realistic-service",
+    "version": 1
+  },
+  "sh:shapesGraph": {
+    "@id": "https://w3id.org/facis/dcs/shapes/v1"
+  }
+}

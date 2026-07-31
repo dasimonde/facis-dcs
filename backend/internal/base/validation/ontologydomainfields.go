@@ -1,559 +1,240 @@
 package validation
 
 import (
-	"bufio"
+	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/tggo/goRDFlib/shacl"
 )
+
+const skosNamespace = "http://www.w3.org/2004/02/skos/core#"
+
+// domainOntology is the parsed active SLA domain ontology (Semantic Hub
+// name="facis-sla" kind="ontology"): the dcs:DomainField index keyed by
+// field IRI — a domain field's IRI is its identity — plus the taxonomy
+// prefix that compacts controlled-vocabulary contract-party role IRIs.
+type domainOntology struct {
+	fields           map[string]domainField
+	entityRolePrefix string
+}
 
 var (
-	ontologyQuotedValue      = regexp.MustCompile(`"([^"]*)"`)
-	ontologyNumberValue      = regexp.MustCompile(`[-+]?[0-9]+(?:\.[0-9]+)?`)
-	ontologyDomainFieldsPath = "docs/ontology/facis-sla-ontology.ttl"
-	ontologyPrefixIndex      = mustLoadOntologyPrefixes()
-	ontologyDomainFieldIndex = mustLoadOntologyDomainFields()
-	ontologyClassIndex       = mustLoadOntologyClasses()
-	ontologyRuntime          = buildOntologyRuntime()
+	domainOntologyMu     sync.Mutex
+	cachedDomainOntology *domainOntology
 )
 
-type ontologyRuntimeMetadata struct {
-	StatementSetType         string
-	RoleEntityType           string
-	EntityRoleField          string
-	EntityRoleStatementField string
-	EntityRoleValuePrefix    string
-	EntityRoleAllowedValues  []string
-	RoleEntityDocumentField  string
-	StatementSetProperty     string
-}
-
-func mustLoadOntologyPrefixes() map[string]string {
-	prefixes, err := loadOntologyPrefixes()
+// requireDomainOntology loads the domain-field index from the installed
+// ShapeSource on first use and caches it. Hub versions are immutable, so
+// the cache lives until a new source is installed (SetShapeSource) or the
+// hub activates a new version (ResetDomainOntologyCache).
+func requireDomainOntology(ctx context.Context) (*domainOntology, error) {
+	domainOntologyMu.Lock()
+	defer domainOntologyMu.Unlock()
+	if cachedDomainOntology != nil {
+		return cachedDomainOntology, nil
+	}
+	source, err := requireShapeSource()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return prefixes
-}
-
-func loadOntologyPrefixes() (map[string]string, error) {
-	var failures []string
-	for _, path := range ontologyPathCandidates() {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", path, err))
-			continue
-		}
-		return parseOntologyPrefixes(string(content)), nil
-	}
-	return nil, fmt.Errorf("load FACIS DCS ontology prefixes: %s", strings.Join(failures, "; "))
-}
-
-func parseOntologyPrefixes(content string) map[string]string {
-	prefixes := map[string]string{}
-	pattern := regexp.MustCompile(`@prefix\s+([^:\s]+):\s+<([^>]+)>`)
-	for _, match := range pattern.FindAllStringSubmatch(content, -1) {
-		prefixes[match[1]] = match[2]
-	}
-	return prefixes
-}
-
-func mustLoadOntologyDomainFields() map[string]domainField {
-	fields, err := loadOntologyDomainFields()
+	content, version, err := source.ActiveDomainOntology(ctx)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("load domain ontology: %w", err)
 	}
-	return fields
-}
-
-func mustLoadOntologyClasses() map[string]string {
-	classes, err := loadOntologyClasses()
+	ontology, err := parseDomainOntology(content)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("parse domain ontology (hub version %d): %w", version, err)
 	}
-	return classes
+	cachedDomainOntology = ontology
+	return ontology, nil
 }
 
-func loadOntologyClasses() (map[string]string, error) {
-	var failures []string
-	for _, path := range ontologyPathCandidates() {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", path, err))
-			continue
-		}
-		return parseOntologyClasses(string(content)), nil
-	}
-	return nil, fmt.Errorf("load FACIS DCS ontology classes: %s", strings.Join(failures, "; "))
+// ResetDomainOntologyCache drops the cached domain-field index so the next
+// audit re-reads the hub's active ontology version — called on hub
+// activation (service.RefreshValidationAnchors).
+func ResetDomainOntologyCache() {
+	domainOntologyMu.Lock()
+	defer domainOntologyMu.Unlock()
+	cachedDomainOntology = nil
 }
 
-func parseOntologyClasses(content string) map[string]string {
-	classes := map[string]string{}
-	for _, statement := range ontologyStatements(content) {
-		if !strings.Contains(statement, " a rdfs:Class") && !strings.Contains(statement, " a owl:Class") {
-			continue
-		}
-		subject := ontologySubject(statement)
-		if subject == "" {
-			continue
-		}
-		classes[expandOntologyResource(subject)] = statement
+func parseDomainOntology(content string) (*domainOntology, error) {
+	graph, err := shacl.LoadTurtleString(content, "urn:dcs:hub:domain-ontology")
+	if err != nil {
+		return nil, err
 	}
-	return classes
-}
+	dcs := dcsNamespace()
 
-func buildOntologyRuntime() ontologyRuntimeMetadata {
-	roleEntityType := expandOntologyResource("dcs:CompanyParty")
-	statementSetType, statementProperty := statementSetRuntime()
-	roleEntityDocumentField := documentPropertyForRange(roleEntityType)
-	return ontologyRuntimeMetadata{
-		StatementSetType:         statementSetType,
-		RoleEntityType:           roleEntityType,
-		EntityRoleField:          expandOntologyResource("dcs:role"),
-		EntityRoleStatementField: "role",
-		EntityRoleValuePrefix:    expandOntologyResource("dcst:role-"),
-		EntityRoleAllowedValues:  entityRoleAllowedValues(),
-		RoleEntityDocumentField:  roleEntityDocumentField,
-		StatementSetProperty:     statementProperty,
-	}
-}
-
-func entityRoleAllowedValues() []string {
-	for _, statement := range ontologyStatementsFromConfiguredFile() {
-		if ontologySubject(statement) != "dcst:constraint-contract-party-role" {
-			continue
-		}
-		constraint := parseOntologyValueConstraint(statement)
-		return append([]string(nil), constraint.AllowedValues...)
-	}
-	return nil
-}
-
-func domainFieldByStatementField(statementField string) domainField {
-	for _, field := range ontologyDomainFieldIndex {
-		if field.StatementField == statementField {
-			return field
-		}
-	}
-	return domainField{}
-}
-
-func statementTypeByStatementField(statementField string) string {
-	return domainFieldByStatementField(statementField).StatementType
-}
-
-func statementSetRuntime() (string, string) {
-	for class, statement := range ontologyClassIndex {
-		if property := ontologyString(statement, "dcs:documentProperty"); property != "" {
-			return class, property
-		}
-	}
-	return "", ""
-}
-
-func documentPropertyForRange(rangeValue string) string {
-	for _, statement := range ontologyStatementsFromConfiguredFile() {
-		if expandOntologyResource(ontologyResource(statement, "rdfs:range")) != rangeValue {
-			continue
-		}
-		if property := ontologyString(statement, "dcs:documentProperty"); property != "" {
-			return property
-		}
-	}
-	return ""
-}
-
-func ontologyStatementsFromConfiguredFile() []string {
-	for _, path := range ontologyPathCandidates() {
-		content, err := os.ReadFile(path)
-		if err == nil {
-			return ontologyStatements(string(content))
-		}
-	}
-	return nil
-}
-
-//nolint:unused
-func statementLeaf(statementField string) string {
-	_, leaf, ok := splitStatementField(statementField)
-	if !ok {
-		return statementField
-	}
-	return leaf
-}
-
-func loadOntologyDomainFields() (map[string]domainField, error) {
-	var failures []string
-	for _, path := range ontologyPathCandidates() {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", path, err))
-			continue
-		}
-		fields, err := parseOntologyDomainFields(string(content))
-		if err != nil {
-			return nil, fmt.Errorf("parse ontology domain fields from %s: %w", path, err)
-		}
-		return fields, nil
-	}
-	return nil, fmt.Errorf("load FACIS DCS ontology domain fields: %s", strings.Join(failures, "; "))
-}
-
-func ontologyPathCandidates() []string {
-	candidates := []string{}
-	if configured := strings.TrimSpace(os.Getenv("FACIS_DCS_ONTOLOGY_PATH")); configured != "" {
-		candidates = append(candidates, configured)
-	}
-	candidates = append(candidates, ontologyDomainFieldsPath, filepath.Join("..", ontologyDomainFieldsPath))
-	if _, file, _, ok := runtime.Caller(0); ok {
-		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, ontologyDomainFieldsPath))
-	}
-	return candidates
-}
-
-func parseOntologyDomainFields(content string) (map[string]domainField, error) {
-	statements := ontologyStatements(content)
+	valueOptions := parseOntologyValueOptions(graph)
 	constraints := map[string]*valueConstraint{}
-	for _, statement := range statements {
-		if !strings.Contains(statement, " a dcs:ValueConstraint") {
-			continue
-		}
-		subject := ontologySubject(statement)
-		constraints[subject] = parseOntologyValueConstraint(statement)
+	for _, subject := range graph.Subjects(shacl.IRI(shacl.RDFType), shacl.IRI(dcs+"ValueConstraint")) {
+		constraints[subject.Value()] = parseOntologyValueConstraint(graph, subject, dcs, valueOptions)
 	}
+	resolveAllowedValuesRefs(constraints)
 
 	fields := map[string]domainField{}
-	for _, statement := range statements {
-		if !strings.Contains(statement, " a dcs:DomainField") {
-			continue
+	for _, subject := range graph.Subjects(shacl.IRI(shacl.RDFType), shacl.IRI(dcs+"DomainField")) {
+		iri := subject.Value()
+		if firstObjectValue(graph, subject, shacl.RDFS+"label") == "" {
+			return nil, fmt.Errorf("domain field %s requires rdfs:label", iri)
 		}
-		semanticPath := ontologyString(statement, "dcs:semanticPath")
-		schemaRef := ontologyString(statement, "dcs:schemaRef")
-		parameterType := ontologyString(statement, "dcs:parameterType")
-		if semanticPath == "" || schemaRef == "" || parameterType == "" {
-			return nil, fmt.Errorf("domain field %s requires semanticPath, schemaRef, and parameterType", ontologySubject(statement))
+		if firstObjectValue(graph, subject, shacl.RDFS+"range") == "" {
+			return nil, fmt.Errorf("domain field %s requires rdfs:range", iri)
 		}
-		subject := ontologySubject(statement)
-		field := domainField{
-			SchemaRef:      schemaRef,
-			Type:           parameterType,
-			DomainPath:     semanticPath,
-			OntologyTerm:   expandOntologyResource(subject),
-			StatementField: ontologyString(statement, "dcs:statementField"),
-			StatementType:  expandOntologyResource(ontologyResource(statement, "dcs:statementType")),
-			StatementID:    ontologyString(statement, "dcs:statementId"),
-			ValuePrefix:    expandOntologyResource(ontologyResource(statement, "dcs:statementValuePrefix")),
-		}
-		if constraintRef := ontologyResource(statement, "dcs:hasValueConstraint"); constraintRef != "" {
-			constraint, ok := constraints[constraintRef]
+		field := domainField{IRI: iri}
+		if constraintIRI := firstObjectValue(graph, subject, dcs+"hasValueConstraint"); constraintIRI != "" {
+			constraint, ok := constraints[constraintIRI]
 			if !ok {
-				return nil, fmt.Errorf("domain field %s references unknown value constraint %s", ontologySubject(statement), constraintRef)
+				return nil, fmt.Errorf("domain field %s references unknown value constraint %s", iri, constraintIRI)
 			}
-			copy := *constraint
-			copy.AllowedValues = append([]string(nil), constraint.AllowedValues...)
-			field.Constraint = &copy
+			field.Constraint = constraint.clone()
 		}
-		fields[semanticPath] = field
-		fields[subject] = field
-		if field.OntologyTerm != "" {
-			fields[field.OntologyTerm] = field
-		}
+		fields[iri] = field
 	}
 	if len(fields) == 0 {
 		return nil, fmt.Errorf("ontology does not define dcs:DomainField entries")
 	}
-	return fields, nil
+	return &domainOntology{
+		fields:           fields,
+		entityRolePrefix: parseEntityRolePrefix(graph, dcs),
+	}, nil
 }
 
-func expandOntologyResource(value string) string {
-	prefix, suffix, ok := strings.Cut(value, ":")
-	if ok && !strings.HasPrefix(value, "http://") && !strings.HasPrefix(value, "https://") {
-		if base := ontologyPrefixIndex[prefix]; base != "" {
-			return base + suffix
-		}
-	}
-	switch {
-	case strings.HasPrefix(value, "http://"), strings.HasPrefix(value, "https://"):
-		return value
-	default:
-		return value
-	}
-}
-
-func statementSetOntologyType() string {
-	return ontologyRuntime.StatementSetType
-}
-
-func statementSetDocumentProperty() string {
-	return ontologyRuntime.StatementSetProperty
-}
-
-func ontologyIdentifier(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.EqualFold(value, "none") {
-		return ""
-	}
-	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.Contains(value, ":") {
-		return expandOntologyResource(value)
-	}
-	if class := ontologyClassByLocalName(value); class != "" {
-		return class
-	}
-	return value
-}
-
-func ontologyClassByLocalName(value string) string {
-	for class := range ontologyClassIndex {
-		if ontologyLocalName(class) == value {
-			return class
+// parseEntityRolePrefix derives the IRI prefix of controlled-vocabulary
+// contract-party role values (…/taxonomy/v1#role-…): the namespace of the
+// role property's value constraint plus the conventional "role-" local-name
+// prefix its individuals carry.
+func parseEntityRolePrefix(graph *shacl.Graph, dcs string) string {
+	for _, property := range graph.Subjects(shacl.IRI(shacl.RDFS+"range"), shacl.IRI(dcs+"ContractPartyRoleCode")) {
+		if constraintIRI := firstObjectValue(graph, property, dcs+"hasValueConstraint"); constraintIRI != "" {
+			return iriNamespace(constraintIRI) + "role-"
 		}
 	}
 	return ""
 }
 
-func ontologyLocalName(value string) string {
-	if hash := strings.LastIndex(value, "#"); hash >= 0 && hash < len(value)-1 {
-		return value[hash+1:]
+// iriNamespace returns the IRI up to and including its last '#' or '/'.
+func iriNamespace(iri string) string {
+	if index := strings.LastIndexAny(iri, "#/"); index >= 0 {
+		return iri[:index+1]
 	}
-	if slash := strings.LastIndex(value, "/"); slash >= 0 && slash < len(value)-1 {
-		return value[slash+1:]
-	}
-	return value
+	return iri
 }
 
-func canonicalStatementEntityType(value string) string {
-	identifier := ontologyIdentifier(value)
-	if _, ok := ontologyClassIndex[identifier]; ok {
-		return identifier
-	}
-	return ""
-}
-
-func statementEntityTypeSupportsRole(value string) bool {
-	return value == ontologyRuntime.RoleEntityType
-}
-
-func canonicalEntityRole(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.EqualFold(value, "none") {
-		return ""
-	}
-	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.Contains(value, ":") {
-		return expandOntologyResource(value)
-	}
-	if ontologyRuntime.EntityRoleValuePrefix != "" {
-		return ontologyRuntime.EntityRoleValuePrefix + slugify(value)
-	}
-	return value
-}
-
-func entityRoleFromEntityType(value string) string {
-	return ""
-}
-
-func applyStatementEntityRole(statement map[string]any, role string) {
-	if role != "" {
-		statement[ontologyRuntime.EntityRoleStatementField] = role
-	}
-}
-
-func normalizeStatementValue(record semanticValueRecord) any {
-	if record.OntologyTerm == ontologyRuntime.EntityRoleField {
-		if role, ok := record.Value.(string); ok {
-			return canonicalEntityRole(role)
+func parseOntologyValueConstraint(graph *shacl.Graph, subject shacl.Term, dcs string, catalogOptions map[string]valueOption) *valueConstraint {
+	allowedValues := objectValues(graph, subject, dcs+"allowedValue")
+	options := make([]valueOption, 0, len(allowedValues))
+	for _, value := range allowedValues {
+		if option, ok := catalogOptions[value]; ok {
+			options = append(options, option)
 		}
 	}
-	return record.Value
+	return &valueConstraint{
+		Format:           firstObjectValue(graph, subject, dcs+"format"),
+		Pattern:          firstObjectValue(graph, subject, dcs+"pattern"),
+		ValueType:        firstObjectValue(graph, subject, dcs+"valueType"),
+		AllowedValues:    allowedValues,
+		ValueOptions:     options,
+		AllowedValuesRef: firstObjectValue(graph, subject, dcs+"allowedValuesRef"),
+		Min:              firstObjectNumber(graph, subject, dcs+"minInclusive"),
+		Max:              firstObjectNumber(graph, subject, dcs+"maxInclusive"),
+		Description:      firstObjectValue(graph, subject, shacl.RDFS+"label"),
+	}
 }
 
-func validateOntologyRoleEntity(entity map[string]any) error {
-	entityType, _ := entity["@type"].(string)
-	if ontologyIdentifier(entityType) != ontologyRuntime.RoleEntityType {
-		return fmt.Errorf("@type must be %s", compactOntologyResource(ontologyRuntime.RoleEntityType))
-	}
-	if len(ontologyRuntime.EntityRoleAllowedValues) == 0 {
-		return fmt.Errorf("role ontology requires allowed values")
-	}
-	role, _ := entity[ontologyRuntime.EntityRoleStatementField].(string)
-	if !containsString(ontologyRuntime.EntityRoleAllowedValues, role) && !containsString(ontologyRuntime.EntityRoleAllowedValues, compactEntityRole(role)) {
-		return fmt.Errorf("role must be one of %s", strings.Join(ontologyRuntime.EntityRoleAllowedValues, ", "))
-	}
-	return nil
-}
-
-func compactEntityRole(value string) string {
-	prefix := ontologyRuntime.EntityRoleValuePrefix
-	if prefix != "" && strings.HasPrefix(value, prefix) {
-		return strings.TrimPrefix(value, prefix)
-	}
-	return value
-}
-
-func compactOntologyResource(value string) string {
-	for prefix, base := range ontologyPrefixIndex {
-		if strings.HasPrefix(value, base) {
-			return prefix + ":" + strings.TrimPrefix(value, base)
-		}
-	}
-	return value
-}
-
-func canonicalDomainFieldTerm(value string) string {
-	field, ok := ontologyDomainFieldIndex[value]
-	if ok && field.OntologyTerm != "" {
-		return field.OntologyTerm
-	}
-	return value
-}
-
-func equivalentSemanticPath(left string, right string) bool {
-	return canonicalDomainFieldTerm(left) == canonicalDomainFieldTerm(right)
-}
-
-func ontologyStatements(content string) []string {
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	var statements []string
-	var lines []string
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "@prefix") {
+// parseOntologyValueOptions indexes the taxonomy's skos value concepts by
+// their notation — the display metadata behind a constraint's allowed
+// values.
+func parseOntologyValueOptions(graph *shacl.Graph) map[string]valueOption {
+	dcs := dcsNamespace()
+	notation := shacl.IRI(skosNamespace + "notation")
+	options := map[string]valueOption{}
+	for _, triple := range graph.All(nil, &notation, nil) {
+		value := triple.Object.Value()
+		if value == "" {
 			continue
 		}
-		lines = append(lines, line)
-		if strings.HasSuffix(line, " .") || line == "." {
-			statements = append(statements, strings.Join(lines, "\n"))
-			lines = nil
+		options[value] = valueOption{
+			Value:  value,
+			Label:  englishObjectValue(graph, triple.Subject, skosNamespace+"prefLabel"),
+			Symbol: firstObjectValue(graph, triple.Subject, dcs+"valueSymbol"),
+			IRI:    triple.Subject.Value(),
 		}
 	}
-	return statements
+	return options
 }
 
-func ontologySubject(statement string) string {
-	fields := strings.Fields(statement)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
-}
-
-func ontologyStatementHasType(statement string, class string) bool {
-	expandedClass := expandOntologyResource(class)
-	for _, line := range strings.Split(statement, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 3 || fields[1] != "a" {
+// resolveAllowedValuesRefs fills a constraint that declares only an
+// allowedValuesRef from a sibling constraint sharing the same reference, so
+// consumers never chase the reference themselves.
+func resolveAllowedValuesRefs(constraints map[string]*valueConstraint) {
+	for _, constraint := range constraints {
+		if len(constraint.AllowedValues) > 0 {
 			continue
 		}
-		for _, rawClass := range fields[2:] {
-			candidate := strings.TrimSuffix(strings.TrimSuffix(rawClass, ";"), ",")
-			if expandOntologyResource(candidate) == expandedClass {
-				return true
+		ref := normalizedAllowedValuesRef(constraint.AllowedValuesRef)
+		if ref == "" {
+			continue
+		}
+		for _, candidate := range constraints {
+			if candidate == constraint || normalizedAllowedValuesRef(candidate.AllowedValuesRef) != ref {
+				continue
+			}
+			if len(candidate.AllowedValues) > 0 {
+				constraint.AllowedValues = append([]string(nil), candidate.AllowedValues...)
+				constraint.ValueOptions = append([]valueOption(nil), candidate.ValueOptions...)
+				break
 			}
 		}
 	}
-	return false
-}
-
-func parseOntologyValueConstraint(statement string) *valueConstraint {
-	constraint := &valueConstraint{
-		Format:           ontologyString(statement, "dcs:format"),
-		Pattern:          ontologyString(statement, "dcs:pattern"),
-		AllowedValues:    ontologyStrings(statement, "dcs:allowedValue"),
-		AllowedValuesRef: ontologyString(statement, "dcs:allowedValuesRef"),
-		Description:      ontologyString(statement, "rdfs:label"),
-	}
-	constraint.Min = ontologyNumber(statement, "dcs:minInclusive")
-	constraint.Max = ontologyNumber(statement, "dcs:maxInclusive")
-	return constraint
-}
-
-func allowedValuesForConstraint(constraint *valueConstraint) []string {
-	if constraint == nil {
-		return nil
-	}
-	if len(constraint.AllowedValues) > 0 {
-		return append([]string(nil), constraint.AllowedValues...)
-	}
-	ref := normalizedAllowedValuesRef(constraint.AllowedValuesRef)
-	if ref == "" {
-		return nil
-	}
-	for _, field := range ontologyDomainFieldIndex {
-		if field.Constraint == nil || normalizedAllowedValuesRef(field.Constraint.AllowedValuesRef) != ref {
-			continue
-		}
-		if len(field.Constraint.AllowedValues) > 0 {
-			return append([]string(nil), field.Constraint.AllowedValues...)
-		}
-	}
-	return nil
 }
 
 func normalizedAllowedValuesRef(value string) string {
 	return strings.ToLower(strings.Join(strings.Fields(value), " "))
 }
 
-func ontologyString(statement string, predicate string) string {
-	values := ontologyStrings(statement, predicate)
-	if len(values) == 0 {
+func firstObjectValue(graph *shacl.Graph, subject shacl.Term, predicate string) string {
+	objects := graph.Objects(subject, shacl.IRI(predicate))
+	if len(objects) == 0 {
 		return ""
 	}
-	return values[0]
+	return objects[0].Value()
 }
 
-func ontologyStrings(statement string, predicate string) []string {
-	values := []string{}
-	for _, line := range strings.Split(statement, "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), predicate+" ") {
-			continue
+// englishObjectValue prefers the @en literal among a predicate's values.
+func englishObjectValue(graph *shacl.Graph, subject shacl.Term, predicate string) string {
+	objects := graph.Objects(subject, shacl.IRI(predicate))
+	for _, object := range objects {
+		if object.Language() == "en" {
+			return object.Value()
 		}
-		matches := ontologyQuotedValue.FindAllStringSubmatch(line, -1)
-		for _, match := range matches {
-			values = append(values, match[1])
-		}
+	}
+	if len(objects) == 0 {
+		return ""
+	}
+	return objects[0].Value()
+}
+
+func objectValues(graph *shacl.Graph, subject shacl.Term, predicate string) []string {
+	objects := graph.Objects(subject, shacl.IRI(predicate))
+	values := make([]string, 0, len(objects))
+	for _, object := range objects {
+		values = append(values, object.Value())
 	}
 	return values
 }
 
-func ontologyNumber(statement string, predicate string) *float64 {
-	for _, line := range strings.Split(statement, "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), predicate+" ") {
-			continue
-		}
-		match := ontologyNumberValue.FindString(line)
-		if match == "" {
-			return nil
-		}
-		value, err := strconv.ParseFloat(match, 64)
-		if err == nil {
-			return &value
-		}
+func firstObjectNumber(graph *shacl.Graph, subject shacl.Term, predicate string) *float64 {
+	raw := firstObjectValue(graph, subject, predicate)
+	if raw == "" {
+		return nil
 	}
-	return nil
-}
-
-//nolint:unused
-func ontologyBool(statement string, predicate string) bool {
-	for _, line := range strings.Split(statement, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) >= 2 && fields[0] == predicate {
-			value := strings.TrimSuffix(fields[1], ";")
-			return value == "true" || value == "true^^xsd:boolean"
-		}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil
 	}
-	return false
-}
-
-func ontologyResource(statement string, predicate string) string {
-	for _, line := range strings.Split(statement, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) >= 2 && fields[0] == predicate {
-			return strings.TrimSuffix(fields[1], ";")
-		}
-	}
-	return ""
+	return &value
 }

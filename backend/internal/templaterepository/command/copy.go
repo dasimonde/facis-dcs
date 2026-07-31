@@ -31,6 +31,13 @@ type Copier struct {
 	CTRepo db.ContractTemplateRepo
 }
 
+// Handle creates cmd.NewDID as a copy of cmd.CopyDID. The actual versioning
+// decision is made inside CTRepo.CopyFromDID (SQL, see db/pg): if the source
+// is not yet REGISTERED/PUBLISHED, the copy starts a brand-new version
+// lineage (version=1); if the source already is, the copy becomes the next
+// version of the same lineage (version+1, same base_template) — this
+// single command backs both "duplicate a draft" and "create the next
+// version of a published template".
 func (h *Copier) Handle(ctx context.Context, cmd CopyCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -69,7 +76,7 @@ func (h *Copier) Handle(ctx context.Context, cmd CopyCmd) error {
 		CopyDID:    cmd.CopyDID,
 		CopiedBy:   cmd.CopiedBy,
 		NewVersion: version,
-		OccurredAt: time.Now(),
+		OccurredAt: time.Now().UTC(),
 		HolderDID:  cmd.HolderDID,
 		UserRoles:  cmd.UserRoles,
 	}

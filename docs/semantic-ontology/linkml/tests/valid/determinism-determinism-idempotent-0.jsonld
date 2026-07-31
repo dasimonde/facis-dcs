@@ -1,0 +1,59 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:determinism-idempotent",
+    "@type": "ContractTemplate",
+    "documentTitle": "Determinism Idempotency Check",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Determinism Idempotency Check"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:determinism-idempotent#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-idempotent#s1",
+                "children": [
+                    "urn:doc:determinism-idempotent#c1",
+                    "urn:doc:determinism-idempotent#c2"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-idempotent#s1",
+                "title": "1. Definitions"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-idempotent#c1",
+                "content": [
+                    "\"Agreement\" means this document."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-idempotent#c2",
+                "content": [
+                    "\"Party\" means any signatory hereto."
+                ]
+            }
+        ]
+    }
+}

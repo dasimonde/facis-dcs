@@ -1,4 +1,4 @@
-{{- $issuer := .Values.config.selfIssuerURL | default (printf "http://%s-hydra:%d" .Release.Name (.Values.service.publicPort | int)) -}}
+{{- $issuer := required "hydra.config.selfIssuerURL is required — set it to the externally reachable base URL (e.g. https://dcs.example.com) and route /oauth2 + /.well-known through the ingress" .Values.config.selfIssuerURL -}}
 {{- $login := .Values.config.loginURL -}}
 {{- $consent := .Values.config.consentURL -}}
 {{- $logout := .Values.config.logoutURL -}}

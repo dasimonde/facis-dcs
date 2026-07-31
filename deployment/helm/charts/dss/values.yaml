@@ -1,0 +1,32 @@
+replicaCount: 1
+
+image:
+  # No official EU-published container exists for the DSS demonstration webapp
+  # (the EU ships only a Dockerfile + testing-only disclaimer, no images). This
+  # community image packages the EU dss-demo-bundle 6.2 — DSS 6.x is required
+  # because visible-signature field placement (imageParameters/fieldParameters
+  # on RemoteSignatureParameters) does NOT exist in the 5.x REST DTO. Pinned —
+  # never :latest.
+  repository: conectx/dss-demo
+  tag: "6.2.1"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    memory: "512Mi"
+  limits:
+    memory: "1536Mi"
+
+# The bundled dss.properties this image ships already defaults
+# current.lotl.url to the real EU LOTL, so QES qualification determination
+# against the actual EU trusted lists is the out-of-the-box behavior with no
+# override needed — this just pins it explicitly (mounted as
+# dss-custom.properties, which the bundle's own Spring config loads from the
+# Tomcat shared classpath) so a future image tag silently defaulting
+# elsewhere can't change that unnoticed.
+trustedList:
+  lotlURL: https://ec.europa.eu/tools/lotl/eu-lotl.xml

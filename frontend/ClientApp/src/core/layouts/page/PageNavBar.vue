@@ -1,12 +1,27 @@
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { usePageStore } from '@core/store/page'
+import AuthButton from '@/components/auth/AuthButton.vue'
+import PermissionList from '@/components/PermissionList.vue'
+
+const pageStore = usePageStore()
+const { isSidebarCollapsed, pageSidebarId } = storeToRefs(pageStore)
+</script>
+
 <template>
   <div class="flex-none">
-    <label :for="pageSidebarId" class="btn btn-square btn-ghost lg:hidden">
+    <label :for="pageSidebarId" class="btn btn-square btn-ghost lg:hidden" aria-label="Open navigation menu">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="h-6 w-6 stroke-current">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
       </svg>
     </label>
 
-    <button class="btn hidden btn-square btn-ghost lg:inline-flex" @click="pageStore.toggleSidebar()">
+    <button
+      type="button"
+      class="btn hidden btn-square btn-ghost lg:inline-flex"
+      :aria-label="isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+      @click="pageStore.toggleSidebar()"
+    >
       <svg
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
@@ -22,19 +37,9 @@
 
   <div class="flex-1 px-4 text-lg font-bold">
     DCS
-    <span class="ml-2 font-normal opacity-50">| Dashboard</span>
+    <span class="ml-2 font-normal text-base-content/70">| Dashboard</span>
   </div>
 
   <PermissionList class="mr-2" />
-  <AuthButton class="flex-none" />
+  <AuthButton class="btn flex-none gap-2 btn-outline btn-sm" />
 </template>
-
-<script setup lang="ts">
-import AuthButton from '@/components/AuthButton.vue'
-import PermissionList from '@/components/PermissionList.vue'
-import { usePageStore } from '@core/store/page'
-import { storeToRefs } from 'pinia'
-
-const pageStore = usePageStore()
-const { isSidebarCollapsed, pageSidebarId } = storeToRefs(pageStore)
-</script>

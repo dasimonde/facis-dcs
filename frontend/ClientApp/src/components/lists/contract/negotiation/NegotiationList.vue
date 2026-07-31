@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { computed, ref, useTemplateRef } from 'vue'
+import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { useAuthStore } from '@/stores/auth-store'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 import type { ContractNegotiationDecision } from '@/models/contract/contract-negotiation-decision'
-import { contractWorkflowService } from '@/services/contract-workflow-service'
-import { useAuthStore } from '@/stores/auth-store'
-import { computed, ref, useTemplateRef } from 'vue'
 
 const props = defineProps<{
   contract: Contract
@@ -14,6 +15,8 @@ const props = defineProps<{
 
 const authStore = useAuthStore()
 const issuer = computed(() => authStore.user?.issuer)
+
+const { isCreator, isReviewer } = useContractPermissions()
 
 const emit = defineEmits<{ selectedNegotiation: [negotiation: ContractNegotiation | null] }>()
 
@@ -94,7 +97,12 @@ const rejectNegotiation = async (negotiation: ContractNegotiation) => {
 
 const isBtnDisabled = (negotiation: ContractNegotiation) => {
   const decision = negotiation.negotiation_decisions.find((decision) => decision.negotiator === issuer.value)
-  return decision?.decision !== undefined
+  // Disable only once THIS negotiator has actually decided. A pending decision
+  // carries a null decision, and `!== undefined` classed that as decided — so
+  // the very decision the user still owes disabled its own Accept/Reject, and
+  // the round deadlocked: the open decision kept Submit disabled with no way to
+  // resolve it.
+  return decision?.decision != null
 }
 
 const isNegotiationShown = ref<Map<string, boolean>>(new Map())
@@ -135,7 +143,7 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
             <button
               v-if="!disabled && isNegotiationShown.get(negotiation.id)"
               class="btn btn-sm btn-primary"
-              :disabled="isSubmitting || isBtnDisabled(negotiation)"
+              :disabled="(!isCreator && !isReviewer) || isSubmitting || isBtnDisabled(negotiation)"
               @click="acceptNegotiation(negotiation)"
             >
               <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -144,7 +152,7 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
             <button
               v-if="!disabled && isNegotiationShown.get(negotiation.id)"
               class="btn btn-sm btn-primary"
-              :disabled="isSubmitting || isBtnDisabled(negotiation)"
+              :disabled="(!isCreator && !isReviewer) || isSubmitting || isBtnDisabled(negotiation)"
               @click="rejectNegotiation(negotiation)"
             >
               <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>

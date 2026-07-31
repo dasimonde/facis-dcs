@@ -1,3 +1,16 @@
+// Package contractworkflowengine implements the core contract lifecycle:
+// creation, negotiation, review, approval, termination, and expiry (this
+// file's CronJob). It follows the repository-wide CQRS layout (command/,
+// query/, db/, datatype/, event/), plus two contract-specific additions:
+// negotiationmerging (folds accepted change requests into a new contract
+// version) and remotesync (the command/RPC side of DCS-to-DCS federation;
+// the peer-transport side lives in the separate dcstodcs package).
+//
+// Ownership model: every contract has a single writer, its Origin peer (see
+// command package doc). Expiry is additionally exposed instantly to readers
+// via the contracts_effective DB view (EXPIRED computed at query time),
+// while this file's cron job lags behind to persist the state and emit the
+// corresponding event/audit-trail entry.
 package contractworkflowengine
 
 import (
@@ -41,7 +54,7 @@ func startExpiryScheduler(ctx context.Context, db *sqlx.DB, repo database.Contra
 			}
 		}(tx)
 
-		expiredContracts, err := repo.ReadExpiredContacts(ctx, tx)
+		expiredContracts, err := repo.ReadExpiredContracts(ctx, tx)
 		if err != nil {
 			return nil, fmt.Errorf("could not read expired contracts: %w", err)
 		}
@@ -77,6 +90,9 @@ func startExpiryScheduler(ctx context.Context, db *sqlx.DB, repo database.Contra
 			return fmt.Errorf("unknown expiration policy for expired contract with DID %s", expiredContract.DID)
 		}
 
+		// Readers already see EXPIRED instantly via the contracts_effective view once
+		// exp_date has passed; this persists that state physically and emits the
+		// ContractExpired event, so it necessarily lags the view by up to the poll interval.
 		err = repo.UpdateState(ctx, tx, expiredContract.DID, contractstate.Expired.String())
 		if err != nil {
 			return fmt.Errorf("could not update expired contract with DID %s: %w", expiredContract.DID, err)

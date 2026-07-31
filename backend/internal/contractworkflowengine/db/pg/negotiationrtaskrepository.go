@@ -31,6 +31,31 @@ func (r *PostgresNegotiationTaskRepo) Create(ctx context.Context, tx *sqlx.Tx, d
 	return &createdAt, nil
 }
 
+func (r *PostgresNegotiationTaskRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, data db.NegotiationTaskData) error {
+	statement := `
+        INSERT INTO contract_negotiation_task (
+            id, did, state, negotiator, created_by, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+    `
+	_, err := tx.ExecContext(ctx, statement,
+		data.ID, data.DID, data.State, data.Negotiator, data.CreatedBy, data.CreatedAt)
+	return err
+}
+
+func (r *PostgresNegotiationTaskRepo) RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data db.NegotiationTaskData) error {
+	statement := `
+        INSERT INTO contract_negotiation_task (
+            id, did, state, negotiator, created_by, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO UPDATE SET
+            state = EXCLUDED.state,
+            negotiator = EXCLUDED.negotiator
+    `
+	_, err := tx.ExecContext(ctx, statement,
+		data.ID, data.DID, data.State, data.Negotiator, data.CreatedBy, data.CreatedAt)
+	return err
+}
+
 func (r *PostgresNegotiationTaskRepo) IsValidNegotiator(ctx context.Context, tx *sqlx.Tx, did string, negotiator string) (bool, error) {
 	query := `
         SELECT COUNT(*) FROM contract_negotiation_task
@@ -51,20 +76,6 @@ func (r *PostgresNegotiationTaskRepo) ReopenTasks(ctx context.Context, tx *sqlx.
     `
 	_, err := tx.ExecContext(ctx, statement, did)
 	return err
-}
-
-func (r *PostgresNegotiationTaskRepo) ReadAll(ctx context.Context, tx *sqlx.Tx, did string) ([]db.NegotiationTaskData, error) {
-	query := `
-        SELECT id, did, state, negotiator,
-               created_by, created_at
-        FROM contract_negotiation_task WHERE did = $1
-    `
-	var negotiationTasks []db.NegotiationTaskData
-	err := tx.SelectContext(ctx, &negotiationTasks, query, did)
-	if err != nil {
-		return nil, err
-	}
-	return negotiationTasks, nil
 }
 
 func (r *PostgresNegotiationTaskRepo) ReadAllByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.NegotiationTaskData, error) {
@@ -176,13 +187,4 @@ func (r *PostgresNegotiationTaskRepo) TaskExist(ctx context.Context, tx *sqlx.Tx
 		return false, err
 	}
 	return count > 0, nil
-}
-
-func (r *PostgresNegotiationTaskRepo) Delete(ctx context.Context, tx *sqlx.Tx, did string) error {
-	statement := `
-        DELETE FROM contract_negotiation_task
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did)
-	return err
 }

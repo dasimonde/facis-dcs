@@ -1,6 +1,6 @@
+import axios from 'axios'
 import { getConfig } from '@/config'
 import { useErrorStore } from '@/stores/error-store'
-import axios from 'axios'
 
 const http = axios.create({
   baseURL: getConfig().API_BASE_URL,

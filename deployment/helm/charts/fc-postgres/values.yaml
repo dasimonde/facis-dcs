@@ -1,0 +1,32 @@
+image:
+  repository: postgres
+  tag: "16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 5432
+  nodePort: null
+
+# The bootstrap user/db. fc-service and Keycloak both connect as this same
+# user (matches the previously vendored fc-service chart's own default
+# wiring — one shared Postgres instance, not a database-per-app split).
+auth:
+  username: keycloak
+  password: keycloak
+  database: postgres
+
+# Additional databases to create on init, owned by auth.username.
+# "keycloak" backs the owned Keycloak deployment (see ../keycloak);
+# fc-service itself uses the bootstrap "postgres" database above.
+additionalDatabases:
+  - keycloak
+
+persistence:
+  enabled: false
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+
+resources: {}

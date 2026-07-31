@@ -1,0 +1,32 @@
+{{- /*
+Service alias for the ADR-19 AC7/AC8/AC9 "trusted" synthetic peer
+(did:web:{{ .Release.Name }}-orce-trusted%3A1880): same selector/ports as the
+primary orce Service (service.yaml), same pod, same Node-RED process — the
+synthetic-peer-flow.json flow tells it apart from the other two identities by
+the incoming request's Host header (msg.req.headers.host).
+
+Unlike them it publishes an agreement credential that VERIFIES against this
+build's federation rules hash, so an inbound scenario reaches the policy
+endpoint (layer 3b) with layer 3a already passed. The documents themselves are
+not in the chart: the BDD harness generates and pushes them per run (POST
+/synthetic-trusted/identity), because a checked-in credential's termsOfUse.hash
+would stop matching the running build whenever the rules document changes.
+ClusterIP only: this identity is resolved in-cluster, by the backend pod's own
+did:web fetch, never from outside the cluster.
+*/}}
+{{- if .Values.syntheticPeer.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-orce-trusted
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.service.port | default 1880 }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: orce
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

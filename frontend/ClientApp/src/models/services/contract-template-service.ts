@@ -1,4 +1,4 @@
-import type { ContractTemplate } from '../contract-template'
+import type { ContractTemplate } from '../contract-template/contract-template'
 import type {
   ContractTemplateApproveRequest,
   ContractTemplateArchiveRequest,
@@ -12,6 +12,7 @@ import type {
   ContractTemplateRetrieveRequest,
   ContractTemplateSearchRequest,
   ContractTemplateSubmitRequest,
+  ContractTemplateUpdateManageRequest,
   ContractTemplateUpdateRequest,
   ContractTemplateVerifyRequest,
 } from '../requests/template-request'
@@ -27,6 +28,7 @@ import type {
   ContractTemplateRetrieveResponse,
   ContractTemplateSearchResponse,
   ContractTemplateSubmitResponse,
+  ContractTemplateUpdateManageResponse,
   ContractTemplateUpdateResponse,
   ContractTemplateVerifyResponse,
 } from '../responses/template-response'
@@ -36,6 +38,7 @@ export interface ContractTemplateService {
   copy: (request: ContractTemplateCopyRequest) => Promise<ContractTemplateCopyResponse>
   submit: (request: ContractTemplateSubmitRequest) => Promise<ContractTemplateSubmitResponse>
   update: (request: ContractTemplateUpdateRequest) => Promise<ContractTemplateUpdateResponse>
+  updateManage: (request: ContractTemplateUpdateManageRequest) => Promise<ContractTemplateUpdateManageResponse>
   search: (request: ContractTemplateSearchRequest) => Promise<ContractTemplateSearchResponse>
   retrieve: (request?: ContractTemplateRetrieveRequest) => Promise<ContractTemplateRetrieveResponse>
   retrieveById: (request: ContractTemplateRetrieveByIdRequest) => Promise<ContractTemplate | null>

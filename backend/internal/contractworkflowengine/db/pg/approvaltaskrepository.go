@@ -1,3 +1,5 @@
+// Package pg is the Postgres implementation of the contract workflow
+// engine's repository interfaces (see db package doc).
 package pg
 
 import (
@@ -33,6 +35,35 @@ func (r *PostgresApprovalTaskRepo) Create(ctx context.Context, tx *sqlx.Tx, data
 	return &createdAt, nil
 }
 
+func (r *PostgresApprovalTaskRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, data db.ApprovalTaskData) error {
+	statement := `
+        INSERT INTO contract_approval_task (
+            id, did, state, approver, created_by, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+    `
+	_, err := tx.ExecContext(ctx, statement,
+		data.ID, data.DID,
+		data.State, data.Approver, data.CreatedBy, data.CreatedAt,
+	)
+	return err
+}
+
+func (r *PostgresApprovalTaskRepo) RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data db.ApprovalTaskData) error {
+	statement := `
+        INSERT INTO contract_approval_task (
+            id, did, state, approver, created_by, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO UPDATE SET
+            state = EXCLUDED.state,
+            approver = EXCLUDED.approver
+    `
+	_, err := tx.ExecContext(ctx, statement,
+		data.ID, data.DID,
+		data.State, data.Approver, data.CreatedBy, data.CreatedAt,
+	)
+	return err
+}
+
 func (r *PostgresApprovalTaskRepo) ReopenTasks(ctx context.Context, tx *sqlx.Tx, did string) error {
 	statement := `
         UPDATE contract_approval_task SET state = 'OPEN'
@@ -42,7 +73,7 @@ func (r *PostgresApprovalTaskRepo) ReopenTasks(ctx context.Context, tx *sqlx.Tx,
 	return err
 }
 
-func (r *PostgresApprovalTaskRepo) ReadAll(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ApprovalTaskData, error) {
+func (r *PostgresApprovalTaskRepo) ReadAllByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ApprovalTaskData, error) {
 	query := `
         SELECT id, did, state, approver,
                created_by, created_at
@@ -64,6 +95,20 @@ func (r *PostgresApprovalTaskRepo) ReadAllByApprover(ctx context.Context, tx *sq
     `
 	var approvalTasks []db.ApprovalTaskData
 	err := tx.SelectContext(ctx, &approvalTasks, query, approver)
+	if err != nil {
+		return nil, err
+	}
+	return approvalTasks, nil
+}
+
+func (r *PostgresApprovalTaskRepo) ReadAllInState(ctx context.Context, tx *sqlx.Tx, state string) ([]db.ApprovalTaskData, error) {
+	query := `
+        SELECT id, did, state, approver,
+               created_by, created_at
+        FROM contract_approval_task WHERE state = $1
+    `
+	var approvalTasks []db.ApprovalTaskData
+	err := tx.SelectContext(ctx, &approvalTasks, query, state)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +157,11 @@ func (r *PostgresApprovalTaskRepo) AnyTasksInState(ctx context.Context, tx *sqlx
 	return count > 0, nil
 }
 
+// IsValidApprover checks that approver (a peer DID) is the one recorded on
+// this task — this is the enforcement point for peer-scoped task ownership:
+// a peer may only progress tasks it was assigned, regardless of which local
+// user triggered the request (local per-user permission is checked
+// separately via UserRoles upstream).
 func (r *PostgresApprovalTaskRepo) IsValidApprover(ctx context.Context, tx *sqlx.Tx, did string, approver string) (bool, error) {
 	query := `
         SELECT COUNT(*) FROM contract_approval_task
@@ -149,13 +199,4 @@ func (r *PostgresApprovalTaskRepo) TaskExists(ctx context.Context, tx *sqlx.Tx, 
 		return false, err
 	}
 	return count > 0, nil
-}
-
-func (r *PostgresApprovalTaskRepo) Delete(ctx context.Context, tx *sqlx.Tx, did string) error {
-	statement := `
-        DELETE FROM contract_approval_task
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did)
-	return err
 }

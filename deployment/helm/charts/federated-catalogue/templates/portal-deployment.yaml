@@ -1,21 +1,19 @@
 {{- if .Values.portal.enabled }}
-{{- $keycloakPath := "" }}
-{{- if .Values.keycloak.routePath }}
-{{- $keycloakPath = printf "/%s" (trimAll "/" .Values.keycloak.routePath) }}
-{{- end }}
 {{- $keycloakExternalUrl := "" }}
 {{- if .Values.keycloak.issuerUrl }}
-{{- /* Strip /realms/... suffix if present so we get just the base URL */}}
 {{- $keycloakExternalUrl = .Values.keycloak.issuerUrl }}
 {{- else if .Values.keycloak.hostname }}
-{{- $keycloakExternalUrl = printf "%s://%s%s" (.Values.keycloak.issuerScheme | default "https") .Values.keycloak.hostname $keycloakPath }}
+{{- $keycloakExternalUrl = printf "%s://%s/auth" (.Values.keycloak.issuerScheme | default "https") .Values.keycloak.hostname }}
 {{- else }}
-{{- $keycloakExternalUrl = printf "http://%s-keycloak:%d%s" .Release.Name (.Values.keycloak.port | default 8080 | int) $keycloakPath }}
+{{- $keycloakExternalUrl = .Values.keycloak.internalUrl | default "http://fc-keycloak-http:8080/auth" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-federated-catalogue-portal
+  name: fc-demo-portal
+  labels:
+    app.kubernetes.io/name: federated-catalogue-portal
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.portal.replicaCount | default 1 }}
   selector:
@@ -37,13 +35,21 @@ spec:
               containerPort: 8088
           env:
             - name: FEDERATED_CATALOGUE_BASE_URI
-              value: {{ printf "http://%s-federated-catalogue:%d%s" .Release.Name (.Values.service.port | default 8081 | int) (.Values.route.path | default "") | quote }}
+              value: {{ printf "http://fc-service:%d%s" (.Values.service.port | default 8081 | int) (.Values.route.path | default "") | quote }}
             - name: SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI
-              value: {{ printf "%s/realms/%s" $keycloakExternalUrl (.Values.keycloak.realm | default "gaia-x") | quote }}
+              value: {{ printf "%s/realms/%s" $keycloakExternalUrl (.Values.keycloak.realm | default "federated-catalogue-realm") | quote }}
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_FC_CLIENT_OIDC_CLIENT_ID
               value: {{ .Values.portal.keycloak.clientId | default .Values.keycloak.clientId | default "federated-catalogue" | quote }}
+            {{- if (.Values.portal.keycloak.clientSecret | default .Values.keycloak.clientSecret) }}
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_FC_CLIENT_OIDC_CLIENT_SECRET
-              value: {{ .Values.portal.keycloak.clientSecret | default .Values.keycloak.clientSecret | default "federated-catalogue-secret" | quote }}
+              value: {{ .Values.portal.keycloak.clientSecret | default .Values.keycloak.clientSecret | quote }}
+            {{- else }}
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_FC_CLIENT_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: fc-keycloak-client-secret
+                  key: keycloak_client_secret
+            {{- end }}
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_FC_CLIENT_OIDC_SCOPE
               value: "openid,profile,email"
             {{- if .Values.portal.route.path }}
@@ -53,6 +59,11 @@ spec:
             {{- with .Values.portal.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: {{ .Values.portal.route.path | default "" }}/actuator/health
@@ -67,4 +78,9 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.portal.resources | nindent 12 }}
+      volumes:
+        - name: logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 {{- end }}

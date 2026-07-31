@@ -1,0 +1,28 @@
+{{- if .Values.statusListLocalhostProxy.enabled }}
+{{- $upstream := required "statusListLocalhostProxy.upstream is required when enabled" .Values.statusListLocalhostProxy.upstream }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-statuslist-localhost-proxy
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    worker_processes 1;
+    error_log /dev/stderr warn;
+    pid /tmp/nginx.pid;
+    events {
+      worker_connections 64;
+    }
+    http {
+      access_log /dev/stdout;
+      server {
+        listen {{ .Values.statusListLocalhostProxy.listenPort }};
+        listen [::]:{{ .Values.statusListLocalhostProxy.listenPort }};
+        location /statuslist/ {
+          proxy_pass {{ $upstream }};
+          proxy_set_header Host {{ .Values.statusListLocalhostProxy.ingressHost }};
+        }
+      }
+    }
+{{- end }}

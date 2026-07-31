@@ -7,14 +7,63 @@ on:
   
 jobs:
   dockerbuild:
-    uses: eclipse-xfsc/dev-ops/.github/workflows/dockerbuild.yml@main
-    secrets: inherit
+    # TODO: can use @main again as soon as dockerbuild.yml accepts secrets input.
+    uses: eclipse-xfsc/dev-ops/.github/workflows/dockerbuild.yml@harbor-env-patch
+    secrets:
+      HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
+      HARBOR_CREDENTIALS: ${{ secrets.HARBOR_CREDENTIALS }}
     with: 
       dockerfile: "deployment/docker/Dockerfile"
       harbor_config: "deployment/harbor.config"
-  # helm:
-  #   uses: eclipse-xfsc/dev-ops/.github/workflows/helm.yml@main
-  #   secrets: inherit
-  #   with: 
-  #     buildContext:  "deployment/helm"
-  #     harbor_config: "deployment/harbor.config"
+
+  # Publishes the Helm chart to Harbor's OCI registry (DCS-OE-03: chart must
+  # be published to a Helm repo, not only exist in-tree). Uses the same
+  # HARBOR_HOST/HARBOR_CREDENTIALS secrets as the Docker build jobs above, and
+  # the same eclipse-xfsc/dev-ops harborconfig.sh the dockerbuild.yml workflow
+  # uses to derive real credentials: HARBOR_CREDENTIALS is base64(JSON) of
+  # {username: password} pairs (not a plaintext password), and Harbor expects
+  # the robot-account form "robot$<user>" (not deployment/harbor.config's bare
+  # USER) — see eclipse-xfsc/dev-ops#10 (branch harbor-env-patch).
+  helmpublish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Build chart dependencies
+        # charts/*.tgz is gitignored; the local file:// subcharts still
+        # resolve from their committed source directories, but external
+        # repo-based deps (kube-prometheus-stack, traefik) need fetching.
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add traefik https://traefik.github.io/charts
+          helm dependency build deployment/helm
+      - name: Package chart
+        run: helm package deployment/helm --destination /tmp/helm-package
+      - name: Derive Harbor credentials
+        env:
+          HARBOR_CREDENTIALS: ${{ secrets.HARBOR_CREDENTIALS }}
+        run: |
+          git clone https://github.com/eclipse-xfsc/dev-ops.git devops
+          chmod +x ./devops/scripts/harborconfig.sh
+          . ./devops/scripts/harborconfig.sh deployment/harbor.config
+          echo "HARBOR_USERNAME=$HARBOR_USERNAME" >> "$GITHUB_ENV"
+          echo "HARBOR_PASSWORD=$HARBOR_PASSWORD" >> "$GITHUB_ENV"
+      - name: Log in to Harbor OCI registry
+        run: |
+          helm registry login "${{ secrets.HARBOR_HOST }}" \
+            --username "$HARBOR_USERNAME" \
+            --password "$HARBOR_PASSWORD"
+      - name: Push chart
+        run: helm push /tmp/helm-package/*.tgz "oci://${{ secrets.HARBOR_HOST }}/dcs/charts"
+
+  dockerbuild-pdf-core:
+    # TODO: can use @main again as soon as dockerbuild.yml accepts secrets input.
+    uses: eclipse-xfsc/dev-ops/.github/workflows/dockerbuild.yml@harbor-env-patch
+    secrets:
+      HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
+      HARBOR_CREDENTIALS: ${{ secrets.HARBOR_CREDENTIALS }}
+    with:
+      dockerfile: "pdf-core/Dockerfile"
+      buildContext: "."
+      service: "pdf-core"
+      harbor_config: "deployment/harbor.config"

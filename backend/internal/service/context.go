@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"net/http"
+	"os"
+	"strings"
 
 	"digital-contracting-service/internal/pathutil"
 )
@@ -60,7 +62,7 @@ func SetRefreshTokenInContext(ctx context.Context, refreshToken string) {
 		Name:     "refresh_token",
 		Value:    refreshToken,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   authCookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 		Path:     authCookiePath(),
 		MaxAge:   7 * 24 * 60 * 60, // 7 days
@@ -77,7 +79,7 @@ func SetOAuthStateCookie(ctx context.Context, state string) {
 		Name:     oauthStateCookieName,
 		Value:    state,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   authCookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 		Path:     oauthStateCookiePath(),
 		MaxAge:   10 * 60,
@@ -105,7 +107,7 @@ func ClearOAuthStateCookie(ctx context.Context) {
 		Name:     oauthStateCookieName,
 		Value:    "",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   authCookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 		Path:     oauthStateCookiePath(),
 		MaxAge:   -1,
@@ -130,7 +132,7 @@ func SetIDTokenCookie(ctx context.Context, idToken string) {
 		Name:     idTokenCookieName,
 		Value:    idToken,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   authCookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 		Path:     authCookiePath(),
 		MaxAge:   7 * 24 * 60 * 60,
@@ -158,7 +160,7 @@ func ClearIDTokenCookie(ctx context.Context) {
 		Name:     idTokenCookieName,
 		Value:    "",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   authCookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 		Path:     authCookiePath(),
 		MaxAge:   -1,
@@ -175,9 +177,15 @@ func ClearRefreshTokenCookie(ctx context.Context) {
 		Name:     "refresh_token",
 		Value:    "",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   authCookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 		Path:     authCookiePath(),
 		MaxAge:   -1, // Delete the cookie
 	})
+}
+
+func authCookieSecure() bool {
+	allowInsecureCookies := strings.EqualFold(strings.TrimSpace(os.Getenv("AUTH_INSECURE_COOKIES")), "true")
+
+	return !allowInsecureCookies
 }

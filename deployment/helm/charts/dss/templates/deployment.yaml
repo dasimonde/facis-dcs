@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-dss
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dss
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dss
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: dss
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The image's entrypoint starts Tomcat in the background then exec's a
+          # shell that exits in a detached container, stopping it. Run Tomcat in
+          # the foreground so the pod stays up.
+          command: ["/dss/apache-tomcat-11.0.4/bin/catalina.sh"]
+          args: ["run"]
+          env:
+            # Bound the JVM heap so the demo container has a predictable
+            # footprint and is not OOM-killed under the two-instance kind node's
+            # memory pressure (its default heap scales to a share of node RAM).
+            - name: JAVA_OPTS
+              value: "-Xms256m -Xmx1024m"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 10
+            # Tomcat serving the DSS landing page can take several seconds under
+            # load; the 1s probe default times out ("context deadline exceeded")
+            # and flaps the pod NotReady mid-signing.
+            timeoutSeconds: 5
+            failureThreshold: 30
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: dss-custom-properties
+              mountPath: /dss/apache-tomcat-11.0.4/lib/dss-custom.properties
+              subPath: dss-custom.properties
+              readOnly: true
+      volumes:
+        - name: dss-custom-properties
+          configMap:
+            name: {{ .Release.Name }}-dss-custom-properties

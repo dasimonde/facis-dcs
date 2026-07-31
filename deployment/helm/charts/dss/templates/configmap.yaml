@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-dss-custom-properties
+data:
+  # esig/dss-demonstrations' PropertiesConfig loads classpath:dss-custom.properties
+  # (optional, ignoreResourceNotFound) AFTER the bundled dss.properties, so any
+  # key set here overrides the built-in default of the same name. Mounted onto
+  # the Tomcat shared classpath (CATALINA_HOME/lib) in deployment.yaml.
+  dss-custom.properties: |
+    current.lotl.url={{ .Values.trustedList.lotlURL }}

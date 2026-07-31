@@ -1,0 +1,85 @@
+# Acceptance/staging profile (SRS §6 item 3: "configuration profiles (DEV,
+# Acceptance, Prod)"). Layered on top of values.yaml
+# (`helm install -f values.yaml -f values.acceptance.yml`).
+#
+# Every field below was checked against the actual chart schema
+# (deployment/helm/values.yaml + templates), not guessed. Secrets audit
+# (E5): every credential below resolves via secretKeyRef — no plaintext
+# secret is committed in this file — with ONE documented exception (Hydra),
+# noted where it occurs.
+
+replicaCount: 2
+
+image:
+  repository: "[registry]/digital-contracting-service"
+  tag: ""
+
+route:
+  basePath: "/digital-contracting-service"
+  publicBaseURL: "https://acceptance.dcs.example.org/digital-contracting-service"
+
+ingress:
+  enabled: true
+  className: ""
+  pathType: Prefix
+  hosts:
+    - host: acceptance.dcs.example.org
+      paths: []   # empty = chart derives the path from route.basePath
+  tls:
+    - hosts: ["acceptance.dcs.example.org"]
+      secretName: dcs-acceptance-tls
+
+database:
+  url: ""
+  secretRef:
+    name: dcs-acceptance-db-credentials
+    key: DATABASE_URL
+
+# Hydra (OAuth2/OIDC): `secrets.system` and `clients[].client_secret` are
+# genuinely plaintext-only fields in this chart version — the Hydra
+# sub-chart has no secretKeyRef equivalent yet (verified against
+# deployment/helm/charts/hydra/values.yaml; Deviation Register follow-up
+# candidate, not yet an entry since it wasn't part of the original 13).
+# Populate both via `--set` from your secret manager at deploy time, never
+# committed to a values file:
+#   helm upgrade ... --set hydra.secrets.system="$(vault read -field=value ...)"
+hydra:
+  enabled: true
+  config:
+    dev: false
+    selfIssuerURL: "https://acceptance.dcs.example.org"
+    loginURL: "https://acceptance.dcs.example.org/ui/"
+    consentURL: "https://acceptance.dcs.example.org/api/auth/consent"
+    logoutURL: "https://acceptance.dcs.example.org/api/auth/logout-complete"
+  clients: []
+
+# PKCS#11: acceptance still runs against the co-deployed SoftHSM2 token
+# (provisioning.enabled=true, same as values.bdd.yml) rather than a real HSM
+# — swapping to a real HSM is a prod-profile-only change (see
+# values.prod.yml). The PIN itself is never inlined here.
+pkcs11:
+  pin: ""
+  pinSecretRef:
+    name: dcs-acceptance-hsm-pin
+    key: PKCS11_PIN
+
+federatedCatalogue:
+  enabled: true
+  apiURL: ""
+  secretRef:
+    name: dcs-acceptance-fc-credentials
+    key: FEDERATED_CATALOGUE_API_URL
+  oauth:
+    clientID: "dcs-fc-client"
+    clientSecretSecretRef:
+      name: dcs-acceptance-fc-credentials
+      key: FEDERATED_CATALOGUE_CLIENT_SECRET
+
+ipfs:
+  enabled: true
+  tenantBaseURLSecretRef:
+    name: dcs-acceptance-ipfs-credentials
+    key: IPFS_TENANT_BASE_URL
+  mfsBaseURLSecretRef:
+    name: dcs-acceptance-ipfs-credentials
+    key: IPFS_MFS_BASE_URL

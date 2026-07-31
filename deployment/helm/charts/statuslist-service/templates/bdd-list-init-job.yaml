@@ -1,0 +1,80 @@
+{{- if .Values.bddListInit.enabled }}
+{{/*
+BDD only: create tenant list 1 via NATS when the DB is empty (GET /status/1 returns 400).
+Idempotent — skips when the list already exists. Wired from values.bdd.yml.
+*/}}
+{{- $tenants := .Values.bddListInit.tenantIDs }}
+{{- if not $tenants }}
+{{- $tenants = list (.Values.bddListInit.tenantID | default "default") }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-statuslist-bdd-list-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bdd-list-init
+          image: natsio/nats-box:0.14.3
+          {{- with (.Values.jobResources | default .Values.resources) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: STATUSLIST_URL
+              value: http://{{ .Release.Name }}-statuslist-service:{{ .Values.service.port | default 8080 }}
+            - name: NATS_URL
+              value: {{ required "statuslist bddListInit requires nats.url" .Values.nats.url | quote }}
+            - name: TENANT_IDS
+              value: {{ join " " $tenants | quote }}
+            - name: LIST_ID
+              value: {{ .Values.bddListInit.listID | default "1" | quote }}
+            - name: CREATION_TOPIC
+              value: {{ .Values.topics.creation | default "status" | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              command -v curl >/dev/null 2>&1 || apk add --no-cache curl >/dev/null
+
+              echo "Waiting for statuslist-service..."
+              until curl -sf "${STATUSLIST_URL}/health" >/dev/null 2>&1 \
+                || curl -sf "${STATUSLIST_URL}/v1/metrics/health" >/dev/null 2>&1; do
+                sleep 3
+              done
+              echo "statuslist-service ready."
+
+              for TENANT_ID in ${TENANT_IDS}; do
+                LIST_URI="${STATUSLIST_URL}/v1/tenants/${TENANT_ID}/status/${LIST_ID}"
+                ORIGIN="${STATUSLIST_URL}/v1/tenants/${TENANT_ID}"
+
+                HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${LIST_URI}" || true)
+                if [ "${HTTP}" = "200" ]; then
+                  echo "status list ${LIST_ID} already exists for tenant ${TENANT_ID}."
+                  continue
+                fi
+                if [ "${HTTP}" != "400" ]; then
+                  echo "unexpected GET ${LIST_URI}: HTTP ${HTTP}" >&2
+                  exit 1
+                fi
+
+                echo "Creating status list ${LIST_ID} for tenant ${TENANT_ID} via NATS (BDD)..."
+                EVENT=$(printf '{"specversion":"1.0","id":"helm-statuslist-bdd-init","source":"helm/statuslist-bdd-init","type":"create","datacontenttype":"application/json","data":{"tenant_id":"%s","request_id":"helm-statuslist-bdd-init","origin":"%s"}}' \
+                  "${TENANT_ID}" "${ORIGIN}")
+                nats --server "${NATS_URL}" req "${CREATION_TOPIC}" "${EVENT}" --timeout 30s
+
+                until curl -sf "${LIST_URI}" >/dev/null 2>&1; do
+                  sleep 2
+                done
+                echo "status list ${LIST_ID} ready for tenant ${TENANT_ID}."
+              done
+{{- end }}

@@ -3,8 +3,5 @@
   "crv": "P-256",
   "x": "TPg_7qbilFLESVua3__W5v-5PiqqmJWvb5l4jrrXvS4",
   "y": "OcZ2rmWA8xAjOC07q0IiQz4QxiotsAtRtcVsyaoxSA0",
-  "d": "5bRVKKyEBpk2TEmuGvmGmIHKxXQqxnSnjLPGzrostbo",
-  "kid": "wallet",
-  "use": "sig",
-  "alg": "ES256"
+  "d": "5bRVKKyEBpk2TEmuGvmGmIHKxXQqxnSnjLPGzrostbo"
 }

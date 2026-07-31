@@ -48,11 +48,17 @@ spec:
             failureThreshold: 2
             timeoutSeconds: 5
           livenessProbe:
+            # Liveness must only describe this process. Tying it to the
+            # downstream IPFS API causes cascading restarts whenever IPFS is
+            # briefly slow under load, even though the manager itself is
+            # healthy and able to recover once its dependency responds.
             httpGet:
               path: /v1/metrics/health
               port: http
             initialDelaySeconds: 15
             periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 5
           {{- if .Values.resources }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

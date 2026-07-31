@@ -1,0 +1,130 @@
+{{- if and .Values.flowImport.enabled (not .Values.flowsFile.enabled) (.Files.Glob "flows/*.json") }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-orce-flow-import
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    # "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: flow-importer
+          image: alpine:3.19
+          {{- with (.Values.jobResources | default .Values.resources) }}
+          # Its own pod, so this block does not overlap the server's. Without one
+          # a LimitRange default applies and the hook is refused on a namespace
+          # whose limits.cpu quota the release already consumes.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: AUTH_USERNAME
+              value: {{ .Values.flowImport.auth.username | quote }}
+            - name: AUTH_PASSWORD
+              value: {{ .Values.flowImport.auth.password | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -ex
+
+              apk add --no-cache curl jq > /dev/null 2>&1
+
+              BASE_URL="http://{{ .Release.Name }}-orce:{{ .Values.service.port | default 1880 }}"
+
+              # Warten bis ORCE bereit ist
+              echo "Warte auf ORCE..."
+              TIMEOUT=120
+              ELAPSED=0
+              until curl -sf "$BASE_URL/" > /dev/null; do
+                if [ $ELAPSED -ge $TIMEOUT ]; then
+                  echo "Timeout: ORCE nicht erreichbar"
+                  exit 1
+                fi
+                sleep 3
+                ELAPSED=$((ELAPSED + 3))
+              done
+              echo "ORCE ist bereit."
+
+              # Bearer Token holen
+              echo "Hole Auth-Token..."
+              # TOKEN_RESPONSE=$(curl -sf -X POST "$BASE_URL/auth/token" \
+              #   -H "Content-Type: application/x-www-form-urlencoded" \
+              #   -d "client_id=node-red-admin&grant_type=password&username=$AUTH_USERNAME&password=$AUTH_PASSWORD")
+              
+              TOKEN_RESPONSE=$(curl -sf -X POST "$BASE_URL/auth/token" -H "content-type: application/x-www-form-urlencoded; charset=UTF-8" -H "node-red-api-version: v2" --data-raw "client_id=node-red-admin&grant_type=password&scope=&username=$AUTH_USERNAME&password=$AUTH_PASSWORD")
+
+              echo "Logging in with user: $AUTH_USERNAME and password: $AUTH_PASSWORD"
+              TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token')
+
+              if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+                echo "Fehler: Kein Token erhalten. Response: $TOKEN_RESPONSE"
+                exit 1
+              fi
+              echo "Token erhalten. $TOKEN"
+
+              # Alle Flow-JSONs zu einem Array zusammenführen
+              echo "Merge Flows..."
+              MERGED=$(cat /flows/*.json | jq -s 'add')
+
+              FLOW_COUNT=$(echo "$MERGED" | jq 'length')
+              echo "$FLOW_COUNT Nodes/Tabs gefunden."
+
+              # Deploy + verify, mit Retries: bei einem Helm-Upgrade kann dieser
+              # Hook das ORCE-Rollout überholen und die Flows in den STERBENDEN
+              # Pod posten (Persistenz ist in BDD aus — der neue Pod startet
+              # dann ohne Flows, alle HTTP-in-Routen 404en). Deshalb: posten,
+              # dann über den Service zurücklesen und prüfen, dass unsere Tabs
+              # wirklich da sind; sonst neu authentifizieren (Token-Store ist
+              # in-memory, ein neuer Pod kennt alte Tokens nicht) und erneut
+              # posten.
+              EXPECTED_TAB=$(echo "$MERGED" | jq -r '[.[] | select(.type == "tab")][0].id')
+              echo "Deploye Flows (verifiziere Tab: $EXPECTED_TAB)..."
+              ATTEMPT=0
+              MAX_ATTEMPTS=30
+              while true; do
+                ATTEMPT=$((ATTEMPT + 1))
+                HTTP_CODE=$(curl -s -o /tmp/deploy-resp.txt -w "%{http_code}" --max-time 60 -X POST "$BASE_URL/flows" \
+                  -H "Content-Type: application/json" \
+                  -H "Node-RED-Deployment-Type: full" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -d "$MERGED" || echo 000)
+                echo "POST /flows -> HTTP $HTTP_CODE (Versuch $ATTEMPT)"
+                if [ "$HTTP_CODE" != "204" ] && [ "$HTTP_CODE" != "200" ]; then
+                  cat /tmp/deploy-resp.txt || true
+                fi
+                sleep 3
+                DEPLOYED=$(curl -s --max-time 30 "$BASE_URL/flows" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "Node-RED-API-Version: v2" | jq -r --arg t "$EXPECTED_TAB" '[.flows[]? | select(.id == $t)] | length' 2>/dev/null || echo 0)
+                if [ "$DEPLOYED" = "1" ]; then
+                  echo "Alle Flows erfolgreich importiert und verifiziert."
+                  break
+                fi
+                if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+                  echo "Fehler: Flows nach $MAX_ATTEMPTS Versuchen nicht verifizierbar."
+                  exit 1
+                fi
+                echo "Flows noch nicht sichtbar (evtl. Pod-Rollout) — hole neues Token und versuche erneut..."
+                sleep 3
+                TOKEN_RESPONSE=$(curl -sf -X POST "$BASE_URL/auth/token" -H "content-type: application/x-www-form-urlencoded; charset=UTF-8" -H "node-red-api-version: v2" --data-raw "client_id=node-red-admin&grant_type=password&scope=&username=$AUTH_USERNAME&password=$AUTH_PASSWORD" || true)
+                NEW_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token')
+                if [ -n "$NEW_TOKEN" ] && [ "$NEW_TOKEN" != "null" ]; then
+                  TOKEN="$NEW_TOKEN"
+                fi
+              done
+              
+          volumeMounts:
+            - name: flows
+              mountPath: /flows
+              readOnly: true
+      volumes:
+        - name: flows
+          configMap:
+            name: {{ .Release.Name }}-orce-flows
+{{- end }}

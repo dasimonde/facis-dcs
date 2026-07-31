@@ -1,0 +1,415 @@
+[
+  {
+    "id": "pki-tab",
+    "type": "tab",
+    "label": "PKI Setup",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "pki-init",
+    "type": "inject",
+    "z": "pki-tab",
+    "name": "on deploy",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "once": true,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 100,
+    "wires": [
+      [
+        "pki-ensure"
+      ]
+    ]
+  },
+  {
+    "id": "pki-ensure",
+    "type": "function",
+    "z": "pki-tab",
+    "name": "ensure root CA + issuer cert",
+    "func": "const pkiDir = '/data/pki';\nconst opensslBin = '/usr/bin/openssl';\n\nconst rootKeyPath = pkiDir + '/root-ca.key';\nconst rootCrtPath = pkiDir + '/root-ca.crt';\nconst issuerKeyPath = pkiDir + '/issuer.key';\nconst issuerCsrPath = pkiDir + '/issuer.csr';\nconst issuerCrtPath = pkiDir + '/issuer.crt';\nconst issuerExtPath = pkiDir + '/issuer-ext.cnf';\n\nfs.mkdirSync(pkiDir, { recursive: true });\n\nfunction sh(cmd) {\n    return cp.execSync(cmd, { cwd: pkiDir, stdio: ['ignore', 'pipe', 'pipe'] });\n}\n\n// This container's clock can be far off real-world time (sandboxed demo\n// environments sometimes run with a future system date). If notBefore is\n// stamped at container \"now\" and that's in the future relative to a real\n// device (e.g. the wallet holder's phone), every verifier rejects the cert\n// as \"not yet valid\" / \"used before it is allowed\". openssl's req/x509 apps\n// have no -not_before flag, so backdate generation with faketime instead:\n// notBefore lands in 2020 regardless of container time, with -days sized to\n// still reach ~2040 -- valid on any real clock for the life of this demo.\ntry {\n    cp.execSync('which faketime', { stdio: 'ignore' });\n} catch (e) {\n    sh('apk add --no-cache libfaketime');\n}\nconst FAKETIME = 'faketime \"2020-01-01 00:00:00\" ';\n\nconst haveRootCa = fs.existsSync(rootKeyPath) && fs.existsSync(rootCrtPath);\nconst haveIssuer = fs.existsSync(issuerKeyPath) && fs.existsSync(issuerCrtPath);\n\nif (!haveRootCa) {\n    sh(`${opensslBin} ecparam -name prime256v1 -genkey -noout -out \"${rootKeyPath}\"`);\n    sh(\n        FAKETIME + `${opensslBin} req -x509 -new -key \"${rootKeyPath}\" -out \"${rootCrtPath}\" ` +\n        `-days 7300 -subj \"/CN=FACIS Demo Root CA\" ` +\n        `-addext \"basicConstraints=critical,CA:true\"`\n    );\n    node.log('pki: generated root CA');\n} else {\n    node.log('pki: root CA already present, skipping');\n}\n\nif (!haveIssuer) {\n    fs.writeFileSync(issuerExtPath, '[v3_issuer]\\nkeyUsage=critical,digitalSignature\\n');\n\n    sh(`${opensslBin} ecparam -name prime256v1 -genkey -noout -out \"${issuerKeyPath}\"`);\n    sh(\n        `${opensslBin} req -new -key \"${issuerKeyPath}\" -out \"${issuerCsrPath}\" ` +\n        `-subj \"/CN=FACIS Demo PID Issuer\"`\n    );\n    sh(\n        FAKETIME + `${opensslBin} x509 -req -in \"${issuerCsrPath}\" ` +\n        `-CA \"${rootCrtPath}\" -CAkey \"${rootKeyPath}\" -CAcreateserial ` +\n        `-out \"${issuerCrtPath}\" -days 7300 ` +\n        `-extfile \"${issuerExtPath}\" -extensions v3_issuer`\n    );\n    node.log('pki: generated issuer cert');\n} else {\n    node.log('pki: issuer cert already present, skipping');\n}\n\nconst rootCaCertPem = fs.readFileSync(rootCrtPath, 'utf8');\nconst issuerCertPem = fs.readFileSync(issuerCrtPath, 'utf8');\nconst issuerKeyPem = fs.readFileSync(issuerKeyPath, 'utf8');\n\nconst rootCaCertDerB64 = new crypto.X509Certificate(rootCaCertPem).raw.toString('base64');\nconst issuerCertDerB64 = new crypto.X509Certificate(issuerCertPem).raw.toString('base64');\n\nglobal.set('pki', {\n    issuerKeyPem,\n    issuerCertPem,\n    issuerCertDerB64,\n    rootCaCertPem,\n    rootCaCertDerB64\n});\n\nnode.status({ fill: 'green', shape: 'dot', text: 'pki ready' });\nreturn null;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "cp",
+        "module": "child_process"
+      },
+      {
+        "var": "fs",
+        "module": "fs"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 420,
+    "y": 100,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "pki-get-rootca",
+    "type": "http in",
+    "z": "pki-tab",
+    "name": "GET /pki/root-ca.pem",
+    "url": "/pki/root-ca.pem",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 220,
+    "wires": [
+      [
+        "pki-serve-rootca"
+      ]
+    ]
+  },
+  {
+    "id": "pki-serve-rootca",
+    "type": "function",
+    "z": "pki-tab",
+    "name": "serve root CA",
+    "func": "const pki = global.get('pki');\nlet pem;\nif (pki && pki.rootCaCertPem) {\n    pem = pki.rootCaCertPem;\n} else {\n    pem = fs.readFileSync('/data/pki/root-ca.crt', 'utf8');\n}\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/x-pem-file' };\nmsg.payload = pem;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "fs",
+        "module": "fs"
+      }
+    ],
+    "x": 430,
+    "y": 220,
+    "wires": [
+      [
+        "pki-resp-rootca"
+      ]
+    ]
+  },
+  {
+    "id": "pki-resp-rootca",
+    "type": "http response",
+    "z": "pki-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 660,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "pki-get-issuer",
+    "type": "http in",
+    "z": "pki-tab",
+    "name": "GET /pki/issuer.pem",
+    "url": "/pki/issuer.pem",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 300,
+    "wires": [
+      [
+        "pki-serve-issuer"
+      ]
+    ]
+  },
+  {
+    "id": "pki-serve-issuer",
+    "type": "function",
+    "z": "pki-tab",
+    "name": "serve issuer cert",
+    "func": "const pki = global.get('pki');\nlet pem;\nif (pki && pki.issuerCertPem) {\n    pem = pki.issuerCertPem;\n} else {\n    pem = fs.readFileSync('/data/pki/issuer.crt', 'utf8');\n}\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/x-pem-file' };\nmsg.payload = pem;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "fs",
+        "module": "fs"
+      }
+    ],
+    "x": 430,
+    "y": 300,
+    "wires": [
+      [
+        "pki-resp-issuer"
+      ]
+    ]
+  },
+  {
+    "id": "pki-resp-issuer",
+    "type": "http response",
+    "z": "pki-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 660,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "pki-get-chain",
+    "type": "http in",
+    "z": "pki-tab",
+    "name": "GET /pki/chain.pem",
+    "url": "/pki/chain.pem",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 380,
+    "wires": [
+      [
+        "pki-serve-chain"
+      ]
+    ]
+  },
+  {
+    "id": "pki-serve-chain",
+    "type": "function",
+    "z": "pki-tab",
+    "name": "serve chain (issuer + root)",
+    "func": "const pki = global.get('pki');\nlet issuerPem, rootPem;\nif (pki && pki.issuerCertPem && pki.rootCaCertPem) {\n    issuerPem = pki.issuerCertPem;\n    rootPem = pki.rootCaCertPem;\n} else {\n    issuerPem = fs.readFileSync('/data/pki/issuer.crt', 'utf8');\n    rootPem = fs.readFileSync('/data/pki/root-ca.crt', 'utf8');\n}\nconst trimmedIssuer = issuerPem.endsWith('\\n') ? issuerPem : issuerPem + '\\n';\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/x-pem-file' };\nmsg.payload = trimmedIssuer + rootPem;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "fs",
+        "module": "fs"
+      }
+    ],
+    "x": 440,
+    "y": 380,
+    "wires": [
+      [
+        "pki-resp-chain"
+      ]
+    ]
+  },
+  {
+    "id": "pki-resp-chain",
+    "type": "http response",
+    "z": "pki-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 660,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "pki-get-reissue",
+    "type": "http in",
+    "z": "pki-tab",
+    "name": "GET /pki/reissue",
+    "url": "/pki/reissue",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 460,
+    "wires": [
+      [
+        "pki-do-reissue"
+      ]
+    ]
+  },
+  {
+    "id": "pki-do-reissue",
+    "type": "function",
+    "z": "pki-tab",
+    "name": "reissue issuer cert with SAN=baseUrl",
+    "func": "// SD-JWT VC x5c trust (draft-ietf-oauth-sd-jwt-vc): when `iss` is an\n// https:// URL, the leaf cert MUST carry a SAN (URI or DNS) matching it, or\n// wallets like Paradym reject the credential (\"iss claim ... does not match\n// a SAN-URI/SAN-DNS name\"). The deploy-time cert has no SAN because the\n// public hostname isn't known until an actual request arrives (ephemeral\n// Cloudflare Quick Tunnel URLs change on every cloudflared restart). Hit\n// this endpoint through whatever URL the wallet will actually use — it\n// reissues the issuer leaf (same root CA, so /pki/root-ca.pem stays valid)\n// with SAN URI+DNS matching that exact hostname. Re-run after any tunnel\n// URL change.\nconst baseUrl = global.get('getBaseUrl')(msg);\nconst hostname = baseUrl.replace(/^[a-z]+:\\/\\//i, '').split(/[/:]/)[0];\n\nconst pkiDir = '/data/pki';\nconst opensslBin = '/usr/bin/openssl';\nconst rootKeyPath = pkiDir + '/root-ca.key';\nconst rootCrtPath = pkiDir + '/root-ca.crt';\nconst issuerKeyPath = pkiDir + '/issuer.key';\nconst issuerCsrPath = pkiDir + '/issuer.csr';\nconst issuerCrtPath = pkiDir + '/issuer.crt';\nconst issuerExtPath = pkiDir + '/issuer-ext.cnf';\n\nfunction sh(cmd) {\n    return cp.execSync(cmd, { cwd: pkiDir, stdio: ['ignore', 'pipe', 'pipe'] });\n}\n\n// Same real-world-clock concern as the initial generation (see pki-ensure) —\n// backdate with faketime so the reissued cert isn't \"not yet valid\" on a\n// real device regardless of this container's system clock.\ntry {\n    cp.execSync('which faketime', { stdio: 'ignore' });\n} catch (e) {\n    sh('apk add --no-cache libfaketime');\n}\nconst FAKETIME = 'faketime \"2020-01-01 00:00:00\" ';\n\nfs.writeFileSync(\n    issuerExtPath,\n    '[v3_issuer]\\nkeyUsage=critical,digitalSignature\\nsubjectAltName=URI:' + baseUrl + ',DNS:' + hostname + '\\n'\n);\n\nsh(`${opensslBin} ecparam -name prime256v1 -genkey -noout -out \"${issuerKeyPath}\"`);\nsh(\n    `${opensslBin} req -new -key \"${issuerKeyPath}\" -out \"${issuerCsrPath}\" ` +\n    `-subj \"/CN=FACIS Demo PID Issuer\"`\n);\nsh(\n    FAKETIME + `${opensslBin} x509 -req -in \"${issuerCsrPath}\" ` +\n    `-CA \"${rootCrtPath}\" -CAkey \"${rootKeyPath}\" -CAcreateserial ` +\n    `-out \"${issuerCrtPath}\" -days 7300 ` +\n    `-extfile \"${issuerExtPath}\" -extensions v3_issuer`\n);\n\nconst rootCaCertPem = fs.readFileSync(rootCrtPath, 'utf8');\nconst issuerCertPem = fs.readFileSync(issuerCrtPath, 'utf8');\nconst issuerKeyPem = fs.readFileSync(issuerKeyPath, 'utf8');\nconst rootCaCertDerB64 = new crypto.X509Certificate(rootCaCertPem).raw.toString('base64');\nconst issuerCertDerB64 = new crypto.X509Certificate(issuerCertPem).raw.toString('base64');\n\nglobal.set('pki', {\n    issuerKeyPem,\n    issuerCertPem,\n    issuerCertDerB64,\n    rootCaCertPem,\n    rootCaCertDerB64\n});\n\nconst cert = new crypto.X509Certificate(issuerCertPem);\nnode.log('pki: reissued issuer cert for ' + baseUrl + ' (SAN: ' + cert.subjectAltName + ')');\nnode.status({ fill: 'green', shape: 'dot', text: 'reissued for ' + hostname });\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/json' };\nmsg.payload = { reissued: true, baseUrl, hostname, subjectAltName: cert.subjectAltName };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "cp",
+        "module": "child_process"
+      },
+      {
+        "var": "fs",
+        "module": "fs"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 470,
+    "y": 460,
+    "wires": [
+      [
+        "pki-resp-reissue"
+      ]
+    ]
+  },
+  {
+    "id": "pki-resp-reissue",
+    "type": "http response",
+    "z": "pki-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 700,
+    "y": 460,
+    "wires": []
+  },
+  {
+    "id": "pki-get-jwks",
+    "type": "http in",
+    "z": "pki-tab",
+    "name": "GET /pki/jwks.json",
+    "url": "/pki/jwks.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 540,
+    "wires": [
+      [
+        "pki-serve-jwks"
+      ]
+    ]
+  },
+  {
+    "id": "pki-serve-jwks",
+    "type": "function",
+    "z": "pki-tab",
+    "name": "serve issuer JWKS",
+    "func": "// The credential-issuance tab embeds this same key as a `jwk` header on\n// every issued credential, and the did.json tab publishes it as a\n// verification method, so a verifier configured with mechanism jwks or\n// did:web reaches the same key either way. Publishing it here lets anyone\n// (an operator writing a trust entry, an auditor) pull it out-of-band too.\nconst pki = global.get('pki');\nlet issuerKeyPem;\nif (pki && pki.issuerKeyPem) {\n    issuerKeyPem = pki.issuerKeyPem;\n} else {\n    issuerKeyPem = fs.readFileSync('/data/pki/issuer.key', 'utf8');\n}\nconst publicKey = crypto.createPublicKey(crypto.createPrivateKey(issuerKeyPem));\nconst jwk = publicKey.export({ format: 'jwk' });\nconst cleanJwk = { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y };\nconst kid = crypto.createHash('sha256').update(JSON.stringify(cleanJwk)).digest('base64url');\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/json' };\nmsg.payload = { keys: [{ ...cleanJwk, kid, use: 'sig', alg: 'ES256' }] };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "fs",
+        "module": "fs"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 440,
+    "y": 540,
+    "wires": [
+      [
+        "pki-resp-jwks"
+      ]
+    ]
+  },
+  {
+    "id": "pki-resp-jwks",
+    "type": "http response",
+    "z": "pki-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 670,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "pki-get-diddoc",
+    "type": "http in",
+    "z": "pki-tab",
+    "name": "GET /.well-known/did.json",
+    "url": "/.well-known/did.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 620,
+    "wires": [
+      [
+        "pki-serve-diddoc"
+      ]
+    ]
+  },
+  {
+    "id": "pki-serve-diddoc",
+    "type": "function",
+    "z": "pki-tab",
+    "name": "serve did:web document",
+    "func": "// Paradym's SD-JWT VC verifier only supports resolving the issuer's\n// signing key via a DID or an x5c chain (\"unsupported signing method\" is\n// its exact error otherwise) -- it does not accept a bare embedded `jwk`\n// header. DCS resolves an issuer's key by the mechanism its trust entry\n// declares (ADR-31): a did:web entry is resolved live from this document,\n// a jwks entry from keys bundled in the trust file. did:web is therefore\n// the one identity both sides can be pointed at. See the\n// credential-issuance function for where `iss` and the proof-header `kid`\n// are set to this DID.\nconst baseUrl = global.get('getBaseUrl')(msg);\nconst hostname = baseUrl.replace(/^[a-z]+:\\/\\//i, '').split(/[/:]/)[0];\n// did:web with path segments: authority first, then each path segment,\n// colon-separated (w3c-ccg did-method-web). Resolution therefore targets\n// <authority>/<segments>/did.json rather than /.well-known/did.json.\nconst _rest = baseUrl.replace(/^[a-z]+:\\/\\//i, '');\nconst _authority = _rest.split('/')[0];\nconst _segs = _rest.split('/').slice(1).filter(Boolean);\nconst did = 'did:web:' + encodeURIComponent(_authority) + (_segs.length ? ':' + _segs.join(':') : '');\n\nconst pki = global.get('pki');\nlet issuerKeyPem;\nif (pki && pki.issuerKeyPem) {\n    issuerKeyPem = pki.issuerKeyPem;\n} else {\n    issuerKeyPem = fs.readFileSync('/data/pki/issuer.key', 'utf8');\n}\nconst publicKey = crypto.createPublicKey(crypto.createPrivateKey(issuerKeyPem));\nconst jwk = publicKey.export({ format: 'jwk' });\nconst cleanJwk = { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, alg: 'ES256', use: 'sig' };\nconst keyId = did + '#key-1';\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/did+ld+json' };\nmsg.payload = {\n    '@context': [\n        'https://www.w3.org/ns/did/v1',\n        'https://w3id.org/security/suites/jws-2020/v1'\n    ],\n    id: did,\n    verificationMethod: [{\n        id: keyId,\n        type: 'JsonWebKey2020',\n        controller: did,\n        publicKeyJwk: cleanJwk\n    }],\n    assertionMethod: [keyId],\n    authentication: [keyId]\n};\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "fs",
+        "module": "fs"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 460,
+    "y": 620,
+    "wires": [
+      [
+        "pki-resp-diddoc"
+      ]
+    ]
+  },
+  {
+    "id": "pki-resp-diddoc",
+    "type": "http response",
+    "z": "pki-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 690,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "pki-get-diddoc-pathbased",
+    "type": "http in",
+    "z": "pki-tab",
+    "name": "GET /did.json (path-based did:web)",
+    "url": "/did.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 660,
+    "wires": [
+      [
+        "pki-serve-diddoc"
+      ]
+    ]
+  }
+]

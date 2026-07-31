@@ -1,16 +1,17 @@
+import axios from 'axios'
 import authHttp from '@/api/auth-http'
+import { clearOid4vpBrowserSession } from '@/hydra-login-guard'
 import {
-  LOGIN_POLL_ERROR,
   type AuthCallbackResponse,
+  LOGIN_POLL_ERROR,
   type LoginPollStatus,
   type LoginResponse,
   type LoginStatusResponse,
   type LogoutResponse,
 } from '@/models/responses/auth-response'
-import type { AuthenticationService } from '@/models/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
-import axios from 'axios'
+import type { AuthenticationService } from '@/models/services/authentication-service'
 
 export const authenticationService: AuthenticationService = {
   async login() {
@@ -89,6 +90,7 @@ export const authenticationService: AuthenticationService = {
     const clearLocalAuth = () => {
       useAuthStore().remove()
       useAuthTokenStore().remove()
+      clearOid4vpBrowserSession()
     }
 
     const doLogout = (retried: boolean) => {

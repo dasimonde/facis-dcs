@@ -1,0 +1,9 @@
+*
+!docs/
+!pdf-core/
+**/.venv
+**/__pycache__
+**/output
+pdf-core/tmp/
+pdf-core/artifacts/
+pdf-core/bin/

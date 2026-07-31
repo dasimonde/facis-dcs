@@ -25,13 +25,10 @@ func handleNATSEvent(ctx context.Context, evt cloudevent.Event, d *Dispatcher) {
 		return
 	}
 
-	// The outbox publisher double-encodes the payload: json.Marshal([]byte).
-	// DataAs(&[]byte) reverses that automatically.
-	var rawPayload []byte
-	if err := evt.DataAs(&rawPayload); err != nil {
-		log.Printf("webhookplatform: decode NATS payload for %s: %v", eventType, err)
-		return
-	}
+	// The outbox publisher passes the domain event straight through as
+	// json.RawMessage (cloudeventprovider.go: marshalling a RawMessage is the
+	// identity), so the CloudEvent data IS the domain event object.
+	rawPayload := evt.Data()
 
 	var envelope struct {
 		DID string `json:"did"`

@@ -1,33 +1,7 @@
-<template>
-  <div class="flex min-h-screen flex-col items-center justify-center gap-6 bg-base-200 p-6">
-    <div v-if="presentationUrl" class="card w-full max-w-md bg-base-100 shadow-md">
-      <div class="card-body items-center gap-4 text-center">
-        <h1 class="card-title text-lg">Sign in with wallet</h1>
-        <p class="text-sm opacity-80">Scan the QR code with your wallet.</p>
-        <figure class="rounded-box bg-white p-3">
-          <img
-            v-if="qrCodeDataUrl"
-            :src="qrCodeDataUrl"
-            alt="OpenID4VP request URI QR code"
-            class="mx-auto h-48 w-48"
-          />
-        </figure>
-        <button type="button" class="btn btn-sm btn-primary" @click="copyPresentationUrl">Copy link</button>
-        <p v-if="copyHint" class="text-sm text-warning">{{ copyHint }}</p>
-        <p class="text-xs opacity-70">
-          Keep this tab open — the QR / link refreshes automatically before it expires (about every 5 minutes). You will
-          be redirected after the wallet presents credentials.
-        </p>
-      </div>
-    </div>
-    <div v-else class="flex flex-col items-center gap-3">
-      <span class="loading loading-lg loading-spinner" />
-      <p class="text-sm opacity-70">Starting login…</p>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
+import { useQRCode } from '@vueuse/integrations/useQRCode'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   clearOid4vpBrowserSession,
   flushPendingLoginChallenge,
@@ -40,15 +14,15 @@ import {
 import { isLoginPollError, isLoginStatusResponse, LOGIN_POLL_ERROR } from '@/models/responses/auth-response'
 import { ROUTES } from '@/router/router'
 import { authenticationService } from '@/services/authentication-service'
-import { useQRCode } from '@vueuse/integrations/useQRCode'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useErrorStore } from '@/stores/error-store'
 
 const route = useRoute()
 const router = useRouter()
 const presentationUrl = ref('')
 const copyHint = ref('')
 const qrCodeDataUrl = useQRCode(computed(() => presentationUrl.value || ''))
+
+const errorStore = useErrorStore()
 
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -229,6 +203,7 @@ async function pollLoginOnce(state: string, generation: number): Promise<'contin
     stopPolling()
     clearOid4vpBrowserSession()
     console.error('OpenID4VP login failed:', status.error_message ?? status.status)
+    errorStore.add(status.error_message ?? status.status)
     return 'done'
   }
   return 'continue'
@@ -352,3 +327,32 @@ async function copyPresentationUrl() {
   copyHint.value = 'Link copied.'
 }
 </script>
+
+<template>
+  <div class="flex min-h-screen flex-col items-center justify-center gap-6 bg-base-200 p-6" role="main">
+    <div v-if="presentationUrl" class="card w-full max-w-md bg-base-100 shadow-md">
+      <div class="card-body items-center gap-4 text-center">
+        <h1 class="card-title text-lg">Sign in with wallet</h1>
+        <p class="text-sm opacity-80">Scan the QR code with your wallet.</p>
+        <figure class="rounded-box bg-white p-3">
+          <img
+            v-if="qrCodeDataUrl"
+            :src="qrCodeDataUrl"
+            alt="OpenID4VP request URI QR code"
+            class="mx-auto h-48 w-48"
+          />
+        </figure>
+        <button type="button" class="btn btn-sm btn-primary" @click="copyPresentationUrl">Copy link</button>
+        <p v-if="copyHint" class="text-sm text-warning">{{ copyHint }}</p>
+        <p class="text-xs opacity-70">
+          Keep this tab open — the QR / link refreshes automatically before it expires (about every 5 minutes). You will
+          be redirected after the wallet presents credentials.
+        </p>
+      </div>
+    </div>
+    <div v-else class="flex flex-col items-center gap-3">
+      <span class="loading loading-lg loading-spinner" />
+      <p class="text-sm opacity-70">Starting login…</p>
+    </div>
+  </div>
+</template>

@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { Contract } from '@/models/contract/contract'
-import type { ContractSearchResponse } from '@/models/responses/contract-response'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import ListSearch from '../ListSearch.vue'
+import type { Contract } from '@/models/contract/contract'
+import type { ContractSearchResponse } from '@/models/responses/contract-response'
 
 defineProps<{
   contracts: Contract[]
 }>()
 
 const emit = defineEmits<{
-  searchResult: [value: Contract[]]
+  searchResult: [value: Contract[] | null]
 }>()
 
 const filterLabels: Partial<Record<keyof Contract, string>> = {

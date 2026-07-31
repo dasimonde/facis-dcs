@@ -1,35 +1,38 @@
 import http from '@/api/http'
-import type { ContractTemplate } from '@/models/contract-template'
+import type { ContractTemplate } from '@/models/contract-template/contract-template'
 import type {
   ContractTemplateApproveRequest,
   ContractTemplateArchiveRequest,
   ContractTemplateAuditRequest,
-  ContractTemplateCreateRequest,
   ContractTemplateCopyRequest,
+  ContractTemplateCreateRequest,
+  ContractTemplatePublishRequest,
   ContractTemplateRegisterRequest,
   ContractTemplateRejectRequest,
   ContractTemplateRetrieveByIdRequest,
+  ContractTemplateRetrieveRequest,
   ContractTemplateSearchRequest,
   ContractTemplateSubmitRequest,
+  ContractTemplateUpdateManageRequest,
   ContractTemplateUpdateRequest,
   ContractTemplateVerifyRequest,
-  ContractTemplatePublishRequest,
 } from '@/models/requests/template-request'
 import type {
   ContractTemplateApproveResponse,
   ContractTemplateArchiveResponse,
   ContractTemplateAuditResponse,
-  ContractTemplateCreateResponse,
   ContractTemplateCopyResponse,
+  ContractTemplateCreateResponse,
+  ContractTemplatePublishResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
   ContractTemplateRetrieveByIdResponse,
   ContractTemplateRetrieveResponse,
   ContractTemplateSearchResponse,
   ContractTemplateSubmitResponse,
+  ContractTemplateUpdateManageResponse,
   ContractTemplateUpdateResponse,
   ContractTemplateVerifyResponse,
-  ContractTemplatePublishResponse,
 } from '@/models/responses/template-response'
 import type { ContractTemplateService } from '@/models/services/contract-template-service'
 
@@ -74,6 +77,16 @@ export const contractTemplateService: ContractTemplateService = {
       })
   },
 
+  async updateManage(request: ContractTemplateUpdateManageRequest) {
+    return http
+      .post<ContractTemplateUpdateManageResponse>('/template/update_manage', request)
+      .then((res) => res.data)
+      .catch((err: unknown) => {
+        console.error('Update Error:', err)
+        throw err
+      })
+  },
+
   async search(request: ContractTemplateSearchRequest): Promise<ContractTemplateSearchResponse> {
     return http
       .get<ContractTemplateSearchResponse>('/template/search', { params: request })
@@ -86,9 +99,9 @@ export const contractTemplateService: ContractTemplateService = {
       })
   },
 
-  async retrieve() {
+  async retrieve(request?: ContractTemplateRetrieveRequest) {
     return http
-      .get<ContractTemplateRetrieveResponse>('/template/retrieve')
+      .get<ContractTemplateRetrieveResponse>('/template/retrieve', { params: request })
       .then((res) => res.data)
       .catch((err: unknown) => {
         console.error('Retrieve Error:', err)

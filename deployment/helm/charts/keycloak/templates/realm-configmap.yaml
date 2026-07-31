@@ -1,12 +1,10 @@
-{{- if .Values.realm.import }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-keycloak-realm
+  name: fc-keycloak-realm-configmap
   labels:
-    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/name: fc-keycloak
     app.kubernetes.io/instance: {{ .Release.Name }}
 data:
-  gaia-x-realm.json: |-
-{{ tpl (.Files.Get "files/gaia-x-realm.json.tpl") . | indent 4 }}
-{{- end }}
+  fc-realm.json: |-
+{{ .Files.Get "files/fc-realm.json" | indent 4 }}

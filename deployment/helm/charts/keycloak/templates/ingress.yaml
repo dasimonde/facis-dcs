@@ -2,7 +2,10 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Release.Name }}-keycloak
+  name: fc-keycloak
+  labels:
+    app.kubernetes.io/name: fc-keycloak
+    app.kubernetes.io/instance: {{ .Release.Name }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -29,7 +32,7 @@ spec:
             pathType: {{ .Values.ingress.pathType }}
             backend:
               service:
-                name: {{ .Release.Name }}-keycloak
+                name: fc-keycloak-http
                 port:
                   number: {{ .Values.service.port }}
 {{- end }}

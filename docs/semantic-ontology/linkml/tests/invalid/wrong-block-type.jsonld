@@ -1,0 +1,20 @@
+{
+    "@context": {
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#"
+    },
+    "@id": "did:web:localhost:template:test-wrong-block-type",
+    "@type": "dcs:ContractTemplate",
+    "dcs:documentStructure": {
+        "@id": "did:web:localhost:template:test-wrong-block-type#document-structure",
+        "@type": "dcs:DocumentStructure",
+        "dcs:blocks": {
+            "@list": [
+                {
+                    "@id": "did:web:localhost:template:test-wrong-block-type#block-1",
+                    "@type": "dcs:SignatureField",
+                    "dcs:name": "this is not a valid block type"
+                }
+            ]
+        }
+    }
+}

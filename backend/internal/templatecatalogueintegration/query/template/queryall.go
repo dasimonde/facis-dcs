@@ -2,47 +2,51 @@ package template
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
+	catalogueevents "digital-contracting-service/internal/templatecatalogueintegration/event"
 	"digital-contracting-service/internal/templatecatalogueintegration/internal/ptr"
 )
 
 type GetAllMetadataQry struct {
-	Offset int
-	Limit  int
+	Offset      int
+	Limit       int
+	RetrievedBy string
+	HolderDID   string
+	UserRoles   userrole.UserRoles
 }
 
 type GetAllMetadataHandler struct {
-	Ctx      context.Context
+	DB       *sqlx.DB
 	FCClient *client.FederatedCatalogueClient
 }
 
-const retrieveTemplatesCountStatement = `
-MATCH (n:ContractTemplate)
-RETURN count(n) AS total
+const retrieveTemplatesCountStatementTemplate = `
+SELECT (COUNT(DISTINCT ?template_uuid) AS ?total) WHERE {
+%s}
 `
 
 const retrieveTemplatesStatementTemplate = `
-MATCH (ct:ContractTemplate)
-RETURN {
-  did: ct.did,
-  document_number: ct.documentNumber,
-  version: ct.version,
-  schema_version: ct.schemaVersion,
-  name: ct.name,
-  description: ct.description,
-  template_type: ct.templateType,
-  participant_id: ct.participantId,
-  created_at: ct.createdAt,
-  updated_at: ct.updatedAt
-} AS n
-SKIP %d
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
+%s}
+ORDER BY ?s
+OFFSET %d
 LIMIT %d
 `
 
-func (h *GetAllMetadataHandler) Handle(qry GetAllMetadataQry) (*templatecatalogueintegration.TemplateCatalogueRetrieveResponse, error) {
+func (h *GetAllMetadataHandler) Handle(ctx context.Context, qry GetAllMetadataQry) (*templatecatalogueintegration.TemplateCatalogueRetrieveResponse, error) {
 	if h.FCClient == nil {
 		return nil, client.ErrFederatedCatalogueNotConfigured
 	}
@@ -50,59 +54,100 @@ func (h *GetAllMetadataHandler) Handle(qry GetAllMetadataQry) (*templatecatalogu
 		return nil, fmt.Errorf("offset must be >= 0")
 	}
 
-	countResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
-		Statement:  retrieveTemplatesCountStatement,
-		Parameters: map[string]string{},
+	countResp, err := h.FCClient.Query(ctx, client.QueryRequest{
+		Statement: fmt.Sprintf(retrieveTemplatesCountStatementTemplate, coreFieldTriples()),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	totalCount := countResp.TotalCount
+	totalCount := countFromResults(countResp.Items, "total")
 
 	limit := qry.Limit
 	if limit < 1 {
 		limit = totalCount
 	}
 
-	statement := fmt.Sprintf(retrieveTemplatesStatementTemplate, qry.Offset, limit)
-	dataResp, err := h.FCClient.Query(h.Ctx, client.QueryRequest{
-		Statement:  statement,
-		Parameters: map[string]string{},
+	statement := fmt.Sprintf(retrieveTemplatesStatementTemplate, coreFieldTriples(), qry.Offset, limit)
+	dataResp, err := h.FCClient.Query(ctx, client.QueryRequest{
+		Statement: statement,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	if h.DB != nil {
+		tx, err := h.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("could not create transaction: %w", err)
+		}
+		defer func(tx *sqlx.Tx) {
+			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+				log.Printf("could not rollback transaction: %v", err)
+			}
+		}(tx)
+
+		evt := catalogueevents.RetrieveAllEvent{
+			RetrievedBy: qry.RetrievedBy,
+			OccurredAt:  time.Now().UTC(),
+			HolderDID:   qry.HolderDID,
+			UserRoles:   qry.UserRoles,
+		}
+		err = event.Create(ctx, tx, evt, componenttype.TemplateCatalogueIntegration)
+		if err != nil {
+			return nil, fmt.Errorf("could not create event: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("could not commit transaction: %w", err)
+		}
+	}
+
 	items := make([]*templatecatalogueintegration.TemplateCatalogueItem, 0, len(dataResp.Items))
 	for _, item := range dataResp.Items {
-		var ct map[string]interface{}
-		// Extract the template projection map from the item
-		for _, v := range item {
-			if m, ok := v.(map[string]interface{}); ok {
-				ct = m
-				break
+		if ct := projectionMap(item); ct != nil {
+			if mapped := mapCatalogueItem(ct); mapped != nil {
+				items = append(items, mapped)
 			}
 		}
-		if ct == nil {
-			continue
-		}
-		items = append(items, &templatecatalogueintegration.TemplateCatalogueItem{
-			Did:            ptr.StringFromMap(ct, "did"),
-			DocumentNumber: ptr.Ref(ptr.StringFromMap(ct, "document_number")),
-			Version:        ptr.Ref(ptr.IntFromMap(ct, "version")),
-			SchemaVersion:  ptr.Ref(ptr.IntFromMap(ct, "schema_version")),
-			Name:           ptr.Ref(ptr.StringFromMap(ct, "name")),
-			Description:    ptr.Ref(ptr.StringFromMap(ct, "description")),
-			TemplateType:   ptr.Ref(ptr.StringFromMap(ct, "template_type")),
-			ParticipantID:  ptr.Ref(ptr.StringFromMap(ct, "participant_id")),
-			CreatedAt:      ptr.Ref(ptr.StringFromMap(ct, "created_at")),
-			UpdatedAt:      ptr.Ref(ptr.StringFromMap(ct, "updated_at")),
-		})
 	}
 
 	return &templatecatalogueintegration.TemplateCatalogueRetrieveResponse{
 		TotalCount: totalCount,
 		Items:      items,
 	}, nil
+}
+
+// projectionMap unwraps a single query result row into its projected fields.
+// SPARQL SELECT rows are already flat (variable name -> value); a nested map
+// under a single key is the Neo4j/Cypher `RETURN {...} AS n` shape kept here
+// only in case any caller still produces it.
+func projectionMap(row map[string]interface{}) map[string]interface{} {
+	if row == nil {
+		return nil
+	}
+	for _, value := range row {
+		if mapped, ok := value.(map[string]interface{}); ok {
+			return mapped
+		}
+	}
+	return row
+}
+
+func mapCatalogueItem(ct map[string]interface{}) *templatecatalogueintegration.TemplateCatalogueItem {
+	if ct == nil {
+		return nil
+	}
+
+	did := ptr.StringFromMap(ct, "did")
+	if strings.TrimSpace(did) == "" {
+		return nil
+	}
+
+	return &templatecatalogueintegration.TemplateCatalogueItem{
+		Did:         did,
+		Version:     ptr.Ref(ptr.IntFromMap(ct, "version")),
+		Name:        ptr.Ref(ptr.StringFromMap(ct, "name")),
+		Description: ptr.Ref(ptr.StringFromMap(ct, "description")),
+	}
 }

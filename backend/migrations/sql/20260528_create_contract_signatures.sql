@@ -1,3 +1,5 @@
+CREATE TYPE contract_signature_status AS ENUM ('PENDING', 'SIGNED', 'REVOKED');
+
 CREATE TABLE contract_signatures (
     id              BIGSERIAL PRIMARY KEY,
     contract_did    VARCHAR(255) NOT NULL REFERENCES contracts(did),
@@ -5,8 +7,8 @@ CREATE TABLE contract_signatures (
     credential_type VARCHAR(255) NOT NULL DEFAULT 'stub',
     signature_bytes BYTEA,
     ipfs_cid        TEXT,
-    status          VARCHAR(32)  NOT NULL DEFAULT 'PENDING',
-    signed_at       TIMESTAMP,
+    status          contract_signature_status NOT NULL DEFAULT 'PENDING',
+    signed_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     revoked_at      TIMESTAMP,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

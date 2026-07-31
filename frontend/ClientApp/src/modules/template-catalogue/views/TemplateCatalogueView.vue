@@ -1,69 +1,20 @@
-<template>
-  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
-    <!-- Tabs -->
-    <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
-      <div class="mx-auto max-w-4xl px-6 pt-3">
-        <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">View Template Catalogue</p>
-        <div role="tablist" class="tabs-border tabs tabs-lg">
-          <a
-            v-for="tab in tabs"
-            :key="tab.id"
-            role="tab"
-            class="tab"
-            :class="{ 'tab-active text-primary': activeTab === tab.id }"
-            @click="setActiveTab(tab.id)"
-          >
-            {{ tab.label }}
-          </a>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab Content -->
-    <div class="mt-5 grow">
-      <div class="mx-auto max-w-4xl p-6">
-        <div v-if="loading" class="px-4">Loading Template Catalogue...</div>
-        <div v-else-if="error" class="px-4">{{ error }}</div>
-        <div v-else>
-          <CatalogueTemplateDetailsInfo v-show="activeTab === 'details'" />
-          <CatalogueTemplateMetaDataInfo v-show="activeTab === 'meta'" />
-          <CatalogueTemplatePreviewInfo v-show="activeTab === 'preview'" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Pinned Footer -->
-    <div v-if="did" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
-      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
-        <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
-        <button class="btn flex-1 btn-primary" :disabled="isRegisterDisabled" @click="registerTemplate">
-          <span v-if="registerLoading" class="loading loading-sm loading-spinner"></span>
-          Register
-        </button>
-      </div>
-    </div>
-
-    <ConfirmationModal ref="confirmation-modal" />
-  </div>
-</template>
-
 <script setup lang="ts">
-import ConfirmationModal from '@/components/ConfirmationModal.vue'
-import { contractTemplateService } from '@/services/contract-template-service'
-import { templateCatalogueIntegrationService } from '@/services/template-catalogue-integration-service'
-import { useContractTemplatesStore } from '@/stores/contract-templates-store'
-import type { TemplateCatalogueRetrieveByIdResponse } from '@/models/responses/template-catalogue-integration-response'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import CatalogueTemplateDetailsInfo from '@/modules/template-catalogue/components/catalogue-template/CatalogueTemplateDetailsInfo.vue'
-import CatalogueTemplateMetaDataInfo from '@/modules/template-catalogue/components/catalogue-template/CatalogueTemplateMetaDataInfo.vue'
-import CatalogueTemplatePreviewInfo from '@/modules/template-catalogue/components/catalogue-template/CatalogueTemplatePreviewInfo.vue'
-import { TemplateType, type TemplateTypeValue } from '@template-repository/models/contract-template'
-import { TemplateState } from '@/types/contract-template-state'
-import { ROUTES } from '@/router/router'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useContractPermissions } from '@/modules/template-repository/composables/useContractPermissions'
+import { TemplateType, type TemplateTypeValue } from '@template-repository/models/contract-template'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
+import CatalogueTemplateDetailsInfo from '@template-catalogue/components/catalogue-template/CatalogueTemplateDetailsInfo.vue'
+import CatalogueTemplateMetaDataInfo from '@template-catalogue/components/catalogue-template/CatalogueTemplateMetaDataInfo.vue'
+import CatalogueTemplatePreviewInfo from '@template-catalogue/components/catalogue-template/CatalogueTemplatePreviewInfo.vue'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { ROUTES } from '@/router/router'
+import { contractTemplateService } from '@/services/contract-template-service'
+import { templateCatalogueIntegrationService } from '@/services/template-catalogue-integration-service'
+import { useContractTemplatesStore } from '@/stores/contract-templates-store'
+import { TemplateState } from '@/types/contract-template-state'
+import type { TemplateCatalogueRetrieveByIdResponse } from '@/models/responses/template-catalogue-integration-response'
 
 const router = useRouter()
 const route = useRoute()
@@ -77,11 +28,12 @@ const version = computed(() => {
 
 const loading = ref(false)
 const error = ref<string | null>(null)
+const remoteTemplateUnreachable = ref(false)
 const catalogue = ref<TemplateCatalogueRetrieveByIdResponse | null>(null)
 
 const registerLoading = ref(false)
 
-const draftStore = useTemplateDraftStore()
+const draftStore = useDcsDraftStore()
 
 type CatalogueTabId = 'details' | 'meta' | 'preview'
 const activeTab = ref<CatalogueTabId>('details')
@@ -114,10 +66,10 @@ const isRegisterDisabled = computed(() => {
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 function toTemplateType(value: string | undefined): TemplateTypeValue {
-  if (value === TemplateType.frameContract || value === TemplateType.subContract) {
+  if (value === TemplateType.contractTemplate || value === TemplateType.component) {
     return value
   }
-  return TemplateType.subContract
+  return TemplateType.component
 }
 
 watch(
@@ -130,6 +82,7 @@ watch(
     }
     loading.value = true
     error.value = null
+    remoteTemplateUnreachable.value = false
     activeTab.value = 'details'
 
     try {
@@ -146,28 +99,18 @@ watch(
 
       const templateData = data.template_data
       if (!templateData) {
-        error.value = 'Template data is missing from catalogue response'
-        return
+        remoteTemplateUnreachable.value = true
       }
 
-      draftStore.reset({
-        workflow: 'template',
+      draftStore.loadDocument(templateData ?? {}, {
         did: data.did,
         name: data.name ?? '',
         description: data.description ?? '',
-        templateDataVersion: templateData.templateDataVersion ?? 1,
-        documentOutline: templateData.documentOutline ?? [],
-        documentBlocks: templateData.documentBlocks ?? [],
-        semanticConditions: templateData.semanticConditions ?? [],
-        customMetaData: templateData.customMetaData ?? [],
-        subTemplateSnapshots: templateData.subTemplateSnapshots ?? [],
         templateType: toTemplateType(data.template_type),
         state: TemplateState.draft,
-        document_number: data.document_number ?? null,
         version: data.version ?? null,
         updated_at: data.updated_at ?? null,
         created_by: '',
-        responsible: null,
       })
     } catch (e: unknown) {
       error.value = e instanceof Error && e.message ? e.message : 'Error loading template catalogue'
@@ -180,9 +123,7 @@ watch(
 )
 
 onMounted(() => {
-  if (!contractTemplates.value.length && !localTemplatesLoading.value) {
-    void templatesStore.loadTemplates()
-  }
+  void templatesStore.loadTemplates()
 })
 
 function setActiveTab(tabId: CatalogueTabId) {
@@ -212,3 +153,58 @@ async function registerTemplate() {
   }
 }
 </script>
+
+<template>
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
+    <!-- Tabs -->
+    <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
+      <div class="mx-auto max-w-4xl px-6 pt-3">
+        <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">View Template Catalogue</p>
+        <div role="tablist" class="tabs-border tabs tabs-lg">
+          <a
+            v-for="tab in tabs"
+            :key="tab.id"
+            role="tab"
+            class="tab"
+            :class="{ 'tab-active text-primary': activeTab === tab.id }"
+            @click="setActiveTab(tab.id)"
+          >
+            {{ tab.label }}
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab Content -->
+    <div class="mt-5 grow">
+      <div class="mx-auto max-w-4xl p-6">
+        <div v-if="loading" class="px-4">Loading Template Catalogue...</div>
+        <div v-else-if="error" class="px-4">{{ error }}</div>
+        <div v-else>
+          <p
+            v-if="remoteTemplateUnreachable"
+            class="mb-4 rounded-lg border border-base-300 bg-base-100 p-4 text-base-content"
+          >
+            Remote template source is currently unreachable.
+          </p>
+          <CatalogueTemplateDetailsInfo v-show="activeTab === 'details'" />
+          <CatalogueTemplateMetaDataInfo v-show="activeTab === 'meta'" />
+          <CatalogueTemplatePreviewInfo v-show="activeTab === 'preview'" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Pinned Footer -->
+    <div v-if="did" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
+        <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
+        <button class="btn flex-1 btn-primary" :disabled="isRegisterDisabled" @click="registerTemplate">
+          <span v-if="registerLoading" class="loading loading-sm loading-spinner"></span>
+          Register
+        </button>
+      </div>
+    </div>
+
+    <ConfirmationModal ref="confirmation-modal" />
+  </div>
+</template>

@@ -1,0 +1,51 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:req-flavors",
+    "@type": "ContractTemplate",
+    "documentTitle": "Flavor Equivalence",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Flavor Equivalence"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:req-flavors#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:req-flavors#s1",
+                "children": [
+                    "urn:doc:req-flavors#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:req-flavors#s1",
+                "title": "1. Terms"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:req-flavors#c1",
+                "content": [
+                    "Reference to dcs:Clause remains equivalent across JSON-LD flavors."
+                ]
+            }
+        ]
+    }
+}

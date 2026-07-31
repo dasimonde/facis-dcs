@@ -1,0 +1,47 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/credentials/v2",
+    "https://identity.foundation/presentation-exchange/submission/v1"
+  ],
+  "type": [
+    "VerifiablePresentation",
+    "PresentationSubmission"
+  ],
+  "verifiableCredential": [
+    {
+      "@context": [
+        "https://www.w3.org/ns/credentials/v2"
+      ],
+      "@id": "http://example.edu/credentials/1872",
+      "type": [
+        "VerifiableCredential"
+      ],
+      "issuer": "did:example:issuer",
+      "validFrom": "2010-01-01T19:23:24Z",
+      "credentialSubject": {
+        "@context": {
+          "foaf": "http://xmlns.com/foaf/0.1/",
+          "schema": "http://schema.org/"
+        },
+        "@id": "did:example:credSub",
+        "@type": [
+          "https://w3id.org/gaia-x/2511#LegalPerson"
+        ],
+        "foaf:givenname": "Fredrik",
+        "foaf:family_name": "Str&#246;mberg",
+        "schema:birthdate": "1949-01-22"
+      }
+    }
+  ],
+  "@id": "ebc6f1c2vp",
+  "holder": "did:example:holder",
+  "presentation_submission": {
+    "definition_id": "Selective disclosure example",
+    "descriptor_map": [
+      {
+        "format": "ldp_vc",
+        "path": "$.verifiableCredential[0]"
+      }
+    ]
+  }
+}

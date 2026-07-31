@@ -17,41 +17,19 @@ spec:
     - {{ . | quote }}
     {{- end }}
   http:
-    {{- /* Keycloak route when enabled with route.path */}}
-    {{- if and .Values.keycloak.enabled .Values.keycloak.route.path }}
-    - name: keycloak
+    {{- /* Vendored fc-service route when enabled with route.path — service
+         name/port are fc-service's own fixed defaults (kept verbatim, not
+         release-prefixed — see Chart.yaml's fc-service dependency). */}}
+    {{- if and .Values.fcservice.enabled .Values.fcservice.route.path }}
+    - name: fc-service
       match:
         - uri:
-            prefix: {{ include "digital-contracting-service.keycloakRoutePath" . }}
+            prefix: {{ include "digital-contracting-service.fcserviceRoutePath" . }}
       route:
         - destination:
-            host: {{ .Release.Name }}-keycloak
+            host: fc-service
             port:
-              number: {{ .Values.keycloak.service.port | int }}
-    {{- end }}
-    {{- /* Federated Catalogue Portal route when enabled with route.path */}}
-    {{- if and .Values.federatedCatalogue.enabled .Values.federatedCatalogue.portal.enabled .Values.federatedCatalogue.portal.route.path }}
-    - name: federated-catalogue-portal
-      match:
-        - uri:
-            prefix: {{ .Values.federatedCatalogue.portal.route.path }}
-      route:
-        - destination:
-            host: {{ .Release.Name }}-federated-catalogue-portal
-            port:
-              number: {{ .Values.federatedCatalogue.portal.service.port | default 8088 | int }}
-    {{- end }}
-    {{- /* Federated Catalogue API route when enabled with route.path */}}
-    {{- if and .Values.federatedCatalogue.enabled .Values.federatedCatalogue.route.path }}
-    - name: federated-catalogue
-      match:
-        - uri:
-            prefix: {{ .Values.federatedCatalogue.route.path }}
-      route:
-        - destination:
-            host: {{ .Release.Name }}-federated-catalogue
-            port:
-              number: {{ .Values.federatedCatalogue.service.port | int }}
+              number: 8081
     {{- end }}
     {{- /* DCS application route */}}
     - name: dcs

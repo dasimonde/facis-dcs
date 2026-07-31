@@ -1,3 +1,12 @@
+<script setup lang="ts">
+withDefaults(
+  defineProps<{
+    size?: number
+  }>(),
+  { size: 20 },
+)
+</script>
+
 <template>
   <svg
     :width="size"
@@ -13,12 +22,3 @@
     <path d="M14 10H6M10 6l-4 4 4 4" />
   </svg>
 </template>
-
-<script setup lang="ts">
-withDefaults(
-  defineProps<{
-    size?: number
-  }>(),
-  { size: 20 },
-)
-</script>

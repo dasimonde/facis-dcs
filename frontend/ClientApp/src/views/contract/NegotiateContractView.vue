@@ -1,30 +1,42 @@
 <script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { computed, onMounted, onUnmounted, type Ref, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
+import { contractStory, toBannerActions } from '@core/workflow-story'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
+import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import AuditView from '@contract-workflow-engine/components/AuditView.vue'
+import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
+import DiffView from '@contract-workflow-engine/components/DiffView.vue'
+import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
+import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
+import { useSemanticValueVerification } from '@contract-workflow-engine/composables/useSemanticValueVerification'
+import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
+import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
+import {
+  collectDeclaredRequirements,
+  fromDocumentSemanticValues,
+} from '@contract-workflow-engine/utils/semantic-condition-values'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
 import NegotiationList from '@/components/lists/contract/negotiation/NegotiationList.vue'
-import { useScrollStore } from '@/core/store/scroll'
-import type { ContractData, SemanticConditionValue } from '@/models/contract-data'
-import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
-import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
-import AuditView from '@/modules/contract-workflow-engine/components/AuditView.vue'
-import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
-import ContractHistoryDiffView from '@/modules/contract-workflow-engine/components/ContractHistoryDiffView.vue'
-import { useContractDataPreprocess } from '@/modules/contract-workflow-engine/composables/useContractDataPreprocess'
-import { useSemanticValueVerification } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
-import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
-import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
-import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
-import TemplatePreview from '@/modules/template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import { useTemplateDraftStore } from '@/modules/template-repository/store/templateDraftStore'
-import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
+import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { getLocalDIDFile } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
+import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
+import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
+import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 import type { UserRole } from '@/types/user-role'
-import { storeToRefs } from 'pinia'
-import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch, type Ref } from 'vue'
-import { useRoute } from 'vue-router'
+import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
 const navStore = useNavStore()
@@ -34,16 +46,17 @@ const issuer = computed(() => authStore.user?.issuer)
 
 const errorStore = useErrorStore()
 
-const templateDraftStore = useTemplateDraftStore()
+const dcsDraftStore = useDcsDraftStore()
 const contractEditorUiStore = useContractEditorUiStore()
 const templateEditorUiStore = useTemplateEditorUiStore()
 const { hasConditionParameterForValue, verifySemanticValue } = useSemanticValueVerification()
 const { preprocessContractData } = useContractDataPreprocess()
 const { activeTab } = storeToRefs(contractEditorUiStore)
 const contractContentValuesStore = useContractContentValuesStore()
-const scrollStore = useScrollStore()
 
 const isSubmitting = ref(false)
+
+const { isCreator, isReviewer } = useContractPermissions()
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number | boolean) =>
@@ -59,24 +72,29 @@ const isAuditingAuthorized = computed(
 
 const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
+const story = computed(() =>
+  contractStory(contract.value?.state, { extrinsicLifecycle: contract.value?.extrinsic_lifecycle }),
+)
+
 const verificationResult = computed(() => {
-  const subTemplateSemanticConditions = templateDraftStore.subTemplateSnapshots.map((subTemplate) => ({
-    templateId: subTemplate.did,
-    version: subTemplate.version,
-    document_number: subTemplate.document_number,
-    semanticConditions: subTemplate.template_data?.semanticConditions ?? [],
-  }))
   return verifySemanticValue(
-    templateDraftStore.semanticConditions,
-    subTemplateSemanticConditions,
+    dcsDraftStore.semanticConditions,
     contractContentValuesStore.semanticConditionValues,
-    templateDraftStore.documentBlocks,
+    dcsDraftStore.blocks,
   )
 })
 
 const contract: Ref<Contract | null> = ref(null)
 const editedContract: Ref<Contract | null> = ref(null)
-const compareChangesData: Ref<(Contract & { exp_notice_period_str: string; exp_policy_str: string }) | null> = ref(null)
+
+interface ProposalComparison {
+  current: Contract
+  proposed: Contract
+  currentContractData?: ContractData
+  proposedContractData?: ContractData
+}
+
+const proposalComparison = ref<ProposalComparison | null>(null)
 
 const hasChangeRequest = computed(() => {
   return (
@@ -88,6 +106,8 @@ const hasChangeRequest = computed(() => {
   )
 })
 
+const contractSemanticConditionValueSnapshot: Ref<SemanticConditionValue[]> = ref([])
+
 const changedName = computed(() => editedContract.value?.name !== contract.value?.name)
 const changedDescription = computed(() => editedContract.value?.description !== contract.value?.description)
 const changeExpNoticePeriod = computed(
@@ -96,19 +116,38 @@ const changeExpNoticePeriod = computed(
 const changeExpPolicy = computed(() => editedContract.value?.exp_policy != contract.value?.exp_policy)
 const changedContractData = computed(() => {
   const storedValues = contractContentValuesStore.semanticConditionValues
-  const contractValues = contract.value?.contract_data?.semanticConditionValues
-
-  if (!storedValues?.length || !contractValues?.length) return false
-
-  return !arrayEqual(
-    storedValues.map((v) => v.parameterValue),
-    contractValues.map((v) => v.parameterValue),
-  )
+  return !semanticConditionValuesEqual(storedValues, contractSemanticConditionValueSnapshot.value)
 })
 
-const arrayEqual = (a: unknown[], b: unknown[]) => {
+const semanticConditionValuesEqual = (a: SemanticConditionValue[], b: SemanticConditionValue[]) => {
   if (a.length !== b.length) return false
-  return a.every((value, i) => value === b[i])
+  const bValues = new Map(
+    b.map((value) => [`${value.blockId}|${value.conditionId}|${value.parameterName}`, value.parameterValue]),
+  )
+  return a.every((value) => {
+    const key = `${value.blockId}|${value.conditionId}|${value.parameterName}`
+    return bValues.get(key) === value.parameterValue
+  })
+}
+
+function buildCurrentContractData(): ContractData | undefined {
+  if (!contract.value) return undefined
+  return buildContractDocument({
+    documentId:
+      ((contract.value.contract_data as Record<string, unknown> | undefined)?.['@id'] as string | undefined) ??
+      contract.value.did,
+    storedDocument: contract.value.contract_data,
+    name: editedContract.value?.name ?? contract.value.name,
+    description: editedContract.value?.description ?? contract.value.description,
+    blocks: dcsDraftStore.blocks,
+    layout: dcsDraftStore.layout,
+    contractFields: dcsDraftStore.contractFields,
+    contractData: dcsDraftStore.contractData,
+    policies: dcsDraftStore.policies,
+    semanticConditionValues: contractContentValuesStore.semanticConditionValues,
+    derivedFromTemplate: contract.value.contract_data?.derivedFromTemplate,
+    parentContractDid: contract.value.contract_data?.['dcs:parentContract']?.['@id'],
+  })
 }
 
 const loadContract = async () => {
@@ -118,9 +157,10 @@ const loadContract = async () => {
       contract.value = await contractWorkflowService.retrieveById({ did: id })
       editedContract.value = !!contract.value ? { ...contract.value } : null
       applyContractDataToDraft(contract.value?.contract_data)
+      await restoreNegotiationDraft()
     }
   } catch (err: unknown) {
-    console.error('Failed to load contract', err)
+    reportActionError(err, 'Load negotiation')
   }
 }
 
@@ -134,59 +174,128 @@ watch(
 )
 
 watch(
-  () => [
-    templateDraftStore.documentBlocks,
-    templateDraftStore.semanticConditions,
-    templateDraftStore.subTemplateSnapshots,
-  ],
+  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
-        !hasConditionParameterForValue(
-          conditionValue,
-          templateDraftStore.documentBlocks,
-          templateDraftStore.semanticConditions,
-          templateDraftStore.subTemplateSnapshots,
-        ),
+        !hasConditionParameterForValue(conditionValue, dcsDraftStore.blocks, dcsDraftStore.semanticConditions),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },
   { deep: true },
 )
 
+function buildChangeRequest(): ContractChangeRequest {
+  const changeRequest: ContractChangeRequest = {}
+  if (!editedContract.value) return changeRequest
+  if (changedName.value) {
+    changeRequest.name = editedContract.value.name
+  }
+  if (changedDescription.value) {
+    changeRequest.description = editedContract.value.description
+  }
+  if (changeExpNoticePeriod.value) {
+    changeRequest.exp_notice_period = editedContract.value.exp_notice_period
+  }
+  if (changeExpPolicy.value) {
+    changeRequest.exp_policy = editedContract.value.exp_policy
+  }
+  if (changedContractData.value) {
+    changeRequest.contract_data = buildCurrentContractData()
+  }
+  return changeRequest
+}
+
 const negotiateContractChange = async () => {
   if (!contract.value || !editedContract.value || !issuer.value) return
+  // Same gate the forward-to-approval path applies: a counter-offer breaking the
+  // contract's machine-readable policy is refused at approval anyway, so it is
+  // reported here — naming the constraint — instead of shipping to the peer.
+  if (!verificationResult.value.isValid) {
+    verificationResult.value.errors.forEach((error) => errorStore.add(error.message))
+    contractEditorUiStore.setActiveTab('content')
+    return
+  }
   isSubmitting.value = true
   try {
-    const changeRequest: ContractChangeRequest = {}
-    if (changedName.value) {
-      changeRequest.name = editedContract.value.name
-    }
-    if (changedDescription.value) {
-      changeRequest.description = editedContract.value.description
-    }
-    if (changeExpNoticePeriod.value) {
-      changeRequest.exp_notice_period = editedContract.value.exp_notice_period
-    }
-    if (changeExpPolicy.value) {
-      changeRequest.exp_policy = editedContract.value.exp_policy
-    }
-    if (changedContractData.value) {
-      changeRequest.contract_data = { semanticConditionValues: contractContentValuesStore.semanticConditionValues }
-    }
     const response = await contractWorkflowService.negotiate({
       did: contract.value?.did,
       updated_at: contract.value?.updated_at,
       negotiated_by: issuer.value,
-      change_request: changeRequest,
+      change_request: buildChangeRequest(),
     })
     if (response.did) {
+      // Proposing consumed the server-side draft (SRS §3.1.1 "Save draft" vs
+      // "Propose change") — loadContract re-checks and finds none.
       await loadContract()
     }
   } catch (err) {
-    console.error('Failed to submit change request', err)
+    reportActionError(err, 'Propose contract changes')
   } finally {
     isSubmitting.value = false
+  }
+}
+
+// SRS §3.1.1 Contract Negotiation UI "Save draft": stage the current
+// modifications privately (per contract + author, server-side) without
+// proposing them; restored into the editor on the next visit.
+const draftSaved = ref(false)
+const isSavingDraft = ref(false)
+
+const saveNegotiationDraft = async () => {
+  if (!contract.value || !hasChangeRequest.value) return
+  isSavingDraft.value = true
+  try {
+    await contractWorkflowService.saveNegotiationDraft({
+      did: contract.value.did,
+      change_request: buildChangeRequest(),
+    })
+    draftSaved.value = true
+    errorStore.add('Negotiation draft saved. It stays private until you propose it.', 'info')
+  } catch (err) {
+    reportActionError(err, 'Save negotiation draft')
+  } finally {
+    isSavingDraft.value = false
+  }
+}
+
+const discardNegotiationDraft = async () => {
+  if (!contract.value) return
+  isSavingDraft.value = true
+  try {
+    await contractWorkflowService.deleteNegotiationDraft({ did: contract.value.did })
+    draftSaved.value = false
+    await loadContract()
+  } catch (err) {
+    reportActionError(err, 'Discard negotiation draft')
+  } finally {
+    isSavingDraft.value = false
+  }
+}
+
+async function restoreNegotiationDraft() {
+  if (!contract.value || !editedContract.value) return
+  try {
+    const response = await contractWorkflowService.retrieveNegotiationDraft({ did: contract.value.did })
+    const changeRequest = response?.change_request
+    if (!changeRequest) {
+      draftSaved.value = false
+      return
+    }
+    draftSaved.value = true
+    if (changeRequest.name !== undefined) editedContract.value.name = changeRequest.name
+    if (changeRequest.description !== undefined) editedContract.value.description = changeRequest.description
+    if (changeRequest.exp_notice_period !== undefined)
+      editedContract.value.exp_notice_period = changeRequest.exp_notice_period
+    if (changeRequest.exp_policy !== undefined) editedContract.value.exp_policy = changeRequest.exp_policy
+    if (changeRequest.contract_data) {
+      // Same mechanism the negotiation compare view uses to overlay a change
+      // request's values onto the editor.
+      const draftValues = fromDocumentSemanticValues(collectDeclaredRequirements(changeRequest.contract_data))
+      draftValues.forEach((value) => contractContentValuesStore.setSemanticConditionValue(value))
+    }
+  } catch (err) {
+    reportActionError(err, 'Restore negotiation draft')
   }
 }
 
@@ -208,25 +317,65 @@ const submitContract = async () => {
       }
     }
   } catch (err) {
-    console.error('Failed to submit', err)
+    reportActionError(err, 'Submit negotiated contract')
   } finally {
     isSubmitting.value = false
   }
 }
 
+// Only THIS party's undecided decisions may block Submit. A negotiation
+// replicates to both instances carrying a decision row per negotiator, but each
+// instance resolves its own row in its own database — the counterparty's
+// acceptance never lands here. Counting every row therefore deadlocked the
+// federated round: the peer's pending decision disabled our Submit forever, and
+// responding to it matched no row (the respond updates WHERE negotiator = us).
+// Identifies which negotiation decisions are OURS: decisions are keyed by the
+// party's DCS instance did:web, not by the logged-in user's issuer (that is the
+// signatory's organization and never matches a party).
+const localInstanceDid = ref('')
+
+// A change request we authored ourselves is excluded: FR-CWE-07 refuses an
+// accept by its own author, so it would disable Submit with a decision this
+// user can never resolve. The backend submit gate skips the same rows.
 const hasOpenDecisions = computed(
   () =>
-    contract.value?.negotiations?.some((negotiation) =>
-      negotiation.negotiation_decisions.some((decision) => !decision.decision),
+    contract.value?.negotiations?.some(
+      (negotiation) =>
+        negotiation.created_by !== issuer.value &&
+        negotiation.negotiation_decisions.some(
+          (decision) => !decision.decision && decision.negotiator === localInstanceDid.value,
+        ),
     ) ?? false,
 )
 
-onMounted(() => {
+// TEMP-INSTRUMENT: log what disables the Submit button on the negotiate view.
+watch(
+  () => ({
+    state: contract.value?.state,
+    isCreator: isCreator.value,
+    isReviewer: isReviewer.value,
+    hasChangeRequest: hasChangeRequest.value,
+    changedName: changedName.value,
+    changedDescription: changedDescription.value,
+    changedContractData: changedContractData.value,
+    hasOpenDecisions: hasOpenDecisions.value,
+    proposalComparison: !!proposalComparison.value,
+    contractVersion: contract.value?.contract_version,
+    store: contractContentValuesStore.semanticConditionValues,
+    snapshot: contractSemanticConditionValueSnapshot.value,
+  }),
+  (s) => console.log('[SUBMIT-GATE]', JSON.stringify(s)),
+  { immediate: true, deep: true },
+)
+
+onMounted(async () => {
   templateEditorUiStore.reset({ workflow: 'contract' })
+  // Our own party identity, used to tell our pending decisions from the peer's.
+  localInstanceDid.value = (await getLocalDIDFile().catch(() => ({ id: '' }))).id
 })
 
 onUnmounted(() => {
-  templateDraftStore.reset({ workflow: 'contract' })
+  dcsDraftStore.reset({ workflow: 'contract' })
   contractContentValuesStore.reset()
   contractEditorUiStore.reset()
   templateEditorUiStore.reset({ workflow: 'contract' })
@@ -235,112 +384,62 @@ onUnmounted(() => {
 // Contract data includes the template data used to fill the contract template
 function applyContractDataToDraft(contractData?: unknown) {
   if (contractData == null) {
-    templateDraftStore.reset({ workflow: 'contract' })
+    contractSemanticConditionValueSnapshot.value = []
+    dcsDraftStore.reset({ workflow: 'contract' })
     contractContentValuesStore.reset()
     return
   }
-  const cd = preprocessContractData(contractData as ContractData)
-  templateDraftStore.reset({
-    workflow: 'contract',
-    documentOutline: cd.documentOutline ?? [],
-    documentBlocks: cd.documentBlocks ?? [],
-    semanticConditions: cd.semanticConditions ?? [],
-    subTemplateSnapshots: cd.subTemplateSnapshots ?? [],
-    templateDataVersion: cd.templateDataVersion,
-    semanticProfile: cd.semanticProfile,
-    templateVariables: cd.templateVariables ?? [],
-    placeholderBindings: cd.placeholderBindings ?? [],
-    semanticRules: cd.semanticRules ?? [],
-    sla: cd.sla ?? null,
-  })
-  contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
+  const cd = preprocessContractData(contractData)
+  contractSemanticConditionValueSnapshot.value = (cd?.semanticConditionValues ?? []).map((value) => ({ ...value }))
+  if (cd) {
+    dcsDraftStore.reset({
+      workflow: 'contract',
+      documentIri: ((contractData as Record<string, unknown>)['@id'] as string | undefined) ?? null,
+      blocks: cd.blocks,
+      layout: cd.layout,
+      contractFields: cd.contractFields,
+      contractData: cd.contractData,
+      policies: cd.policies,
+    })
+    contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
+  } else {
+    dcsDraftStore.reset({ workflow: 'contract' })
+    contractContentValuesStore.reset()
+  }
 }
 
-const templatePreviewContent = useTemplateRef<HTMLElement>('template-preview-content')
+function immutableSnapshot<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
 
-const originalSemanticConditionValues: Ref<SemanticConditionValue[]> = ref([])
-const originalValuesWereCached = ref(false)
-
-const handleSelectedNegotiation = async (negotiation: ContractNegotiation | null) => {
+const handleSelectedNegotiation = (negotiation: ContractNegotiation | null) => {
   if (!contract.value) return
-  compareChangesData.value = !!negotiation
-    ? {
-        ...contract.value,
-        name: negotiation.change_request.name
-          ? `${contract.value.name} -> ${negotiation.change_request.name}`
-          : contract.value.name,
-        exp_notice_period_str: negotiation.change_request.exp_notice_period
-          ? `${contract.value.exp_notice_period} -> ${negotiation.change_request.exp_notice_period}`
-          : (contract.value.exp_notice_period?.toString() ?? ''),
-        exp_policy_str: negotiation.change_request.exp_policy
-          ? `${contract.value.exp_policy} -> ${negotiation.change_request.exp_policy}`
-          : (contract.value.exp_policy ?? ''),
-        description: negotiation.change_request.description
-          ? `${contract.value.description} -> ${negotiation.change_request.description}`
-          : contract.value.description,
-        contract_data: contract.value.contract_data,
-      }
-    : null
+  if (!negotiation) {
+    proposalComparison.value = null
+    return
+  }
 
-  if (compareChangesData.value && negotiation) {
-    if (!originalValuesWereCached.value) {
-      originalSemanticConditionValues.value = [...contractContentValuesStore.semanticConditionValues]
-      originalValuesWereCached.value = true
-    }
-    const negotiationValues = negotiation.change_request.contract_data?.semanticConditionValues ?? []
+  const current = immutableSnapshot(contract.value)
+  const currentContractData = current.contract_data ? immutableSnapshot(current.contract_data) : undefined
+  const proposedContractData = negotiation.change_request.contract_data
+    ? immutableSnapshot(negotiation.change_request.contract_data)
+    : currentContractData
+      ? immutableSnapshot(currentContractData)
+      : undefined
+  const proposed = immutableSnapshot({
+    ...current,
+    name: negotiation.change_request.name ?? current.name,
+    description: negotiation.change_request.description ?? current.description,
+    exp_notice_period: negotiation.change_request.exp_notice_period ?? current.exp_notice_period,
+    exp_policy: negotiation.change_request.exp_policy ?? current.exp_policy,
+    contract_data: proposedContractData,
+  })
 
-    const originalValuesMap = new Map(
-      contract.value.contract_data?.semanticConditionValues?.map((value) => [
-        `${value.blockId}|${value.conditionId}|${value.parameterName}`,
-        String(value.parameterValue),
-      ]) ?? [],
-    )
-    const negotiationValuesMap = new Map(
-      negotiationValues.map((value) => [
-        `${value.blockId}|${value.conditionId}|${value.parameterName}`,
-        String(value.parameterValue),
-      ]),
-    )
-    negotiationValues.forEach((value) => contractContentValuesStore.setSemanticConditionValue(value))
-
-    await nextTick()
-
-    requestAnimationFrame(() => {
-      const inputs = Array.from(templatePreviewContent.value?.querySelectorAll('input') ?? [])
-
-      const highlightedValues = new Set<string>()
-      for (const [key, negotiationValue] of negotiationValuesMap.entries()) {
-        const originalValue = originalValuesMap.get(key)
-        if (negotiationValue !== originalValue) {
-          highlightedValues.add(negotiationValue)
-        }
-      }
-
-      inputs.forEach((input) => {
-        if (highlightedValues.has(input.value)) {
-          input.classList.add('!border-warning', '!border-2')
-          input.style.setProperty('border-color', '#f59e0b', 'important')
-          input.style.setProperty('border-width', '2px', 'important')
-        } else {
-          input.classList.remove('!border-warning', '!border-2')
-          input.style.removeProperty('border-color')
-          input.style.removeProperty('border-width')
-        }
-      })
-    })
-
-    scrollStore.scrollToTop()
-  } else {
-    contractContentValuesStore.reset({ semanticConditionValues: originalSemanticConditionValues.value })
-    originalValuesWereCached.value = false
-    requestAnimationFrame(() => {
-      const inputs = Array.from(templatePreviewContent.value?.querySelectorAll('input') ?? [])
-      inputs.forEach((input) => {
-        input.classList.remove('!border-warning', '!border-2')
-        input.style.removeProperty('border-color')
-        input.style.removeProperty('border-width')
-      })
-    })
+  proposalComparison.value = {
+    current,
+    proposed,
+    currentContractData,
+    proposedContractData,
   }
 }
 
@@ -352,33 +451,29 @@ const shownData = computed(() => {
 })
 
 const currentContractData = computed<ContractData | undefined>(() => {
-  const data = contract.value?.contract_data
-  if (!data) return undefined
-  const preprocessedContractData = preprocessContractData(data)
-
-  return {
-    ...preprocessedContractData,
-    semanticConditionValues: [...contractContentValuesStore.semanticConditionValues],
-  }
+  return buildCurrentContractData()
 })
 
 const hasActiveNegotiations = computed(() => {
+  // A negotiation needs surfacing while it still carries an undecided decision
+  // (that decision blocks Submit) OR it targets the current version. Keying on
+  // the version alone hid the list once a counter's immediate redline bumped the
+  // contract version, deadlocking the round: Submit disabled, no list to resolve.
   return (
     contract.value?.negotiations?.some(
-      (negotiation) => negotiation.contract_version === contract.value?.contract_version,
+      (negotiation) =>
+        negotiation.contract_version === contract.value?.contract_version ||
+        negotiation.negotiation_decisions.some((decision) => !decision.decision),
     ) ?? false
   )
 })
 
-const exportPdf = async () => {
-  const did = route.params.did as string
-  const blob = await contractWorkflowService.exportPdf(did)
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `contract-${did}.pdf`
-  a.click()
-  URL.revokeObjectURL(url)
+const { download: downloadExport, exporting } = useDocumentExport()
+
+const exportPDF = async () => {
+  const did = contract?.value?.did
+  if (!did) return
+  await downloadExport(() => contractWorkflowService.exportPdf(did), `contract-${did}.pdf`)
 }
 </script>
 
@@ -389,13 +484,13 @@ const exportPdf = async () => {
         <!-- Tabs -->
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
-            <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">Negotiate Contract</p>
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Negotiate Contract</p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
               <a
                 v-for="tab in tabs"
                 :key="tab.id"
                 role="tab"
-                class="tab"
+                class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
@@ -408,54 +503,121 @@ const exportPdf = async () => {
         <div class="mt-5 grow">
           <div class="mx-auto max-w-4xl p-6">
             <div class="grid grid-cols-1 gap-4">
-              <div v-show="activeTab === 'details'">
-                <ContractDetailsEditor
-                  :contract="shownData"
-                  :inserted="{
-                    name: compareChangesData?.name,
-                    description: compareChangesData?.description,
-                    exp_notice_period: compareChangesData?.exp_notice_period_str,
-                    exp_policy: compareChangesData?.exp_policy_str,
-                  }"
-                />
-              </div>
-
-              <div v-show="activeTab === 'content'">
-                <div class="card border border-base-300 bg-base-100 shadow-sm">
-                  <div class="card-body gap-5">
-                    <div ref="template-preview-content">
-                      <TemplatePreview
-                        :document-outline="templateDraftStore.documentOutline"
-                        :document-blocks="templateDraftStore.documentBlocks"
-                        :semantic-conditions="templateDraftStore.semanticConditions"
-                        :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
-                        :verification-result="verificationResult"
-                        :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
-                        :set-semantic-condition-value="setSemanticConditionValue"
-                      />
-                    </div>
-                  </div>
+              <WorkflowStageBanner
+                :steps="story.steps"
+                :current-key="story.currentKey"
+                :headline="story.headline"
+                :narrative="story.narrative"
+                :actions="toBannerActions(story.actionHints)"
+              />
+              <section
+                v-if="proposalComparison"
+                data-testid="proposal-comparison"
+                class="space-y-4"
+                aria-labelledby="proposal-comparison-heading"
+              >
+                <div>
+                  <h2 id="proposal-comparison-heading" class="text-xl font-semibold">Selected change proposal</h2>
+                  <p class="mt-1 text-sm text-base-content/70">
+                    Current contract and proposed contract are complete, separate snapshots. Highlighting marks changed
+                    contract content.
+                  </p>
                 </div>
-              </div>
 
-              <div v-show="activeTab === 'diff'">
-                <ContractHistoryDiffView
-                  v-if="contract"
-                  :contract-did="contract.did"
-                  :contract-state="contract.state"
-                  :current-contract-data="currentContractData"
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <article data-testid="proposal-current" class="card border border-base-300 bg-base-100 shadow-sm">
+                    <div class="card-body min-w-0">
+                      <h3 class="card-title">Current contract</h3>
+                      <dl class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+                        <dt class="font-medium">Name</dt>
+                        <dd class="break-words">{{ proposalComparison.current.name || '—' }}</dd>
+                        <dt class="font-medium">Description</dt>
+                        <dd class="break-words">{{ proposalComparison.current.description || '—' }}</dd>
+                        <dt class="font-medium">Notice period</dt>
+                        <dd>{{ proposalComparison.current.exp_notice_period ?? '—' }}</dd>
+                        <dt class="font-medium">Expiry policy</dt>
+                        <dd>{{ proposalComparison.current.exp_policy || '—' }}</dd>
+                      </dl>
+                    </div>
+                  </article>
+                  <article data-testid="proposal-proposed" class="card border border-primary/40 bg-primary/5 shadow-sm">
+                    <div class="card-body min-w-0">
+                      <h3 class="card-title">Proposed contract</h3>
+                      <dl class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+                        <dt class="font-medium">Name</dt>
+                        <dd class="break-words">{{ proposalComparison.proposed.name || '—' }}</dd>
+                        <dt class="font-medium">Description</dt>
+                        <dd class="break-words">{{ proposalComparison.proposed.description || '—' }}</dd>
+                        <dt class="font-medium">Notice period</dt>
+                        <dd>{{ proposalComparison.proposed.exp_notice_period ?? '—' }}</dd>
+                        <dt class="font-medium">Expiry policy</dt>
+                        <dd>{{ proposalComparison.proposed.exp_policy || '—' }}</dd>
+                      </dl>
+                    </div>
+                  </article>
+                </div>
+
+                <DiffView
+                  data-testid="proposal-content-diff"
+                  :left-contract-data="proposalComparison.currentContractData"
+                  :right-contract-data="proposalComparison.proposedContractData"
+                  left-pane-title="Current contract content"
+                  right-pane-title="Proposed contract content"
+                  :show-line-numbers="true"
+                  :highlight-diff="true"
                 />
-              </div>
+              </section>
 
-              <template v-if="isAuditingAuthorized">
-                <div v-show="activeTab === 'audit'">
+              <template v-else>
+                <div v-show="activeTab === 'details'">
+                  <ContractDetailsEditor :contract="shownData" />
+                </div>
+
+                <div v-show="activeTab === 'content'">
                   <div class="card border border-base-300 bg-base-100 shadow-sm">
-                    <div class="card-body">
-                      <h2 class="card-title text-sm">Audit History</h2>
-                      <AuditView />
+                    <div class="card-body gap-5">
+                      <div class="space-y-5">
+                        <TemplatePreview
+                          :layout="dcsDraftStore.layout"
+                          :blocks="dcsDraftStore.blocks"
+                          :semantic-conditions="dcsDraftStore.semanticConditions"
+                          :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                          :verification-result="verificationResult"
+                          :set-semantic-condition-value="setSemanticConditionValue"
+                        />
+                        <template v-if="dcsDraftStore.contractData.length">
+                          <div class="divider text-xs text-base-content/40">semantic data objects</div>
+                          <DataObjectsEditor
+                            mode="contract"
+                            :editable="!!setSemanticConditionValue"
+                            :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                            :set-semantic-condition-value="setSemanticConditionValue ?? undefined"
+                          />
+                        </template>
+                      </div>
                     </div>
                   </div>
                 </div>
+
+                <div v-show="activeTab === 'diff'">
+                  <ContractHistoryDiffView
+                    v-if="contract"
+                    :contract-did="contract.did"
+                    :contract-state="contract.state"
+                    :current-contract-data="currentContractData"
+                  />
+                </div>
+
+                <template v-if="isAuditingAuthorized">
+                  <div v-show="activeTab === 'audit'">
+                    <div class="card border border-base-300 bg-base-100 shadow-sm">
+                      <div class="card-body">
+                        <h2 class="card-title text-sm">Audit History</h2>
+                        <AuditView />
+                      </div>
+                    </div>
+                  </div>
+                </template>
               </template>
             </div>
           </div>
@@ -471,12 +633,35 @@ const exportPdf = async () => {
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
-        <button class="btn btn-outline md:w-32" @click="$router.back()">Cancel</button>
-        <button class="btn btn-outline md:w-32" @click="exportPdf">Export PDF</button>
+        <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
+        <!-- Needs the loaded contract's DID; until it arrives exportPDF can only
+             return silently, so the click looks like it did nothing. -->
+        <button class="btn btn-outline md:w-32" :disabled="exporting || !contract" @click="exportPDF">
+          Export PDF
+        </button>
         <button
-          v-if="contract?.state === ContractState.negotiation"
+          v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
+          class="btn btn-outline md:w-36"
+          :disabled="isSavingDraft || isSubmitting || !hasChangeRequest || !!proposalComparison"
+          @click="saveNegotiationDraft"
+        >
+          <span v-if="isSavingDraft" class="loading loading-sm loading-spinner"></span>
+          Save draft
+        </button>
+        <button
+          v-if="
+            draftSaved && (contract?.state === ContractState.negotiation || contract?.state === ContractState.offered)
+          "
+          class="btn btn-outline md:w-36"
+          :disabled="isSavingDraft || isSubmitting"
+          @click="discardNegotiationDraft"
+        >
+          Discard draft
+        </button>
+        <button
+          v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting || !hasChangeRequest || !!compareChangesData"
+          :disabled="isSubmitting || !hasChangeRequest || !!proposalComparison"
           @click="negotiateContractChange"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -485,7 +670,9 @@ const exportPdf = async () => {
         <button
           v-if="contract?.state === ContractState.negotiation"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting || hasChangeRequest || hasOpenDecisions || !!compareChangesData"
+          :disabled="
+            (!isCreator && !isReviewer) || isSubmitting || hasChangeRequest || hasOpenDecisions || !!proposalComparison
+          "
           @click="submitContract"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>

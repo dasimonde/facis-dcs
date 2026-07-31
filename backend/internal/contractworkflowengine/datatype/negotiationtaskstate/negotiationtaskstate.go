@@ -1,3 +1,8 @@
+// Package negotiationtaskstate tracks, per responsible peer, whether that
+// negotiator has responded in the current negotiation round (OPEN ->
+// ACCEPTED). Once every negotiator's task is no longer OPEN, Submit merges
+// all accepted change requests (see negotiationmerging) and bumps
+// contract_version.
 package negotiationtaskstate
 
 import (
@@ -26,7 +31,7 @@ func NewNegotiationTaskState(s string) (NegotiationTaskState, error) {
 	return ts, nil
 }
 
-// IsValid checks if the NegotiationTaskState is a valid role
+// IsValid reports whether the value is one of the declared NegotiationTaskState values.
 func (s NegotiationTaskState) IsValid() bool {
 	upper := NegotiationTaskState(strings.ToUpper(string(s)))
 	return validStates[upper]

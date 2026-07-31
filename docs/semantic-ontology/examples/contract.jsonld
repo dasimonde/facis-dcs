@@ -1,0 +1,114 @@
+{
+  "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6",
+  "@type": "dcs:Contract",
+  "@context": [
+    "https://dcs.example.org/api/semantic/context/facis-dcs?version=1",
+    {
+      "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+      "odrl": "http://www.w3.org/ns/odrl/2/",
+      "xsd": "http://www.w3.org/2001/XMLSchema#"
+    }
+  ],
+  "dcs:metadata": {
+    "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#metadata",
+    "@type": "dcs:ContractMetadata",
+    "dcs:title": "BDD ODRL Soundness Contract"
+  },
+  "dcs:policies": {
+    "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#policy-set-1",
+    "@type": "odrl:Offer",
+    "odrl:profile": {
+      "@id": "https://w3id.org/facis/dcs/ontology/v1/odrl-profile"
+    },
+    "odrl:obligation": [
+      {
+        "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#policy-coverage-0",
+        "@type": "odrl:Duty",
+        "dcs:prose": {
+          "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#block-clause-1"
+        },
+        "odrl:action": {
+          "@id": "dcs:provideCompliantValue"
+        },
+        "odrl:target": {
+          "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:dcs.example.org"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:dcs.example.org"
+        },
+        "odrl:constraint": {
+          "@type": "odrl:Constraint",
+          "odrl:operator": {
+            "@id": "odrl:gteq"
+          },
+          "odrl:leftOperand": {
+            "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage"
+          },
+          "odrl:rightOperand": 95
+        }
+      }
+    ]
+  },
+  "sh:shapesGraph": {
+    "@id": "https://dcs.example.org/api/semantic/shapes/facis-dcs?version=1"
+  },
+  "dcs:contractFields": [
+    {
+      "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage",
+      "@type": "dcs:ContractField",
+      "dcs:label": "Provider coverage",
+      "dcs:datatype": "xsd:decimal",
+      "dcs:required": true,
+      "dcs:value": 99
+    }
+  ],
+  "dcs:contractData": [
+    {
+      "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#provider-service-level",
+      "@type": "dcs:ServiceLevelClause",
+      "dcs:coverage": {
+        "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage"
+      }
+    }
+  ],
+  "dcterms:conformsTo": {
+    "@id": "https://dcs.example.org/api/semantic/profile/facis.sla.basic?version=1"
+  },
+  "dcs:documentStructure": {
+    "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#document-structure",
+    "@type": "dcs:DocumentStructure",
+    "dcs:blocks": {
+      "@list": [
+        {
+          "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#block-clause-1",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Provider coverage: ",
+              {
+                "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "dcs:layout": [
+      {
+        "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#block-root",
+        "@type": "dcs:LayoutNode",
+        "dcs:isRoot": true,
+        "dcs:children": {
+          "@list": [
+            {
+              "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#block-clause-1"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

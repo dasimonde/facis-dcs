@@ -20,6 +20,12 @@ type Event interface {
 	GetDID() string
 }
 
+// Create persists a domain event into the outbox table using the caller's
+// existing transaction (tx). This is the transactional-outbox half of the
+// audit trail: the event is guaranteed to be recorded exactly if the
+// surrounding business mutation commits, with no separate two-phase commit
+// needed. The asynchronous OutboxProcessor picks it up afterwards to anchor
+// it to IPFS/TSA and publish it on NATS.
 func Create(ctx context.Context, tx *sqlx.Tx, evt Event, component componenttype.ComponentType) error {
 	if evt == nil {
 		return errors.New("event cannot be nil")

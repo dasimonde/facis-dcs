@@ -50,7 +50,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.
 		CorrelationID: uuid.New().String(),
 		Event:         event,
 		DID:           did,
-		OccurredAt:    time.Now(),
+		OccurredAt:    time.Now().UTC(),
 		Data:          data,
 	}
 
@@ -78,15 +78,28 @@ func (d *Dispatcher) DispatchFromDCS(ctx context.Context, dcsEventType, did stri
 }
 
 func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
+	delivery := Delivery{
+		EventID:       payload.EventID,
+		CorrelationID: payload.CorrelationID,
+		Event:         payload.Event,
+		DID:           payload.DID,
+		CallbackURL:   sub.CallbackURL,
+		DeliveredAt:   time.Now().UTC(),
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("webhookplatform: marshal payload for %s: %v", sub.CallbackURL, err)
+		delivery.Error = err.Error()
+		d.store.AddDelivery(delivery)
 		return
 	}
 
 	req, err := http.NewRequest(http.MethodPost, sub.CallbackURL, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("webhookplatform: build request for %s: %v", sub.CallbackURL, err)
+		delivery.Error = err.Error()
+		d.store.AddDelivery(delivery)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -99,6 +112,8 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		log.Printf("webhookplatform: notify %s [%s]: %v", sub.CallbackURL, payload.Event, err)
+		delivery.Error = err.Error()
+		d.store.AddDelivery(delivery)
 		return
 	}
 	defer func(Body io.ReadCloser) {
@@ -111,6 +126,9 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	if err != nil {
 		log.Printf("webhookplatform: read response body: %v", err)
 	}
+
+	delivery.StatusCode = resp.StatusCode
+	d.store.AddDelivery(delivery)
 
 	log.Printf("webhookplatform: notified %s [%s] → HTTP %d", sub.CallbackURL, payload.Event, resp.StatusCode)
 }

@@ -1,8 +1,10 @@
-import { computed, unref, type MaybeRef } from 'vue'
-import type { DocumentOutline, DocumentOutlineBlock } from '@/modules/template-repository/models/contract-template'
+import { computed, type MaybeRef, unref } from 'vue'
+import type { DcsLayoutNode } from '@/models/dcs-jsonld'
 
 export interface FlattenedOutlineItem {
+  /** Full JSON-LD @id IRI of this block. */
   blockId: string
+  /** Full JSON-LD @id IRI of the parent node. */
   parentBlockId: string
   /** 0-based index of this block among its siblings (in the parent's children array). */
   siblingIndex: number
@@ -12,33 +14,35 @@ export interface FlattenedOutlineItem {
   depthLevel: number
 }
 
-/** Converts the document outline tree into a depth-first flat list of items with positional metadata. */
-function flattenOutline(outline: DocumentOutline): FlattenedOutlineItem[] {
-  const outlineByBlockId = new Map<string, DocumentOutlineBlock>(outline.map((b) => [b.blockId, b]))
-  const root = outline.find((b) => b.isRoot)
-  const rootChildIds = root?.children ?? []
+function layoutNodeChildIds(node: DcsLayoutNode): string[] {
+  return node['dcs:children']['@list'].map((ref) => ref['@id'])
+}
+
+function flattenLayout(layout: DcsLayoutNode[]): FlattenedOutlineItem[] {
+  const nodeById = new Map<string, DcsLayoutNode>(layout.map((n) => [n['@id'], n]))
+  const root = layout.find((n) => n['dcs:isRoot'])
   const result: FlattenedOutlineItem[] = []
 
   function collect(
-    blockId: string,
-    parentBlockId: string,
+    iri: string,
+    parentIri: string,
     siblingIndex: number,
     depthLevel: number,
     sectionNumberPath: number[],
   ) {
-    result.push({ blockId, parentBlockId, siblingIndex, sectionNumberPath, depthLevel })
-    const outlineBlock = outlineByBlockId.get(blockId)
-    const childIds = outlineBlock?.children ?? []
-    childIds.forEach((id, i) => collect(id, blockId, i, depthLevel + 1, [...sectionNumberPath, i + 1]))
+    result.push({ blockId: iri, parentBlockId: parentIri, siblingIndex, sectionNumberPath, depthLevel })
+    const node = nodeById.get(iri)
+    const childIris = node ? layoutNodeChildIds(node) : []
+    childIris.forEach((id, i) => collect(id, iri, i, depthLevel + 1, [...sectionNumberPath, i + 1]))
   }
 
   if (root) {
-    rootChildIds.forEach((id, i) => collect(id, root.blockId, i, 0, [i + 1]))
+    layoutNodeChildIds(root).forEach((id, i) => collect(id, root['@id'], i, 0, [i + 1]))
   }
   return result
 }
 
-/** Composable: returns a computed depth-first flat list from a document outline (ref or raw). */
-export function useFlattenedOutline(outline: MaybeRef<DocumentOutline>) {
-  return computed(() => flattenOutline(unref(outline)))
+/** Composable: returns a computed depth-first flat list from a JSON-LD layout (ref or raw). */
+export function useFlattenedOutline(layout: MaybeRef<DcsLayoutNode[]>) {
+  return computed(() => flattenLayout(unref(layout)))
 }

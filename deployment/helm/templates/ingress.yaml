@@ -28,7 +28,9 @@ spec:
   {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}
-    - host: {{ .host | quote }}
+    - {{- with .host }}
+      host: {{ . | quote }}
+      {{- end }}
       http:
         paths:
           {{- if .paths }}
@@ -50,15 +52,48 @@ spec:
                 port:
                   number: {{ $.Values.service.port | int }}
           {{- end }}
-          {{- /* Keycloak route on same host when enabled with route.path */}}
-          {{- if and $.Values.keycloak.enabled $.Values.keycloak.route.path }}
-          - path: {{ include "digital-contracting-service.keycloakRoutePath" $ }}
+          {{- /* Vendored fc-service route on same host when enabled with route.path —
+               lets another DCS instance's backend reach this one's FC across clusters.
+               Service name/port are fc-service's own fixed defaults (kept verbatim,
+               not release-prefixed — see Chart.yaml's fc-service dependency). */}}
+          {{- if and $.Values.fcservice.enabled $.Values.fcservice.route.path }}
+          - path: {{ include "digital-contracting-service.fcserviceRoutePath" $ }}
             pathType: {{ default "Prefix" $.Values.ingress.pathType }}
             backend:
               service:
-                name: {{ $.Release.Name }}-keycloak
+                name: fc-service
                 port:
-                  number: {{ $.Values.keycloak.service.port | int }}
+                  number: 8081
+          {{- end }}
+          {{- /* This instance's own /.well-known documents, routed to the backend BEFORE
+               Hydra's blanket /.well-known prefix below. A peer resolves this instance's
+               did:web against the host root (identity.FetchDIDDocumentFromHostname builds
+               https://<host>/.well-known/did.json), and the agreement credential + federation
+               rules are fetched the same way by the trust gate. Hydra owning all of
+               /.well-known shadows them, so did:web resolution 404s and federation cannot
+               start. These are exact paths so ingress-nginx prefers them over that prefix;
+               the backend serves each of them (see backend/design/did.go). */}}
+          {{- range include "digital-contracting-service.wellKnownPaths" $ | fromYamlArray }}
+          - path: {{ . }}
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "digital-contracting-service.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port | int }}
+          {{- end }}
+          {{- /* Hydra public OAuth2/OIDC routes — keeps Hydra off the edge; browser traffic
+               proxied through this ingress. selfIssuerURL must match the ingress host. */}}
+          {{- if and $.Values.hydra.enabled $.Values.hydra.route.paths }}
+          {{- range $.Values.hydra.route.paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Release.Name }}-hydra
+                port:
+                  number: {{ $.Values.hydra.service.publicPort | int }}
+          {{- end }}
           {{- end }}
     {{- end }}
 {{- end }}

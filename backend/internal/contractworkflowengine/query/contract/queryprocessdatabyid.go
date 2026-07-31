@@ -53,7 +53,7 @@ func (h *GetProcessDataByIDHandler) Handle(ctx context.Context, query GetProcess
 		}
 	}(tx)
 
-	data, err := h.CRepo.ReadProcessData(ctx, tx, query.DID)
+	data, err := h.CRepo.ReadProcessDataByDID(ctx, tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not get contract process data: %w", err)
 	}

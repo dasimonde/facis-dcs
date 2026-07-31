@@ -1,63 +1,38 @@
-<template>
-  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
-    <TemplateEditors title="Approve Template" />
-
-    <!-- Pinned Footer -->
-    <div v-if="hasDid" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
-      <!-- Decision notes container -->
-      <ConfirmationModal ref="decision-note-dialog" />
-      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
-        <button class="btn btn-outline md:w-32" @click="router.back()">Cancel</button>
-        <CopyTemplateButton v-if="isCreator || isManager" class="btn flex-1 btn-primary" />
-        <button class="btn flex-1 btn-primary" :disabled="isSubmitting" @click="reject">
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Reject
-        </button>
-        <button class="btn flex-1 btn-primary" :disabled="isSubmitting" @click="resubmit">
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Resubmit
-        </button>
-        <button class="btn flex-1 btn-primary" :disabled="isSubmitting" @click="approve">
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Approve
-        </button>
-        <TemplateManagerActions
-          v-if="contractTemplate && isManager"
-          :template="contractTemplate"
-          class="btn flex-1 btn-primary"
-        />
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import ConfirmationModal from '@/components/ConfirmationModal.vue'
-import TemplateManagerActions from '@/components/template/TemplateManagerActions.vue'
-import type { PartialContractTemplate } from '@/models/contract-template'
-import { contractTemplateService } from '@/services/contract-template-service'
-import { useNavStore } from '@/stores/nav-store'
+import { storeToRefs } from 'pinia'
+import { computed, type Ref, ref, useTemplateRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
+import { templateStory, toBannerActions } from '@core/workflow-story'
+import CopyTemplateButton from '@template-repository/components/CopyTemplateButton.vue'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
-import { computed, ref, useTemplateRef, watch, type Ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import CopyTemplateButton from '../components/CopyTemplateButton.vue'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import TemplateManagerActions from '@/components/template/TemplateManagerActions.vue'
+import { useDocumentExport } from '@/composables/useDocumentExport'
+import { contractTemplateService } from '@/services/contract-template-service'
+import { useNavStore } from '@/stores/nav-store'
+import { reportActionError } from '@/utils/report-action-error'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const router = useRouter()
 const route = useRoute()
 const navStore = useNavStore()
 
 const templateEditorUiStore = useTemplateEditorUiStore()
-const draftStore = useTemplateDraftStore()
+const draftStore = useDcsDraftStore()
+const { state, templateType } = storeToRefs(draftStore)
+
+const story = computed(() => templateStory(state.value, { templateType: templateType.value }))
 
 const decisionNoteDialog = useTemplateRef<InstanceType<typeof ConfirmationModal>>('decision-note-dialog')
 
 const hasDid = computed(() => !!route.params.did)
 const hasChosenType = ref(false)
 
-const { isCreator, isManager: isManagerBase } = useTemplatePermissions()
+const { isCreator, isManager: isManagerBase, isApprover } = useTemplatePermissions()
 const isManager = computed(() => hasDid.value && isManagerBase.value)
 
 const contractTemplate: Ref<PartialContractTemplate | null> = ref(null)
@@ -80,31 +55,18 @@ watch(
         templateEditorUiStore.setTemplateEditable(false)
         contractTemplate.value = template
 
-        draftStore.reset({
+        draftStore.loadDocument(template.template_data, {
           did: template.did,
-          name: template.name,
-          description: template.description,
-          templateDataVersion: template.template_data?.templateDataVersion ?? 1,
-          documentOutline: template.template_data?.documentOutline ?? [],
-          documentBlocks: template.template_data?.documentBlocks ?? [],
-          semanticConditions: template.template_data?.semanticConditions ?? [],
-          customMetaData: template.template_data?.customMetaData ?? [],
-          semanticProfile: template.template_data?.semanticProfile,
-          templateVariables: template.template_data?.templateVariables ?? [],
-          placeholderBindings: template.template_data?.placeholderBindings ?? [],
-          semanticRules: template.template_data?.semanticRules ?? [],
-          sla: template.template_data?.sla ?? null,
-          subTemplateSnapshots: template.template_data?.subTemplateSnapshots ?? [],
+          name: template.name ?? '',
+          description: template.description ?? '',
           templateType: template.template_type,
           state: template.state,
           version: template.version ?? null,
-          document_number: template.document_number ?? null,
           updated_at: template.updated_at ?? null,
-          responsible: template.responsible ?? null,
         })
       })
       .catch((error: unknown) => {
-        console.error('Failed to load template for editing', error)
+        reportActionError(error, 'Load template approval')
       })
   },
   { immediate: true },
@@ -117,10 +79,9 @@ async function approve() {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for approval')
+    reportActionError(new Error('The current template version is unavailable.'), 'Approve template')
     return
   }
-  isSubmitting.value = true
   try {
     const decisionNoteResult = await decisionNoteDialog.value?.reveal({
       message: 'Add decision note?',
@@ -131,6 +92,7 @@ async function approve() {
     } else if (decisionNoteResult?.data) {
       decisionNote.value = decisionNoteResult.data
     }
+    isSubmitting.value = true
     await contractTemplateService.approve({
       did,
       updated_at: updatedAt,
@@ -138,7 +100,7 @@ async function approve() {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Approval failed', error)
+    reportActionError(error, 'Approve template')
   } finally {
     isSubmitting.value = false
   }
@@ -148,10 +110,9 @@ async function resubmit() {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for reopen reviews')
+    reportActionError(new Error('The current template version is unavailable.'), 'Resubmit template')
     return
   }
-  isSubmitting.value = true
   try {
     const decisionNoteResult = await decisionNoteDialog.value?.reveal({
       message: 'Add decision note?',
@@ -162,6 +123,7 @@ async function resubmit() {
     } else if (decisionNoteResult?.data) {
       decisionNote.value = decisionNoteResult.data
     }
+    isSubmitting.value = true
     await contractTemplateService.submit({
       did,
       updated_at: updatedAt,
@@ -169,7 +131,7 @@ async function resubmit() {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Resubmission failed', error)
+    reportActionError(error, 'Resubmit template')
   } finally {
     isSubmitting.value = false
   }
@@ -179,7 +141,7 @@ async function reject() {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for rejection')
+    reportActionError(new Error('The current template version is unavailable.'), 'Reject template')
     return
   }
   const decisionNoteResult = await decisionNoteDialog.value?.reveal({
@@ -192,7 +154,7 @@ async function reject() {
     decisionNote.value = decisionNoteResult.data
   }
   if (!decisionNote.value?.trim()) {
-    console.error('Reason is required for rejection')
+    reportActionError(new Error('A reason is required.'), 'Reject template')
     return
   }
   isSubmitting.value = true
@@ -204,9 +166,66 @@ async function reject() {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Rejection failed', error)
+    reportActionError(error, 'Reject template')
   } finally {
     isSubmitting.value = false
   }
 }
+
+const { download: downloadExport, exporting } = useDocumentExport()
+
+const exportPDF = async () => {
+  const did = route.params?.did
+  if (!did || Array.isArray(did)) return
+  await downloadExport(() => contractTemplateService.exportPdf(did), `template-${did}.pdf`)
+}
 </script>
+
+<template>
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
+    <TemplateEditors title="Approve Template">
+      <template #before-tabs>
+        <WorkflowStageBanner
+          v-if="state"
+          :steps="story.steps"
+          :current-key="story.currentKey"
+          :headline="story.headline"
+          :narrative="story.narrative"
+          :actions="toBannerActions(story.actionHints)"
+        />
+      </template>
+    </TemplateEditors>
+
+    <!-- Pinned Footer -->
+    <div v-if="hasDid" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
+      <!-- Decision notes container -->
+      <ConfirmationModal ref="decision-note-dialog" />
+      <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
+        <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
+        <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
+        <CopyTemplateButton :disabled="!isCreator && !isManager" class="btn flex-1 btn-primary" />
+        <button :disabled="isSubmitting || (!isApprover && !isManager)" class="btn flex-1 btn-primary" @click="reject">
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
+          Reject
+        </button>
+        <button
+          :disabled="isSubmitting || (!isApprover && !isManager)"
+          class="btn flex-1 btn-primary"
+          @click="resubmit"
+        >
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
+          Resubmit
+        </button>
+        <button :disabled="isSubmitting || (!isApprover && !isManager)" class="btn flex-1 btn-primary" @click="approve">
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
+          Approve
+        </button>
+        <TemplateManagerActions
+          v-if="contractTemplate && isManager"
+          :template="contractTemplate"
+          class="btn flex-1 btn-primary"
+        />
+      </div>
+    </div>
+  </div>
+</template>

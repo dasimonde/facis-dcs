@@ -18,9 +18,10 @@ type NegotiationTaskData struct {
 
 type NegotiationTaskRepo interface {
 	Create(ctx context.Context, tx *sqlx.Tx, data NegotiationTaskData) (*time.Time, error)
+	RemoteCreate(ctx context.Context, tx *sqlx.Tx, data NegotiationTaskData) error
+	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data NegotiationTaskData) error
 	IsValidNegotiator(ctx context.Context, tx *sqlx.Tx, did string, negotiator string) (bool, error)
 	ReopenTasks(ctx context.Context, tx *sqlx.Tx, did string) error
-	ReadAll(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationTaskData, error)
 	ReadAllByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationTaskData, error)
 	ReadAllByNegotiator(ctx context.Context, tx *sqlx.Tx, negotiator string) ([]NegotiationTaskData, error)
 	ReadNegotiatorsForDID(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
@@ -28,5 +29,4 @@ type NegotiationTaskRepo interface {
 	AnyTasksInState(ctx context.Context, tx *sqlx.Tx, did string, states ...string) (bool, error)
 	TaskExistsInState(ctx context.Context, tx *sqlx.Tx, did string, negotiator string, state string) (bool, error)
 	TaskExist(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
-	Delete(ctx context.Context, tx *sqlx.Tx, did string) error
 }

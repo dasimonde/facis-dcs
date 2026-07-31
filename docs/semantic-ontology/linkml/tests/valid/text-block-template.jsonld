@@ -1,0 +1,30 @@
+{
+  "@context": {
+    "dcs": "https://w3id.org/facis/dcs/ontology/v1#"
+  },
+  "@id": "did:web:localhost:template:text-block",
+  "@type": "dcs:ContractTemplate",
+  "dcs:metadata": {
+    "@id": "did:web:localhost:template:text-block#metadata",
+    "@type": "dcs:TemplateMetadata",
+    "dcs:title": "Text Block Template"
+  },
+  "dcs:policies": [
+    {
+      "@id": "did:web:localhost:template:text-block#policy-1"
+    }
+  ],
+  "dcs:documentStructure": {
+    "@id": "did:web:localhost:template:text-block#document-structure",
+    "@type": "dcs:DocumentStructure",
+    "dcs:blocks": {
+      "@list": [
+        {
+          "@id": "did:web:localhost:template:text-block#block-1",
+          "@type": "dcs:TextBlock",
+          "dcs:text": "This is plain static text."
+        }
+      ]
+    }
+  }
+}

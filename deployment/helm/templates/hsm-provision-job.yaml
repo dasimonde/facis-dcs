@@ -1,0 +1,234 @@
+{{- if .Values.pkcs11.provisioning.enabled }}
+# Provisions the co-deployed SoftHSM2 software token (dev/staging/CI only, never
+# a production HSM): initializes the token, generates the five DCS ECDSA P-256
+# keys, and issues the C2PA x5chain bound to the dcs-c2pa token key, published as
+# a Secret that pdf-core mounts (pdf-core signs COSE bytes via the backend's
+# PKCS#11 key and only needs the public x5chain, DCS-IR-HI-01). Idempotent; runs
+# on every install/upgrade after the token PVC exists.
+{{- if .Values.pkcs11.provisioning.publishSecrets }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        {{- include "digital-contracting-service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: hsm-provision
+    spec:
+      {{- if .Values.pkcs11.provisioning.publishSecrets }}
+      serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+      {{- end }}
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hsm-provision
+          image: "{{ .Values.pkcs11.provisioning.image.repository | default .Values.image.repository }}:{{ .Values.pkcs11.provisioning.image.tag | default .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.pkcs11.provisioning.image.pullPolicy | default .Values.image.pullPolicy }}
+          # Runs as root to write into the freshly-provisioned volume; the token
+          # dir is chmod'd afterwards so the non-root backend can open it.
+          securityContext:
+            runAsUser: 0
+          {{- with .Values.pkcs11.provisioning.resources }}
+          # Without a block here the job inherits the namespace LimitRange
+          # default (commonly 1 CPU). On a namespace whose limits.cpu quota is
+          # already consumed by the release's own containers the job is refused
+          # outright, and since it provisions the signing identity the install
+          # never completes.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: PKCS11_PIN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "digital-contracting-service.hsmPinSecretName" . | quote }}
+                  key: {{ .Values.pkcs11.pinSecretRef.key | quote }}
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+              TOKEN_DIR={{ .Values.pkcs11.provisioning.tokenDir | quote }}
+              LABEL={{ .Values.pkcs11.tokenLabel | quote }}
+              MODULE={{ .Values.pkcs11.modulePath | quote }}
+              SO_PIN={{ .Values.pkcs11.provisioning.soPin | quote }}
+              SECRET_NAME={{ include "digital-contracting-service.hsmX5ChainSecretName" . | quote }}
+              IDENTITY_SECRET_NAME={{ include "digital-contracting-service.identitySecretName" . | quote }}
+              DID_HOSTNAME={{ include "digital-contracting-service.didHostname" . | quote }}
+              CRL_URL={{ printf "http://%s:%v%s/crl/dcs-c2pa.crl" (include "digital-contracting-service.fullname" .) .Values.service.port (include "digital-contracting-service.apiPath" .) | quote }}
+
+              /app/scripts/hsm-provision.sh "$TOKEN_DIR" "$LABEL" "$PKCS11_PIN" "$SO_PIN" "$MODULE"
+
+              # Store the x5chain + its dev CA inside the token dir so the CA
+              # stays a stable trust anchor across upgrades. No second leaf for
+              # a contract-signing cert: the DCS holds no contract-signing key
+              # (ADR-12/ADR-20) — only the C2PA claim-signing chain is provisioned.
+              /app/scripts/c2pa-cert-provision.sh "$TOKEN_DIR" "$LABEL" "$PKCS11_PIN" \
+                "$TOKEN_DIR/c2pa-x5chain.pem" "$MODULE" "$CRL_URL"
+
+              # Derive did.json from the dcs-did token key with the same /app/gendid
+              # tool dev-stack.sh uses natively (identity.NewDIDDocument is fatal on
+              # startup if the JWK does not match the token's key — SoftHSM2 keys are
+              # freshly generated every provisioning run, so a static did.json fixture
+              # would mismatch and crash-loop the backend).
+              # Prefer the configured issuer DID verbatim: it may carry did:web
+              # path segments (several instances on one hostname), which a
+              # hostname-derived identifier cannot express. Falls back to
+              # deriving one from the hostname when no issuer DID is set.
+              DID_ID={{ include "digital-contracting-service.issuerDID" . | quote }}
+              if [ -z "$DID_ID" ]; then
+                DID_ID="did:web:$(printf '%s' "$DID_HOSTNAME" | sed 's/:/%3A/g')"
+              fi
+              # The endpoint a peer dials after resolving this DID, so it has to
+              # carry the scheme callers actually reach us on: hardcoding http
+              # publishes a plaintext endpoint for every TLS deployment. Falls
+              # back to the hostname-derived form when no public base URL is set.
+              ENDPOINT_URL={{ include "digital-contracting-service.publicAnchorBaseURL" . | quote }}
+              if [ -z "$ENDPOINT_URL" ]; then
+                ENDPOINT_URL="http://${DID_HOSTNAME}/api"
+              fi
+              SOFTHSM2_CONF="$TOKEN_DIR/softhsm2.conf" \
+              PKCS11_MODULE_PATH="$MODULE" \
+              PKCS11_TOKEN_LABEL="$LABEL" \
+              PKCS11_PIN="$PKCS11_PIN" \
+                /app/gendid -out "$TOKEN_DIR/did.json" -did "$DID_ID" -endpoint "$ENDPOINT_URL"
+
+              # Let the non-root backend container read/write the token.
+              chmod -R a+rwX "$TOKEN_DIR"
+
+              {{- if not .Values.pkcs11.provisioning.publishSecrets }}
+              # publishSecrets=false: every artifact above already lives on the
+              # shared token volume (did.json, c2pa-x5chain.pem), which the
+              # backend and pdf-core mount directly. Touching the Kubernetes API
+              # here is what would need RBAC, so we stop.
+              echo "hsm-provision done (artifacts on ${TOKEN_DIR}, Secret publication disabled)."
+              exit 0
+              {{- end }}
+
+              k8s_host="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}"
+              ca_path="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+              sa_token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+              create_url="${k8s_host}/api/v1/namespaces/${K8S_NAMESPACE}/secrets"
+
+              put_secret() {
+                local name="$1" payload="$2"
+                local secret_url="${create_url}/${name}"
+                local status
+                status="$(curl -s -o /dev/null -w '%{http_code}' \
+                  --cacert "$ca_path" -H "Authorization: Bearer ${sa_token}" "$secret_url")"
+                if [ "$status" = "200" ]; then
+                  curl -fsS -X PUT --cacert "$ca_path" \
+                    -H "Authorization: Bearer ${sa_token}" -H "Content-Type: application/json" \
+                    --data "$payload" "$secret_url" >/dev/null
+                  echo "Updated secret ${name}."
+                else
+                  curl -fsS -X POST --cacert "$ca_path" \
+                    -H "Authorization: Bearer ${sa_token}" -H "Content-Type: application/json" \
+                    --data "$payload" "$create_url" >/dev/null
+                  echo "Created secret ${name}."
+                fi
+              }
+
+              # Publish the C2PA x5chain as a Secret for pdf-core via the K8s API.
+              x5chain_json="$(jq -Rs . < "$TOKEN_DIR/c2pa-x5chain.pem")"
+              x5chain_payload="$(cat <<EOF
+              {
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": { "name": "${SECRET_NAME}" },
+                "type": "Opaque",
+                "stringData": {
+                  "x5chain-pem": ${x5chain_json}
+                }
+              }
+              EOF
+              )"
+              put_secret "$SECRET_NAME" "$x5chain_payload"
+
+              # Publish did.json as the identity Secret (identitySecretName
+              # helper — <fullname>-identity, unique per release so two BDD
+              # releases in one namespace don't collide) that the backend
+              # mounts at DCS_DID — replaces the static kubectl-create-secret
+              # previously run from tests/bdd/Makefile's kind_deploy target
+              # before this job existed.
+              did_json="$(jq -Rs . < "$TOKEN_DIR/did.json")"
+              identity_payload="$(cat <<EOF
+              {
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": { "name": "${IDENTITY_SECRET_NAME}" },
+                "type": "Opaque",
+                "stringData": { "did.json": ${did_json} }
+              }
+              EOF
+              )"
+              put_secret "$IDENTITY_SECRET_NAME" "$identity_payload"
+          volumeMounts:
+            - name: hsm-token
+              mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
+      volumes:
+        - name: hsm-token
+          persistentVolumeClaim:
+            claimName: {{ include "digital-contracting-service.fullname" . }}-hsm-token
+{{- end }}

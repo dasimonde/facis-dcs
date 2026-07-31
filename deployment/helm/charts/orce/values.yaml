@@ -27,5 +27,92 @@ persistence:
     - ReadWriteOnce
 
 extraEnv: []
+checkpointSink:
+  enabled: false
+  url: ""
+  timeoutSeconds: 5
+  # Hydra and DCS are internal control-plane dependencies. Keep their budget
+  # independent from the externally observable sink request timeout.
+  internalTimeoutSeconds: 30
+  # Test-only escape hatch for the BDD HTTPS sink's ephemeral self-signed
+  # certificate. The flow ignores this unless test controls are also enabled.
+  allowInsecureTLS: false
+  bearerToken: ""
+  bearerTokenSecretRef:
+    name: ""
+    key: "CHECKPOINT_SINK_BEARER_TOKEN"
+global:
+  archiveAuditToken: ""
+  archiveAuditTokenSecretRef:
+    name: ""
+    key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  auditExecutorToken: ""
+  auditExecutorTokenSecretRef:
+    name: ""
+    key: "PAC_AUDIT_EXECUTOR_BEARER_TOKEN"
+  workflowGateToken: ""
+  workflowGateTokenSecretRef:
+    name: ""
+    key: "PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"
+
+# Local RFC3161 dev TSA: the /tsa flow signs timestamp replies in-pod with a
+# provisioned dev cert (see configmap-tsa.yaml) instead of forwarding to an
+# external TSA. Self-contained for dev/BDD/CI — no internet dependency.
+localTSA:
+  enabled: true
+  # The provisioning Job needs a Role/RoleBinding to write the material
+  # Secret, which some clusters' deploying identities aren't allowed to
+  # self-grant (RBAC self-management). Set to false there and pre-create
+  # the <release>-orce-tsa-material Secret (keys tsa-cert.pem/tsa-key.pem)
+  # out of band before install — the mount (this flag's `enabled`) still
+  # applies regardless.
+  autoProvision: true
 
 resources: {}
+
+# Sizes the hook Jobs (flow import, TSA provisioning), which are separate pods
+# from the server. Falls back to `resources` when unset; set it on namespaces
+# with a limits.cpu quota, where an unsized hook inherits the LimitRange default
+# and is refused once the release's own containers consume the quota.
+jobResources: {}
+
+# Which chart flow set this release runs. `flows` is the DCS-side set (trust
+# PDP, archive, TSA, contract targets); `flows-issuer` is the OID4VCI credential
+# issuer (did.json, VCI, status list, admin). They claim overlapping routes, so
+# a release serves one set, not both.
+flowsDir: flows
+
+# The issuer admin tab (credential revoke / unrevoke) carries no authorization
+# of its own, and an issuer is published so wallets can reach /offer — which
+# would put an unauthenticated un-revoke endpoint on the public internet next to
+# it. Off unless a deployment asks, and even then it wants an auth proxy.
+adminFlows:
+  enabled: false
+
+# Mount the chart's merged <flowsDir>/*.json as Node-RED's startup flows file —
+# deterministic, rollout-race-free. When enabled, the flowImport hook job is
+# skipped for chart flows (flows.json is a read-only mount; runtime /flows
+# deploys would fail to persist anyway).
+flowsFile:
+  enabled: true
+
+flowImport:
+  enabled: true
+  auth:
+    enabled: true
+    tokenUrl: "http://dcs-orce:1880/auth/token"
+    username: "admin"
+    password: "xfsc-orce"
+
+# Synthetic peer identities used only by the ADR-19 BDD scenarios: further
+# Service names in front of the SAME Node-RED pod so the flow can distinguish
+# several did:web identities by Host header alone — `-orce-mismatch` (AC5,
+# credential with a deliberately wrong rules hash) and `-orce-trusted`
+# (AC7/AC8/AC9, credential that verifies, so the policy endpoint is the only
+# gate left).
+# It is test scaffolding, not a deployment component — off by default so a real
+# install neither ships a fixture nor spends a Service against a namespace quota,
+# which on a quota-capped namespace can be the difference between the release
+# fitting and being refused.
+syntheticPeer:
+  enabled: false

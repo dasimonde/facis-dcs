@@ -1,0 +1,19 @@
+[
+  {"id":"stl-tab","type":"tab","label":"Status List","disabled":false,"info":""},
+  {
+    "id":"stl-get","type":"http in","z":"stl-tab","name":"GET /status-list/1",
+    "url":"/status-list/1","method":"get","upload":false,"swaggerDoc":"",
+    "x":190,"y":140,"wires":[["stl-serve"]]
+  },
+  {
+    "id":"stl-serve","type":"function","z":"stl-tab","name":"build + sign status list JWT",
+    "func":"const SAFE_IAT_FALLBACK = Math.floor(Date.parse('2020-01-01T00:00:00Z') / 1000);\n\n(async () => {\nconst baseUrl = global.get('getBaseUrl')(msg);\n\n// Disk-backed (see boot tab) so revocations made via /admin persist across\n// pod restarts, unlike Node-RED's default in-memory global context.\nconst bits = global.get('loadStatusBits')();\n\nlet issuerKeyPem, issuerCertDerB64, rootCaCertDerB64;\nconst pki = global.get('pki');\nif (pki) {\n    issuerKeyPem = pki.issuerKeyPem;\n    issuerCertDerB64 = pki.issuerCertDerB64;\n    rootCaCertDerB64 = pki.rootCaCertDerB64;\n} else {\n    issuerKeyPem = fs.readFileSync('/data/pki/issuer.key', 'utf8');\n    const issuerCertPem = fs.readFileSync('/data/pki/issuer.crt', 'utf8');\n    const rootCaCertPem = fs.readFileSync('/data/pki/root-ca.crt', 'utf8');\n    issuerCertDerB64 = new crypto.X509Certificate(issuerCertPem).raw.toString('base64');\n    rootCaCertDerB64 = new crypto.X509Certificate(rootCaCertPem).raw.toString('base64');\n}\n\nconst compressed = zlib.deflateSync(bits).toString('base64url');\n\n// See the boot tab's getRealWorldNowSeconds comment: this container's own\n// clock can't be trusted, so fetch real time from an external HTTPS Date\n// header, falling back to a safely-past fixed anchor if that fails.\nconst realNow = await global.get('getRealWorldNowSeconds')();\nconst iat = realNow || SAFE_IAT_FALLBACK;\n\nconst header = { alg: 'ES256', typ: 'statuslist+jwt', x5c: [issuerCertDerB64, rootCaCertDerB64] };\nconst payload = {\n    iss: baseUrl,\n    sub: baseUrl + '/status-list/1',\n    iat,\n    status_list: { bits: 1, lst: compressed }\n};\n\nconst b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');\nconst signingInput = b64url(header) + '.' + b64url(payload);\nconst signature = crypto.sign('sha256', Buffer.from(signingInput), {\n    key: crypto.createPrivateKey(issuerKeyPem),\n    dsaEncoding: 'ieee-p1363'\n});\nconst jwt = signingInput + '.' + signature.toString('base64url');\n\nmsg.headers = { 'content-type': 'application/statuslist+jwt' };\nmsg.payload = jwt;\nnode.send(msg);\n})();\nreturn null;",
+    "outputs":1,"timeout":0,"noerr":0,"initialize":"","finalize":"",
+    "libs":[{"var":"crypto","module":"crypto"},{"var":"zlib","module":"zlib"},{"var":"fs","module":"fs"}],
+    "x":460,"y":140,"wires":[["stl-resp"]]
+  },
+  {
+    "id":"stl-resp","type":"http response","z":"stl-tab","name":"",
+    "statusCode":"","headers":{},"x":700,"y":140,"wires":[]
+  }
+]

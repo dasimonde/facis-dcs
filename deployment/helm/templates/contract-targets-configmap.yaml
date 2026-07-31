@@ -1,0 +1,22 @@
+{{- if .Values.contractTargets }}
+# Contract Target Systems this deployment starts with (ADR-25). A fresh install
+# has an empty registry, so without these nothing can be deployed until somebody
+# opens the admin UI — including a test cluster recreated on every run.
+#
+# Seeding is create-only, matched on name: an entry an administrator later
+# repoints in the UI is NOT reverted by the next restart. Change one here and it
+# applies to new installs; change an existing deployment's target in the UI.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-contract-targets
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+data:
+  targets.json: |
+    {{- range $i, $t := .Values.contractTargets }}
+    {{- if not $t.name }}{{ fail "each contractTargets entry requires a name" }}{{ end }}
+    {{- if not $t.url }}{{ fail (printf "contractTargets entry %q requires a url" $t.name) }}{{ end }}
+    {{- end }}
+    {{ toJson .Values.contractTargets }}
+{{- end }}

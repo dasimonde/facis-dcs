@@ -1,0 +1,16 @@
+{{- if and .Values.ingress.enabled .Values.ingress.stripPrefix }}
+{{/*
+Support /statuslist/v1/... ingress paths by stripping the external prefix before routing to the service.
+*/}}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-statuslist-strip-prefix
+  labels:
+    app.kubernetes.io/name: statuslist-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  stripPrefix:
+    prefixes:
+      - {{ .Values.ingress.stripPrefix | quote }}
+{{- end }}

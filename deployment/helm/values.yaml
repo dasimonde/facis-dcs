@@ -40,6 +40,9 @@ ingress:
   hosts: []
   tls: []
 
+traefik:
+  enabled: false
+
 # Istio VirtualService (optional)
 istio:
   enabled: false
@@ -59,23 +62,27 @@ volumeMounts: []
 
 oid4vp:
   trust:
-    enabled: true
-    mountPath: /app/config/oid4vp
-    configMapName: ""
-    issuerDID: did:web:dev.example:issuer:poa
-  demoWallet:
-    secretName: ""
-    # When false, vault-init seeds from chart files/oid4vp/*.
-    autoGenerate: false
-
-vault:
-  enabled: false
-  injector:
+    # Trust is deployment state. The chart default deliberately trusts no
+    # development issuer or Dev Root; dev/demo/BDD overlays opt in explicitly.
     enabled: false
-  server:
-    dev:
-      enabled: true
-      devRootToken: root
+    dataPath: ""
+    # Name of an operator-supplied ConfigMap holding the trust document, for
+    # deployments that must trust a REAL credential issuer rather than the dev
+    # fixture baked into the image. When set it is mounted read-only and
+    # dataPath above is ignored in favour of the mounted file, so the issuer
+    # registry is deployment state rather than a hand-applied patch that the
+    # next upgrade silently reverts.
+    existingConfigMap: ""
+    # Key within that ConfigMap; also the mounted file name.
+    existingConfigMapKey: trust.json
+    # Where the ConfigMap is mounted. The file lands at <mountPath>/<key>.
+    existingConfigMapMountPath: /etc/dcs/oid4vp
+    xfscAllowUnsignedFallback: false
+    # Optional: trust anchors an x5c-bearing credential's certificate chain
+    # (e.g. a real EUDI wallet's issued PID) must verify against. Empty means
+    # unset — an x5c-bearing credential is then refused outright, never
+    # trusted off its own embedded certificate (sdjwt.verificationKeyFromX5C).
+    x5cAnchorsPath: ""
 
 customCA:
   enabled: false
@@ -89,14 +96,84 @@ affinity: {}
 extraEnv: []
 extraEnvFrom: []
 
+# Archive notary / ORCE integration
+archiveNotary:
+  baseURL: ""
+  notaryPath: "/archive/notary"
+  auditLogPath: "/archive-audit-events.jsonl"
+  # The audit-log bearer token is NOT configured here: the wired source is
+  # global.archiveAuditToken / global.archiveAuditTokenSecretRef below.
+
+# External PAC audit executor. The bundled ORCE endpoint is selected when URL
+# is empty and orce.enabled=true; a customer replaces it through configuration
+# only, without changing DCS code.
+auditExecutor:
+  url: ""
+  path: "/audit/run"
+  timeout: "10s"
+
+# Consequential contract transitions use this distinct, snapshot-pinned
+# executor contract. Missing/invalid configuration is a backend boot failure.
+workflowGateExecutor:
+  url: ""
+  path: "/workflow-gate/run"
+  timeout: "10s"
+
+global:
+  archiveAuditToken: ""
+  archiveAuditTokenSecretRef:
+    name: ""
+    key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  auditExecutorToken: ""
+  auditExecutorTokenSecretRef:
+    name: ""
+    key: "PAC_AUDIT_EXECUTOR_BEARER_TOKEN"
+  workflowGateToken: ""
+  workflowGateTokenSecretRef:
+    name: ""
+    key: "PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"
+
 # Route and path configuration
 route:
   basePath: "/digital-contracting-service"
+  publicBaseURL: ""
+  # Explicit override for the did:web hostname (see the 'didHostname' helper
+  # in _helpers.tpl). Empty falls back to publicBaseURL's host. Only needed
+  # when the did:web identifier's hostname differs from publicBaseURL's host
+  # (e.g. a cluster-routable hostname resolved via a CoreDNS rewrite rather
+  # than being the literal ingress host, as in the BDD two-instance suite).
+  didHostname: ""
 
 # Override individual paths (derived from route.basePath if not set)
 paths:
   api: ""
   ui: ""
+
+# DID identity Secret mount (DCS_DID). Disabled by default: most deployments
+# derive their signing identity from the PKCS#11 token directly. Enabled by
+# the BDD kind harness, where a post-install hsm-provision Job publishes
+# did.json (freshly derived from the in-cluster SoftHSM2 token key) into the
+# Secret named by the 'identitySecretName' helper.
+identity:
+  enabled: false
+  # Override the auto-derived <fullname>-identity Secret name.
+  secretName: ""
+  mountPath: "/app/identity"
+
+# Application readiness is intentionally distinct from process liveness.
+# /readyz remains 503 on the bootstrap server until initialization, including
+# the Federated Catalogue functional gate and schema sync, has completed.
+# The supported deploy.sh path invokes Helm without --wait so the HSM
+# post-install hook can run before this probe becomes successful; adding
+# `helm --wait` directly would deadlock that hook/bootstrap dependency.
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  periodSeconds: 2
+  timeoutSeconds: 1
+  failureThreshold: 3
+  successThreshold: 1
 
 # Keycloak realm URL for Federated Catalogue.
 fcKeycloak:
@@ -125,13 +202,25 @@ messaging:
 # Service discovery overrides – all auto-wired when the sub-charts below are enabled
 serviceDiscovery:
   postgresqlHost: ""
-  keycloakHost: ""
   natsHost: ""
-  keycloakPort: ""
 
 # ---- Signing / C2PA provenance ----------------------------------------
-# DCS never holds private keys (DCS-IR-HI-01). Set these when connecting to
-# an external Crypto Provider Service or relying on the co-deployed one below.
+# DCS never holds raw private keys (DCS-IR-HI-01): every key lives in the
+# PKCS#11 token configured under `pkcs11` below.
+
+# DCS-to-DCS federation (ADR-19). The trust gate consults this policy endpoint
+# for every inbound and outbound federated interaction and is FAIL-CLOSED: while
+# it is empty nothing ships and nothing is accepted, so an instance meant to
+# federate is not configured until this is set. Each instance consults only its
+# OWN endpoint — never the counterparty's.
+#
+# The bundled orce chart serves a permissive stand-in at
+# http://<release>-orce:1880/trust-pdp; operators are expected to replace it with
+# a real decision function (peer allowlist as policy, a trust list, a Gaia-X
+# Clearing House). Left empty by default so federation is opt-in rather than
+# silently permissive.
+federation:
+  trustPdpURL: ""
 
 signing:
   # DID of this DCS instance (embedded in C2PA lifecycle assertions as authority).
@@ -142,35 +231,70 @@ signing:
 
   # RFC 3161 Timestamp Authority (optional; activates real timestamps on C2PA manifests).
   tsaURL: ""
+  # Optional: Secret (key tsa-cert.pem) holding the TSA certificate to trust
+  # for RFC3161 token verification, overriding the embedded certs/tsa.crt
+  # (mounted at /etc/dcs/tsa-trust, wired as TSA_TRUST_CERT_FILE).
+  tsaTrustCertSecret: ""
 
-  # XFSC Crypto Provider Service URL. Leave empty when cryptoProvider.enabled=true
-  # (auto-derived from the co-deployed signer service).
-  cryptoProviderURL: ""
-  cryptoProviderURLSecretRef:
+# ---- PKCS#11 signing token (DCS-IR-HI-01) -----------------------------
+# Every private key is held in a PKCS#11 token. With provisioning.enabled a
+# SoftHSM2 software token is co-deployed and provisioned in-cluster — this is a
+# dev/staging/CI convenience ONLY and is NOT a production HSM. For production,
+# set provisioning.enabled=false and point modulePath/tokenLabel/pinSecretRef at
+# a real external PKCS#11 module (its keys must already exist in the token).
+pkcs11:
+  modulePath: "/usr/lib/softhsm/libsofthsm2.so"
+  tokenLabel: "dcs"
+  # PIN for the auto-created Secret. Ignored when pinSecretRef.name is set.
+  pin: "1234"
+  pinSecretRef:
     name: ""
-    key: "CRYPTO_PROVIDER_URL"
-
-  # Vault transit mount path and key name.
-  # Taken from cryptoProvider.transit.* when co-deploying.
-  cryptoProviderNamespace: ""
-  cryptoProviderKey: ""
-  cryptoProviderVCKey: ""
-
-  # VC proof suite used by the local Ed25519Signature2020 proof path.
-  vcSignatureType: "ed25519signature2020"
-
-  # Signer certificate chain (PEM) used for C2PA x5chain headers.
-  # When enabled, the chart mounts the secret and sets
-  # CRYPTO_PROVIDER_CERT_CHAIN_FILE automatically.
-  # With cryptoProvider.devCertChain.enabled=true, this is auto-wired even when
-  # certChain.enabled=false.
-  certChain:
-    enabled: false
-    existingSecret:
-      name: ""
-      key: "chain.pem"
-    mountPath: "/var/run/secrets/dcs"
-    fileName: "crypto-provider-cert-chain.pem"
+    key: "PKCS11_PIN"
+  provisioning:
+    enabled: true
+    # Publish the provisioned did.json and C2PA x5chain as Secrets via the
+    # Kubernetes API, which requires the job to carry its own ServiceAccount +
+    # Role + RoleBinding.
+    #
+    # Set false on clusters that do not grant the installer rbac.authorization
+    # (a common on-prem namespace restriction — the install otherwise fails on
+    # "cannot create resource roles"). The job then writes nothing to the API:
+    # every artifact stays on the shared token volume it already writes them to,
+    # the backend reads DCS_DID from there, and pdf-core mounts the same volume
+    # read-only for the x5chain. That co-mount is why pdf-core is pinned to the
+    # backend's node in this mode — a ReadWriteOnce volume admits multiple pods
+    # only on one node. Supply persistence.accessModes: ["ReadWriteMany"] to
+    # drop the pinning.
+    publishSecrets: true
+    # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
+    tokenDir: "/var/lib/softhsm"
+    # SO (security officer) PIN used only during token initialization.
+    soPin: "12345678"
+    persistence:
+      # 1Gi rather than the ~10Mi the token actually needs: several CSI drivers
+      # refuse to provision below 1Gi and the claim then never binds, which
+      # surfaces as pods stuck Pending rather than as an install error.
+      size: "1Gi"
+      accessModes: ["ReadWriteOnce"]
+      # Empty uses the cluster default StorageClass. The token directory holds
+      # the SoftHSM2 private keys — set an encrypted class per environment
+      # (DCS-NFR-SEC-14); deploy.sh asserts the bound class when one is set.
+      storageClassName: ""
+    # Resource block for the provisioning job itself. Set it on namespaces with a
+    # limits.cpu quota — see the template for why an unset block blocks install.
+    resources: {}
+    # Provisioning job image; defaults to the DCS image, which bundles
+    # softhsm2/opensc/openssl and the provisioning scripts.
+    image:
+      repository: ""
+      tag: ""
+      # Empty so the job follows image.pullPolicy. The provisioning script and
+      # the gendid tool it runs ship inside the application image, so pinning
+      # this to IfNotPresent while the application pulls Always lets a node's
+      # cached copy of a mutable tag provision an older key set than the
+      # application expects — the backend then exits at startup on a key the
+      # provisioner never created.
+      pullPolicy: ""
 
 # ---- Co-deployed dependencies ----------------------------------------
 # Each sub-chart owns its full set of configurable values.
@@ -178,60 +302,94 @@ signing:
 # All other sub-chart options (images, resources, persistence, etc.) can
 # be set directly in your values override file.
 
+orce:
+  checkpointSink:
+    internalTimeoutSeconds: 30
+
 postgresql:
   enabled: false
   auth:
     username: dcs
     password: dcs
     database: dcs
-
-keycloak:
-  enabled: false
-  service:
-    port: 8080
-  route:
-    path: ""
+  # Pointing another component's DSN at this server is not enough to create its
+  # database — list it here as well. Hydra in particular only runs
+  # `hydra migrate sql`, which assumes the database already exists; without an
+  # entry it stays unready and the backend cannot discover the OIDC provider.
+  additionalDatabases: []
+  # Defaults to an emptyDir, which loses every contract on a pod restart. Enable
+  # for anything longer-lived than a test cluster.
+  persistence:
+    enabled: false
+    size: 1Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class per
+    # environment (DCS-NFR-SEC-14) — this volume holds the dcs/hydra/statuslist
+    # databases; deploy.sh asserts the bound class when one is set.
+    storageClassName: ""
 
 hydra:
   enabled: false
   clients: []
 
+# SRS System User clients (SRS §2.4 Table 5), each authenticating with the
+# OAuth2 client credentials grant against this deployment's Hydra. Empty means
+# no machine caller is accepted at all. Every entry needs a client_id that also
+# exists under hydra.clients, a participant_did its actions are attributed to,
+# and the DCS roles it may exercise.
+#
+# The roles are read from here by client_id, never from the token, so a client
+# cannot ask for more than it is given. Configuring the hydra.clients half alone
+# yields a client that authenticates and is then refused everywhere.
+#
+#   hydra:
+#     clients:
+#       - client_id: dcs-sys-creator
+#         client_secret: "<random>"
+#         grant_types: ["client_credentials"]
+#         response_types: []
+#         scope: ""
+#         token_endpoint_auth_method: client_secret_post
+#   systemClients:
+#     - client_id: dcs-sys-creator
+#       participant_did: "did:web:dcs.example.org"
+#       roles: ["Sys. Contract Creator"]
+#
+# Valid roles: Sys. Contract Creator, Sys. Contract Reviewer, Sys. Contract
+# Approver, Sys. Contract Manager, Sys. Auditor, Sys. Contract Signer. The
+# strings must match exactly; an unknown one stops the backend at startup.
+# Sys. Contract Signer holds no signing scope (ADR-17), so a signature always
+# needs a person with a wallet.
+#
+# A contract target system is NOT configured here: it is a registry row
+# (contractTargets, or the admin UI) and its callback credential is issued to
+# that row rather than declared. See ADR-25 and ADR-27.
+#
+# Token: POST /oauth2/token with grant_type=client_credentials, then send it as
+# a bearer token. See values.bdd.yml for all four classes wired up.
+#
+# These entries are a SEED, not the runtime source. They are reconciled into the
+# machine identity registry at startup so a deployment has the callers it needs
+# before anyone logs in to create them; everything after that is administered
+# through the UI, where a credential is issued once and rotated rather than
+# edited here (ADR-27).
+systemClients: []
+
 nats:
   enabled: false
 
-neo4j:
+# BDD only: loopback proxy so DCS Pod fetches localhost statusListCredential via Traefik ingress.
+statusListLocalhostProxy:
   enabled: false
-
-# XFSC Crypto Provider Service + HashiCorp Vault (transit engine).
-# When enabled, CRYPTO_PROVIDER_URL is auto-derived and wired into DCS.
-# See charts/crypto-provider/values.yaml for the full set of options.
-cryptoProvider:
-  enabled: false
-  vault:
-    dev:
-      enabled: true
-      rootToken: "root"
-    service:
-      port: 8200
-  transit:
-    mount: "transit"
-    key: "dcs-signing-key-p256"
-    keyType: "ecdsa-p256"
-    vcKey: "dcs-vc-signing-key"
-    vcKeyType: "ed25519"
-  devCertChain:
-    enabled: false
-    secretName: ""
-    secretKey: "chain.pem"
-    caCertKey: "ca.pem"
-    leafCommonName: "dcs-dev-signer"
-    caCommonName: "dcs-dev-local-ca"
-    validityDays: 3650
-    overwrite: true
-    image:
-      repository: alpine
-      tag: "3.20"
-      pullPolicy: IfNotPresent
+  image:
+    repository: nginx
+    tag: alpine
+    pullPolicy: IfNotPresent
+  listenPort: 18080
+  upstream: ""
+  ingressHost: localhost
+  # Functional HTTP route used by the sidecar readiness probe. Environments
+  # that require a particular seeded status list can override this path.
+  readinessPath: "/statuslist/health"
 
 # XFSC Status List Service (DCS-OR-C2PA-005)
 # Manages verifiable credential status lists (Status List 2021/2023 format).
@@ -239,9 +397,13 @@ cryptoProvider:
 # See charts/statuslist-service/values.yaml for all configurable fields.
 statuslistService:
   enabled: false
+  # url overrides the auto-wired ClusterIP URL when enabled=true.
+  url: ""
+  # tenantID is the tenant identifier passed as STATUSLIST_TENANT_ID (defaults to "default" when empty).
+  tenantID: ""
   image:
-    repository: ghcr.io/eclipse-xfsc/statuslist-service
-    tag: "latest"
+    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/status-list-service
+    tag: "main"
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP
@@ -254,8 +416,18 @@ statuslistService:
       cpu: 300m
       memory: 512Mi
 
-# XFSC Federated Catalogue (requires neo4j, keycloak, postgresql with "fc" database)
-# See charts/federated-catalogue/values.yaml for all configurable fields.
+# XFSC Federated Catalogue. Two parts:
+#   - federatedCatalogue.*: how THIS DCS backend calls out to an FC instance
+#     (its own env vars, independent of where that instance runs — could be
+#     fcservice below, or a remote instance like OSC-testbed pointing at IONOS).
+#   - fcservice.*/fcKeycloakApp.*/fcFuseki.*/fcPostgres.*: whether/how to
+#     deploy the FC instance itself — our OWN local charts (charts/federated-
+#     catalogue, charts/keycloak, charts/fuseki, charts/fc-postgres; see
+#     Chart.yaml's dependencies and each chart's values.yaml for every
+#     configurable field). Fuseki is the graph store (not neo4j — neo4j's
+#     n10s plugin crash-loops on patch-version image drift, see
+#     charts/fuseki/values.yaml); fc-postgres backs both fc-service and its
+#     Keycloak.
 federatedCatalogue:
   enabled: false
   # URL the DCS backend uses to reach the Federated Catalogue API
@@ -270,18 +442,131 @@ federatedCatalogue:
     clientSecretSecretRef:
       name: ""
       key: "FEDERATED_CATALOGUE_CLIENT_SECRET"
+  remote:
+    # ADR-18: the current FC service account has ADMIN_ALL. A remote/shared FC
+    # is therefore safe only inside one mutually trusted administrative
+    # boundary; it is not tenant isolation. Remote deployments must explicitly
+    # acknowledge that constraint or Helm rendering fails.
+    acknowledgeAdminAllTrustBoundary: false
+
+fcservice:
+  enabled: false
+  # The functional startup gate performs schema+semantic verification once.
+  # A one-core Java cold path exceeded the client budget in a live fresh
+  # install, so keep enough burst CPU for that deterministic request.
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
       cpu: 500m
-      memory: 1Gi
+    limits:
+      cpu: "2"
+  route:
+    path: ""
+  # Explicit true (not left unset) so fc-realm-provision-job.yaml's
+  # {{ if .Values.fcservice.portal.enabled }} can be overridden to false —
+  # sprig's `default` treats `false` as "unset" too, so a bare `| default
+  # true` there would silently ignore an override to false (confirmed live:
+  # values.bdd.yml's portal.enabled: false rendered as if it were true).
+  portal:
+    enabled: true
+  # Public hostname of the owned Keycloak (see fcKeycloakApp.hostname below —
+  # values.yaml cannot self-reference, keep these two in sync manually).
+  # Empty = fc-service builds its JWT issuer URL from the in-cluster Service
+  # instead (fine for kind/no-ingress environments, wrong for real ingress).
+  keycloak:
+    hostname: ""
+  # Realm import via Admin API (see fc-realm-provision-job.yaml) — boot-time
+  # --import-realm hits a confirmed unresolved upstream Keycloak bug for
+  # realm files this size (keycloak/keycloak#37745).
+  realmProvision:
+    enabled: false
+    # Sizes the provisioning hook Job, a separate pod from the services. Falls
+    # back to the top-level `resources` when unset; set it on namespaces with a
+    # limits.cpu quota, where an unsized hook inherits the LimitRange default.
+    resources: {}
+    keycloakHost: "fc-keycloak-http"
+    adminUser: "admin"
+    adminPassword: "admin"
+    # Fixed, deterministic id of the `service-account-federated-catalogue`
+    # USER (charts/keycloak/files/fc-realm.json's `users[0].id` — every
+    # client also gets an implicit service-account user, a distinct Keycloak
+    # entity from the client itself). Confirmed live: the client's OWN id
+    # (52c9c697-c860-4edd-bde4-5e03904fdb44, used as client-role containerId
+    # throughout the same file) is NOT this user's id and 404s the
+    # role-mappings call — every run of the Job failed on role assignment
+    # until this was corrected. Not server-generated, same across every
+    # environment using this chart version, not a per-deploy secret.
+    serviceAccountUserID: "25b4615a-b7e1-4554-be7d-85f50b2151cf"
+    clientSecret: "**********"
+    image:
+      # Contains bash, curl, jq and kubectl. alpine/k8s is a Docker-Sponsored
+      # Open Source image; this exact multi-arch manifest was verified before
+      # pinning. It is independent from the mutable application image.
+      repository: alpine/k8s
+      tag: "1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68"
+      pullPolicy: IfNotPresent
 
-# XFSC Custom Policy Agent (OPA-based policy evaluation)
-# See charts/custom-policy-agent/values.yaml for all configurable fields.
-mongodb:
-  enabled: false
+# Owned Keycloak backing fcservice above (see charts/keycloak). hostname MUST
+# be a real, externally reachable https URL for wallet/browser OIDC flows on
+# environments with real ingress — see deployment/README.md.
+# Keep in sync with fcservice.keycloak.hostname above.
+fcKeycloakApp:
+  hostname: ""
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
+
+# Owned Fuseki graph store backing fcservice above (see charts/fuseki).
+fcFuseki:
+  persistence:
+    enabled: false
+
+# Owned Postgres backing fcservice + fcKeycloakApp above (see charts/fc-postgres).
+fcPostgres:
+  persistence:
+    enabled: false
+
+# PDF-Core: C2PA-aware PDF compiler and verifier (DCS-OR-C2PA-*)
+pdfCore:
+  enabled: true
+  # Every other component honours a resources block; without one here a
+  # LimitRange default (commonly 1 CPU) applies, which on a namespace with a
+  # low limits.cpu quota is enough to stop the release scheduling.
+  resources: {}
+  image:
+    repository: ""     # set to your registry image, e.g. registry.example.com/facis/pdf-core
+    tag: ""            # set to the image tag; falls back to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    port: 8080
+  # url overrides the auto-wired ClusterIP URL when enabled=true.
+  url: ""
+  # contextIRI overrides the JSON-LD @context IRI embedded in every envelope.
+  # Default: auto-derived as <pdfCoreURL>/ontology/dcs-pdf-core.
+  # Set to a registered w3id IRI once available.
+  contextIRI: ""
+  # ontologyBaseURL is the base URL pdf-core uses for ontology IRIs in payloads
+  # and the served JSON-LD context (DCS_PDF_CORE_ONTOLOGY_BASE_URL, required by
+  # pdf-core at startup). Default: auto-derived from the pdf-core service URL,
+  # keeping it consistent with the contextIRI default above.
+  ontologyBaseURL: ""
+  signing:
+    # No default key/cert ships in this chart (clean-product sweep freeze-day
+    # grep gate: no PEM private key material in committed values files). This
+    # path only matters when pkcs11.provisioning.enabled=false (SoftHSM2/PKCS#11
+    # provisioning is the default and does not use these values at all — see
+    # pdf-core-signing-secret.yaml's render guard). If you disable PKCS11
+    # provisioning, either set existingSecret below, or supply signerKeyPEM +
+    # x5ChainPEM explicitly via --set-file / a values overlay that is NOT
+    # committed to the chart.
+    signerKeyPEM: ""
+    x5ChainPEM: ""
+    # Set to use an existing Secret instead of auto-creating one from the inline values above.
+    existingSecret: ""
+    existingSecretX5ChainKey: "x5chain-pem"
 
 ipfs:
   enabled: false
@@ -293,6 +578,13 @@ ipfs:
   mfsBaseURLSecretRef:
     name: ""
     key: "IPFS_MFS_BASE_URL"
+  persistence:
+    enabled: false
+    size: 5Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class per
+    # environment (DCS-NFR-SEC-14) — the Kubo repo holds all pinned artifact
+    # ciphertext; deploy.sh asserts the bound class when one is set.
+    storageClassName: ""
 
 ipfsDocumentManager:
   enabled: false
@@ -302,20 +594,6 @@ ipfsClient:
   tenantName: "tenant_space"  # tenant identifier in the Document Manager URL path
   tenantBaseURL: ""            # IPFS_TENANT_BASE_URL explicit override
   mfsBaseURL: ""               # IPFS_MFS_BASE_URL explicit override (Kubo RPC API)
-
-customPolicyAgent:
-  enabled: false
-  mongo:
-    uri: ""
-    database: "policy"
-    collectionName: "policy"
-  nats:
-    url: ""
-  auth:
-    jwkURL: ""
-  logging:
-    level: "info"
-    format: "json"
 
 # ---- Optional monitoring stack (Prometheus, Grafana, Alertmanager) ----------------
 monitoring:
@@ -361,3 +639,147 @@ nodeExporter:
 
 kubeStateMetrics:
   enabled: false
+
+# EU DSS demonstration webapp (AdES validation alongside the PKCS#11 signing
+# path — DCS-FR-SM-18, DCS-IR-SI-10, DCS-IR-CI-08). DISABLED by default:
+# there is no official EU-published container image (the webapp ships as a
+# ZIP/WAR), so charts/dss wraps a pinned community image; enabling it — and
+# setting the backend's DSS_URL env (e.g. http://<release>-dss:8080) — is an
+# explicit operator decision. The backend HARD-FAILS signature validation if
+# DSS_URL is configured but the instance is unreachable.
+# EU DSS for signature VALIDATION (DCS-FR-SM-18) and the wallet-driven
+# /signature/submit acceptance path (ADR-12). When enabled the backend gets
+# DSS_URL; the DCS validates a signature the SIGNATORY produced and holds no
+# contract-signing key. Disabled by default (an operator decision).
+dss:
+  enabled: false
+  # url: http://<release>-dss:8080  # defaults to the in-cluster dss service
+
+# ---- ACME certificate renewal (opt-in) --------------------------------
+# For clusters where cert-manager cannot renew the ingress certificate itself.
+# The usual cause is a namespace LimitRange with a per-container minimum above
+# what cert-manager asks for its HTTP-01 solver pod (10m CPU / 64Mi): the solver
+# never schedules, the challenge is never presented, and the certificate simply
+# lapses. That cannot be worked around through cert-manager, because the Issuer
+# CRD only honours priorityClassName, nodeSelector, affinity, serviceAccountName
+# and tolerations under solvers[].http01.ingress.podTemplate.spec — resources are
+# ignored, and the request values are a controller-wide flag.
+#
+# This runs the same HTTP-01 exchange as an ordinary CronJob whose resources obey
+# the LimitRange, and writes the result into the TLS Secret the ingress serves.
+# Leave disabled wherever cert-manager works: this is a fallback, not a preference.
+acmeRenewal:
+  enabled: false
+  # Hostname to certify. Must be the host the ingress serves and must already
+  # resolve to this cluster, or the HTTP-01 challenge cannot be answered.
+  host: ""
+  # Contact address for the ACME account; Let's Encrypt rejects registration
+  # without one and uses it for expiry warnings.
+  email: ""
+  # Name of the kubernetes.io/tls Secret referenced by ingress.tls[].secretName.
+  secretName: ""
+  server: "https://acme-v02.api.letsencrypt.org/directory"
+  # Twice weekly. certbot renews only inside its own window and exits 0
+  # otherwise, so a frequent schedule costs nothing and leaves room to recover
+  # from a failed attempt well before expiry.
+  schedule: "17 3 * * 1,4"
+  image: "certbot/certbot:v2.11.0"
+  challengePort: 8080
+  rbac:
+    # The renewal pod needs its own ServiceAccount + Role + RoleBinding to write
+    # the TLS Secret. Set false on clusters that do not grant the installer
+    # rbac.authorization — the same namespace restriction pkcs11.provisioning.
+    # publishSecrets exists for — and name an existing account below that may
+    # already write secrets in this namespace.
+    create: true
+  serviceAccountName: ""
+  # Defaults to ingress.className when empty.
+  ingressClassName: ""
+  ingressAnnotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  persistence:
+    size: "1Gi"
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: ""
+
+# ---- Continuous compliance monitoring (DCS-FR-PACM-02) ----------------
+#
+# Runs the compliance sweep on a schedule instead of waiting for someone to call
+# GET /pac/monitor, so missing approvals, denied access attempts, breached KPIs
+# and failed deployments are detected unattended. Each violation alerts once,
+# when it first appears (and again if it recurs after being resolved), never on
+# every run.
+#
+# Keep enabled: with this off, risks are only ever found by someone asking, and
+# the "continuously monitor" requirement is not met.
+complianceMonitor:
+  enabled: true
+  # Every five minutes. The time-based rules (missing approvals, expiries) are
+  # served well by this; the event-driven ones (unauthorized access, failed
+  # deployment) are therefore reported with up to five minutes' delay. Kubernetes
+  # cannot schedule finer than one minute.
+  schedule: "*/5 * * * *"
+  # Skip a sweep that could not start on time rather than queueing it — the next
+  # run re-derives the same state anyway.
+  startingDeadlineSeconds: 120
+  timeout: "2m"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ---- Shared supporting services for a resource-constrained peer -------
+# Exposes this instance's stateless services under https://<host>/shared/<name>
+# so a peer that cannot run its own can consume them. Disabled by default: doing
+# this makes the peer depend on this deployment for validation and revocation
+# data, which weakens its independence and should be a considered choice.
+#
+# service is rendered with tpl, so it may reference the release, e.g.
+# "{{ .Release.Name }}-dss".
+sharedServices:
+  enabled: false
+  host: ""
+  ingressClassName: ""
+  proxyBodySize: "64m"
+  annotations: {}
+  tls: []
+  services:
+    - name: statuslist
+      service: "{{ .Release.Name }}-statuslist-service"
+      port: 8080
+    - name: dss
+      service: "{{ .Release.Name }}-dss"
+      port: 8080
+    - name: orce
+      service: "{{ .Release.Name }}-orce"
+      port: 1880
+    - name: ipfs-dm
+      service: "{{ .Release.Name }}-ipfs-document-manager"
+      port: 8080
+
+# ---- Contract target systems (ADR-25) ---------------------------------
+# Systems a signed contract can be deployed to. A fresh install has an empty
+# registry and nothing can be deployed until one exists, so declaring them here
+# makes an instance usable straight after install — and makes a test cluster
+# that is recreated on every run usable without manual setup.
+#
+# Seeding is CREATE-ONLY, matched on name. An entry an administrator later
+# repoints in the admin UI is not reverted by the next restart: changing a value
+# here affects new installs, and changing a running deployment's target is done
+# in the UI. Removing an entry here does not remove it from a running instance.
+#
+# Each entry: name (unique), url (endpoint the payload is POSTed to),
+# description (optional), enabled (optional, default true).
+contractTargets: []
+#  - name: "Reference ORCE target"
+#    url: "http://my-release-orce:1880/contract-target/deploy"
+#    description: "The shipped ORCE contract-target flow."

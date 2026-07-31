@@ -1,6 +1,6 @@
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
 import './style.css'
+import { createPinia } from 'pinia'
+import { createApp } from 'vue'
 import App from './App.vue'
 import { bindHydraLoginChallengeFromURL } from './hydra-login-guard'
 import { router } from './router/router'

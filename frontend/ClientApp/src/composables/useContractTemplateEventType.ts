@@ -2,8 +2,8 @@ import type {
   ContractTemplateApproveEvent,
   ContractTemplateArchiveEvent,
   ContractTemplateAuditEvent,
-  ContractTemplateCreateEvent,
   ContractTemplateCopyEvent,
+  ContractTemplateCreateEvent,
   ContractTemplatePublishEvent,
   ContractTemplateRegisterEvent,
   ContractTemplateRejectEvent,
@@ -13,7 +13,7 @@ import type {
   ContractTemplateSubmitEvent,
   ContractTemplateUpdateEvent,
   ContractTemplateVerifyEvent,
-} from '@/models/contract-template-event'
+} from '@/models/contract-template/contract-template-event'
 import type { ContractTemplateAuditResponseItem } from '@/models/responses/template-response'
 
 export function useContractTemplateEventType() {

@@ -1,29 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-keycloak
+  name: fc-keycloak
+  labels:
+    app.kubernetes.io/name: fc-keycloak
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas | default 1 }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: keycloak
+      app.kubernetes.io/name: fc-keycloak
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/name: fc-keycloak
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       containers:
         - name: keycloak
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - "/opt/keycloak/bin/kc.sh"
           args:
-            - "start-dev"
-            - "--http-port={{ .Values.service.port }}"
-            {{- if .Values.realm.import }}
-            - "--import-realm"
-            {{- end }}
+            - "start"
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
@@ -31,31 +34,91 @@ spec:
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-keycloak
+                  name: fc-keycloak
                   key: admin-user
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-keycloak
+                  name: fc-keycloak
                   key: admin-password
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # Keycloak 26's proxy-headers mode; the ingress in front of this
+            # sets X-Forwarded-Proto/-Host, which Keycloak needs to build
+            # correct issuer/redirect URLs behind TLS termination.
+            - name: KC_PROXY_HEADERS
+              value: "xforwarded"
+            {{- if .Values.hostname }}
+            # A full URL (scheme+host+path), not a bare hostname: Keycloak's
+            # hostname-v2 provider only takes hostname/port from a bare
+            # value and still infers SCHEME from the actual request (via
+            # X-Forwarded-Proto when KC_PROXY_HEADERS trusts it, else the
+            # raw connection) — confirmed live, this produced two different
+            # `iss` claims for the exact same realm depending on whether the
+            # token was requested through the external https ingress or
+            # directly over plain http from inside the cluster (DCS's own
+            # client_credentials call, no proxy headers), which fc-service's
+            # fixed https-only issuer check then rejected as a mismatch
+            # (401). A full URL fixes scheme+host unconditionally. It must
+            # also carry the relative path explicitly — confirmed live,
+            # switching to a full-URL KC_HOSTNAME stops Keycloak from
+            # auto-appending KC_HTTP_RELATIVE_PATH to the issuer, dropping
+            # "/auth" and 401ing all over again.
+            - name: KC_HOSTNAME
+              value: {{ printf "https://%s/%s" .Values.hostname (trimAll "/" .Values.route.path) | trimSuffix "/" | quote }}
+            {{- end }}
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            # Single replica — the clustered ispn/JGroups cache this image
+            # defaults to needs a discovery mechanism this cluster doesn't
+            # provide and is unneeded complexity for one pod.
+            - name: KC_CACHE
+              value: "local"
             {{- if .Values.route.path }}
             - name: KC_HTTP_RELATIVE_PATH
               value: {{ printf "/%s" (trimAll "/" .Values.route.path) | quote }}
             {{- end }}
+            - name: KC_DB
+              value: "postgres"
+            - name: KC_DB_URL_HOST
+              value: {{ .Values.database.hostname | quote }}
+            - name: KC_DB_URL_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: KC_DB_URL_DATABASE
+              value: {{ .Values.database.name | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.database.username | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.existingSecretPasswordKey }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if .Values.realm.import }}
-          volumeMounts:
-            - name: realm-config
-              mountPath: /opt/keycloak/data/import
-              readOnly: true
-          {{- end }}
+          # Keycloak's Quarkus augmentation + this cluster's slow-ish I/O can
+          # push first boot past several minutes; the startup probe gates
+          # liveness so a slow boot isn't killed into a crashloop (matches
+          # ../federated-catalogue's own fc-service startupProbe reasoning).
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: {{ printf "/%s/realms/master/.well-known/openid-configuration" (trimAll "/" .Values.route.path) | quote }}
+              port: http
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+            periodSeconds: 5
+            timeoutSeconds: 2
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if .Values.realm.import }}
-      volumes:
-        - name: realm-config
-          configMap:
-            name: {{ .Release.Name }}-keycloak-realm
-      {{- end }}

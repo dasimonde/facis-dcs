@@ -28,18 +28,16 @@ type GetByIDQry struct {
 }
 
 type GetByIDResult struct {
-	DID            string
-	DocumentNumber *string
-	Version        int
-	State          contracttemplatestate.ContractTemplateState
-	TemplateType   contracttemplatetype.ContractTemplateType
-	Name           *string
-	Description    *string
-	CreatedBy      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	Responsible    *db.Responsible
-	TemplateData   *datatype.JSON
+	DID          string
+	Version      int
+	State        contracttemplatestate.ContractTemplateState
+	TemplateType contracttemplatetype.ContractTemplateType
+	Name         *string
+	Description  *string
+	CreatedBy    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	TemplateData *datatype.JSON
 }
 
 type GetByIDHandler struct {
@@ -65,13 +63,12 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 	}
 
 	evt := templateevents.RetrieveByIDEvent{
-		DID:            query.DID,
-		DocumentNumber: data.DocumentNumber,
-		Version:        data.Version,
-		RetrievedBy:    query.RetrievedBy,
-		OccurredAt:     time.Now().UTC(),
-		HolderDID:      query.HolderDID,
-		UserRoles:      query.UserRoles,
+		DID:         query.DID,
+		Version:     data.Version,
+		RetrievedBy: query.RetrievedBy,
+		OccurredAt:  time.Now().UTC(),
+		HolderDID:   query.HolderDID,
+		UserRoles:   query.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
@@ -94,17 +91,15 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 	}
 
 	return &GetByIDResult{
-		DID:            query.DID,
-		DocumentNumber: data.DocumentNumber,
-		Version:        data.Version,
-		State:          state,
-		TemplateType:   templateType,
-		Name:           data.Name,
-		Description:    data.Description,
-		CreatedBy:      data.CreatedBy,
-		CreatedAt:      data.CreatedAt,
-		UpdatedAt:      data.UpdatedAt,
-		Responsible:    data.Responsible,
-		TemplateData:   data.TemplateData,
+		DID:          query.DID,
+		Version:      data.Version,
+		State:        state,
+		TemplateType: templateType,
+		Name:         data.Name,
+		Description:  data.Description,
+		CreatedBy:    data.CreatedBy,
+		CreatedAt:    data.CreatedAt,
+		UpdatedAt:    data.UpdatedAt,
+		TemplateData: data.TemplateData,
 	}, nil
 }

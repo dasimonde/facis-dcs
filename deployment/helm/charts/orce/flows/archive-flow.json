@@ -1,0 +1,196 @@
+[
+    {
+        "id": "f10514b54313a655",
+        "type": "tab",
+        "label": "Audit Archive",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "3e5d28c9c3814ebf",
+        "type": "http in",
+        "z": "f10514b54313a655",
+        "name": "POST /archive/notary",
+        "url": "/archive/notary",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 142.5,
+        "y": 140,
+        "wires": [
+            [
+                "9f976e196dc5b844"
+            ]
+        ]
+    },
+    {
+        "id": "9f976e196dc5b844",
+        "type": "function",
+        "z": "f10514b54313a655",
+        "name": "Build archive audit event",
+        "func": "const token = env.get(\"ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN\");\nif (!token || msg.req?.headers?.authorization !== `Bearer ${token}`) { msg.statusCode = 401; msg.payload = {error: \"Unauthorized\"}; return msg; }\nconst required = [\"eventType\",\"did\",\"contractVersion\",\"archiveEntryId\",\"contentHash\",\"snapshotCid\",\"storedBy\",\"storedAt\"];\nfor (const key of required) { if (!msg.payload || msg.payload[key] === undefined || msg.payload[key] === null || msg.payload[key] === \"\") { msg.statusCode = 400; msg.payload = {error: `Missing field: ${key}`}; return msg; } }\nconst path = \"/data/archive-audit-events.jsonl\";\nlet events = [];\ntry { events = fs.readFileSync(path, \"utf8\").split(/\\r?\\n/).filter(Boolean).map(JSON.parse); } catch (error) { if (error.code !== \"ENOENT\") { msg.statusCode = 500; msg.payload = {error: \"Cannot read archive chain\"}; return msg; } }\nlet head = null;\nfor (const event of events) { const {eventHash, ...payload} = event; const expected = \"sha256:\" + crypto.createHash(\"sha256\").update(JSON.stringify(payload)).digest(\"hex\"); if (event.previousHash !== head || eventHash !== expected) { msg.statusCode = 409; msg.payload = {error: \"Persistent archive chain is invalid\"}; return msg; } head = eventHash; }\nconst input = Object.fromEntries(required.map(key => [key, msg.payload[key]]));\nconst existing = events.find(event => event.archiveEntryId === input.archiveEntryId);\nif (existing) { const same = required.every(key => existing[key] === input[key]); if (!same) { msg.statusCode = 409; msg.payload = {error: \"Archive entry id already exists with different content\"}; return msg; } msg.receipt = {receiptType: \"ARCHIVE_NOTARY_RECEIPT\", archiveEntryId: existing.archiveEntryId, eventHash: existing.eventHash, previousHash: existing.previousHash, receivedAt: existing.receivedAt}; return msg; }\nconst auditPayload = {...input, receivedAt: new Date().toISOString(), previousHash: head};\nconst eventHash = \"sha256:\" + crypto.createHash(\"sha256\").update(JSON.stringify(auditPayload)).digest(\"hex\");\nconst storedEvent = {...auditPayload, eventHash};\nfs.appendFileSync(path, JSON.stringify(storedEvent) + \"\\n\", {encoding: \"utf8\"});\nmsg.receipt = {receiptType: \"ARCHIVE_NOTARY_RECEIPT\", archiveEntryId: storedEvent.archiveEntryId, eventHash, previousHash: head, receivedAt: storedEvent.receivedAt};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            },
+            {
+                "var": "fs",
+                "module": "fs"
+            }
+        ],
+        "x": 517.5,
+        "y": 140,
+        "wires": [
+            [
+                "e1bdd77b97527da2"
+            ]
+        ]
+    },
+    {
+        "id": "a140293e82da129a",
+        "type": "file",
+        "z": "f10514b54313a655",
+        "name": "Write Archive Event",
+        "filename": "/data/archive-audit-events.jsonl",
+        "filenameType": "str",
+        "appendNewline": false,
+        "createDir": true,
+        "overwriteFile": "false",
+        "encoding": "none",
+        "x": 897.5,
+        "y": 140,
+        "wires": [
+            [
+                "e1bdd77b97527da2"
+            ]
+        ]
+    },
+    {
+        "id": "004907d18c654e54",
+        "type": "http response",
+        "z": "f10514b54313a655",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 1657.5,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "e1bdd77b97527da2",
+        "type": "function",
+        "z": "f10514b54313a655",
+        "name": "Return receipt",
+        "func": "msg.headers = {\"Content-Type\": \"application/json\"};\nif (msg.receipt) { msg.statusCode = 200; msg.payload = msg.receipt; }\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1277.5,
+        "y": 140,
+        "wires": [
+            [
+                "004907d18c654e54"
+            ]
+        ]
+    },
+    {
+        "id": "a1d8c2c1e5b24a7f",
+        "type": "http in",
+        "z": "f10514b54313a655",
+        "name": "GET /archive-audit-events.jsonl",
+        "url": "/archive-audit-events.jsonl",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 175,
+        "y": 300,
+        "wires": [
+            [
+                "d6f0a35a7c9617ac"
+            ]
+        ]
+    },
+    {
+        "id": "d6f0a35a7c9617ac",
+        "type": "function",
+        "z": "f10514b54313a655",
+        "name": "Check audit log bearer token",
+        "func": "const configuredToken = env.get(\"ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN\");\nconst expected = configuredToken ? `Bearer ${configuredToken}` : null;\nconst actual = msg.req?.headers?.authorization;\n\nif (!expected || actual !== expected) {\n  msg.statusCode = 401;\n  msg.headers = {\n    \"Content-Type\": \"application/json\"\n  };\n  msg.payload = { error: \"Unauthorized\" };\n  return [null, msg];\n}\n\nreturn [msg, null];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 515,
+        "y": 300,
+        "wires": [
+            [
+                "b945bead4933f6dd"
+            ],
+            [
+                "c7717d5f7aa1de62"
+            ]
+        ]
+    },
+    {
+        "id": "b945bead4933f6dd",
+        "type": "file in",
+        "z": "f10514b54313a655",
+        "name": "Read Archive Events",
+        "filename": "/data/archive-audit-events.jsonl",
+        "filenameType": "str",
+        "format": "utf8",
+        "chunk": false,
+        "sendError": true,
+        "encoding": "none",
+        "allProps": false,
+        "x": 865,
+        "y": 280,
+        "wires": [
+            [
+                "e7fbad236deea5f1"
+            ]
+        ]
+    },
+    {
+        "id": "e7fbad236deea5f1",
+        "type": "function",
+        "z": "f10514b54313a655",
+        "name": "Return archive audit log",
+        "func": "if (msg.error) {\n  msg.statusCode = 404;\n  msg.headers = {\n    \"Content-Type\": \"application/json\"\n  };\n  msg.payload = {\n    error: \"Archive audit log file not found\",\n    path: \"/data/archive-audit-events.jsonl\"\n  };\n  return msg;\n}\n\nmsg.statusCode = 200;\nmsg.headers = {\n  \"Content-Type\": \"text/plain; charset=utf-8\"\n};\n\nif (msg.payload === undefined || msg.payload === null) {\n  msg.payload = \"\";\n}\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1215,
+        "y": 280,
+        "wires": [
+            [
+                "c7717d5f7aa1de62"
+            ]
+        ]
+    },
+    {
+        "id": "c7717d5f7aa1de62",
+        "type": "http response",
+        "z": "f10514b54313a655",
+        "name": "Archive audit log response",
+        "statusCode": "",
+        "headers": {},
+        "x": 1580,
+        "y": 300,
+        "wires": []
+    }
+]

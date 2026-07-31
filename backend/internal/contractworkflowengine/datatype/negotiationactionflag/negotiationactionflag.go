@@ -1,3 +1,8 @@
+// Package negotiationactionflag is the accept/reject decision flag on the
+// "respond" endpoint (accept/reject one negotiation change request). Unlike
+// most other contract-mutating endpoints, respond does not require
+// updated_at and so is not covered by the optimistic-concurrency check
+// (see contractworkflowengine/command package doc).
 package negotiationactionflag
 
 import (
@@ -25,7 +30,7 @@ func NewNegotiationActionFlag(s string) (NegotiationActionFlag, error) {
 	return flag, nil
 }
 
-// IsValid checks if the NegotiationActionFlag is a valid role
+// IsValid reports whether the value is one of the declared NegotiationActionFlag values.
 func (f NegotiationActionFlag) IsValid() bool {
 	upper := NegotiationActionFlag(strings.ToUpper(string(f)))
 	return validFlag[upper]

@@ -1,0 +1,87 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:verify",
+    "@type": "ContractTemplate",
+    "documentTitle": "Verification Witness",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Verification Witness"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:verify#s1",
+                    "urn:doc:verify#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:verify#s1",
+                "children": [
+                    "urn:doc:verify#c1",
+                    "urn:doc:verify#c2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:verify#s2",
+                "children": [
+                    "urn:doc:verify#c3"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:verify#s1",
+                "title": "1. Verification"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:verify#c1",
+                "content": [
+                    "Verification re-renders the ",
+                    "prov:Entity",
+                    " extracted from the embedded JSON-LD payload."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:verify#c2",
+                "content": [
+                    "The ",
+                    "prov:Activity",
+                    " sealing this witness was performed by a ",
+                    "prov:SoftwareAgent",
+                    " acting as the compiler runtime."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:verify#s2",
+                "title": "2. Integrity"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:verify#c3",
+                "content": [
+                    "Witness bytes are appended without disturbing the original prefix, preserving the ",
+                    "prov:Bundle",
+                    " integrity."
+                ]
+            }
+        ]
+    }
+}

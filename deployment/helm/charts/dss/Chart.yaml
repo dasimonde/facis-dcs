@@ -1,0 +1,13 @@
+apiVersion: v2
+name: dss
+description: >-
+  EU Digital Signature Service (DSS) demonstration webapp — the eSignature
+  building block's AdES validation stack, run alongside the PKCS#11 signing
+  path as an ADDITIONAL external validator (DCS-FR-SM-18, DCS-IR-SI-10,
+  DCS-IR-CI-08). DISABLED by default: the EU distributes the webapp as a
+  ZIP/WAR without an official container image, so this chart wraps a pinned
+  community image and enabling it is an explicit operator decision
+  (dss.enabled + the backend's DSS_URL env).
+type: application
+version: 0.1.0
+appVersion: "5.5"

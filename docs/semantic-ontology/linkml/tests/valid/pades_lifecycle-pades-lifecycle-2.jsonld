@@ -1,0 +1,63 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:pades-lifecycle",
+    "@type": "ContractTemplate",
+    "documentTitle": "PAdES Lifecycle Test Document",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "PAdES Lifecycle Test Document"
+    },
+    "signatureFields": [
+        {
+            "@type": "SignatureField",
+            "signatoryName": "SignerOne",
+            "@id": "urn:doc:pades-lifecycle#SignerOne"
+        },
+        {
+            "@type": "SignatureField",
+            "signatoryName": "SignerTwo",
+            "@id": "urn:doc:pades-lifecycle#SignerTwo"
+        }
+    ],
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:pades-lifecycle#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:pades-lifecycle#s1",
+                "children": [
+                    "urn:doc:pades-lifecycle#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:pades-lifecycle#s1",
+                "title": "1. Terms"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:pades-lifecycle#c1",
+                "content": [
+                    "Clause one revised in first amendment."
+                ]
+            }
+        ]
+    }
+}

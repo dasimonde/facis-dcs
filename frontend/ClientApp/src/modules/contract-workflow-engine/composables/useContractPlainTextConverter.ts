@@ -1,33 +1,23 @@
-import type { ContractData, SemanticConditionValue } from '@/models/contract-data'
-import type { SubTemplateSnapshot } from '@/models/contract-template'
-import { isNewline, isPlaceholder, isText, parseSegments } from '@template-repository/composables/useClauseTextChips'
-import type {
-  ApprovedTemplateBlock,
-  ClauseBlock,
-  DocumentBlock,
-  DocumentOutline,
-  DocumentOutlineBlock,
-  SectionBlock,
-  SemanticCondition,
-  TextBlock,
-} from '@/modules/template-repository/models/contract-template'
 import {
-  isApprovedTemplateBlock,
-  isClauseBlock,
-  isMergedApprovedTemplateBlock,
-  isSectionBlock,
-  isTextBlock,
-} from '@template-repository/models/contract-template'
+  isNewline,
+  isPlaceholder,
+  isText,
+  parseSegmentsFromContent,
+} from '@template-repository/composables/useClauseTextChips'
+import { getSemanticConditionsFromTemplateData } from '@template-repository/store/dcsDraftStore'
 import {
-  getOwnerBlockIdFromMergedBlockId,
-  isMergedBlockId,
-  isSameTemplateDataRef,
-} from '@template-repository/utils/template-data-ref'
+  collectDeclaredRequirements,
+  fromDocumentSemanticValues,
+} from '@contract-workflow-engine/utils/semantic-condition-values'
+import { isDcsDocumentData } from '@/models/dcs-jsonld'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
+import type { DcsBlock, DcsClause, DcsLayoutNode } from '@/models/dcs-jsonld'
+import type { SemanticCondition } from '@template-repository/models/contract-template'
 
 const DEFAULT_PLACEHOLDER_TEXT = '__________'
 const NEWLINE = '\n'
 
-export type ContractPlainTextInput = Partial<ContractData> | null | undefined
+export type ContractPlainTextInput = unknown
 
 export interface ContractPlainTextSection {
   type: 'section'
@@ -51,12 +41,11 @@ export function isTextPlainTextBlock(block: ContractPlainTextBlock): block is Co
 }
 
 interface ContractContext {
-  blockMap: Map<string, DocumentBlock>
-  outlineMap: Map<string, DocumentOutlineBlock>
-  rootBlockIds: string[]
+  blockMap: Map<string, DcsBlock>
+  layoutMap: Map<string, DcsLayoutNode>
+  rootChildIds: string[]
   semanticConditions: SemanticCondition[]
   semanticConditionValues: SemanticConditionValue[]
-  subTemplateSnapshots: SubTemplateSnapshot[]
 }
 
 interface PlainTextWriter {
@@ -68,17 +57,20 @@ interface PlainTextWriter {
   toBlocks: () => ContractPlainTextBlock[]
 }
 
-function createContractContext(contractData: ContractPlainTextInput): ContractContext {
-  const documentOutline: DocumentOutline = contractData?.documentOutline ?? []
-  const documentBlocks: DocumentBlock[] = contractData?.documentBlocks ?? []
-
+function createContractContext(
+  blocks: DcsBlock[],
+  layout: DcsLayoutNode[],
+  semanticConditions: SemanticCondition[],
+  semanticConditionValues: SemanticConditionValue[],
+): ContractContext {
+  const root = layout.find((n) => n['dcs:isRoot'])
+  const rootChildIds = root ? root['dcs:children']['@list'].map((r) => r['@id']) : []
   return {
-    blockMap: new Map(documentBlocks.map((block) => [block.blockId, block])),
-    outlineMap: new Map(documentOutline.map((node) => [node.blockId, node])),
-    rootBlockIds: documentOutline.find((node) => node.isRoot)?.children ?? [],
-    semanticConditions: contractData?.semanticConditions ?? [],
-    semanticConditionValues: contractData?.semanticConditionValues ?? [],
-    subTemplateSnapshots: contractData?.subTemplateSnapshots ?? [],
+    blockMap: new Map(blocks.map((b) => [b['@id'], b])),
+    layoutMap: new Map(layout.map((n) => [n['@id'], n])),
+    rootChildIds,
+    semanticConditions,
+    semanticConditionValues,
   }
 }
 
@@ -89,11 +81,7 @@ function createPlainTextWriter(): PlainTextWriter {
 
   function addSection(text: string, level: number): void {
     breakLineIfOpen()
-    blocks.push({
-      type: 'section',
-      text,
-      level,
-    })
+    blocks.push({ type: 'section', text, level })
   }
 
   function addText(text: string): void {
@@ -102,10 +90,7 @@ function createPlainTextWriter(): PlainTextWriter {
   }
 
   function breakLine(): void {
-    blocks.push({
-      type: 'text',
-      text: currentLine,
-    })
+    blocks.push({ type: 'text', text: currentLine })
     currentLine = ''
     hasOpenLine = false
   }
@@ -130,155 +115,77 @@ function createPlainTextWriter(): PlainTextWriter {
     return blocks
   }
 
-  return {
-    addSection,
-    addText,
-    breakLine,
-    breakLineIfOpen,
-    addBoundarySpaceIfNeeded,
-    toBlocks,
-  }
+  return { addSection, addText, breakLine, breakLineIfOpen, addBoundarySpaceIfNeeded, toBlocks }
 }
 
 function writeBlockAsPlainText(cxt: ContractContext, blockId: string, level: number, writer: PlainTextWriter): void {
   const block = cxt.blockMap.get(blockId)
   if (!block) return
-  if (isSectionBlock(block)) writeSectionBlock(cxt, block, level, writer)
-  else if (isTextBlock(block)) writeTextBlock(block, writer)
-  else if (isClauseBlock(block)) writeClauseBlock(cxt, block, writer)
-  else if (isApprovedTemplateBlock(block)) writeApprovedTemplateBlock(cxt, block, level, writer)
-  else if (isMergedApprovedTemplateBlock(block)) writeChildBlocks(cxt, block.blockId, level, writer)
-}
 
-function writeSectionBlock(cxt: ContractContext, block: SectionBlock, level: number, writer: PlainTextWriter): void {
-  writer.addSection(block.title ?? block.text ?? '', level)
-  writeChildBlocks(cxt, block.blockId, level + 1, writer)
-}
-
-function writeTextBlock(block: TextBlock, writer: PlainTextWriter): void {
-  const lines = (block.text ?? '').split(NEWLINE)
-  for (let index = 0; index < lines.length; index += 1) {
-    writer.addText(lines[index] ?? '')
-    if (index < lines.length - 1) writer.breakLine()
+  if (block['@type'] === 'dcs:Section') {
+    const title = (block as { 'dcs:title'?: string })['dcs:title'] ?? ''
+    writer.addSection(title, level)
+    writeChildBlocks(cxt, blockId, level + 1, writer)
+  } else if (block['@type'] === 'dcs:TextBlock') {
+    const text = (block as { 'dcs:text'?: string })['dcs:text'] ?? ''
+    const lines = text.split(NEWLINE)
+    for (let i = 0; i < lines.length; i++) {
+      writer.addText(lines[i] ?? '')
+      if (i < lines.length - 1) writer.breakLine()
+    }
+    writer.addBoundarySpaceIfNeeded(text)
+  } else if (block['@type'] === 'dcs:Clause') {
+    writeClauseBlock(cxt, block, writer)
   }
-  writer.addBoundarySpaceIfNeeded(block.text ?? '')
 }
 
-function writeClauseBlock(cxt: ContractContext, block: ClauseBlock, writer: PlainTextWriter): void {
-  const semanticConditions = getSemanticConditionsForClauseBlock(block.blockId, cxt)
-  writeClauseText(block.text ?? '', block.blockId, semanticConditions, cxt.semanticConditionValues, writer)
-  writer.addBoundarySpaceIfNeeded(block.text ?? '')
-}
+function writeClauseBlock(cxt: ContractContext, clause: DcsClause, writer: PlainTextWriter): void {
+  const conditions = cxt.semanticConditions
+  const content = clause['dcs:content']
+  const segments_raw = typeof content === 'string' ? [] : content['@list']
+  const segments = parseSegmentsFromContent(segments_raw, conditions)
 
-function writeApprovedTemplateBlock(
-  cxt: ContractContext,
-  block: ApprovedTemplateBlock,
-  level: number,
-  writer: PlainTextWriter,
-): void {
-  writer.breakLineIfOpen()
-  const snapshot = cxt.subTemplateSnapshots.find((item) =>
-    isSameTemplateDataRef(
-      {
-        templateId: item.did,
-        version: item.version,
-        document_number: item.document_number,
-      },
-      {
-        templateId: block.templateId,
-        version: block.version,
-        document_number: block.document_number,
-      },
-    ),
-  )
-
-  if (snapshot?.template_data) {
-    const snapshotContext = createContractContext({
-      documentOutline: snapshot.template_data.documentOutline ?? [],
-      documentBlocks: snapshot.template_data.documentBlocks ?? [],
-      semanticConditions: snapshot.template_data.semanticConditions ?? [],
-      semanticConditionValues: cxt.semanticConditionValues,
-      subTemplateSnapshots: cxt.subTemplateSnapshots,
-    })
-
-    for (const childId of snapshotContext.rootBlockIds) {
-      writeBlockAsPlainText(snapshotContext, childId, level, writer)
+  for (const seg of segments) {
+    if (isText(seg)) {
+      writer.addText(seg.value)
+    } else if (isPlaceholder(seg)) {
+      const parameterValue = cxt.semanticConditionValues.find(
+        // A value is keyed by its placeholder @id (conditionId), not the block.
+        (item) => item.conditionId === seg.conditionId && item.parameterName === seg.parameterName,
+      )?.parameterValue
+      writer.addText(parameterValue == null ? DEFAULT_PLACEHOLDER_TEXT : String(parameterValue))
+    } else if (isNewline(seg)) {
+      writer.breakLine()
     }
   }
 
-  writeChildBlocks(cxt, block.blockId, level, writer)
+  const clauseText = typeof content === 'string' ? content : ''
+  writer.addBoundarySpaceIfNeeded(clauseText)
 }
 
 function writeChildBlocks(cxt: ContractContext, parentBlockId: string, level: number, writer: PlainTextWriter): void {
-  const childIds = cxt.outlineMap.get(parentBlockId)?.children ?? []
+  const node = cxt.layoutMap.get(parentBlockId)
+  const childIds = node ? node['dcs:children']['@list'].map((r) => r['@id']) : []
   for (const childId of childIds) {
     writeBlockAsPlainText(cxt, childId, level, writer)
   }
 }
 
-function writeClauseText(
-  text: string,
-  blockId: string,
-  semanticConditions: SemanticCondition[],
-  semanticConditionValues: SemanticConditionValue[],
-  writer: PlainTextWriter,
-): void {
-  const segments = parseSegments(text ?? '', semanticConditions)
-
-  for (const segment of segments) {
-    if (isText(segment)) {
-      writer.addText(segment.value)
-      continue
-    }
-
-    if (isPlaceholder(segment)) {
-      const parameterValue = semanticConditionValues.find(
-        (item) =>
-          item.blockId === blockId &&
-          item.conditionId === segment.conditionId &&
-          item.parameterName === segment.parameterName,
-      )?.parameterValue
-      writer.addText(parameterValue == null ? DEFAULT_PLACEHOLDER_TEXT : String(parameterValue))
-      continue
-    }
-
-    if (isNewline(segment)) writer.breakLine()
-  }
-}
-
-function getSemanticConditionsForClauseBlock(blockId: string, cxt: ContractContext): SemanticCondition[] {
-  if (!isMergedBlockId(blockId)) return cxt.semanticConditions
-  const ownerBlockId = getOwnerBlockIdFromMergedBlockId(blockId)
-  if (!ownerBlockId) return cxt.semanticConditions
-
-  const ownerBlock = cxt.blockMap.get(ownerBlockId)
-  if (!ownerBlock || !isMergedApprovedTemplateBlock(ownerBlock)) return cxt.semanticConditions
-
-  const snapshot = cxt.subTemplateSnapshots.find((item) =>
-    isSameTemplateDataRef(
-      {
-        templateId: item.did,
-        version: item.version,
-        document_number: item.document_number,
-      },
-      {
-        templateId: ownerBlock.templateId,
-        version: ownerBlock.version,
-        document_number: ownerBlock.document_number,
-      },
-    ),
-  )
-
-  return snapshot?.template_data?.semanticConditions ?? cxt.semanticConditions
-}
-
 export function useContractPlainTextConverter() {
   function convertContractToPlainTextBlocks(contractData: ContractPlainTextInput): ContractPlainTextBlock[] {
-    const context = createContractContext(contractData)
-    if (context.rootBlockIds.length === 0) return []
+    if (!isDcsDocumentData(contractData)) return []
+
+    const cd = contractData as import('@/models/dcs-jsonld').DcsContractData
+    const blocks = cd['dcs:documentStructure']['dcs:blocks']['@list']
+    const layout = cd['dcs:documentStructure']['dcs:layout']['@list']
+    const conditions = getSemanticConditionsFromTemplateData(cd)
+    const conditionValues = fromDocumentSemanticValues(collectDeclaredRequirements(cd))
+
+    const context = createContractContext(blocks, layout, conditions, conditionValues)
+    if (context.rootChildIds.length === 0) return []
 
     const writer = createPlainTextWriter()
-    for (const childId of context.rootBlockIds) {
+    for (const childId of context.rootChildIds) {
       writeBlockAsPlainText(context, childId, 1, writer)
     }
 

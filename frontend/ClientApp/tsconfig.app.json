@@ -4,9 +4,12 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client"],
     "paths": {
-      "@/*": ["./src/*"],
+      "@template-repository/*": ["./src/modules/template-repository/*"],
+      "@contract-workflow-engine/*": ["./src/modules/contract-workflow-engine/*"],
+      "@template-catalogue/*": ["./src/modules/template-catalogue/*"],
+      "@semantic-hub/*": ["./src/modules/semantic-hub/*"],
       "@core/*": ["./src/core/*"],
-      "@template-repository/*": ["./src/modules/template-repository/*"]
+      "@/*": ["./src/*"]
     },
 
     /* Linting */

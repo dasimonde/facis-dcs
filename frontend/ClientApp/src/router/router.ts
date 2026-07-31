@@ -1,41 +1,61 @@
+import {
+  ArchiveBoxIcon,
+  ArrowsRightLeftIcon,
+  CheckCircleIcon,
+  CircleStackIcon,
+  ClipboardDocumentListIcon,
+  DocumentTextIcon,
+  EyeIcon,
+  KeyIcon,
+  LockClosedIcon,
+  PencilSquareIcon,
+  ServerStackIcon,
+  ShieldCheckIcon,
+  ShieldExclamationIcon,
+  Square3Stack3DIcon,
+  SquaresPlusIcon,
+} from '@heroicons/vue/20/solid'
+import { nextTick } from 'vue'
+import { createRouter, createWebHistory, type RouteRecordRaw, START_LOCATION } from 'vue-router'
+import { useScrollStore } from '@core/store/scroll'
+import ApproveContractTemplateView from '@template-repository/views/ApproveContractTemplateView.vue'
+import NewContractTemplateView from '@template-repository/views/NewContractTemplateView.vue'
+import ReviewContractTemplateView from '@template-repository/views/ReviewContractTemplateView.vue'
+import ViewContractTemplateView from '@template-repository/views/ViewContractTemplateView.vue'
+import TemplateCatalogueListView from '@template-catalogue/views/TemplateCatalogueListView.vue'
+import TemplateCatalogueView from '@template-catalogue/views/TemplateCatalogueView.vue'
+import SemanticHubView from '@semantic-hub/views/SemanticHubView.vue'
 import { getUIBasePath } from '@/config'
-import { useScrollStore } from '@/core/store/scroll'
-import ApproveContractTemplateView from '@/modules/template-repository/views/ApproveContractTemplateView.vue'
-import ReviewContractTemplateView from '@/modules/template-repository/views/ReviewContractTemplateView.vue'
-import ViewContractTemplateView from '@/modules/template-repository/views/ViewContractTemplateView.vue'
 import { OID4VP_STATE_KEY } from '@/hydra-login-guard'
 import { authenticationService } from '@/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
+import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
+import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
+import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
+import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
-import SigningDashboardView from '@/views/signing/SigningDashboardView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
-import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
+import PidPresentationView from '@/views/auth/PidPresentationView.vue'
+import ComplianceViewerView from '@/views/compliance/ComplianceViewerView.vue'
 import ApproveContractView from '@/views/contract/ApproveContractView.vue'
 import ContractListView from '@/views/contract/ContractListView.vue'
 import NegotiateContractView from '@/views/contract/NegotiateContractView.vue'
 import NewContractView from '@/views/contract/NewContractView.vue'
 import ReviewContractView from '@/views/contract/ReviewContractView.vue'
 import ViewContractView from '@/views/contract/ViewContractView.vue'
+import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
+import FrontPageView from '@/views/FrontPageView.vue'
+import NonComplianceInvestigationView from '@/views/non-compliance/NonComplianceInvestigationView.vue'
+import SecureContractViewerView from '@/views/signing/SecureContractViewerView.vue'
+import SigningListView from '@/views/signing/SigningListView.vue'
 import TaskListView from '@/views/task/TaskListView.vue'
-import TemplateCatalogueListView from '@/modules/template-catalogue/views/TemplateCatalogueListView.vue'
-import TemplateCatalogueView from '@/modules/template-catalogue/views/TemplateCatalogueView.vue'
-import {
-  ArrowsRightLeftIcon,
-  CheckCircleIcon,
-  ClipboardDocumentListIcon,
-  DocumentTextIcon,
-  EyeIcon,
-  PencilSquareIcon,
-  SquaresPlusIcon,
-} from '@heroicons/vue/20/solid'
-import NewContractTemplateView from '@template-repository/views/NewContractTemplateView.vue'
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 const ROUTES = {
   HOME: 'home',
+  FRONT_PAGE: 'front_page',
   TEMPLATES: {
     LIST: 'templates.list',
     NEW: 'templates.new',
@@ -56,8 +76,12 @@ const ROUTES = {
   AUDIT: {
     LIST: 'audit.list',
   },
+  ARCHIVE: {
+    DASHBOARD: 'archive.dashboard',
+  },
   AUTH: {
     SUCCESS: 'auth.success',
+    PID_VERIFY: 'auth.pid_verify',
   },
   CONTRACTS: {
     LIST: 'contracts.list',
@@ -69,7 +93,22 @@ const ROUTES = {
     APPROVE: 'contracts.approve',
   },
   SIGNING: {
-    DASHBOARD: 'signing.dashboard',
+    LIST: 'signing.list',
+    VIEWER: 'signing.viewer',
+  },
+  COMPLIANCE: {
+    VIEWER: 'compliance.viewer',
+  },
+  NON_COMPLIANCE: {
+    INVESTIGATION: 'non_compliance.investigation',
+  },
+  ADMIN: {
+    TARGETS: 'admin.targets',
+    SYSTEM_USERS: 'admin.system-users',
+    KEY_INVENTORY: 'admin.key-inventory',
+  },
+  SEMANTIC_HUB: {
+    DASHBOARD: 'semantic_hub.dashboard',
   },
 } as const
 
@@ -81,6 +120,17 @@ const routes: RouteRecordRaw[] = [
     component: LoginView,
   },
   {
+    path: '/frontpage',
+    name: ROUTES.FRONT_PAGE,
+    component: FrontPageView,
+    meta: {
+      name: 'DCS',
+      hideInSidebar: true,
+      requiresAuth: true,
+      title: 'DCS',
+    },
+  },
+  {
     path: '/templates',
     name: ROUTES.TEMPLATES.LIST,
     component: ContractTemplateListView,
@@ -90,6 +140,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Templates',
       order: 1,
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -101,7 +152,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - New Template',
-      roles: ['TEMPLATE_CREATOR'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -113,7 +164,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Edit Template',
-      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -138,7 +189,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Review Template',
-      roles: ['TEMPLATE_REVIEWER'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -150,7 +201,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Approve Template',
-      roles: ['TEMPLATE_APPROVER'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -189,7 +240,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Negotiation Tasks',
       order: 3.3,
-      roles: ['CONTRACT_CREATOR', 'CONTRACT_REVIEWER'],
+      roles: ['CONTRACT_CREATOR', 'CONTRACT_NEGOTIATOR', 'CONTRACT_REVIEWER'],
     },
   },
   {
@@ -198,7 +249,7 @@ const routes: RouteRecordRaw[] = [
     component: TemplateCatalogueListView,
     meta: {
       name: 'Template Catalogue',
-      icon: DocumentTextIcon,
+      icon: Square3Stack3DIcon,
       requiresAuth: true,
       title: 'DCS - Template Catalogue',
       order: 4,
@@ -228,20 +279,20 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Audit',
       order: 5,
-      roles: ['AUDITOR'],
+      roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
     },
   },
   {
-    path: '/audit',
-    name: ROUTES.AUDIT.LIST,
-    component: AuditView,
+    path: '/archive/dashboard',
+    name: ROUTES.ARCHIVE.DASHBOARD,
+    component: ArchiveDashboardView,
     meta: {
-      name: 'Audit',
-      icon: ClipboardDocumentListIcon,
+      name: 'Archive',
+      icon: ArchiveBoxIcon,
       requiresAuth: true,
-      title: 'DCS - Audit',
-      order: 5,
-      roles: ['AUDITOR'],
+      title: 'DCS - Archive Dashboard',
+      order: 6,
+      roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
     },
   },
   {
@@ -254,7 +305,14 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Contracts',
       order: 2,
-      roles: ['CONTRACT_CREATOR', 'CONTRACT_REVIEWER', 'CONTRACT_APPROVER', 'CONTRACT_MANAGER'],
+      roles: [
+        'CONTRACT_CREATOR',
+        'CONTRACT_NEGOTIATOR',
+        'CONTRACT_REVIEWER',
+        'CONTRACT_APPROVER',
+        'CONTRACT_MANAGER',
+        'CONTRACT_OBSERVER',
+      ],
     },
   },
   {
@@ -290,7 +348,14 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - View Contract',
-      roles: ['CONTRACT_CREATOR', 'CONTRACT_REVIEWER', 'CONTRACT_APPROVER', 'CONTRACT_MANAGER'],
+      roles: [
+        'CONTRACT_CREATOR',
+        'CONTRACT_NEGOTIATOR',
+        'CONTRACT_REVIEWER',
+        'CONTRACT_APPROVER',
+        'CONTRACT_MANAGER',
+        'CONTRACT_OBSERVER',
+      ],
     },
   },
   {
@@ -302,7 +367,14 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Negotiate Contract',
-      roles: ['CONTRACT_CREATOR', 'CONTRACT_REVIEWER'],
+      roles: [
+        'CONTRACT_CREATOR',
+        'CONTRACT_NEGOTIATOR',
+        'CONTRACT_REVIEWER',
+        'CONTRACT_APPROVER',
+        'CONTRACT_MANAGER',
+        'CONTRACT_OBSERVER',
+      ],
     },
   },
   {
@@ -314,7 +386,14 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Review Contract',
-      roles: ['CONTRACT_REVIEWER'],
+      roles: [
+        'CONTRACT_CREATOR',
+        'CONTRACT_NEGOTIATOR',
+        'CONTRACT_REVIEWER',
+        'CONTRACT_APPROVER',
+        'CONTRACT_MANAGER',
+        'CONTRACT_OBSERVER',
+      ],
     },
   },
   {
@@ -326,20 +405,117 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Approve Contract',
-      roles: ['CONTRACT_APPROVER'],
+      roles: [
+        'CONTRACT_CREATOR',
+        'CONTRACT_NEGOTIATOR',
+        'CONTRACT_REVIEWER',
+        'CONTRACT_APPROVER',
+        'CONTRACT_MANAGER',
+        'CONTRACT_OBSERVER',
+      ],
     },
   },
   {
     path: '/signing',
-    name: ROUTES.SIGNING.DASHBOARD,
-    component: SigningDashboardView,
+    name: ROUTES.SIGNING.LIST,
+    component: SigningListView,
     meta: {
-      name: 'Signing Dashboard',
+      name: 'Signing',
       icon: PencilSquareIcon,
       requiresAuth: true,
-      title: 'DCS - Signing Dashboard',
-      order: 5,
+      title: 'DCS - Signing',
+      order: 7,
+      roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER', 'CONTRACT_OBSERVER'],
+    },
+  },
+  {
+    path: '/signing/:did',
+    name: ROUTES.SIGNING.VIEWER,
+    component: SecureContractViewerView,
+    meta: {
+      name: 'Secure Contract Viewer',
+      hideInSidebar: true,
+      requiresAuth: true,
+      title: 'DCS - Secure Contract Viewer',
       roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER'],
+    },
+  },
+  {
+    path: '/compliance',
+    name: ROUTES.COMPLIANCE.VIEWER,
+    component: ComplianceViewerView,
+    meta: {
+      name: 'Compliance Viewer',
+      icon: ShieldCheckIcon,
+      requiresAuth: true,
+      title: 'DCS - Signature Compliance Viewer',
+      order: 8,
+      roles: ['AUDITOR', 'COMPLIANCE_OFFICER', 'CONTRACT_MANAGER'],
+    },
+  },
+  {
+    path: '/admin/targets',
+    name: ROUTES.ADMIN.TARGETS,
+    component: ContractTargetAdminView,
+    meta: {
+      name: 'Target Systems',
+      icon: ServerStackIcon,
+      requiresAuth: true,
+      title: 'DCS - Target Systems',
+      order: 11,
+      roles: ['SYSTEM_ADMINISTRATOR', 'INTEGRATION_MANAGER'],
+    },
+  },
+  {
+    path: '/admin/system-users',
+    name: ROUTES.ADMIN.SYSTEM_USERS,
+    component: MachineIdentityAdminView,
+    meta: {
+      name: 'System Users',
+      icon: KeyIcon,
+      requiresAuth: true,
+      title: 'DCS - System Users',
+      order: 12,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/admin/hsm-keys',
+    name: ROUTES.ADMIN.KEY_INVENTORY,
+    component: KeyInventoryAdminView,
+    meta: {
+      name: 'Key Inventory',
+      icon: LockClosedIcon,
+      requiresAuth: true,
+      title: 'DCS - Key Inventory',
+      order: 13,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/non-compliance',
+    name: ROUTES.NON_COMPLIANCE.INVESTIGATION,
+    component: NonComplianceInvestigationView,
+    meta: {
+      name: 'Non-Compliance Investigation',
+      icon: ShieldExclamationIcon,
+      requiresAuth: true,
+      title: 'DCS - Non-Compliance Investigation',
+      order: 9,
+      roles: ['COMPLIANCE_OFFICER'],
+    },
+  },
+  {
+    path: '/semantic-hub',
+    name: ROUTES.SEMANTIC_HUB.DASHBOARD,
+    component: SemanticHubView,
+    meta: {
+      name: 'Semantic Hub',
+      icon: CircleStackIcon,
+      requiresAuth: true,
+      title: 'DCS - Semantic Hub',
+      order: 10,
+      roles: ['TEMPLATE_MANAGER'],
     },
   },
   {
@@ -347,6 +523,12 @@ const routes: RouteRecordRaw[] = [
     name: ROUTES.AUTH.SUCCESS,
     meta: { hideInSidebar: true, requiresAuth: false, layout: 'blank', title: 'DCS - Auth Success' },
     component: AuthSuccessView,
+  },
+  {
+    path: '/pid-verify',
+    name: ROUTES.AUTH.PID_VERIFY,
+    meta: { hideInSidebar: true, requiresAuth: false, layout: 'blank', title: 'DCS - PID Verify' },
+    component: PidPresentationView,
   },
 ]
 
@@ -368,7 +550,7 @@ router.beforeEach(async (to) => {
       }
     }
     if (authStore.isAuthenticated) {
-      return { name: ROUTES.TEMPLATES.LIST }
+      return { name: ROUTES.FRONT_PAGE }
     }
     return true
   }
@@ -378,6 +560,14 @@ router.beforeEach(async (to) => {
   }
 
   if (authStore.isAuthenticated) {
+    return true
+  }
+
+  // A valid stored token already carries the identity — restore it without a
+  // refresh round-trip; only refresh when there is no usable token (its
+  // rotating refresh cookie is single-use, so it must not be spent on every
+  // navigation).
+  if (authStore.restoreFromToken()) {
     return true
   }
 
@@ -400,7 +590,7 @@ router.beforeEach((to) => {
   }
 })
 
-router.beforeEach((to) => {
+router.afterEach((to) => {
   const scrollStore = useScrollStore()
   if (to.matched.some((r) => r.path.includes(':'))) {
     scrollStore.addGutter()
@@ -409,9 +599,19 @@ router.beforeEach((to) => {
   }
 })
 
-router.beforeEach((_, from) => {
+router.afterEach((_, from) => {
   const navStore = useNavStore()
   navStore.previousRoute = from
+})
+
+router.afterEach(async (to, from) => {
+  if (from === START_LOCATION) return
+
+  if (to.path === from.path) return
+
+  const scrollStore = useScrollStore()
+  await nextTick()
+  scrollStore.scrollContainer?.focus()
 })
 
 export { router, ROUTES }

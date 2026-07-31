@@ -33,7 +33,7 @@ func TestAuditTemplateApprovalProvenanceAcceptsValidLifecycle(t *testing.T) {
 
 	findings := AuditTemplateApprovalProvenance(did, entries)
 
-	require.True(t, hasFindingSeverity(findings, "FACIS-TPL-PROV-000", "info"))
+	require.True(t, hasFindingSeverity(findings, "FACIS-TPL-PROV-000", SeveritySatisfied))
 	require.False(t, hasFindingSeverity(findings, "FACIS-TPL-PROV-004", "error"))
 }
 

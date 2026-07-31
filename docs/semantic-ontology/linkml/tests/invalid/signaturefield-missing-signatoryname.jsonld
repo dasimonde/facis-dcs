@@ -1,0 +1,54 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:sig-missing-title",
+    "@type": "ContractTemplate",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Missing Title Test"
+    },
+    "signatureFields": [
+        {
+            "@type": "SignatureField"
+        }
+    ],
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:sig-missing-title#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:sig-missing-title#s1",
+                "children": [
+                    "urn:doc:sig-missing-title#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:sig-missing-title#s1",
+                "title": "1. Terms"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:sig-missing-title#c1",
+                "content": [
+                    "A clause."
+                ]
+            }
+        ]
+    }
+}

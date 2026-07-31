@@ -57,6 +57,7 @@ func (p *Platform) routes() {
 	p.mux.HandleFunc("POST /webhooks", p.auth(p.subscribe))
 	p.mux.HandleFunc("DELETE /webhooks/{id}", p.auth(p.unsubscribe))
 	p.mux.HandleFunc("POST /callbacks", p.auth(p.callback))
+	p.mux.HandleFunc("GET /deliveries", p.auth(p.listDeliveries))
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -103,6 +104,12 @@ func (p *Platform) listEvents(w http.ResponseWriter, r *http.Request) {
 // GET /webhooks
 func (p *Platform) listWebhooks(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, p.store.ListAll())
+}
+
+// GET /deliveries — recent notification outcomes (status code / error /
+// acknowledged), the monitoring surface for DCS-FR-TR-22 subscribers.
+func (p *Platform) listDeliveries(w http.ResponseWriter, r *http.Request) {
+	jsonOK(w, p.store.ListDeliveries())
 }
 
 // POST /webhooks

@@ -1,0 +1,34 @@
+# Docker build context excludes. Without this file, `docker build` from the
+# repo root tars up everything below, including the Python BDD virtualenv
+# (tests/bdd/.venv — hundreds of thousands of small files) and build tmp
+# dirs; over the WSL2/9p-mounted filesystem this reliably crashes the
+# legacy builder's tar writer ("archive/tar: missed writing N bytes" ->
+# "unexpected EOF") after tens of minutes rather than merely being slow.
+
+.git
+.github
+
+# BDD test harness virtualenv and caches (never needed inside any image)
+tests/bdd/.venv
+tests/bdd/.tmp
+tests/bdd/.reports
+**/__pycache__
+**/*.pyc
+
+# Go build artifacts / editor tmp / air hot-reload output
+backend/tmp
+backend/bin
+tmp
+
+# Frontend — installed fresh via npm ci inside the frontend-builder stage
+frontend/ClientApp/node_modules
+frontend/ClientApp/dist
+
+# pdf-core build artifacts and its own local test venv/tmp, if any
+pdf-core/tmp
+pdf-core/**/__pycache__
+
+# Local dev secrets/certs and editor/IDE metadata
+.vscode
+.idea
+*.log

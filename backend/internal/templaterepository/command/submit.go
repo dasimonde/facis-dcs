@@ -76,12 +76,14 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 	}(tx)
 
-	processData, err := h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
+	processData, err := h.CTRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not process core data: %w", err)
 	}
 
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	// Optimistic concurrency: reject if the caller's view of the template is
+	// older than what's stored (see command package doc / ADR-0007).
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 
@@ -89,25 +91,8 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 	var nextTemplateState contracttemplatestate.ContractTemplateState
 	if processData.State == contracttemplatestate.Draft.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.TemplateCreator) {
+		if !cmd.UserRoles.HasRoles(userrole.TemplateCreator, userrole.TemplateManager) {
 			return errors.New("invalid user permission")
-		}
-
-		resp := db.Responsible{
-			Creator:   processData.CreatedBy,
-			Reviewers: []string{cmd.SubmittedBy},
-			Approver:  cmd.SubmittedBy,
-		}
-		anyResp := any(resp)
-		responsible = &anyResp
-
-		updateData := db.ContractTemplateUpdateData{
-			DID:         cmd.DID,
-			Responsible: &resp,
-		}
-		err := h.CTRepo.Update(ctx, tx, updateData)
-		if err != nil {
-			return fmt.Errorf("could not update contract template: %w", err)
 		}
 
 		err = createTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd)
@@ -119,7 +104,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Rejected.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.TemplateCreator) {
+		if !cmd.UserRoles.HasRoles(userrole.TemplateCreator, userrole.TemplateManager) {
 			return errors.New("invalid user permission")
 		}
 
@@ -137,7 +122,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Submitted.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.TemplateReviewer) {
+		if !cmd.UserRoles.HasRoles(userrole.TemplateReviewer, userrole.TemplateManager) {
 			return errors.New("invalid user permission")
 		}
 
@@ -188,7 +173,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Reviewed.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.TemplateApprover) {
+		if !cmd.UserRoles.HasRoles(userrole.TemplateApprover, userrole.TemplateManager) {
 			return errors.New("invalid user permission")
 		}
 
@@ -223,18 +208,17 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 
 		evt := templateevents.SubmitEvent{
-			DID:            cmd.DID,
-			DocumentNumber: processData.DocumentNumber,
-			Version:        processData.Version,
-			SubmittedBy:    cmd.SubmittedBy,
-			PreviousState:  processData.State,
-			NewState:       nextTemplateState.String(),
-			ActionFlag:     cmd.ActionFlag,
-			Comments:       cmd.Comments,
-			OccurredAt:     time.Now().UTC(),
-			Responsible:    responsible,
-			HolderDID:      cmd.HolderDID,
-			UserRoles:      cmd.UserRoles,
+			DID:           cmd.DID,
+			Version:       processData.Version,
+			SubmittedBy:   cmd.SubmittedBy,
+			PreviousState: processData.State,
+			NewState:      nextTemplateState.String(),
+			ActionFlag:    cmd.ActionFlag,
+			Comments:      cmd.Comments,
+			OccurredAt:    time.Now().UTC(),
+			Responsible:   responsible,
+			HolderDID:     cmd.HolderDID,
+			UserRoles:     cmd.UserRoles,
 		}
 		err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 		if err != nil {

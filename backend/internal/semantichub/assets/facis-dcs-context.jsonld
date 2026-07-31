@@ -1,0 +1,18 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+    "dcst": "https://w3id.org/facis/dcs/taxonomy/v1#",
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "dcterms": "http://purl.org/dc/terms/",
+    "sh": "http://www.w3.org/ns/shacl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "parameterValue": "dcs:parameterValue",
+    "blockId": "dcs:blockId",
+    "derivedFromTemplate": {
+      "@id": "dcs:derivedFromTemplate",
+      "@type": "@id"
+    },
+    "version": "dcs:version"
+  }
+}

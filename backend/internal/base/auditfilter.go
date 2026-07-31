@@ -1,3 +1,7 @@
+// Package base holds the shared kernel used by every domain: cross-cutting
+// helpers (this file), plus the conf, datatype, db, event, identity, ipfs,
+// tsa, and validation subpackages. Domains depend on base; base never
+// depends on a domain.
 package base
 
 import "strings"

@@ -1,0 +1,51 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:network-runtime",
+    "@type": "ContractTemplate",
+    "documentTitle": "Hosted Ontology",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Hosted Ontology"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:network-runtime#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:network-runtime#s1",
+                "children": [
+                    "urn:doc:network-runtime#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:network-runtime#s1",
+                "title": "1. Runtime"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:network-runtime#c1",
+                "content": [
+                    "The runtime serves its own structural ontology and patch metadata."
+                ]
+            }
+        ]
+    }
+}

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { TemplateResourcesItem } from '@/modules/template-catalogue/models/template-resource'
-import { compareValues } from '@/utils/comparison'
 import { computed, ref, watch } from 'vue'
 import ListSort from '@/components/lists/ListSort.vue'
+import { compareValues } from '@/utils/comparison'
 import TemplateCatalogueListItem from './TemplateCatalogueListItem.vue'
 import TemplateCatalogueListSearch from './TemplateCatalogueListSearch.vue'
+import type { TemplateResourcesItem } from '@template-catalogue/models/template-resource'
 
 const props = defineProps<{
   templates: TemplateResourcesItem[]
@@ -32,8 +32,8 @@ const sortedTemplates = computed(() => {
 
 const hasTemplates = computed(() => props.templates.length > 0)
 
-const applySearchResult = (searchResult: TemplateResourcesItem[]) => {
-  searchedTemplates.value = searchResult
+const applySearchResult = (searchResult: TemplateResourcesItem[] | null) => {
+  searchedTemplates.value = searchResult ?? props.templates
 }
 
 watch(
@@ -45,17 +45,19 @@ watch(
 </script>
 
 <template>
-  <ul class="list">
-    <li class="flex flex-col justify-between px-4 tracking-wide sm:flex-row">
-      <TemplateCatalogueListSearch :templates="templates" class="flex-1" @search-result="applySearchResult" />
-      <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTemplates" />
-    </li>
-    <TemplateCatalogueListItem
-      v-for="template in sortedTemplates"
-      :key="`${template.did}|${template.document_number}|${template.version}`"
-      :template="template"
-      :templates="props.templates"
-    />
-    <li v-if="sortedTemplates.length < 1" class="px-4">No templates found</li>
-  </ul>
+  <div class="flex h-full min-h-0 flex-col">
+    <ul class="list flex-1 overflow-y-auto">
+      <li class="flex flex-col justify-between px-4 tracking-wide sm:flex-row">
+        <TemplateCatalogueListSearch :templates="templates" class="flex-1" @search-result="applySearchResult" />
+        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTemplates" />
+      </li>
+      <TemplateCatalogueListItem
+        v-for="template in sortedTemplates"
+        :key="`${template.did}|${template.version}`"
+        :template="template"
+        :templates="props.templates"
+      />
+      <li v-if="sortedTemplates.length < 1" class="px-4">No templates found</li>
+    </ul>
+  </div>
 </template>

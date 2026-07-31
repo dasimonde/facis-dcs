@@ -1,21 +1,8 @@
-<template>
-  <p class="m-0 leading-6 whitespace-pre-wrap text-base-content/90">
-    <template v-if="highlightSegments && hasSegments">
-      <span v-for="(segment, index) in segments" :key="`text-segment-${index}`" :class="getSegmentClass(segment.type)">
-        {{ segment.text }}
-      </span>
-    </template>
-    <template v-else>
-      {{ block.text }}
-    </template>
-  </p>
-</template>
-
 <script setup lang="ts">
-import type { TextDiffSegmentType } from '@/modules/contract-workflow-engine/composables/useContractBlockDiff'
-import type { TextDiffSegment } from '@/modules/contract-workflow-engine/composables/useContractBlockDiff'
-import type { ContractPlainTextLine } from '@/modules/contract-workflow-engine/composables/useContractPlainTextConverter'
 import { computed } from 'vue'
+import type { TextDiffSegmentType } from '@contract-workflow-engine/composables/useContractBlockDiff'
+import type { TextDiffSegment } from '@contract-workflow-engine/composables/useContractBlockDiff'
+import type { ContractPlainTextLine } from '@contract-workflow-engine/composables/useContractPlainTextConverter'
 
 const props = withDefaults(
   defineProps<{
@@ -37,3 +24,16 @@ function getSegmentClass(type: TextDiffSegmentType): string {
   return ''
 }
 </script>
+
+<template>
+  <p class="m-0 leading-6 whitespace-pre-wrap text-base-content/90">
+    <template v-if="highlightSegments && hasSegments">
+      <span v-for="(segment, index) in segments" :key="`text-segment-${index}`" :class="getSegmentClass(segment.type)">
+        {{ segment.text }}
+      </span>
+    </template>
+    <template v-else>
+      {{ block.text }}
+    </template>
+  </p>
+</template>

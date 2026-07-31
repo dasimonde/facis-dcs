@@ -1,7 +1,48 @@
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import AddBlockModal from '@template-repository/components/builder-editor/AddBlockModal.vue'
+import BuilderPreviewDialog from '@template-repository/components/builder-editor/BuilderPreviewDialog.vue'
+import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
+import ClauseEditor from '@template-repository/components/clauses-editor/ClauseEditor.vue'
+import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
+import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
+import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
+import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import AuditView from './AuditView.vue'
+
+withDefaults(
+  defineProps<{
+    title: string
+    nameError?: string
+    descriptionError?: string
+  }>(),
+  {},
+)
+
+const route = useRoute()
+
+const templateEditorUiStore = useTemplateEditorUiStore()
+const draftStore = useDcsDraftStore()
+const { activeTab } = storeToRefs(templateEditorUiStore)
+const { state, templateType } = storeToRefs(draftStore)
+const tabs = computed(() => {
+  return templateEditorUiStore.availableTabs(templateType.value).filter((tab) => {
+    return tab.id !== 'audit' || !!route.params.did
+  })
+})
+const currentTabNumber = computed(() => 1 + tabs.value.map((tab) => tab.id).indexOf(activeTab.value))
+const { isManager } = useTemplatePermissions()
+</script>
+
 <template>
   <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
-    <div class="mx-auto max-w-4xl px-6 pt-3">
-      <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">
+    <div class="mx-auto max-w-5xl px-6 pt-3">
+      <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">
         {{ title }}
       </p>
       <div role="tablist" class="tabs-border tabs tabs-lg">
@@ -9,7 +50,7 @@
           v-for="(tab, _index) in tabs"
           :key="tab.id"
           role="tab"
-          class="tab"
+          class="tab text-base-content/70"
           :class="{ 'tab-active text-primary': activeTab === tab.id }"
           @click="templateEditorUiStore.setActiveTab(tab.id)"
         >
@@ -21,8 +62,9 @@
 
   <!-- Tab content -->
   <div class="mt-5 grow">
-    <div class="mx-auto max-w-4xl p-6">
+    <div class="mx-auto max-w-5xl p-6">
       <div class="grid grid-cols-1 gap-4">
+        <slot name="before-tabs" />
         <!-- DETAILS TAB -->
         <div v-show="activeTab === 'details'">
           <div class="card border border-base-300 bg-base-100 shadow-sm">
@@ -34,20 +76,7 @@
                 </div>
                 <div v-if="state" class="badge badge-sm badge-secondary">{{ state }}</div>
               </h2>
-              <DetailsEditor />
-            </div>
-          </div>
-        </div>
-
-        <!-- SEMANTIC RULES TAB -->
-        <div v-show="activeTab === 'semantic'">
-          <div class="card border border-base-300 bg-base-100 shadow-sm">
-            <div class="card-body gap-5">
-              <h2 class="card-title text-sm">
-                <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
-                Semantic Rules
-              </h2>
-              <SemanticRulesEditor />
+              <DetailsEditor :name-error="nameError" :description-error="descriptionError" />
             </div>
           </div>
         </div>
@@ -60,6 +89,8 @@
                 <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
                 Clauses
               </h2>
+              <ClauseEditor />
+              <div class="divider text-xs text-base-content/70">existing clauses</div>
               <ClausesEditor />
             </div>
           </div>
@@ -87,6 +118,19 @@
           </div>
           <AddBlockModal />
           <BuilderPreviewDialog />
+        </div>
+
+        <!-- DATA TAB -->
+        <div v-show="activeTab === 'data'">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
+            <div class="card-body gap-5">
+              <h2 class="card-title text-sm">
+                <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                Semantic Data Objects
+              </h2>
+              <DataObjectsEditor mode="template" :editable="templateEditorUiStore.isTemplateEditable" />
+            </div>
+          </div>
         </div>
 
         <!-- META TAB -->
@@ -119,41 +163,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
-import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
-import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
-import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
-import SemanticRulesEditor from '@template-repository/components/SemanticRulesEditor.vue'
-import AddBlockModal from '@template-repository/components/builder-editor/AddBlockModal.vue'
-import BuilderPreviewDialog from '@template-repository/components/builder-editor/BuilderPreviewDialog.vue'
-import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
-import { storeToRefs } from 'pinia'
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
-import AuditView from './AuditView.vue'
-
-withDefaults(
-  defineProps<{
-    title: string
-  }>(),
-  {},
-)
-
-const route = useRoute()
-
-const templateEditorUiStore = useTemplateEditorUiStore()
-const draftStore = useTemplateDraftStore()
-const { activeTab } = storeToRefs(templateEditorUiStore)
-const { state, templateType } = storeToRefs(draftStore)
-const tabs = computed(() => {
-  return templateEditorUiStore.availableTabs(templateType.value).filter((tab) => {
-    return tab.id !== 'audit' || !!route.params.did
-  })
-})
-const currentTabNumber = computed(() => 1 + tabs.value.map((tab) => tab.id).indexOf(activeTab.value))
-const { isManager } = useTemplatePermissions()
-</script>

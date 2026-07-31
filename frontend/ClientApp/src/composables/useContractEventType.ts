@@ -10,6 +10,7 @@ import type {
   ContractRejectNegotiationEvent,
   ContractRetrieveAllEvent,
   ContractRetrieveByIDEvent,
+  ContractRetrieveHistoryByDIDEvent,
   ContractReviewEvent,
   ContractSubmitEvent,
   ContractTerminateEvent,
@@ -41,6 +42,12 @@ export function useContractEventType() {
     event: ContractAuditResponseItem,
   ): event is ContractAuditResponseItem & { event_data: ContractRetrieveByIDEvent } => {
     return event.event_type === 'RETRIEVE_CONTRACT_BY_ID'
+  }
+
+  const isRetrieveHistoryByDIDEvent = (
+    event: ContractAuditResponseItem,
+  ): event is ContractAuditResponseItem & { event_data: ContractRetrieveHistoryByDIDEvent } => {
+    return event.event_type === 'RETRIEVE_CONTRACT_HISTORY_BY_DID'
   }
 
   const isRetrieveAllEvent = (
@@ -120,6 +127,7 @@ export function useContractEventType() {
     isUpdateEvent,
     isSubmitEvent,
     isRetrieveByIDEvent,
+    isRetrieveHistoryByDIDEvent,
     isRetrieveAllEvent,
     isVerifyEvent,
     isNegotiationEvent,

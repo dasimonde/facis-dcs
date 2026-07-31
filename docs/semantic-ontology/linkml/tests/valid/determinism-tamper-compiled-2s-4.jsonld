@@ -1,0 +1,87 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:tamper-compiled",
+    "@type": "ContractTemplate",
+    "documentTitle": "Non-Disclosure Agreement",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Non-Disclosure Agreement"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:tamper-compiled#s1",
+                    "urn:doc:tamper-compiled#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:tamper-compiled#s1",
+                "children": [
+                    "urn:doc:tamper-compiled#c1",
+                    "urn:doc:tamper-compiled#c2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:tamper-compiled#s2",
+                "children": [
+                    "urn:doc:tamper-compiled#c3",
+                    "urn:doc:tamper-compiled#c4"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:tamper-compiled#s1",
+                "title": "1. Confidential Information"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-compiled#c1",
+                "content": [
+                    "Each party agrees to hold the other's Confidential Information in strict confidence."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-compiled#c2",
+                "content": [
+                    "Confidential Information shall not be disclosed to any third party without prior written consent."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:tamper-compiled#s2",
+                "title": "2. Permitted Disclosures"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-compiled#c3",
+                "content": [
+                    "Disclosure is permitted where required by law or court order."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-compiled#c4",
+                "content": [
+                    "The disclosing party shall give prompt notice of any compelled disclosure."
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,58 @@
+{{- if .Values.sharedServices.enabled -}}
+{{- if not .Values.sharedServices.host -}}
+{{- fail "sharedServices.enabled=true requires sharedServices.host" -}}
+{{- end -}}
+{{- $fullName := include "digital-contracting-service.fullname" . -}}
+# Publishes this instance's stateless supporting services under /shared/<name>
+# so a DCS in another cluster can consume them. A peer that cannot fit its own
+# copies — the OSC testbed namespace caps limits.cpu at 2 and Services at 10 —
+# points its DSS_URL and status-list URL here instead of going without a
+# validator entirely.
+#
+# This is a deliberate reduction in the peer's operational independence: its
+# validation verdicts and revocation data then live on the counterparty's
+# infrastructure. Leave disabled unless a peer genuinely cannot self-host.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}-shared-services
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    # The capture groups in each path feed $2 to rewrite-target, so /shared/dss/x
+    # reaches the backend as /x. Both annotations are required: without use-regex
+    # the parentheses are matched literally and every request 404s.
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: "/$2"
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.sharedServices.proxyBodySize | quote }}
+    {{- with .Values.sharedServices.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.sharedServices.ingressClassName | default .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.sharedServices.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.sharedServices.host | quote }}
+      http:
+        paths:
+          {{- range .Values.sharedServices.services }}
+          {{- if not .name }}
+          {{- fail "each sharedServices.services entry requires a name (the /shared/<name> prefix)" -}}
+          {{- end }}
+          {{- if not .service }}
+          {{- fail (printf "sharedServices.services entry %q requires a service" .name) -}}
+          {{- end }}
+          - path: /shared/{{ .name }}(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ tpl .service $ | quote }}
+                port:
+                  number: {{ .port }}
+          {{- end }}
+{{- end }}

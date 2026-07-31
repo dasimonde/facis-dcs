@@ -1,0 +1,55 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:sig-blank-node",
+    "@type": "ContractTemplate",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Blank Node SignatureField Test"
+    },
+    "signatureFields": [
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-one"
+        }
+    ],
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:sig-blank-node#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:sig-blank-node#s1",
+                "children": [
+                    "urn:doc:sig-blank-node#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:sig-blank-node#s1",
+                "title": "1. Terms"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:sig-blank-node#c1",
+                "content": [
+                    "A clause."
+                ]
+            }
+        ]
+    }
+}

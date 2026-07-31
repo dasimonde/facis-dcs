@@ -8,6 +8,10 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base/identity"
+
+	db2 "digital-contracting-service/internal/dcstodcs/db"
+
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
@@ -19,16 +23,19 @@ import (
 )
 
 type RecordEvidenceCmd struct {
-	DID        string
-	RecordedBy string
-	UpdatedAt  time.Time
-	HolderDID  string
-	UserRoles  userrole.UserRoles
+	DID        string             `json:"did"`
+	RecordedBy string             `json:"recorded_by"`
+	UpdatedAt  time.Time          `json:"updated_at"`
+	HolderDID  string             `json:"holder_did"`
+	UserRoles  userrole.UserRoles `json:"user_roles"`
+	CauserDID  string             `json:"causer_did"`
 }
 
 type EvidenceRecorder struct {
-	DB    *sqlx.DB
-	CRepo db.ContractRepo
+	DB          *sqlx.DB
+	CRepo       db.ContractRepo
+	SRepo       db2.SyncRepository
+	DIDDocument identity.DIDDocument
 }
 
 func (h *EvidenceRecorder) Handle(ctx context.Context, cmd RecordEvidenceCmd) error {
@@ -43,18 +50,31 @@ func (h *EvidenceRecorder) Handle(ctx context.Context, cmd RecordEvidenceCmd) er
 		}
 	}(tx)
 
-	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
 
+	localPeer, err := h.DIDDocument.GetID()
+	if err != nil {
+		return err
+	}
+
+	// Optimistic concurrency: reject if the caller's view of the contract is
+	// older than what's stored (see package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+		if localPeer != cmd.CauserDID {
+			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+		}
 		return errors.New("contract was updated elsewhere, please reload")
 	}
 
 	if processData.State == contractstate.Terminated.String() {
 		return errors.New("current contract state is invalid")
 	}
+
+	// RecordEvidence never mutates contract state — it only appends an
+	// evidence event to the audit trail.
 
 	evt := contractevents.RecordEvidenceEvent{
 		DID:             cmd.DID,

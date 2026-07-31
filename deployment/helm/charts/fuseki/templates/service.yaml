@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fc-fuseki
+  labels:
+    app.kubernetes.io/name: fc-fuseki
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: fc-fuseki
+    app.kubernetes.io/instance: {{ .Release.Name }}

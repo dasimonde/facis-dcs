@@ -6,17 +6,51 @@
   "rules": [
     {
       "id": "FACIS-TPL-STRUCT-001",
-      "title": "Template uses FACIS schema references",
+      "title": "Template uses canonical JSON-LD document structure",
       "severity": "error",
-      "builtin": "required_schema_refs",
-      "ontologyTerm": "dcst:validation-template-v1"
+      "builtin": "canonical_document_structure",
+      "ontologyTerm": "dcs:DocumentStructure",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"]
+    },
+    {
+      "id": "FACIS-TPL-DATA-001",
+      "title": "Template declares contract data requirements",
+      "severity": "error",
+      "builtin": "canonical_contract_data",
+      "ontologyTerm": "dcs:ContractField",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"]
     },
     {
       "id": "FACIS-TPL-POLICY-001",
-      "title": "Template declares required policy references",
+      "title": "Template policies reference declared contract data fields",
       "severity": "error",
-      "builtin": "required_policy_refs",
-      "ontologyTerm": "dcst:policy-template-structure-v1"
+      "builtin": "canonical_policy_operands",
+      "ontologyTerm": "odrl:Constraint",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"]
+    },
+    {
+      "id": "FACIS-COMP-STRUCT-001",
+      "title": "Component document structure is internally consistent",
+      "severity": "error",
+      "builtin": "component_document_structure_integrity",
+      "ontologyTerm": "dcs:DocumentStructure",
+      "appliesToTemplateTypes": ["COMPONENT"]
+    },
+    {
+      "id": "FACIS-COMP-DATA-001",
+      "title": "Component contract data declarations are internally consistent",
+      "severity": "error",
+      "builtin": "component_contract_data_integrity",
+      "ontologyTerm": "dcs:ContractField",
+      "appliesToTemplateTypes": ["COMPONENT"]
+    },
+    {
+      "id": "FACIS-COMP-POLICY-001",
+      "title": "Component policies reference declared component data fields",
+      "severity": "error",
+      "builtin": "component_policy_operand_integrity",
+      "ontologyTerm": "odrl:Constraint",
+      "appliesToTemplateTypes": ["COMPONENT"]
     },
     {
       "id": "FACIS-TPL-LIFECYCLE-001",
@@ -24,6 +58,7 @@
       "severity": "info",
       "builtin": "finished_template_state",
       "ontologyTerm": "dcs:LifecycleState",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"],
       "parameters": {
         "states": [
           "APPROVED",
@@ -33,24 +68,27 @@
     },
     {
       "id": "FACIS-TPL-CLAUSE-001",
-      "title": "Finished template contains at least one clause with semantic rules",
+      "title": "Finished template contains at least one clause bound to contract data",
       "severity": "error",
       "builtin": "finished_template_has_clause_semantics",
-      "ontologyTerm": "dcs:ClauseBlock"
+      "ontologyTerm": "dcs:Clause",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"]
     },
     {
       "id": "FACIS-TPL-DOMAIN-001",
       "title": "Template semantic parameters use canonical domain fields",
       "severity": "error",
       "builtin": "canonical_domain_fields",
-      "ontologyTerm": "dcs:DomainField"
+      "ontologyTerm": "dcs:DomainField",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE", "COMPONENT"]
     },
     {
       "id": "FACIS-TPL-CONSTRAINT-001",
       "title": "Constrained semantic parameters carry ontology constraints",
       "severity": "error",
       "builtin": "constrained_parameters_use_value_constraint",
-      "ontologyTerm": "dcs:ValueConstraint"
+      "ontologyTerm": "dcs:ValueConstraint",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE", "COMPONENT"]
     },
     {
       "id": "FACIS-TPL-LEGAL-001",
@@ -58,9 +96,10 @@
       "severity": "warning",
       "builtin": "required_domain_fields",
       "ontologyTerm": "dcst:field-contract-jurisdiction",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"],
       "parameters": {
-        "semanticPaths": [
-          "contract.jurisdiction"
+        "fieldIris": [
+          "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"
         ]
       }
     },
@@ -70,9 +109,10 @@
       "severity": "warning",
       "builtin": "required_domain_fields",
       "ontologyTerm": "dcst:field-company-location-country",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"],
       "parameters": {
-        "semanticPaths": [
-          "company.location.country"
+        "fieldIris": [
+          "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-country"
         ]
       }
     },
@@ -82,9 +122,10 @@
       "severity": "warning",
       "builtin": "required_domain_fields",
       "ontologyTerm": "dcst:field-signature-requiredLevel",
+      "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"],
       "parameters": {
-        "semanticPaths": [
-          "signature.requiredLevel"
+        "fieldIris": [
+          "https://w3id.org/facis/dcs/taxonomy/v1#field-signature-requiredLevel"
         ]
       }
     },

@@ -1,3 +1,11 @@
+// Package contractstate defines the contract lifecycle enum and the single
+// explicit transition table (see transition.go) that is the sole source of
+// truth for which state × event combinations are valid. This is the ONE
+// contract state machine used across the whole backend; every consumer
+// imports this package.
+//
+// Expired is set out-of-band by the CWE cron job, though readers see it
+// instantly via the contracts_effective DB view.
 package contractstate
 
 import (
@@ -11,26 +19,45 @@ type ContractState string
 
 const (
 	Draft       ContractState = "DRAFT"
+	Offered     ContractState = "OFFERED"
 	Rejected    ContractState = "REJECTED"
+	Withdrawn   ContractState = "WITHDRAWN"
 	Negotiation ContractState = "NEGOTIATION"
 	Submitted   ContractState = "SUBMITTED"
 	Reviewed    ContractState = "REVIEWED"
 	Approved    ContractState = "APPROVED"
 	Signed      ContractState = "SIGNED"
+	Active      ContractState = "ACTIVE"
+	Revoked     ContractState = "REVOKED"
 	Terminated  ContractState = "TERMINATED"
 	Expired     ContractState = "EXPIRED"
 )
 
 var validStates = map[ContractState]bool{
 	Draft:       true,
+	Offered:     true,
 	Rejected:    true,
+	Withdrawn:   true,
 	Negotiation: true,
 	Submitted:   true,
 	Reviewed:    true,
 	Approved:    true,
 	Signed:      true,
+	Active:      true,
+	Revoked:     true,
 	Terminated:  true,
 	Expired:     true,
+}
+
+// All returns every contract state, in lifecycle order — so a consumer that
+// classifies states (which of them freeze the PDF artifact, say) derives its
+// answer from the enum instead of restating it and silently missing a state
+// added later.
+func All() []ContractState {
+	return []ContractState{
+		Draft, Offered, Rejected, Withdrawn, Negotiation, Submitted,
+		Reviewed, Approved, Signed, Active, Revoked, Terminated, Expired,
+	}
 }
 
 func NewContractState(s string) (ContractState, error) {
@@ -41,7 +68,7 @@ func NewContractState(s string) (ContractState, error) {
 	return ts, nil
 }
 
-// IsValid checks if the ContractState is a valid role
+// IsValid reports whether the value is one of the declared ContractState values.
 func (s ContractState) IsValid() bool {
 	upper := ContractState(strings.ToUpper(string(s)))
 	return validStates[upper]

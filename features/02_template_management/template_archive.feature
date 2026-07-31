@@ -1,12 +1,12 @@
-@UC-02-05
+@UC-02-05 @DCS-FR-UC-02-1
 Feature: Archive Contract Templates
   Template Managers deprecate outdated templates to prevent new contract generation
   and delete deprecated templates that are no longer needed.
 
-  @clean_db
+  @clean_db @DCS-FR-TR-17
   Scenario: Deprecate an active template
     Given I am authenticated with roles: "Template Manager"
-    And template "Old NDA" is in "Approved" status
+    And template "Old NDA" is in "Registered" status
     When I deprecate template "Old NDA"
     Then the template status is "Deprecated"
     And new contracts cannot be generated from this template

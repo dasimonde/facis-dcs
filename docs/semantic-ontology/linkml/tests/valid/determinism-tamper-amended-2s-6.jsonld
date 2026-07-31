@@ -1,0 +1,87 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:tamper-amended",
+    "@type": "ContractTemplate",
+    "documentTitle": "Service Level Agreement v2",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Service Level Agreement v2"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:tamper-amended#s1",
+                    "urn:doc:tamper-amended#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:tamper-amended#s1",
+                "children": [
+                    "urn:doc:tamper-amended#c1",
+                    "urn:doc:tamper-amended#c2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:tamper-amended#s2",
+                "children": [
+                    "urn:doc:tamper-amended#c3",
+                    "urn:doc:tamper-amended#c4"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:tamper-amended#s1",
+                "title": "1. Availability"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-amended#c1",
+                "content": [
+                    "The Service shall be available ninety-nine point nine percent (99.9%) of the time."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-amended#c2",
+                "content": [
+                    "Downtime is measured over each calendar month."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:tamper-amended#s2",
+                "title": "2. Remedies"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-amended#c3",
+                "content": [
+                    "A service credit of five percent (5%) of monthly fees shall apply per hour of excess downtime."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-amended#c4",
+                "content": [
+                    "Credits shall be applied to the next invoice automatically."
+                ]
+            }
+        ]
+    }
+}

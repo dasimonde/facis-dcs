@@ -8,7 +8,6 @@ var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
 	Description("Template catalogue item returned to the client")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -47,7 +46,6 @@ var TemplateCatalogueSearchRequest = Type("TemplateCatalogueSearchRequest", func
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -71,7 +69,6 @@ var TemplateCatalogueRetrieveByIDResponse = Type("TemplateCatalogueRetrieveByIDR
 	Description("Template catalogue detail response")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -79,218 +76,16 @@ var TemplateCatalogueRetrieveByIDResponse = Type("TemplateCatalogueRetrieveByIDR
 	Attribute("schema_version", Int, "Schema version of the contract template")
 	Attribute("template_data", Any, "The template data of the contract template")
 	// Optional participant summary
-	Attribute("participant", TemplateCatalogueParticipantSummary, "Participant summary")
+	Attribute("participant_id", String, "Issuer participant DID")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Required("did")
 })
 
-var TemplateCatalogueParticipantHeadquarterSummary = Type("TemplateCatalogueParticipantHeadquarterSummary", func() {
-	Description("Participant headquarter summary")
-
-	Attribute("country", String, "Headquarter country")
-	Attribute("locality", String, "Headquarter locality")
-})
-
-var TemplateCatalogueParticipantSummary = Type("TemplateCatalogueParticipantSummary", func() {
-	Description("Participant summary returned with template detail")
-
-	Attribute("legal_name", String, "Participant legal name")
-	Attribute("registration_number", String, "Participant registration number")
-	Attribute("lei_code", String, "Participant LEI code")
-	Attribute("headquarter_address", TemplateCatalogueParticipantHeadquarterSummary, "Participant headquarter summary")
-	Attribute("terms_and_conditions", String, "Participant terms and conditions")
-})
-
-var TemplateCatalogueAddress = Type("TemplateCatalogueAddress", func() {
-	Description("Address information")
-
-	Attribute("country", String, "Country")
-	Attribute("street_address", String, "Street address")
-	Attribute("postal_code", String, "Postal code")
-	Attribute("locality", String, "Locality")
-})
-
-var TemplateCatalogueHeadquarterAddress = Type("TemplateCatalogueHeadquarterAddress", func() {
-	Description("Headquarter address information")
-
-	Attribute("country", String, "Country")
-	Attribute("street_address", String, "Headquarter street address")
-	Attribute("postal_code", String, "Headquarter postal code")
-	Attribute("locality", String, "Headquarter locality")
-})
-
-var TemplateCatalogueCreateParticipantRequest = Type("TemplateCatalogueCreateParticipantRequest", func() {
-	Description("Create participant request")
-
-	Token("token", String, "JWT token")
-
-	Attribute("legal_name", String, "Legal name")
-	Attribute("registration_number", String, "Registration number")
-	Attribute("lei_code", String, "LEI code")
-	Attribute("ethereum_address", String, "Ethereum address")
-	Attribute("headquarter_address", TemplateCatalogueHeadquarterAddress, "Headquarter address")
-	Attribute("legal_address", TemplateCatalogueAddress, "Legal address")
-	Attribute("terms_and_conditions", String, "Terms and conditions")
-
-	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "legal_address", "terms_and_conditions")
-})
-
-var TemplateCatalogueCreateParticipantResponse = Type("TemplateCatalogueCreateParticipantResponse", func() {
-	Description("Create participant response")
-
-	Attribute("id", String, "Participant id")
-
-	Required("id")
-})
-
-var TemplateCatalogueCreateServiceOfferingRequest = Type("TemplateCatalogueCreateServiceOfferingRequest", func() {
-	Description("Create service offering request")
-
-	Token("token", String, "JWT token")
-
-	Attribute("end_point_url", String, "Service offering endpoint URL")
-
-	Attribute("terms_and_conditions", String, "Terms and conditions")
-
-	Attribute("keywords", ArrayOf(String), "Service offering keywords")
-
-	Attribute("description", String, "Service offering description")
-
-	Required("end_point_url", "terms_and_conditions", "keywords", "description")
-})
-
-var TemplateCatalogueCreateServiceOfferingResponse = Type("TemplateCatalogueCreateServiceOfferingResponse", func() {
-	Description("Create service offering response")
-
-	Attribute("id", String, "Service offering id")
-
-	Required("id")
-})
-
-var TemplateCatalogueGetCurrentParticipantRequest = Type("TemplateCatalogueGetCurrentParticipantRequest", func() {
-	Description("Get current participant request")
-
-	Token("token", String, "JWT token")
-})
-
-var TemplateCatalogueGetCurrentParticipantResponse = Type("TemplateCatalogueGetCurrentParticipantResponse", func() {
-	Description("Current participant response")
-
-	Attribute("legal_name", String, "Legal name")
-	Attribute("registration_number", String, "Registration number")
-	Attribute("lei_code", String, "LEI code")
-	Attribute("ethereum_address", String, "Ethereum address")
-	Attribute("headquarter_address", TemplateCatalogueHeadquarterAddress, "Headquarter address")
-	Attribute("legal_address", TemplateCatalogueAddress, "Legal address")
-	Attribute("terms_and_conditions", String, "Terms and conditions")
-
-	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "legal_address", "terms_and_conditions")
-})
-
-var TemplateCatalogueListOtherParticipantsRequest = Type("TemplateCatalogueListOtherParticipantsRequest", func() {
-	Description("List other participants request")
-
-	Token("token", String, "JWT token")
-})
-
-var TemplateCatalogueGetCurrentServiceOfferingRequest = Type("TemplateCatalogueGetCurrentServiceOfferingRequest", func() {
-	Description("Get current service offering request")
-
-	Token("token", String, "JWT token")
-})
-
-var TemplateCatalogueGetCurrentServiceOfferingResponse = Type("TemplateCatalogueGetCurrentServiceOfferingResponse", func() {
-	Description("Current service offering response")
-
-	Attribute("keywords", ArrayOf(String), "Service offering keywords")
-	Attribute("description", String, "Service offering description")
-	Attribute("end_point_url", String, "Service offering endpoint URL")
-	Attribute("terms_and_conditions", String, "Terms and conditions")
-
-	Required("end_point_url", "terms_and_conditions", "keywords", "description")
-})
-
-var TemplateCatalogueUpdateParticipantRequest = Type("TemplateCatalogueUpdateParticipantRequest", func() {
-	Description("Update current participant request")
-
-	Token("token", String, "JWT token")
-
-	Attribute("legal_name", String, "Legal name")
-	Attribute("registration_number", String, "Registration number")
-	Attribute("lei_code", String, "LEI code")
-	Attribute("ethereum_address", String, "Ethereum address")
-	Attribute("headquarter_address", TemplateCatalogueHeadquarterAddress, "Headquarter address")
-	Attribute("legal_address", TemplateCatalogueAddress, "Legal address")
-	Attribute("terms_and_conditions", String, "Terms and conditions")
-
-	Required("legal_name", "registration_number", "lei_code", "ethereum_address", "headquarter_address", "legal_address", "terms_and_conditions")
-})
-
-var TemplateCatalogueUpdateParticipantResponse = Type("TemplateCatalogueUpdateParticipantResponse", func() {
-	Description("Update participant response")
-
-	Attribute("id", String, "Participant id")
-
-	Required("id")
-})
-
-var TemplateCatalogueUpdateServiceOfferingRequest = Type("TemplateCatalogueUpdateServiceOfferingRequest", func() {
-	Description("Update service offering request")
-
-	Token("token", String, "JWT token")
-
-	Attribute("end_point_url", String, "Service offering endpoint URL")
-
-	Attribute("terms_and_conditions", String, "Terms and conditions")
-
-	Attribute("keywords", ArrayOf(String), "Service offering keywords")
-
-	Attribute("description", String, "Service offering description")
-
-	Required("end_point_url", "terms_and_conditions", "keywords", "description")
-})
-
-var TemplateCatalogueUpdateServiceOfferingResponse = Type("TemplateCatalogueUpdateServiceOfferingResponse", func() {
-	Description("Update service offering response")
-
-	Attribute("id", String, "Service offering id")
-
-	Required("id")
-})
-
-var TemplateCatalogueDeleteServiceOfferingRequest = Type("TemplateCatalogueDeleteServiceOfferingRequest", func() {
-	Description("Delete current service offering request")
-
-	Token("token", String, "JWT token")
-})
-
-var TemplateCatalogueDeleteServiceOfferingResponse = Type("TemplateCatalogueDeleteServiceOfferingResponse", func() {
-	Description("Delete service offering response")
-
-	Attribute("id", String, "Service offering id")
-
-	Required("id")
-})
-
-var TemplateCatalogueDeleteParticipantRequest = Type("TemplateCatalogueDeleteParticipantRequest", func() {
-	Description("Delete current participant request")
-
-	Token("token", String, "JWT token")
-})
-
-var TemplateCatalogueDeleteParticipantResponse = Type("TemplateCatalogueDeleteParticipantResponse", func() {
-	Description("Delete participant response")
-
-	Attribute("id", String, "Participant id")
-
-	Required("id")
-})
-
 // Template Catalogue Integration Service (TR <-> XFSC Catalogue)
 var _ = Service("TemplateCatalogueIntegration", func() {
-	Description("Integration APIs between the Template Repository (TR) and the XFSC Catalogue for template retrieval and the management of participants and service offerings.")
+	Description("Integration APIs between the Template Repository (TR) and the XFSC Catalogue for template retrieval.")
 
 	// GET /catalogue/template/retrieve
 	Method("retrieve_template", func() {
@@ -298,6 +93,10 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			// The Template Manager owns the Template Catalogue view and the
+			// register that follows it; the contract roles read the catalogue
+			// to pick a template to draw a contract from.
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -325,6 +124,7 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -346,234 +146,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		})
 	})
 
-	// POST /catalogue/participant/create
-	Method("create_participant", func() {
-		Description("Create participant in XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueCreateParticipantRequest)
-		Result(TemplateCatalogueCreateParticipantResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			POST("/catalogue/participant/create")
-			Response(StatusOK)
-		})
-	})
-
-	// POST /catalogue/service-offering/create
-	Method("create_service_offering", func() {
-		Description("Create service offering in XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueCreateServiceOfferingRequest)
-		Result(TemplateCatalogueCreateServiceOfferingResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			POST("/catalogue/service-offering/create")
-			Response(StatusOK)
-		})
-	})
-
-	// GET /catalogue/participant/current
-	Method("get_current_participant", func() {
-		Description("Get current participant from XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueGetCurrentParticipantRequest)
-		Result(TemplateCatalogueGetCurrentParticipantResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "Not found")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			GET("/catalogue/participant/current")
-			Response(StatusOK)
-			Response("not_found", StatusNotFound)
-		})
-	})
-
-	// GET /catalogue/participant/current/summary
-	Method("get_current_participant_summary", func() {
-		Description("Get current participant summary from XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueGetCurrentParticipantRequest)
-		Result(TemplateCatalogueParticipantSummary)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "Not found")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			GET("/catalogue/participant/current/summary")
-			Response(StatusOK)
-			Response("not_found", StatusNotFound)
-		})
-	})
-
-	// GET /catalogue/participant/others
-	Method("list_other_participants", func() {
-		Description("List participants from XFSC Catalogue, excluding the current participant.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueListOtherParticipantsRequest)
-		Result(ArrayOf(TemplateCatalogueParticipantSummary))
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			GET("/catalogue/participant/others")
-			Response(StatusOK)
-		})
-	})
-
-	// GET /catalogue/service-offering/current
-	Method("get_current_service_offering", func() {
-		Description("Get current service offering from XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueGetCurrentServiceOfferingRequest)
-		Result(TemplateCatalogueGetCurrentServiceOfferingResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "Not found")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			GET("/catalogue/service-offering/current")
-			Response(StatusOK)
-			Response("not_found", StatusNotFound)
-		})
-	})
-
-	// PUT /catalogue/participant/update
-	Method("update_participant", func() {
-		Description("Update current participant in XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueUpdateParticipantRequest)
-		Result(TemplateCatalogueUpdateParticipantResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "Not found")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			PUT("/catalogue/participant/update")
-			Response(StatusOK)
-			Response("not_found", StatusNotFound)
-		})
-	})
-
-	// PUT /catalogue/service-offering/update
-	Method("update_service_offering", func() {
-		Description("Update current service offering in XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueUpdateServiceOfferingRequest)
-		Result(TemplateCatalogueUpdateServiceOfferingResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "Not found")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			PUT("/catalogue/service-offering/update")
-			Response(StatusOK)
-			Response("not_found", StatusNotFound)
-		})
-	})
-
-	// DELETE /catalogue/participant/delete
-	Method("delete_participant", func() {
-		Description("Delete current participant in XFSC Catalogue, including dependent self-descriptions.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueDeleteParticipantRequest)
-		Result(TemplateCatalogueDeleteParticipantResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			DELETE("/catalogue/participant/delete")
-			Response(StatusOK)
-		})
-	})
-
-	// DELETE /catalogue/service-offering/delete
-	Method("delete_service_offering", func() {
-		Description("Delete current service offering in XFSC Catalogue.")
-		Meta("dcs:requirements", "DCS-IR-SI-01")
-
-		Security(JWTAuth, func() {
-			Scope("Sys. Administrator")
-		})
-
-		Payload(TemplateCatalogueDeleteServiceOfferingRequest)
-		Result(TemplateCatalogueDeleteServiceOfferingResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "Not found")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			DELETE("/catalogue/service-offering/delete")
-			Response(StatusOK)
-			Response("not_found", StatusNotFound)
-		})
-	})
-
 	// GET /catalogue/template/search
 	Method("search_template", func() {
 		Description("Search templates in XFSC Catalogue by metadata fields.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
 		Security(JWTAuth, func() {
+			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Contract Approver")
@@ -590,7 +169,6 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		HTTP(func() {
 			GET("/catalogue/template/search")
 			Param("did")
-			Param("document_number")
 			Param("version")
 			Param("name")
 			Param("description")

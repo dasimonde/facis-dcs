@@ -8,13 +8,17 @@ import (
 )
 
 type AccessAttempt struct {
-	ID          int64     `db:"id"`
-	AttemptBy   *string   `db:"user_id"`
-	IPAddress   string    `db:"ip_address"`
-	AttemptedAt time.Time `db:"attempted_at"`
-	Success     bool      `db:"success"`
-	Service     string    `db:"service"`
-	Method      string    `db:"method"`
+	ID            int64     `db:"id"`
+	AttemptBy     *string   `db:"user_id"`
+	IPAddress     string    `db:"ip_address"`
+	AttemptedAt   time.Time `db:"attempted_at"`
+	Success       bool      `db:"success"`
+	Service       string    `db:"service"`
+	Method        string    `db:"method"`
+	Roles         string    `db:"roles"`
+	Scope         string    `db:"scope"`
+	DID           *string   `db:"did"`
+	Justification string    `db:"justification"`
 }
 
 type AccessAttemptRepo interface {

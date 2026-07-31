@@ -1,0 +1,130 @@
+{{- if and .Values.localTSA.enabled .Values.localTSA.autoProvision }}
+# Provisions the in-cluster dev TSA signing material (RSA key + self-signed
+# cert with critical extendedKeyUsage=timeStamping) into a Secret. The ORCE
+# /tsa flow signs RFC3161 replies with it (openssl ts -reply), and any service
+# verifying those tokens (DCS backend via TSA_TRUST_CERT_FILE) mounts the same
+# Secret's cert. Idempotent: an existing secret is left untouched so tokens
+# issued earlier keep verifying across upgrades.
+# Needs RBAC self-management (Role/RoleBinding) on the deploying identity —
+# set localTSA.autoProvision: false and pre-create the Secret yourself if
+# that identity can't self-grant (see values.yaml comment).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-orce-tsa-provision
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-orce-tsa-provision
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-orce-tsa-provision
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-orce-tsa-provision
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-orce-tsa-provision
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-orce-tsa-provision
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ .Release.Name }}-orce-tsa-provision
+      containers:
+        - name: tsa-provision
+          image: alpine:3.19
+          {{- with (.Values.jobResources | default .Values.resources) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SECRET_NAME
+              value: {{ .Release.Name }}-orce-tsa-material
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              # Installed at run time because no pinned image carries all three
+              # (the chart's other hooks use alpine/k8s, which has no openssl).
+              # A single attempt makes every deploy depend on a package mirror
+              # being reachable at that instant: one hiccup fails the pre-upgrade
+              # hook and the whole release with it. Retry, and let the last
+              # failure print rather than swallowing it into /dev/null.
+              for attempt in 1 2 3; do
+                if apk add --no-cache curl jq openssl > /dev/null 2>/tmp/apk.err; then
+                  break
+                fi
+                if [ "$attempt" = 3 ]; then
+                  echo "apk add failed after 3 attempts:" >&2
+                  cat /tmp/apk.err >&2
+                  exit 1
+                fi
+                sleep 3
+              done
+
+              k8s_host="https://kubernetes.default.svc"
+              ca_path="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+              sa_token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+              secret_url="${k8s_host}/api/v1/namespaces/${K8S_NAMESPACE}/secrets/${SECRET_NAME}"
+              create_url="${k8s_host}/api/v1/namespaces/${K8S_NAMESPACE}/secrets"
+
+              code="$(curl -s -o /dev/null -w '%{http_code}' \
+                --cacert "$ca_path" -H "Authorization: Bearer ${sa_token}" "$secret_url")"
+              if [ "$code" = "200" ]; then
+                echo "Secret ${SECRET_NAME} already exists — keeping existing TSA material."
+                exit 0
+              fi
+
+              echo "Generating dev TSA key + certificate..."
+              openssl req -x509 -newkey rsa:2048 -nodes \
+                -keyout /tmp/tsa-key.pem -out /tmp/tsa-cert.pem \
+                -days 365 -subj "/CN=FACIS DCS Dev TSA" \
+                -addext "keyUsage=critical,digitalSignature" \
+                -addext "extendedKeyUsage=critical,timeStamping"
+
+              payload="$(jq -n \
+                --arg name "$SECRET_NAME" \
+                --arg cert "$(base64 -w0 /tmp/tsa-cert.pem)" \
+                --arg key "$(base64 -w0 /tmp/tsa-key.pem)" \
+                '{apiVersion:"v1",kind:"Secret",metadata:{name:$name},type:"Opaque",data:{"tsa-cert.pem":$cert,"tsa-key.pem":$key}}')"
+              curl -sf -X POST -H "Content-Type: application/json" \
+                --cacert "$ca_path" -H "Authorization: Bearer ${sa_token}" \
+                --data "$payload" "$create_url" > /dev/null
+              echo "Created secret ${SECRET_NAME}."
+              openssl x509 -in /tmp/tsa-cert.pem -noout -subject -enddate
+{{- end }}

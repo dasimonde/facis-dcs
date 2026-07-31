@@ -85,18 +85,16 @@ func Run(db *sqlx.DB) error {
 		}
 
 		if _, err := tx.Exec(string(content)); err != nil {
-			err := tx.Rollback()
-			if err != nil {
-				return err
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				return rollbackErr
 			}
 			return err
 		}
 
 		// Record migration as applied
 		if _, err := tx.Exec("INSERT INTO schema_migrations (filename) VALUES ($1)", fileName); err != nil {
-			err := tx.Rollback()
-			if err != nil {
-				return err
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				return rollbackErr
 			}
 			return err
 		}

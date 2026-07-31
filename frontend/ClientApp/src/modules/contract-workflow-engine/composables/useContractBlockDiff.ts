@@ -1,5 +1,5 @@
-import type { ContractPlainTextBlock } from './useContractPlainTextConverter'
 import { diff } from 'fast-myers-diff'
+import type { ContractPlainTextBlock } from './useContractPlainTextConverter'
 
 export type DiffType = 'added' | 'removed' | 'modified'
 export type TextDiffSegmentType = 'equal' | 'added' | 'removed'

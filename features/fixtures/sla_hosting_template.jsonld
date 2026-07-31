@@ -1,0 +1,1188 @@
+{
+  "@context": {
+    "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "sh": "http://www.w3.org/ns/shacl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  },
+  "@id": "did:web:example:template:sla-hosting",
+  "@type": "dcs:ContractTemplate",
+  "_comment": "Readable @ids on purpose. The builder mints urn:uuid: rule ids and #block-<uuid> prose anchors; the shapes require an IRI, not a particular one, so this BDD fixture uses speaking fragments to stay legible to whoever debugs a failing scenario. Realism is proved elsewhere: the e2e authors through the UI and therefore exercises the real urn:uuid: form. Do not 'fix' these ids. Everything else here is the shape the authoring path emits -- see the header of backend/internal/base/validation/slahostingfixture_test.go. The \"@context\" is a prefix map with no remote IRI, matching the templates every other step module posts (steps/support/services/template_service.py canonical_document_data) -- normalizeCanonicalContext prepends the hub's own served, host-absolute context URL to it (DCS_PUBLIC_URL). Naming https://w3id.org/facis/dcs/context/v1 here instead makes isHubContextAnchor treat the document as already anchored, so normalization returns early, the document keeps an IRI nothing serves, and pdf-core -- which expands over real HTTP rather than through the hub's hermetic loader -- 404s the render. The prefixes must be the hub context's own (enforceCanonicalOntologyIRIs rejects a redefinition).",
+  "dcs:contractData": [
+    {
+      "@id": "did:web:example:template:sla-hosting#asset-hosting-environment",
+      "@type": "https://w3id.org/facis/sla/hosting/v1#ManagedKubernetesEnvironment",
+      "https://w3id.org/facis/sla/hosting/v1#nodeClass": {
+        "@id": "did:web:example:template:sla-hosting#field-node-class"
+      },
+      "https://w3id.org/facis/sla/hosting/v1#provisionedNodes": {
+        "@id": "did:web:example:template:sla-hosting#field-provisioned-nodes"
+      },
+      "https://w3id.org/facis/sla/hosting/v1#serviceRegion": {
+        "@id": "did:web:example:template:sla-hosting#field-service-region"
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#asset-support-service",
+      "@type": "https://w3id.org/facis/sla/hosting/v1#SupportService",
+      "https://w3id.org/facis/sla/hosting/v1#incidentResponseMinutes": {
+        "@id": "did:web:example:template:sla-hosting#field-incident-response-minutes"
+      }
+    }
+  ],
+  "dcs:contractFields": [
+    {
+      "@id": "did:web:example:template:sla-hosting#field-governing-law",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Governing Law",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-governingLaw"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [
+          "DE",
+          "AT",
+          "CH",
+          "EU"
+        ],
+        "description": "Governing Law Vocabulary Constraint",
+        "format": "controlled-vocabulary",
+        "iri": "https://w3id.org/facis/dcs/taxonomy/v1#constraint-governing-law",
+        "odrlLeftOperands": [],
+        "valueOptions": []
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-provisioned-nodes",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:integer",
+      "dcs:label": "Managed Kubernetes Environment · Provisioned nodes",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#provisionedNodes"
+      },
+      "dcs:valueConstraint": {
+        "max": 500,
+        "min": 1,
+        "valueOptions": []
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-node-class",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Managed Kubernetes Environment · Node class",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#nodeClass"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [
+          "GENERAL_PURPOSE",
+          "MEMORY_OPTIMIZED",
+          "COMPUTE_OPTIMIZED"
+        ],
+        "valueOptions": [
+          {
+            "value": "GENERAL_PURPOSE"
+          },
+          {
+            "value": "MEMORY_OPTIMIZED"
+          },
+          {
+            "value": "COMPUTE_OPTIMIZED"
+          }
+        ]
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-service-region",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Managed Kubernetes Environment · Service region",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#serviceRegion"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [
+          "EMEA",
+          "AMER",
+          "APAC"
+        ],
+        "valueOptions": [
+          {
+            "value": "EMEA"
+          },
+          {
+            "value": "AMER"
+          },
+          {
+            "value": "APAC"
+          }
+        ]
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-contract-end-date",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:date",
+      "dcs:label": "Validity End Date",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-validity-endDate"
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-service-credit-rate",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:decimal",
+      "dcs:label": "Service Credit Rate",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#field-service-serviceCreditRate"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [],
+        "description": "Service Credit Rate Constraint",
+        "format": "percentage",
+        "iri": "https://w3id.org/facis/sla/hosting/v1#constraint-service-credit-rate",
+        "max": 100,
+        "min": 0,
+        "odrlLeftOperands": [],
+        "valueOptions": []
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-committed-availability",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:decimal",
+      "dcs:label": "SLA Availability",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-service-sla-availability"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [],
+        "description": "SLA Availability Percentage Constraint",
+        "format": "percentage",
+        "iri": "https://w3id.org/facis/dcs/taxonomy/v1#constraint-sla-availability-percent",
+        "max": 100,
+        "min": 0,
+        "odrlLeftOperands": [],
+        "valueOptions": []
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-measurement-window",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Measurement Window",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#field-service-measurementWindow"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [
+          "P1M",
+          "P3M"
+        ],
+        "description": "Measurement Window Constraint",
+        "format": "controlled-vocabulary",
+        "iri": "https://w3id.org/facis/sla/hosting/v1#constraint-measurement-window",
+        "odrlLeftOperands": [
+          "http://www.w3.org/ns/odrl/2/timeInterval"
+        ],
+        "valueOptions": []
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-monthly-fee",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:decimal",
+      "dcs:label": "Payment Amount",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-amount"
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-currency",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Payment Currency",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-currency"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [
+          "EUR",
+          "USD"
+        ],
+        "allowedValuesRef": "ISO 4217",
+        "description": "ISO 4217 Currency Constraint",
+        "format": "iso-4217",
+        "iri": "https://w3id.org/facis/dcs/taxonomy/v1#constraint-iso4217-currency",
+        "odrlLeftOperands": [],
+        "pattern": "^[A-Z]{3}$",
+        "valueCatalog": {
+          "iri": "https://w3id.org/facis/dcs/taxonomy/v1#catalog-iso4217-currency",
+          "label": "ISO 4217 Currencies"
+        },
+        "valueOptions": [
+          {
+            "catalog": {
+              "iri": "https://w3id.org/facis/dcs/taxonomy/v1#catalog-iso4217-currency",
+              "label": "ISO 4217 Currencies"
+            },
+            "iri": "https://w3id.org/facis/dcs/taxonomy/v1#currency-EUR",
+            "label": "Euro",
+            "symbol": "€",
+            "value": "EUR"
+          },
+          {
+            "catalog": {
+              "iri": "https://w3id.org/facis/dcs/taxonomy/v1#catalog-iso4217-currency",
+              "label": "ISO 4217 Currencies"
+            },
+            "iri": "https://w3id.org/facis/dcs/taxonomy/v1#currency-USD",
+            "label": "US Dollar",
+            "symbol": "$",
+            "value": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-billing-period",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Billing Period",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#field-service-billingPeriod"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [
+          "P1M",
+          "P3M",
+          "P1Y"
+        ],
+        "description": "Billing Period Constraint",
+        "format": "controlled-vocabulary",
+        "iri": "https://w3id.org/facis/sla/hosting/v1#constraint-billing-period",
+        "odrlLeftOperands": [
+          "http://www.w3.org/ns/odrl/2/timeInterval"
+        ],
+        "valueOptions": []
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-incident-response-minutes",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:integer",
+      "dcs:label": "Support Service · P1 incident response in minutes",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/sla/hosting/v1#incidentResponseMinutes"
+      },
+      "dcs:valueConstraint": {
+        "max": 240,
+        "min": 5,
+        "valueOptions": []
+      }
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#field-required-signature-level",
+      "@type": "dcs:ContractField",
+      "dcs:datatype": "xsd:string",
+      "dcs:label": "Required Signature Level",
+      "dcs:required": true,
+      "dcs:shape": {
+        "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-signature-requiredLevel"
+      },
+      "dcs:valueConstraint": {
+        "allowedValues": [
+          "SES",
+          "AES",
+          "QES"
+        ],
+        "description": "eIDAS Signature Level Constraint",
+        "format": "eidas-signature-level",
+        "iri": "https://w3id.org/facis/dcs/taxonomy/v1#constraint-eidas-signature-level",
+        "odrlLeftOperands": [],
+        "valueOptions": []
+      }
+    }
+  ],
+  "dcs:documentStructure": {
+    "@id": "did:web:example:template:sla-hosting#document-structure",
+    "@type": "dcs:DocumentStructure",
+    "dcs:blocks": {
+      "@list": [
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-parties",
+          "@type": "dcs:Section",
+          "dcs:title": "1. Parties and Term"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-environment",
+          "@type": "dcs:Section",
+          "dcs:title": "2. Provisioned Environment"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-service-levels",
+          "@type": "dcs:Section",
+          "dcs:title": "3. Service Levels"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-charges",
+          "@type": "dcs:Section",
+          "dcs:title": "4. Charges and Payment"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-service-credits",
+          "@type": "dcs:Section",
+          "dcs:title": "5. Service Credits"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-use-restrictions",
+          "@type": "dcs:Section",
+          "dcs:title": "6. Use Restrictions"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-signatures",
+          "@type": "dcs:Section",
+          "dcs:title": "7. Signatures"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-parties",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "This Managed Kubernetes Hosting Agreement is entered into between Nordwind Cloud Services GmbH (the Provider) and Hansa Logistics AG (the Customer)."
+            ]
+          },
+          "dcs:title": "Parties"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-governing-law",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "This agreement is governed by the law of ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-governing-law"
+              },
+              "."
+            ]
+          },
+          "dcs:title": "Governing law"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-environment",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Provider provisions ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-provisioned-nodes"
+              },
+              " worker nodes of class ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-node-class"
+              },
+              " in service region ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-service-region"
+              },
+              ". The Customer may execute production workloads on that environment until ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-contract-end-date"
+              },
+              ". Where availability falls short, the Provider owes a service credit of ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-service-credit-rate"
+              },
+              " percent."
+            ]
+          },
+          "dcs:title": "Provisioned environment and workload execution"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-maintenance",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Provider may modify the provisioned environment to carry out planned maintenance, and informs the Customer at least five days beforehand."
+            ]
+          },
+          "dcs:title": "Planned maintenance"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-availability",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Provider maintains an availability of at least ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-committed-availability"
+              },
+              " percent, measured over each ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-measurement-window"
+              },
+              "."
+            ]
+          },
+          "dcs:title": "Availability"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-incident-response",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Provider informs the Customer of a priority-1 incident within ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-incident-response-minutes"
+              },
+              " minutes of detecting it."
+            ]
+          },
+          "dcs:title": "Incident response"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-data-residency",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Provider processes and stores all Customer data inside the agreed service region."
+            ]
+          },
+          "dcs:title": "Data residency"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-charges",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Customer pays ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-monthly-fee"
+              },
+              " ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-currency"
+              },
+              " per ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-billing-period"
+              },
+              ", due within fourteen days of the invoice date."
+            ]
+          },
+          "dcs:title": "Charges and payment"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-service-credits",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "A service credit is settled against the next invoice for the affected billing period."
+            ]
+          },
+          "dcs:title": "Service credits"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-no-resale",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Customer must not sell the provisioned environment, or any part of it, to a third party or to the public."
+            ]
+          },
+          "dcs:title": "No resale"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-no-grant-use",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Customer must not grant use of the support service to a third party or to an affiliate."
+            ]
+          },
+          "dcs:title": "No onward grant of use"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-no-capacity-excess",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "The Customer must not run more worker nodes than the provisioned capacity."
+            ]
+          },
+          "dcs:title": "No capacity excess"
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-clause-signature-level",
+          "@type": "dcs:Clause",
+          "dcs:content": {
+            "@list": [
+              "Both parties sign this agreement at signature level ",
+              {
+                "@id": "did:web:example:template:sla-hosting#field-required-signature-level"
+              },
+              "."
+            ]
+          },
+          "dcs:title": "Signature level"
+        }
+      ]
+    },
+    "dcs:layout": {
+      "@list": [
+        {
+          "@id": "did:web:example:template:sla-hosting#block-root",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-section-parties"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-section-environment"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-section-service-levels"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-section-charges"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-section-service-credits"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-section-use-restrictions"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-section-signatures"
+              }
+            ]
+          },
+          "dcs:isRoot": true
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-parties",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-parties"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-governing-law"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-environment",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-environment"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-maintenance"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-service-levels",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-availability"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-incident-response"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-data-residency"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-charges",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-charges"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-service-credits",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-service-credits"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-use-restrictions",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-no-resale"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-no-grant-use"
+              },
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-no-capacity-excess"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:template:sla-hosting#block-section-signatures",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:template:sla-hosting#block-clause-signature-level"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "dcs:metadata": {
+    "@id": "did:web:example:template:sla-hosting#metadata",
+    "@type": "dcs:TemplateMetadata",
+    "dcs:description": "Hosting service level agreement between Nordwind Cloud Services GmbH (Provider) and Hansa Logistics AG (Customer).",
+    "dcs:templateType": "dcs:ContractTemplate",
+    "dcs:title": "Managed Kubernetes Hosting SLA"
+  },
+  "dcs:policies": {
+    "@id": "did:web:example:template:sla-hosting#policy-set",
+    "@type": "odrl:Offer",
+    "odrl:obligation": [
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r1-availability",
+        "@type": "odrl:Duty",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-availability"
+        },
+        "odrl:action": {
+          "@id": "dcs:provideCompliantValue"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-committed-availability"
+            },
+            "odrl:operator": {
+              "@id": "odrl:gteq"
+            },
+            "odrl:rightOperand": {
+              "@type": "xsd:decimal",
+              "@value": "99.5"
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:percentage"
+            },
+            "odrl:operator": {
+              "@id": "odrl:gteq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-committed-availability"
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:timeInterval"
+            },
+            "odrl:operator": {
+              "@id": "odrl:eq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-measurement-window"
+            }
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting"
+        }
+      },
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r2-payment",
+        "@type": "odrl:Duty",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-charges"
+        },
+        "odrl:action": {
+          "@id": "odrl:compensate"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:payAmount"
+            },
+            "odrl:operator": {
+              "@id": "odrl:eq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-monthly-fee"
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:timeInterval"
+            },
+            "odrl:operator": {
+              "@id": "odrl:eq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-billing-period"
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:elapsedTime"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@type": "xsd:duration",
+              "@value": "P14D"
+            }
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting"
+        }
+      },
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r8-incident-response",
+        "@type": "odrl:Duty",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-incident-response"
+        },
+        "odrl:action": {
+          "@id": "odrl:inform"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:elapsedTime"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-incident-response-minutes"
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-incident-response-minutes"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@type": "xsd:integer",
+              "@value": "60"
+            }
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting#asset-support-service"
+        }
+      },
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r9-data-residency",
+        "@type": "odrl:Duty",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-data-residency"
+        },
+        "odrl:action": {
+          "@id": "dcs:provideCompliantValue"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:spatial"
+            },
+            "odrl:operator": {
+              "@id": "odrl:isAnyOf"
+            },
+            "odrl:rightOperand": [
+              {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#service-region-EMEA"
+              }
+            ]
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting"
+        }
+      }
+    ],
+    "odrl:permission": [
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r3-workload-execution",
+        "@type": "odrl:Permission",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-environment"
+        },
+        "odrl:action": {
+          "@id": "odrl:execute"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:count"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-provisioned-nodes"
+            }
+          },
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:or": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "odrl:spatial"
+                  },
+                  "odrl:operator": {
+                    "@id": "odrl:eq"
+                  },
+                  "odrl:rightOperand": {
+                    "@id": "did:web:example:template:sla-hosting#field-service-region"
+                  }
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "odrl:spatial"
+                  },
+                  "odrl:operator": {
+                    "@id": "odrl:isAnyOf"
+                  },
+                  "odrl:rightOperand": [
+                    {
+                      "@id": "https://w3id.org/facis/dcs/taxonomy/v1#service-region-EMEA"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:dateTime"
+            },
+            "odrl:operator": {
+              "@id": "odrl:lteq"
+            },
+            "odrl:rightOperand": {
+              "@id": "did:web:example:template:sla-hosting#field-contract-end-date"
+            }
+          }
+        ],
+        "odrl:duty": [
+          {
+            "@type": "odrl:Duty",
+            "dcs:prose": {
+              "@id": "did:web:example:template:sla-hosting#block-clause-environment"
+            },
+            "odrl:action": {
+              "@id": "dcs:provideCompliantValue"
+            },
+            "odrl:consequence": [
+              {
+                "@type": "odrl:Duty",
+                "dcs:prose": {
+                  "@id": "did:web:example:template:sla-hosting#block-clause-environment"
+                },
+                "odrl:action": {
+                  "@id": "odrl:compensate"
+                },
+                "odrl:constraint": [
+                  {
+                    "@type": "odrl:Constraint",
+                    "odrl:leftOperand": {
+                      "@id": "odrl:percentage"
+                    },
+                    "odrl:operator": {
+                      "@id": "odrl:eq"
+                    },
+                    "odrl:rightOperand": {
+                      "@id": "did:web:example:template:sla-hosting#field-service-credit-rate"
+                    }
+                  }
+                ]
+              }
+            ],
+            "odrl:constraint": [
+              {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                  "@id": "odrl:percentage"
+                },
+                "odrl:operator": {
+                  "@id": "odrl:gteq"
+                },
+                "odrl:rightOperand": {
+                  "@type": "xsd:decimal",
+                  "@value": "99.5"
+                }
+              }
+            ]
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting#asset-hosting-environment"
+        }
+      },
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r4-maintenance",
+        "@type": "odrl:Permission",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-maintenance"
+        },
+        "odrl:action": {
+          "@id": "odrl:modify"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:duty": [
+          {
+            "@type": "odrl:Duty",
+            "dcs:prose": {
+              "@id": "did:web:example:template:sla-hosting#block-clause-maintenance"
+            },
+            "odrl:action": {
+              "@id": "odrl:inform"
+            },
+            "odrl:constraint": [
+              {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                  "@id": "odrl:delayPeriod"
+                },
+                "odrl:operator": {
+                  "@id": "odrl:gteq"
+                },
+                "odrl:rightOperand": {
+                  "@type": "xsd:duration",
+                  "@value": "P5D"
+                }
+              }
+            ]
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting"
+        }
+      }
+    ],
+    "odrl:profile": {
+      "@id": "https://w3id.org/facis/dcs/ontology/v1/odrl-profile"
+    },
+    "odrl:prohibition": [
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r5-no-resale",
+        "@type": "odrl:Prohibition",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-no-resale"
+        },
+        "odrl:action": {
+          "@id": "odrl:sell"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:recipient"
+            },
+            "odrl:operator": {
+              "@id": "odrl:isNoneOf"
+            },
+            "odrl:rightOperand": [
+              {
+                "@type": "xsd:string",
+                "@value": "third-party"
+              },
+              {
+                "@type": "xsd:string",
+                "@value": "public"
+              }
+            ]
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting#asset-hosting-environment"
+        }
+      },
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r6-no-grant-use",
+        "@type": "odrl:Prohibition",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-no-grant-use"
+        },
+        "odrl:action": {
+          "@id": "odrl:grantUse"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:recipient"
+            },
+            "odrl:operator": {
+              "@id": "odrl:isNoneOf"
+            },
+            "odrl:rightOperand": [
+              {
+                "@type": "xsd:string",
+                "@value": "third-party"
+              },
+              {
+                "@type": "xsd:string",
+                "@value": "affiliate"
+              }
+            ]
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting#asset-support-service"
+        }
+      },
+      {
+        "@id": "did:web:example:template:sla-hosting#policy-r7-no-capacity-excess",
+        "@type": "odrl:Prohibition",
+        "dcs:prose": {
+          "@id": "did:web:example:template:sla-hosting#block-clause-no-capacity-excess"
+        },
+        "odrl:action": {
+          "@id": "odrl:use"
+        },
+        "odrl:assignee": {
+          "@id": "did:web:example:template:sla-hosting#party-customer"
+        },
+        "odrl:assigner": {
+          "@id": "did:web:example:template:sla-hosting#party-provider"
+        },
+        "odrl:constraint": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "odrl:count"
+            },
+            "odrl:operator": {
+              "@id": "odrl:gt"
+            },
+            "odrl:rightOperand": {
+              "@type": "xsd:integer",
+              "@value": "12"
+            }
+          }
+        ],
+        "odrl:target": {
+          "@id": "did:web:example:template:sla-hosting"
+        }
+      }
+    ]
+  },
+  "sh:shapesGraph": [
+    {
+      "@id": "https://dcs.example/api/semantic/shapes/facis-dcs?version=1"
+    },
+    {
+      "@id": "https://dcs.example/api/semantic/shapes/facis-sla-hosting?version=1"
+    }
+  ]
+}

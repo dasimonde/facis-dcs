@@ -1,0 +1,153 @@
+[
+  {
+    "id": "adm-tab",
+    "type": "tab",
+    "label": "Admin",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "adm-get-admin",
+    "type": "http in",
+    "z": "adm-tab",
+    "name": "GET /admin",
+    "url": "/admin",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 100,
+    "wires": [
+      [
+        "adm-fn-render"
+      ]
+    ]
+  },
+  {
+    "id": "adm-fn-render",
+    "type": "function",
+    "z": "adm-tab",
+    "name": "render credential list",
+    "func": "const registry = global.get('loadRegistry')();\nconst bits = global.get('loadStatusBits')();\nconst rows = registry.slice().reverse().map((entry) => {\n  const revoked = global.get('getStatusBit')(bits, entry.idx) || entry.revoked;\n  const roles = (entry.claims && entry.claims.roles || []).map((r) =>\n    '<span class=\"chip\">' + esc(r) + '</span>'\n  ).join(' ');\n  const org = entry.claims && entry.claims.organization || '—';\n  const issued = new Date(entry.issuedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });\n  const statusBadge = revoked\n    ? '<span class=\"badge badge-revoked\">● Revoked</span>'\n    : '<span class=\"badge badge-active\">● Active</span>';\n  const actionForm = revoked\n    ? '<form method=\"POST\" action=\"/admin/credentials/' + entry.idx + '/unrevoke\"><button class=\"btn btn-restore\" type=\"submit\">Restore</button></form>'\n    : '<form method=\"POST\" action=\"/admin/credentials/' + entry.idx + '/revoke\"><button class=\"btn btn-revoke\" type=\"submit\">Revoke</button></form>';\n  return '<tr>' +\n    '<td class=\"mono\">#' + entry.idx + '</td>' +\n    '<td class=\"mono small\">' + esc(org) + '</td>' +\n    '<td>' + (roles || '—') + '</td>' +\n    '<td class=\"small muted\">' + issued + '</td>' +\n    '<td>' + statusBadge + '</td>' +\n    '<td>' + actionForm + '</td>' +\n    '</tr>';\n}).join('\\n');\n\nfunction esc(s) {\n  return String(s).replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\n}\n\nconst empty = '<tr><td colspan=\"6\" class=\"empty\">No credentials issued yet — <a href=\"/offer\">go claim one</a>.</td></tr>';\n\nconst html = '<!doctype html>\\n' +\n  '<html lang=\"en\">\\n' +\n  '<head>\\n' +\n  '<meta charset=\"utf-8\">\\n' +\n  '<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\n' +\n  '<title>Issued PoA Credentials</title>\\n' +\n  '<style>\\n' +\n  ':root{color-scheme:light;}\\n' +\n  '*{box-sizing:border-box;}\\n' +\n  'body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Inter,Roboto,sans-serif;' +\n  'margin:0;min-height:100vh;padding:2.5rem 1.5rem;background:linear-gradient(180deg,#eef2ff 0%,#f8fafc 55%);color:#1e1b2e;}\\n' +\n  '.wrap{max-width:920px;margin:0 auto;}\\n' +\n  '.card{background:#fff;border-radius:20px;box-shadow:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.08);padding:2rem;}\\n' +\n  'h1{font-size:1.35rem;font-weight:700;margin:0 0 .25rem;color:#1e1b4b;}\\n' +\n  'p.lead{color:#64748b;font-size:.9rem;margin:0 0 1.5rem;}\\n' +\n  'table{width:100%;border-collapse:collapse;font-size:.85rem;}\\n' +\n  'thead th{text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;' +\n  'padding:.5rem .6rem;border-bottom:1px solid #e2e8f0;}\\n' +\n  'tbody td{padding:.75rem .6rem;border-bottom:1px solid #f1f5f9;vertical-align:middle;}\\n' +\n  'tbody tr:last-child td{border-bottom:none;}\\n' +\n  '.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}\\n' +\n  '.small{font-size:.78rem;}\\n' +\n  '.muted{color:#94a3b8;}\\n' +\n  '.chip{display:inline-block;background:#eef2ff;color:#4338ca;font-size:.72rem;font-weight:600;' +\n  'padding:.2rem .55rem;border-radius:999px;margin:0 .2rem .2rem 0;}\\n' +\n  '.badge{display:inline-flex;align-items:center;gap:.3rem;font-size:.78rem;font-weight:600;' +\n  'padding:.25rem .6rem;border-radius:999px;}\\n' +\n  '.badge-active{background:#dcfce7;color:#15803d;}\\n' +\n  '.badge-revoked{background:#fee2e2;color:#b91c1c;}\\n' +\n  '.btn{border:none;border-radius:8px;padding:.4rem .8rem;font-size:.78rem;font-weight:600;cursor:pointer;}\\n' +\n  '.btn-revoke{background:#fee2e2;color:#b91c1c;}\\n' +\n  '.btn-revoke:hover{background:#fecaca;}\\n' +\n  '.btn-restore{background:#dcfce7;color:#15803d;}\\n' +\n  '.btn-restore:hover{background:#bbf7d0;}\\n' +\n  '.empty{text-align:center;color:#94a3b8;padding:2rem 0;}\\n' +\n  '.empty a{color:#6366f1;}\\n' +\n  '.top-links{margin-top:1.5rem;font-size:.78rem;color:#94a3b8;}\\n' +\n  '.top-links a{color:#6366f1;text-decoration:none;margin-right:.75rem;}\\n' +\n  '.tablewrap{overflow-x:auto;}\\n' +\n  '</style>\\n' +\n  '</head>\\n' +\n  '<body>\\n' +\n  '<div class=\"wrap\">\\n' +\n  '<div class=\"card\">\\n' +\n  '<h1>Issued PoA Credentials</h1>\\n' +\n  '<p class=\"lead\">Every demo Power of Attorney credential issued from this instance, and its status-list revocation state.</p>\\n' +\n  '<div class=\"tablewrap\">\\n' +\n  '<table>\\n' +\n  '<thead><tr><th>#</th><th>Organization</th><th>Roles</th><th>Issued</th><th>Status</th><th></th></tr></thead>\\n' +\n  '<tbody>' + (rows || empty) + '</tbody>\\n' +\n  '</table>\\n' +\n  '</div>\\n' +\n  '</div>\\n' +\n  '<div class=\"top-links\"><a href=\"/offer\">← New offer</a><a href=\"/status-list/1\">Status list JWT</a><a href=\"/pki/jwks.json\">Issuer JWKS</a></div>\\n' +\n  '</div>\\n' +\n  '</body>\\n' +\n  '</html>\\n';\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'text/html' };\nmsg.payload = html;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 100,
+    "wires": [
+      [
+        "adm-resp-render"
+      ]
+    ]
+  },
+  {
+    "id": "adm-resp-render",
+    "type": "http response",
+    "z": "adm-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "adm-post-revoke",
+    "type": "http in",
+    "z": "adm-tab",
+    "name": "POST /admin/credentials/:idx/revoke",
+    "url": "/admin/credentials/:idx/revoke",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 200,
+    "wires": [
+      [
+        "adm-fn-revoke"
+      ]
+    ]
+  },
+  {
+    "id": "adm-fn-revoke",
+    "type": "function",
+    "z": "adm-tab",
+    "name": "set revoked = true",
+    "func": "const idx = parseInt(msg.req.params.idx, 10);\nif (!Number.isInteger(idx) || idx < 0) {\n  msg.statusCode = 400;\n  msg.headers = { 'content-type': 'application/json' };\n  msg.payload = { error: 'invalid_idx' };\n  return msg;\n}\n\nconst bits = global.get('loadStatusBits')(Math.ceil((idx + 1) / 8));\nglobal.get('setStatusBit')(bits, idx, true);\nglobal.get('saveStatusBits')(bits);\n\nconst registry = global.get('loadRegistry')();\nconst entry = registry.find((e) => e.idx === idx);\nif (entry) {\n  entry.revoked = true;\n  entry.revokedAt = new Date().toISOString();\n  global.get('saveRegistry')(registry);\n}\n\nnode.log('admin: revoked credential idx=' + idx);\nmsg.statusCode = 302;\nmsg.headers = { location: '/admin' };\nmsg.payload = '';\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 200,
+    "wires": [
+      [
+        "adm-resp-revoke"
+      ]
+    ]
+  },
+  {
+    "id": "adm-resp-revoke",
+    "type": "http response",
+    "z": "adm-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 690,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "adm-post-unrevoke",
+    "type": "http in",
+    "z": "adm-tab",
+    "name": "POST /admin/credentials/:idx/unrevoke",
+    "url": "/admin/credentials/:idx/unrevoke",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 195,
+    "y": 280,
+    "wires": [
+      [
+        "adm-fn-unrevoke"
+      ]
+    ]
+  },
+  {
+    "id": "adm-fn-unrevoke",
+    "type": "function",
+    "z": "adm-tab",
+    "name": "set revoked = false",
+    "func": "const idx = parseInt(msg.req.params.idx, 10);\nif (!Number.isInteger(idx) || idx < 0) {\n  msg.statusCode = 400;\n  msg.headers = { 'content-type': 'application/json' };\n  msg.payload = { error: 'invalid_idx' };\n  return msg;\n}\n\nconst bits = global.get('loadStatusBits')(Math.ceil((idx + 1) / 8));\nglobal.get('setStatusBit')(bits, idx, false);\nglobal.get('saveStatusBits')(bits);\n\nconst registry = global.get('loadRegistry')();\nconst entry = registry.find((e) => e.idx === idx);\nif (entry) {\n  entry.revoked = false;\n  entry.revokedAt = null;\n  global.get('saveRegistry')(registry);\n}\n\nnode.log('admin: restored credential idx=' + idx);\nmsg.statusCode = 302;\nmsg.headers = { location: '/admin' };\nmsg.payload = '';\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 465,
+    "y": 280,
+    "wires": [
+      [
+        "adm-resp-unrevoke"
+      ]
+    ]
+  },
+  {
+    "id": "adm-resp-unrevoke",
+    "type": "http response",
+    "z": "adm-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 695,
+    "y": 280,
+    "wires": []
+  }
+]

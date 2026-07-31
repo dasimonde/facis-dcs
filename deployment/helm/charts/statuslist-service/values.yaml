@@ -16,6 +16,7 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
+  stripPrefix: ""
   pathType: Prefix
   hosts: []
   tls: []
@@ -27,6 +28,12 @@ resources:
   limits:
     cpu: 300m
     memory: 512Mi
+
+# Sizes the BDD list-init hook Job, a separate pod from the service. Falls back
+# to `resources` when unset; set it on namespaces with a limits.cpu quota, where
+# an unsized hook inherits the LimitRange default and is refused once the
+# release's own containers consume the quota.
+jobResources: {}
 
 # PostgreSQL connection — required; the service uses auto-migrate on startup.
 database:
@@ -50,7 +57,14 @@ topics:
   signer: "signer"
 
 # List configuration
-listSize: "125000"
+listSize: "131072"
+
+# BDD list initialization
+bddListInit:
+  enabled: false
+  tenantID: "default"
+  tenantIDs: []
+  listID: "1"
 
 # Logging level
 logging:

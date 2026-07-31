@@ -1,0 +1,59 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:manifest-url-absent",
+    "@type": "ContractTemplate",
+    "documentTitle": "No Remote Manifest",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "No Remote Manifest"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:manifest-url-absent#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:manifest-url-absent#s1",
+                "children": [
+                    "urn:doc:manifest-url-absent#c1",
+                    "urn:doc:manifest-url-absent#c2"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:manifest-url-absent#s1",
+                "title": "1. Provenance"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:manifest-url-absent#c1",
+                "content": [
+                    "Base document."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:manifest-url-absent#c2",
+                "content": [
+                    "Amendment one."
+                ]
+            }
+        ]
+    }
+}

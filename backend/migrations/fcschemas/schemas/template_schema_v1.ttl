@@ -48,11 +48,6 @@ dcs-template:did a rdf:Property ;
   rdfs:domain dcs-template:ContractTemplate ;
   rdfs:range xsd:string .
 
-dcs-template:documentNumber a rdf:Property ;
-  rdfs:label "Document Number" ;
-  rdfs:comment "Identifier shared/ by all versions of the same contract template." ;
-  rdfs:domain dcs-template:ContractTemplate ;
-  rdfs:range xsd:string .
 
 dcs-template:version a rdf:Property ;
   rdfs:label "Version" ;
@@ -122,12 +117,6 @@ dcs-template:ContractTemplateShape
     sh:maxCount 1 ;
   ] ;
 
-  sh:property [
-    sh:path dcs-template:documentNumber ;
-    sh:datatype xsd:string ;
-    sh:minCount 1 ;
-    sh:maxCount 1 ;
-  ] ;
 
   sh:property [
     sh:path dcs-template:version ;
@@ -228,8 +217,6 @@ dcs-template-data:templateId a rdf:Property ;
 dcs-template-data:version a rdf:Property ;
   rdfs:label "Version" .
 
-dcs-template-data:document_number a rdf:Property ;
-  rdfs:label "Document number" .
 
 dcs-template-data:name a rdf:Property ;
   rdfs:label "Name" .
@@ -485,12 +472,6 @@ dcs-template:ApprovedTemplateBlockShape
       [ sh:datatype xsd:double ]
       [ sh:datatype xsd:decimal ]
     ) ;
-  ] ;
-  sh:property [
-    sh:path dcs-template-data:document_number ;
-    sh:datatype xsd:string ;
-    sh:minCount 1 ;
-    sh:maxCount 1 ;
   ] .
 
 dcs-template:MergedApprovedTemplateBlockShape
@@ -532,12 +513,6 @@ dcs-template:MergedApprovedTemplateBlockShape
       [ sh:datatype xsd:double ]
       [ sh:datatype xsd:decimal ]
     ) ;
-  ] ;
-  sh:property [
-    sh:path dcs-template-data:document_number ;
-    sh:datatype xsd:string ;
-    sh:minCount 1 ;
-    sh:maxCount 1 ;
   ] .
 
 ### 5.2. SemanticConditions Shape
@@ -641,12 +616,6 @@ dcs-template:SubTemplateSnapshotShape
     sh:path dcs-template-data:did ;
     sh:datatype xsd:string ;
     sh:minCount 1 ;
-    sh:maxCount 1 ;
-  ] ;
-  sh:property [
-    sh:path dcs-template-data:document_number ;
-    sh:datatype xsd:string ;
-    sh:minCount 0 ;
     sh:maxCount 1 ;
   ] ;
   sh:property [

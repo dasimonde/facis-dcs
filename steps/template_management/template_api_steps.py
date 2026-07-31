@@ -18,10 +18,7 @@ def step_when_create_template(context, template_name, category):
         "template_type": TemplateService.template_type_for_category(category),
         "name": template_name,
         "description": "BDD executable template creation",
-        "template_data": {
-            "title": template_name,
-            "clauses": [{"id": "c1", "text": "Confidentiality clause"}],
-        },
+        "template_data": TemplateService.canonical_document_data(template_name),
     }
     context.requests_response = post_json(context, template_create_url(context), payload)
 
@@ -32,10 +29,7 @@ def step_when_create_template(context, template_name, category):
         "template_type": TemplateService.template_type_for_category(category),
         "name": template_name,
         "description": "BDD executable template creation",
-        "template_data": {
-            "title": template_name,
-            "clauses": [{"id": "c1", "text": "Confidentiality clause"}],
-        },
+        "template_data": TemplateService.canonical_document_data(template_name),
     }
     context.requests_response = post_json(context, template_create_url(context), payload)
     body = context.requests_response.json()
@@ -47,10 +41,10 @@ def step_when_create_template(context, template_name, category):
 def step_when_attempt_create_template(context):
     # Uses whatever role headers are currently on context (set by Given "I am authenticated with roles: X").
     payload = {
-        "template_type": "FRAME_CONTRACT",
+        "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
         "name": "BDD Unauthorized Template",
         "description": "Should be blocked by RBAC",
-        "template_data": {"title": "Test", "clauses": []},
+        "template_data": TemplateService.canonical_document_data("BDD Unauthorized Template"),
     }
     context.requests_response = post_json(context, template_create_url(context), payload)
 
@@ -246,10 +240,10 @@ def step_then_uuid_unique(context):
 
     # DID format encodes uniqueness; a second create produces a different DID.
     payload = {
-        "template_type": "FRAME_CONTRACT",
+        "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
         "name": "BDD UUID Check",
         "description": "Duplicate to verify UUID uniqueness",
-        "template_data": {"title": "BDD UUID Check", "clauses": []},
+        "template_data": TemplateService.canonical_document_data("BDD UUID Check"),
     }
     second_resp = post_json(context, template_create_url(context), payload)
     assert second_resp.status_code == 200, second_resp.text

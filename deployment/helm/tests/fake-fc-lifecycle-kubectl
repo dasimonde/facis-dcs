@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"$FC_FAKE_KUBECTL_LOG"
+
+if [[ "${1:-}" == "wait" ]]; then
+  if [[ " $* " == *" --for=condition=complete "* ]]; then
+    condition="Complete"
+  elif [[ " $* " == *" --for=condition=failed "* ]]; then
+    condition="Failed"
+  else
+    echo "unsupported fake wait condition: $*" >&2
+    exit 2
+  fi
+  printf '%s %s\n' "$BASHPID" "$condition" >>"$FC_FAKE_PID_LOG"
+  [[ " $* " == *" --timeout=-1s "* ]] || {
+    echo "wait does not use the unbounded Kubernetes watch" >&2
+    exit 2
+  }
+  if [[ "$FC_FAKE_INITIAL" == "$condition" || "$FC_FAKE_TERMINAL" == "$condition" ]]; then
+    printf '%s\n' "$condition" >"$FC_FAKE_STATE"
+    printf 'job/fc-realm-provision condition met\n'
+    exit 0
+  fi
+
+  trap 'exit 0' TERM INT
+  exec {block_fd}<>"$FC_FAKE_BLOCK_FIFO"
+  read -r _ <&"$block_fd"
+  exit 3
+fi
+
+state="$FC_FAKE_INITIAL"
+if [[ -s "$FC_FAKE_STATE" ]]; then
+  state="$(<"$FC_FAKE_STATE")"
+fi
+
+case "$state" in
+  Complete)
+    condition='"conditions":[{"type":"Complete","status":"True","reason":"Completed","message":"realm ready"}]'
+    ;;
+  Failed)
+    condition='"conditions":[{"type":"Failed","status":"True","reason":"BackoffLimitExceeded","message":"realm import failed"}]'
+    ;;
+  nonterminal)
+    condition='"conditions":[]'
+    ;;
+  *)
+    echo "unsupported fake state: $state" >&2
+    exit 2
+    ;;
+esac
+
+printf '{"metadata":{"resourceVersion":"42"},"status":{%s}}\n' "$condition"

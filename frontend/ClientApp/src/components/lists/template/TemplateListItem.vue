@@ -1,22 +1,30 @@
 <script setup lang="ts">
-import type { PartialContractTemplate } from '@/models/contract-template'
-import { useTemplatePermissions } from '@/modules/template-repository/composables/useTemplatePermissions'
+import { computed } from 'vue'
+import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { ROUTES } from '@/router/router'
 import { TemplateState } from '@/types/contract-template-state'
 import { toProperCase } from '@/utils/string'
-import { computed } from 'vue'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const props = defineProps<{
   template: PartialContractTemplate
 }>()
 
-const { isCreator, isReviewer, isApprover } = useTemplatePermissions()
+const { isCreator, isReviewer, isApprover, isManager } = useTemplatePermissions()
 
 const canEdit = computed(() => {
   const inDraftOrRejectedState =
     (props.template.state === TemplateState.draft || props.template.state === TemplateState.rejected) && isCreator.value
   const inSubmittedState = props.template.state === TemplateState.submitted && isReviewer.value
-  return inDraftOrRejectedState || inSubmittedState
+  const inValidStateForManager =
+    (props.template.state === TemplateState.draft ||
+      props.template.state === TemplateState.submitted ||
+      props.template.state === TemplateState.rejected ||
+      props.template.state === TemplateState.reviewed ||
+      props.template.state === TemplateState.approved ||
+      props.template.state === TemplateState.deleted) &&
+    isManager.value
+  return inDraftOrRejectedState || inSubmittedState || inValidStateForManager
 })
 
 const canReview = computed(() => {
@@ -32,14 +40,28 @@ const resolveViewRouteName = computed(() => {
   }
   return ROUTES.TEMPLATES.VIEW
 })
+
+function getTemplateLink(template: PartialContractTemplate): string {
+  return `/ui/templates/view/${template.latest_did}`
+}
 </script>
 
 <template>
   <li class="list-row w-full min-w-0">
     <div class="list-col-grow card w-full min-w-0 border-base-content/10 bg-base-100 card-border hover:bg-base-300">
       <div class="card-body min-w-0">
-        <div class="-mt-9 -ml-1 flex">
-          <div class="badge badge-md badge-accent">{{ toProperCase(template.template_type) }}</div>
+        <div class="-mt-9 mr-1 -ml-1 grid w-full grid-cols-1 items-center gap-2 sm:grid-cols-3">
+          <div class="badge badge-md badge-accent sm:justify-self-start">
+            {{ toProperCase(template.template_type) }}
+          </div>
+          <a
+            v-if="template?.latest_did"
+            class="badge badge-md badge-warning max-sm:link sm:justify-self-center"
+            :href="getTemplateLink(template)"
+          >
+            A newer template version is available
+          </a>
+          <div></div>
         </div>
 
         <h2 class="card-title items-start justify-between">
@@ -50,8 +72,7 @@ const resolveViewRouteName = computed(() => {
             <div class="badge badge-secondary">{{ template.state }}</div>
           </div>
         </h2>
-        <div class="flex justify-between">
-          <div v-if="template.document_number">Document number: {{ template.document_number }}</div>
+        <div class="flex flex-col">
           <div v-if="template.version">Version: {{ template.version }}</div>
         </div>
         <div class="flex min-w-0 justify-between">

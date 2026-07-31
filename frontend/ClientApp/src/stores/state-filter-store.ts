@@ -1,11 +1,11 @@
+import { defineStore } from 'pinia'
+import { computed, type Ref, ref } from 'vue'
 import type { FilterStore } from '@/models/stores/filter-store'
 import type { ApprovalTaskState } from '@/types/approval-task-state'
 import type { ContractState } from '@/types/contract-state'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { NegotiationTaskState } from '@/types/negotiation-task-state'
 import type { ReviewTaskState } from '@/types/review-task-state'
-import { defineStore } from 'pinia'
-import { computed, type Ref, ref } from 'vue'
 
 function createFilterStore<T>(storeId: string) {
   return defineStore(storeId, () => {

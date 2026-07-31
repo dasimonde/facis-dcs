@@ -2,6 +2,20 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-orce
+{{- if .Values.checkpointSink.enabled }}
+{{- if not (hasPrefix "https://" (trim .Values.checkpointSink.url)) }}
+{{- fail "orce.checkpointSink.url must be a non-empty HTTPS URL when checkpointSink.enabled=true" }}
+{{- end }}
+{{- if le (int .Values.checkpointSink.internalTimeoutSeconds) 0 }}
+{{- fail "orce.checkpointSink.internalTimeoutSeconds must be a positive integer when checkpointSink.enabled=true" }}
+{{- end }}
+{{- if and (not (trim .Values.checkpointSink.bearerToken)) (not (trim .Values.checkpointSink.bearerTokenSecretRef.name)) }}
+{{- fail "orce.checkpointSink requires bearerToken or bearerTokenSecretRef.name when enabled" }}
+{{- end }}
+{{- if and .Values.checkpointSink.bearerTokenSecretRef.name (not (trim .Values.checkpointSink.bearerTokenSecretRef.key)) }}
+{{- fail "orce.checkpointSink.bearerTokenSecretRef.key must be non-empty when a Secret is configured" }}
+{{- end }}
+{{- end }}
 spec:
   replicas: {{ .Values.replicaCount | default 1 }}
   selector:
@@ -10,10 +24,54 @@ spec:
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
+      annotations:
+        # The flows are mounted as a subPath, which Kubernetes never refreshes
+        # in a running pod, so an upgrade that only changes a flow left the pod
+        # serving the previous one and the change looked like it had no effect.
+        checksum/flows: {{ include (print $.Template.BasePath "/configmap-flows.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/name: orce
         app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- if .Values.flowsFile.enabled }}
+      annotations:
+        checksum/flows: {{ include (print $.Template.BasePath "/configmap-flows.yaml") . | sha256sum }}
+      {{- end }}
     spec:
+      {{- if or .Values.localTSA.enabled .Values.persistence.enabled }}
+      initContainers:
+        {{- if .Values.persistence.enabled }}
+        # A fresh persistent volume mounted at /data shadows the image's
+        # baked-in Node-RED runtime files (settings.js, ...); seed them once.
+        - name: seed-data
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          command: ["/bin/sh", "-c", "[ -f /seed/settings.js ] || cp -a /data/. /seed/"]
+          {{- with .Values.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so mirroring the main block here costs nothing while an
+          # unset one lets a LimitRange default size the whole pod.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: orce-data
+              mountPath: /seed
+        {{- end }}
+        {{- if .Values.localTSA.enabled }}
+        # openssl ts -reply needs a writable, pre-existing serial file.
+        - name: seed-tsa-serial
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          command: ["/bin/sh", "-c", "[ -f /data/tsa-state/serial ] || echo 01 > /data/tsa-state/serial"]
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tsa-state
+              mountPath: /data/tsa-state
+        {{- end }}
+      {{- end }}
       containers:
         - name: orce
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -22,14 +80,90 @@ spec:
             - name: http
               containerPort: 1880
               protocol: TCP
-          {{- with .Values.extraEnv }}
+          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken .Values.checkpointSink.url .Values.extraEnv }}
           env:
+            {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if or .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken }}
+            - name: ORCE_WORKFLOW_GATE_BEARER_TOKEN
+              {{- if .Values.global.workflowGateTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.workflowGateTokenSecretRef.name | quote }}
+                  key: {{ .Values.global.workflowGateTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.global.workflowGateToken | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if .Values.checkpointSink.enabled }}
+            - name: CHECKPOINT_SINK_ENABLED
+              value: "true"
+            - name: CHECKPOINT_SINK_URL
+              value: {{ .Values.checkpointSink.url | quote }}
+            - name: CHECKPOINT_SINK_TIMEOUT_SECONDS
+              value: {{ .Values.checkpointSink.timeoutSeconds | quote }}
+            - name: CHECKPOINT_INTERNAL_TIMEOUT_SECONDS
+              value: {{ .Values.checkpointSink.internalTimeoutSeconds | quote }}
+            - name: CHECKPOINT_SINK_ALLOW_INSECURE_TLS
+              value: {{ .Values.checkpointSink.allowInsecureTLS | quote }}
+            {{- if or .Values.checkpointSink.bearerTokenSecretRef.name .Values.checkpointSink.bearerToken }}
+            - name: CHECKPOINT_SINK_BEARER_TOKEN
+              {{- if .Values.checkpointSink.bearerTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.checkpointSink.bearerTokenSecretRef.name | quote }}
+                  key: {{ .Values.checkpointSink.bearerTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.checkpointSink.bearerToken | quote }}
+              {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if or .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken }}
+            - name: ORCE_AUDIT_EXECUTOR_BEARER_TOKEN
+              {{- if .Values.global.auditExecutorTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.auditExecutorTokenSecretRef.name | quote }}
+                  key: {{ .Values.global.auditExecutorTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.global.auditExecutorToken | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken }}
+            - name: ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN
+              {{- if .Values.global.archiveAuditTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.archiveAuditTokenSecretRef.name | quote }}
+                  key: {{ .Values.global.archiveAuditTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.global.archiveAuditToken | quote }}
+              {{- end }}
+            {{- end }}
           {{- end }}
-          {{- if .Values.persistence.enabled }}
+          {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled }}
           volumeMounts:
+            {{- if .Values.persistence.enabled }}
             - name: orce-data
               mountPath: /data
+            {{- end }}
+            {{- if .Values.flowsFile.enabled }}
+            - name: flows-merged
+              mountPath: /data/flows.json
+              subPath: flows.json
+              readOnly: true
+            {{- end }}
+            {{- if .Values.localTSA.enabled }}
+            - name: tsa-config
+              mountPath: /data/tsa
+              readOnly: true
+            - name: tsa-certs
+              mountPath: /data/tsa-certs
+              readOnly: true
+            - name: tsa-state
+              mountPath: /data/tsa-state
+            {{- end }}
           {{- end }}
           livenessProbe:
             httpGet:
@@ -47,9 +181,26 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- end }}
-      {{- if .Values.persistence.enabled }}
+      {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled }}
       volumes:
+        {{- if .Values.persistence.enabled }}
         - name: orce-data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-orce
+        {{- end }}
+        {{- if .Values.flowsFile.enabled }}
+        - name: flows-merged
+          configMap:
+            name: {{ .Release.Name }}-orce-flows-merged
+        {{- end }}
+        {{- if .Values.localTSA.enabled }}
+        - name: tsa-config
+          configMap:
+            name: {{ .Release.Name }}-orce-tsa
+        - name: tsa-certs
+          secret:
+            secretName: {{ .Release.Name }}-orce-tsa-material
+        - name: tsa-state
+          emptyDir: {}
+        {{- end }}
       {{- end }}

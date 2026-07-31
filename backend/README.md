@@ -62,6 +62,52 @@ go test -v ./...
 ```
 **Note:** Every time you modify files in **backend/design**, you must regenerate the code.
 
+## Contract Signing
+
+The DCS is the OID4VP relying party and signature validator; it holds no
+contract-signing key (ADR-12, ADR-20). The only signing path is the ceremony:
+
+1. `POST /signature/request` — start a ceremony, request a PID (+ Power of
+   Attorney) presentation from the signer's wallet.
+2. The wallet presents PID+PoA (direct_post `vp_token`, keyed by the DCQL
+   credential query ids) to the ceremony's own callback
+   (`POST /signature/request/{ceremony_id}/callback`) — verified
+   cryptographically against the ceremony's nonce and the configured PID
+   issuer trust anchors (`OID4VP_TRUST_DATA_PATH`) before anything is
+   persisted. A PID whose issuer credential carries an x5c certificate
+   (a real EUDI wallet, rather than this project's JWKS-only dev issuer) is
+   only accepted if its chain verifies against `OID4VP_X5C_TRUST_ANCHORS_PATH`
+   (a PEM bundle of trusted roots) — unset in dev/BDD, where no PID is ever
+   x5c-signed; an x5c-bearing credential presented with none configured is
+   refused outright, never trusted off its own embedded certificate.
+3. `POST /signature/request/{ceremony_id}/publish` — prepare the to-be-signed
+   PDF and JSON-LD payload (evidence embedded, bytes pinned), and publish a
+   standard OID4VP Document-Retrieval request object as a QR/deep link.
+4. The wallet fetches the request object, fetches both documents, signs the
+   PDF (PAdES, via its own SCA/QTSP) and the JSON-LD payload (JAdES, with the
+   ceremony's request nonce bound into the protected header), and posts both
+   back to the SAME callback endpoint from step 2 (`documentWithSignature[]`
+   / `signatureObject[]`).
+5. The callback validates: the submitted PDF's initial revision byte-matches
+   what was pinned at prepare, the DSS-validated signature meets the
+   contract's declared level (AES or QES, per `dcs:requiredCredentialType` on
+   the signature field), the certificate names the ceremony's verified PID,
+   and (once a ceremony is published) the JAdES's nonce claim matches. Only
+   then does it finalize and transition the contract to SIGNED.
+
+`POST /signature/prepare` + `POST /signature/submit` are the same
+prepare/validate steps without the QR/publish layer, for a JWT-authenticated
+caller who already has the signatory's signed PDF in hand (e.g. a desktop
+PAdES signer) — same acceptance gate, no separate ceremony webhook.
+
+There is no DCS-signed-PAdES fallback: `POST /signature/apply` and the
+`dcs-contract-pades` HSM key are removed. See
+[docs/adr-12-wallet-driven-signing.md](../docs/adr-12-wallet-driven-signing.md)
+and [docs/adr-20-signing-acceptance-hardening.md](../docs/adr-20-signing-acceptance-hardening.md)
+for the full acceptance-path decision record, and
+[testWallet/](../testWallet/) for the wallet+QTSP stand-in that drives this
+path in dev and CI.
+
 ## Running the API Server
 
 For the local Helm stack, see [deployment/README.md](../deployment/README.md).
@@ -81,7 +127,8 @@ export FEDERATED_CATALOGUE_CLIENT_ID="dcs-fc-client"
 export FEDERATED_CATALOGUE_CLIENT_SECRET="dcs-fc-client-secret"
 
 # Hydra Authentication
-export HYDRA_ISSUER_URL="http://localhost:30444"
+export HYDRA_PUBLIC_ISSUER_URL="http://localhost:5173"
+export HYDRA_INTERNAL_ISSUER_URL="http://localhost:30444"
 export HYDRA_CLIENT_ID="dcs-client"
 export HYDRA_CLIENT_SECRET="dcs-secret"
 export HYDRA_REDIRECT_URI="http://localhost:5173/api/auth/callback"
@@ -89,7 +136,7 @@ export HYDRA_POST_LOGOUT_REDIRECT_URI="http://localhost:5173/api/auth/logout-com
 export HYDRA_ADMIN_URL="http://localhost:30085"
 ```
 
-When using the local Helm stack, copy `backend/.env.dev` to `backend/.env`.
+When using the local Helm stack, copy `backend/.env.dev1` to `backend/.env` (done automatically by `dev-stack.sh`).
 
 ### Start the DCS backend service
 ```bash

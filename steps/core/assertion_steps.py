@@ -1,11 +1,12 @@
 """Shared assertion steps for executable BDD scenarios."""
 import ast
 import json
+import os
 import re
 
 import requests as _requests
 
-from behave import then, when
+from behave import given, then, when
 from behave.matchers import use_step_matcher
 
 
@@ -96,8 +97,14 @@ def step_when_request_with_payload(context, method, endpoint, payload=None):
 
 @when('the system sends "{method}" request to internal endpoint "{endpoint}"')
 def step_when_internal_request(context, method, endpoint):
-    # For internal endpoints, we ignore any path in the base URL and construct the URL directly from the endpoint to ensure it targets the correct service.
-    url = "/".join(context.base_url.split("/", 3)[:3]) + endpoint
+    # Internal endpoints (e.g. /metrics) live at the service root, outside the
+    # API prefix; the ingress does not route them. Prefer the direct service
+    # origin (port-forward set up by run_bdd_helm.sh), falling back to the
+    # base URL's origin for local air/Vite runs.
+    origin = os.getenv("BDD_DCS_INTERNAL_ORIGIN", "").strip().rstrip("/")
+    if not origin:
+        origin = "/".join(context.base_url.split("/", 3)[:3])
+    url = origin + endpoint
     m = method.upper()
     if m == "GET":
         context.requests_response = _requests.get(url, timeout=context.http_timeout_seconds)
@@ -105,6 +112,27 @@ def step_when_internal_request(context, method, endpoint):
         context.requests_response = _requests.post(url, json={}, timeout=context.http_timeout_seconds)
     else:
         raise NotImplementedError(f"Method {method} not supported in internal endpoint step")
+
+
+@given("get http 200:Success code")
+def step_given_get_http_200(context):
+    """Duplicate of eu.xfsc.bdd.core.steps.rest._200 (pip package
+    bdd-executor), registered as @given too.
+
+    behave registers @given/@when/@then into separate per-type lookup
+    tables; the upstream bdd-executor package only registers this exact
+    text under @then, so behave reports it as "undefined" wherever a
+    scenario uses it as an "And" continuing a Given block (several
+    scenarios in features/05_contract_deployment/contract_deployment.feature
+    do exactly this, to assert an intermediate setup call succeeded before
+    the Given block's actual precondition is fully built). We cannot edit
+    the installed pip package's source, so this is a thin,
+    behavior-identical duplicate scoped to the Given case
+    only — the upstream @then registration is untouched and still handles
+    every other (Then) usage across the rest of this codebase's features.
+    """
+    status_code = context.requests_response.status_code
+    assert status_code == 200, (status_code, context.requests_response.content)
 
 
 @then("the response status is {status_code:d}")

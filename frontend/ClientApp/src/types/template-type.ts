@@ -1,1 +1,1 @@
-export type TemplateType = 'FRAME_CONTRACT' | 'SUB_CONTRACT'
+export type TemplateType = 'CONTRACT_TEMPLATE' | 'COMPONENT'

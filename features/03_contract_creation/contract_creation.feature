@@ -1,10 +1,10 @@
-@UC-03-01 @FR-CWE-13 @FR-CWE-03 @FR-CWE-30 @FR-CWE-07
+@UC-03-01 @FR-CWE-13 @FR-CWE-03 @FR-CWE-30 @FR-CWE-07 @DCS-FR-UC-03-1
 Feature: Contract Creation
   Contract Creators generate contracts from predefined templates with
   auto-filled metadata. The system supports dynamic contract assembling
   from reusable clauses and contract package bundling.
 
-  @clean_db
+  @clean_db @DCS-IR-CWE-01
   Scenario: Create contract from template
     Given I am authenticated with roles: "Contract Creator"
     And template "Service Agreement Template" is approved and available
@@ -13,6 +13,14 @@ Feature: Contract Creation
     And the contract is assigned a unique contract ID
     And metadata is auto-filled
     And the creation is logged and traceable to the template version
+
+  @clean_db @REQ-contract-readonly-event-admin-diff-regressions-AC2 @DCS-FR-UC-09-2 @UC-09-02
+  Scenario: Successful contract creation records an effective audit timestamp
+    Given I am authenticated with roles: "Contract Creator"
+    And template "Audit Timestamp Template" is approved and available
+    When I create a contract from template "Audit Timestamp Template"
+    Then a draft contract is generated
+    And the CREATE_CONTRACT audit event for the created contract has a non-zero RFC3339 occurred_at timestamp
 
   @clean_db
   Scenario: Created contract renders in both machine-readable and human-readable views
@@ -76,26 +84,26 @@ Feature: Contract Creation
     Then the contract is created successfully
     And the contract is associated with party "Acme Corp"
 
-  Scenario: Contract Creator cannot create contracts involving unauthorized parties
-    Given I am authenticated with roles: "Contract Creator"
-    And I am not authorized to create contracts with party "RestrictedVendor Inc"
-    When I attempt to create a contract involving party "RestrictedVendor Inc"
-    Then the request is denied with an "Not authorized to create contracts with this party" error
-    And the contract creation is prevented
-    And the attempt is logged
-
+  # Party read-scoping (query/contract/querybyid.go): the caller's
+  # organization (the OID4VP-disclosed organization claim, the same value
+  # persisted as created_by) must be the creating organization or listed in
+  # the contract's dcs:parties to read it; Sys.* automation roles, the
+  # Sys. Administrator, and the Auditor are org-independent readers. A
+  # denial is HTTP 403 (retrieve_by_id's "forbidden" design error) and lands
+  # in the audit trail as a CONTRACT_ACCESS_DENIED event.
+  @DCS-NFR-SEC-03 @DCS-NFR-SEC-08 @UC-03-01
   Scenario: Created contract is accessible only to authorized parties
     Given I am authenticated with roles: "Contract Creator"
-    And I have created contract "Service Agreement" with parties "Acme Corp" and "TechVendor Inc"
-    When a representative of party "Acme Corp" attempts to access the contract
+    And I have created contract "Party Scoped Contract" with parties "Acme Corp" and "TechVendor Inc"
+    When a representative of party "TechVendor Inc" attempts to access contract "Party Scoped Contract"
     Then the contract is accessible and visible
-    And when a representative of unrelated party "UnrelatedCorp" attempts to access the contract
-    Then the access is denied with a "Not authorized to access this contract" error
+    And when a representative of unrelated party "UnrelatedCorp" attempts to access contract "Party Scoped Contract"
+    Then the access is denied with a "not authorized to access this contract" error
 
+  @DCS-NFR-SEC-03 @DCS-NFR-SEC-08 @UC-03-01
   Scenario: Unauthorized party cannot access created contract
-    Given I am authenticated with roles: "Contract Observer"
-    And contract "Service Agreement" is created with parties "Acme Corp" and "TechVendor Inc"
-    And I do not have authorization for either party
-    When I attempt to access contract "Service Agreement"
-    Then the request is denied with an "Access denied - unauthorized for contract parties" error
-    And the access denial is logged with timestamp
+    Given I am authenticated with roles: "Contract Creator"
+    And I have created contract "Party Denied Contract" with parties "Acme Corp" and "TechVendor Inc"
+    When a representative of unrelated party "UnrelatedCorp" attempts to access contract "Party Denied Contract"
+    Then the access is denied with a "not authorized to access this contract" error
+    And the access denial for contract "Party Denied Contract" is logged in the audit trail

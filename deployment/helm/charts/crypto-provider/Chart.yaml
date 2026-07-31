@@ -1,8 +1,0 @@
-apiVersion: v2
-name: crypto-provider
-description: |
-  HashiCorp Vault (transit engine) + eclipse-xfsc/crypto-provider-service for DCS C2PA signing.
-  DCS never holds private keys (DCS-IR-HI-01). All signing is delegated to this service.
-type: application
-version: 0.1.0
-appVersion: "1.0"

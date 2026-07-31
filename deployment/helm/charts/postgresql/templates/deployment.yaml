@@ -4,6 +4,14 @@ metadata:
   name: {{ .Release.Name }}-postgresql
 spec:
   replicas: 1
+  # The data volume is RWO, so an update must terminate the current pod before
+  # creating its replacement. Keeping RollingUpdate avoids an invalid
+  # server-side-apply migration from the chart's previous strategy.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: postgresql
@@ -14,58 +22,6 @@ spec:
         app.kubernetes.io/name: postgresql
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      {{- if .Values.additionalDatabases }}
-      initContainers:
-        - name: create-additional-dbs
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /bin/bash
-            - -c
-            - |
-              # Start postgres temporarily to create additional databases
-              docker-entrypoint.sh postgres &
-              PG_PID=$!
-
-              # Wait for postgres to be ready
-              until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
-                echo "Waiting for postgres to be ready..."
-                sleep 2
-              done
-
-              # Create additional databases
-              {{- range .Values.additionalDatabases }}
-              echo "Creating database: {{ . }}"
-              psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -tc "SELECT 1 FROM pg_database WHERE datname = '{{ . }}'" | grep -q 1 || \
-                psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -c "CREATE DATABASE \"{{ . }}\";"
-              psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -c "GRANT ALL PRIVILEGES ON DATABASE \"{{ . }}\" TO \"$POSTGRES_USER\";"
-              echo "Database {{ . }} ready"
-              {{- end }}
-
-              # Shutdown postgres gracefully
-              kill -TERM $PG_PID
-              wait $PG_PID
-              echo "Init container completed"
-          env:
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-postgresql
-                  key: postgres-user
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-postgresql
-                  key: postgres-password
-            - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-postgresql
-                  key: postgres-database
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/postgresql/data
-      {{- end }}
       containers:
         - name: postgresql
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -89,9 +45,18 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-postgresql
                   key: postgres-database
+            # A subdirectory rather than the mount point itself: CSI-provisioned
+            # ext4 volumes arrive holding lost+found, and initdb refuses a data
+            # directory that is not empty.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            {{- if .Values.additionalDatabases }}
+            - name: initdb-scripts
+              mountPath: /docker-entrypoint-initdb.d
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
@@ -102,3 +67,9 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if .Values.additionalDatabases }}
+        - name: initdb-scripts
+          configMap:
+            name: {{ .Release.Name }}-postgresql-initdb
+            defaultMode: 0755
+        {{- end }}

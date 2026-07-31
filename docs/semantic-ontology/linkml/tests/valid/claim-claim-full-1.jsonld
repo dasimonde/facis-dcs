@@ -1,0 +1,51 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:claim-full",
+    "@type": "ContractTemplate",
+    "documentTitle": "Claim Test With Metadata",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Claim Test With Metadata"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:claim-full#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:claim-full#s1",
+                "children": [
+                    "urn:doc:claim-full#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:claim-full#s1",
+                "title": "1. Terms"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:claim-full#c1",
+                "content": [
+                    "This clause is in a PDF that still has its embedded JSON-LD present."
+                ]
+            }
+        ]
+    }
+}

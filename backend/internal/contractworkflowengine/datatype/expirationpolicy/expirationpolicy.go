@@ -1,3 +1,7 @@
+// Package expirationpolicy declares what should happen when a contract's
+// exp_date passes. The cron job in contractworkflowengine.CronJob currently
+// only logs a placeholder action for each policy (Renewal/Archiving/
+// Termination are not yet implemented beyond setting the EXPIRED state).
 package expirationpolicy
 
 import (
@@ -27,7 +31,7 @@ func NewExpirationPolicy(s string) (ExpirationPolicy, error) {
 	return flag, nil
 }
 
-// IsValid checks if the ExpirationPolicy is a valid role
+// IsValid reports whether the value is one of the declared ExpirationPolicy values.
 func (f ExpirationPolicy) IsValid() bool {
 	upper := ExpirationPolicy(strings.ToUpper(string(f)))
 	return validPolicies[upper]

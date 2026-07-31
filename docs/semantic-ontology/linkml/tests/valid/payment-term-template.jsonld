@@ -1,0 +1,140 @@
+{
+    "@context": {
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "odrl": "http://www.w3.org/ns/odrl/2/",
+        "xsd": "http://www.w3.org/2001/XMLSchema#"
+    },
+    "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3",
+    "@type": "dcs:ContractTemplate",
+    "dcs:contractFields": [
+        {
+            "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.amount",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Payment Amount",
+            "dcs:datatype": "xsd:decimal", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-amount"
+            },
+            "dcs:required": true,
+            "dcs:value": 12
+        },
+        {
+            "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.currency",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Payment Currency",
+            "dcs:datatype": "xsd:string", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-currency"
+            },
+            "dcs:required": true
+        },
+        {
+            "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.dueDate",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Payment Due Date",
+            "dcs:datatype": "xsd:date", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-dueDate"
+            },
+            "dcs:required": true
+        },
+        {
+            "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.dueDays",
+            "@type": "dcs:ContractField",
+            "dcs:label": "Payment Due Days",
+            "dcs:datatype": "xsd:integer", "dcs:required": true,
+            "dcs:shape": {
+                "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-dueDays"
+            },
+            "dcs:required": true
+        }
+    ],
+    "dcs:documentStructure": {
+        "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#document-structure",
+        "@type": "dcs:DocumentStructure",
+        "dcs:blocks": {
+            "@list": [
+                {
+                    "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#block-54222a4d-ecef-4a8e-ab84-d0d8194f9222",
+                    "@type": "dcs:Clause",
+                    "dcs:content": {
+                        "@list": [
+                            "Payment Amount: ",
+                            {
+                                "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.amount"
+                            },
+                            "\nPayment Currency: ",
+                            {
+                                "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.currency"
+                            },
+                            "\nPayment Due Date: ",
+                            {
+                                "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.dueDate"
+                            },
+                            "\nPayment Due Days: ",
+                            {
+                                "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.dueDays"
+                            }
+                        ]
+                    },
+                    "dcs:title": "Payment Term"
+                },
+                {
+                    "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#block-de1e1217-c698-4d85-ae7f-6ebfc3f5dd65",
+                    "@type": "dcs:Section",
+                    "dcs:title": "test"
+                }
+            ]
+        },
+        "dcs:layout": [
+            {
+                "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#block-ddac34ed-a7ac-4c2e-8810-aa2b33275301",
+                "@type": "dcs:LayoutNode",
+                "dcs:children": {
+                    "@list": [
+                        {
+                            "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#block-de1e1217-c698-4d85-ae7f-6ebfc3f5dd65"
+                        },
+                        {
+                            "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#block-54222a4d-ecef-4a8e-ab84-d0d8194f9222"
+                        }
+                    ]
+                },
+                "dcs:isRoot": true
+            },
+            {
+                "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#block-de1e1217-c698-4d85-ae7f-6ebfc3f5dd65",
+                "@type": "dcs:LayoutNode",
+                "dcs:children": {
+                    "@list": []
+                }
+            }
+        ]
+    },
+    "dcs:metadata": {
+        "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#metadata",
+        "@type": "dcs:TemplateMetadata",
+        "dcs:description": "tetet",
+        "dcs:templateType": "dcs:SubContract",
+        "dcs:title": "tete"
+    },
+    "dcs:policies": [
+        {
+            "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#policy-contract.payment.amount-0",
+            "@type": "odrl:Duty",
+            "odrl:constraint": {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                    "@id": "did:web:localhost:template:493959cb-6d4b-4f49-a848-eb6ebb6de2a3#field-contract.payment.amount"
+                },
+                "odrl:operator": {
+                    "@id": "odrl:eq"
+                },
+                "odrl:rightOperand": {
+                    "@type": "xsd:decimal",
+                    "@value": "12"
+                }
+            }
+        }
+    ]
+}

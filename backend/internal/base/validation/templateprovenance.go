@@ -61,7 +61,7 @@ func AuditTemplateApprovalProvenance(resourceDID string, entries []datatype.Audi
 		findings = append(findings, templateProvenanceFinding(
 			"FACIS-TPL-PROV-000",
 			"Template approval provenance is consistent",
-			"info",
+			SeveritySatisfied,
 			"create, review, approval, and registration provenance checks passed",
 			"event_type",
 		))
@@ -160,7 +160,7 @@ func auditTemplateSubmitProvenance(eventData map[string]any, state *templateProv
 
 	if newState == "SUBMITTED" {
 		state.submitted = true
-		extractResponsiblePersons(eventData, state)
+		extractResponsible(eventData, state)
 		if state.creator != "" && submittedBy != "" && state.creator != submittedBy && previousState != "SUBMITTED" {
 			findings = append(findings, templateProvenanceFinding(
 				"FACIS-TPL-PROV-003",
@@ -210,7 +210,7 @@ func auditTemplateSubmitProvenance(eventData map[string]any, state *templateProv
 	return findings
 }
 
-func extractResponsiblePersons(eventData map[string]any, state *templateProvenanceState) {
+func extractResponsible(eventData map[string]any, state *templateProvenanceState) {
 	responsible, ok := eventData["responsible_persons"].(map[string]any)
 	if !ok {
 		return
@@ -307,7 +307,6 @@ func templateProvenanceFinding(ruleID, title, severity, message, path string) Po
 		Severity:     severity,
 		Message:      message,
 		Path:         path,
-		SemanticPath: path,
 		OntologyTerm: "dcs:TemplateApprovalProvenance",
 		Requirement:  "DCS-FR-PACM-03",
 	}

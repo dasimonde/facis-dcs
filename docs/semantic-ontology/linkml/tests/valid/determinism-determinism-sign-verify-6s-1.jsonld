@@ -1,0 +1,203 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:determinism-sign-verify",
+    "@type": "ContractTemplate",
+    "documentTitle": "Master Services Agreement",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Master Services Agreement"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:determinism-sign-verify#s1",
+                    "urn:doc:determinism-sign-verify#s2",
+                    "urn:doc:determinism-sign-verify#s3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-sign-verify#s1",
+                "children": [
+                    "urn:doc:determinism-sign-verify#c1",
+                    "urn:doc:determinism-sign-verify#c2",
+                    "urn:doc:determinism-sign-verify#s1-1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-sign-verify#s1-1",
+                "children": [
+                    "urn:doc:determinism-sign-verify#c3",
+                    "urn:doc:determinism-sign-verify#c4"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-sign-verify#s2",
+                "children": [
+                    "urn:doc:determinism-sign-verify#c5",
+                    "urn:doc:determinism-sign-verify#c6",
+                    "urn:doc:determinism-sign-verify#s2-1",
+                    "urn:doc:determinism-sign-verify#s2-2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-sign-verify#s2-1",
+                "children": [
+                    "urn:doc:determinism-sign-verify#c7"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-sign-verify#s2-2",
+                "children": [
+                    "urn:doc:determinism-sign-verify#c8",
+                    "urn:doc:determinism-sign-verify#c9"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-sign-verify#s3",
+                "children": [
+                    "urn:doc:determinism-sign-verify#c10",
+                    "urn:doc:determinism-sign-verify#c11"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-sign-verify#s1",
+                "title": "1. Definitions"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c1",
+                "content": [
+                    "\"Services\" means the professional services described in Schedule A."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c2",
+                "content": [
+                    "\"Fees\" means the amounts payable under clause 3."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-sign-verify#s1-1",
+                "title": "1.1 Interpretation"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c3",
+                "content": [
+                    "Words in the singular include the plural and vice versa."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c4",
+                "content": [
+                    "References to statutes include all amendments thereto."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-sign-verify#s2",
+                "title": "2. Obligations"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c5",
+                "content": [
+                    "The Provider shall deliver the Services by the agreed milestone dates."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c6",
+                "content": [
+                    "The Client shall pay invoices within thirty (30) calendar days of receipt."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-sign-verify#s2-1",
+                "title": "2.1 Standard of Care"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c7",
+                "content": [
+                    "Services shall be performed with reasonable professional skill and care."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-sign-verify#s2-2",
+                "title": "2.2 Acceptance"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c8",
+                "content": [
+                    "The Client shall notify the Provider of defects within ten (10) business days."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c9",
+                "content": [
+                    "Failure to notify within this period constitutes acceptance."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-sign-verify#s3",
+                "title": "3. Confidentiality"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c10",
+                "content": [
+                    "Each party shall keep the other party's Confidential Information strictly confidential."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-sign-verify#c11",
+                "content": [
+                    "This obligation survives termination for five (5) years."
+                ]
+            }
+        ]
+    },
+    "signatureFields": [
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-provider",
+            "@id": "urn:doc:determinism-sign-verify#sig-provider"
+        },
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-client",
+            "@id": "urn:doc:determinism-sign-verify#sig-client"
+        }
+    ]
+}

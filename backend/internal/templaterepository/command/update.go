@@ -22,16 +22,15 @@ import (
 )
 
 type UpdateCmd struct {
-	DID            string
-	DocumentNumber *string
-	TemplateType   *contracttemplatetype.ContractTemplateType
-	UpdatedAt      time.Time
-	UpdatedBy      string
-	Name           *string
-	Description    *string
-	TemplateData   *datatype.JSON
-	HolderDID      string
-	UserRoles      userrole.UserRoles
+	DID          string
+	TemplateType *contracttemplatetype.ContractTemplateType
+	UpdatedAt    time.Time
+	UpdatedBy    string
+	Name         *string
+	Description  *string
+	TemplateData *datatype.JSON
+	HolderDID    string
+	UserRoles    userrole.UserRoles
 }
 
 type Updater struct {
@@ -65,6 +64,7 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		return fmt.Errorf("could not read template data: %w", err)
 	}
 
+	// Optimistic concurrency (see command package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < oldData.UpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
@@ -116,12 +116,11 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	}
 
 	newData := db.ContractTemplateUpdateData{
-		DID:            cmd.DID,
-		DocumentNumber: cmd.DocumentNumber,
-		TemplateType:   templateType,
-		Name:           cmd.Name,
-		Description:    cmd.Description,
-		TemplateData:   cmd.TemplateData,
+		DID:          cmd.DID,
+		TemplateType: templateType,
+		Name:         cmd.Name,
+		Description:  cmd.Description,
+		TemplateData: cmd.TemplateData,
 	}
 	err = h.CTRepo.Update(ctx, tx, newData)
 	if err != nil {
@@ -129,19 +128,17 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	}
 
 	evt := templateevents.UpdateEvent{
-		DID:               cmd.DID,
-		OldDocumentNumber: oldData.DocumentNumber,
-		NewDocumentNumber: cmd.DocumentNumber,
-		OldName:           oldData.Name,
-		NewName:           cmd.Name,
-		OldDescription:    oldData.Description,
-		NewDescription:    cmd.Description,
-		OldTemplateData:   oldData.TemplateData,
-		NewTemplateData:   cmd.TemplateData,
-		UpdatedBy:         cmd.UpdatedBy,
-		OccurredAt:        time.Now().UTC(),
-		HolderDID:         cmd.HolderDID,
-		UserRoles:         cmd.UserRoles,
+		DID:             cmd.DID,
+		OldName:         oldData.Name,
+		NewName:         cmd.Name,
+		OldDescription:  oldData.Description,
+		NewDescription:  cmd.Description,
+		OldTemplateData: oldData.TemplateData,
+		NewTemplateData: cmd.TemplateData,
+		UpdatedBy:       cmd.UpdatedBy,
+		OccurredAt:      time.Now().UTC(),
+		HolderDID:       cmd.HolderDID,
+		UserRoles:       cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

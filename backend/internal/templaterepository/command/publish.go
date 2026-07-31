@@ -10,25 +10,31 @@ import (
 	"net/http"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/fcasset"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
-	"digital-contracting-service/internal/templaterepository/selfdescription"
 
 	"github.com/jmoiron/sqlx"
 )
 
 type PublishCmd struct {
-	DID           string
-	UpdatedAt     time.Time
-	PublishedBy   string
-	HolderDID     string
-	ParticipantID string
-	UserRoles     userrole.UserRoles
+	DID         string
+	UpdatedAt   time.Time
+	PublishedBy string
+	HolderDID   string
+	// InstanceDID is this DCS deployment's own did:web (signing.issuerDID) —
+	// the FC-facing publisher identity. A federated catalogue's Participant
+	// concept is an organization/deployment, not the individual employee who
+	// clicked publish, so this — not HolderDID — is what's asserted as the
+	// asset's issuer to FC.
+	InstanceDID string
+	UserRoles   userrole.UserRoles
 }
 
 type Publisher struct {
@@ -52,7 +58,7 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 			}
 		}(tx)
 
-		processData, err = h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
+		processData, err = h.CTRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 		if err != nil {
 			return fmt.Errorf("could not read process data: %w", err)
 		}
@@ -63,12 +69,12 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		}
 	}
 
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 
-	if processData.State != contracttemplatestate.Approved.String() {
-		return errors.New("contract template must be in approved state to publish")
+	if processData.State != contracttemplatestate.Registered.String() {
+		return errors.New("contract template must be in registered state to publish")
 	}
 
 	if h.FCClient == nil {
@@ -90,7 +96,7 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		}
 	}(tx)
 
-	processData, err = h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
+	processData, err = h.CTRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
@@ -100,8 +106,8 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	if processData.State == contracttemplatestate.Published.String() {
 		return nil
 	}
-	if processData.State != contracttemplatestate.Approved.String() {
-		return errors.New("contract template must be in approved state to publish")
+	if processData.State != contracttemplatestate.Registered.String() {
+		return errors.New("contract template must be in registered state to publish")
 	}
 
 	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Published.String())
@@ -110,13 +116,12 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	evt := templateevents.PublishEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		PublishedBy:    cmd.PublishedBy,
-		HolderDID:      cmd.HolderDID,
-		OccurredAt:     time.Now().UTC(),
-		UserRoles:      cmd.UserRoles,
+		DID:         cmd.DID,
+		Version:     processData.Version,
+		PublishedBy: cmd.PublishedBy,
+		HolderDID:   cmd.HolderDID,
+		OccurredAt:  time.Now().UTC(),
+		UserRoles:   cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
@@ -127,15 +132,10 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 }
 
 func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd PublishCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
-	if cmd.ParticipantID == "" {
-		return fmt.Errorf("participant id is empty")
-	}
-	documentNumber := ""
-	if processData.DocumentNumber != nil && *processData.DocumentNumber != "" {
-		documentNumber = *processData.DocumentNumber
+	if cmd.InstanceDID == "" {
+		return fmt.Errorf("instance did is empty")
 	}
 
-	templateType := fullTemplate.TemplateType
 	name := ""
 	description := ""
 	if fullTemplate.Name != nil {
@@ -145,25 +145,36 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		description = *fullTemplate.Description
 	}
 
-	sd := selfdescription.BuildTemplateResourceSelfDescription(selfdescription.TemplateResourceInput{
-		ParticipantID:  cmd.ParticipantID,
-		DID:            cmd.DID,
-		DocumentNumber: documentNumber,
-		Version:        processData.Version,
-		TemplateType:   templateType,
-		Name:           name,
-		Description:    description,
-		CreatedAt:      fullTemplate.CreatedAt,
-		UpdatedAt:      fullTemplate.UpdatedAt,
-		TemplateData:   fullTemplate.TemplateData,
-	})
-
-	body, err := json.Marshal(sd)
+	templateDataString, err := fcasset.TemplateDataString(fullTemplate.TemplateData)
 	if err != nil {
-		return fmt.Errorf("marshal template resource self-description failed: %w", err)
+		return fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
 	}
 
-	resp, err := h.FCClient.Post(ctx, fcclient.SelfDescriptionsEndpointPath, nil, body)
+	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
+		Issuer:     cmd.InstanceDID,
+		SubjectIRI: base.ResourceIRI("template", cmd.DID),
+		ValidFrom:  fullTemplate.UpdatedAt,
+		Subject: fcasset.CatalogueSubjectFromRepository(
+			cmd.DID,
+			processData.Version,
+			processData.State,
+			name,
+			description,
+			fullTemplate.TemplateType,
+		),
+		TemplateDataString: templateDataString,
+	})
+
+	if err != nil {
+		return fmt.Errorf("build template asset payload failed: %w", err)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal template asset payload failed: %w", err)
+	}
+
+	resp, err := h.FCClient.PostRaw(ctx, fcclient.AssetsEndpointPath, nil, fcclient.JSONLDContentType, body)
 	if err != nil {
 		return fmt.Errorf("publish template resource failed: %w", err)
 	}

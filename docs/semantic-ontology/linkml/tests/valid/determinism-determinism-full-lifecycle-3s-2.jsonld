@@ -1,0 +1,119 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:determinism-full-lifecycle",
+    "@type": "ContractTemplate",
+    "documentTitle": "Software Licence Agreement v1",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Software Licence Agreement v1"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#s1",
+                    "urn:doc:determinism-full-lifecycle#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s1",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c1",
+                    "urn:doc:determinism-full-lifecycle#c2",
+                    "urn:doc:determinism-full-lifecycle#s1-1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s1-1",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s2",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c4",
+                    "urn:doc:determinism-full-lifecycle#c5"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s1",
+                "title": "1. Grant of Licence"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c1",
+                "content": [
+                    "The Licensor grants the Licensee a non-exclusive, non-transferable licence."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c2",
+                "content": [
+                    "The licence covers use on up to ten (10) devices."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s1-1",
+                "title": "1.1 Permitted Use"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c3",
+                "content": [
+                    "The Licensee may use the Software solely for internal business purposes."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s2",
+                "title": "2. Restrictions"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c4",
+                "content": [
+                    "The Licensee shall not sublicense, sell, or transfer the Software."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c5",
+                "content": [
+                    "Reverse engineering is prohibited except where required by applicable law."
+                ]
+            }
+        ]
+    },
+    "signatureFields": [
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-licensor",
+            "@id": "urn:doc:determinism-full-lifecycle#sig-licensor"
+        },
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-licensee",
+            "@id": "urn:doc:determinism-full-lifecycle#sig-licensee"
+        }
+    ]
+}

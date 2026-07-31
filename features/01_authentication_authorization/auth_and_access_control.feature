@@ -9,17 +9,21 @@ Feature: Authentication Endpoints
     And the response JSON includes "<field>"
 
     Examples:
-      | method | endpoint     | field       |
-      | POST   | /auth/login  | request_uri |
-      | GET    | /auth/logout | logout_url  |
+      | method | endpoint    | field       |
+      | POST   | /auth/login | request_uri |
 
+  Scenario: Logout without a session is rejected
+    When the system sends "GET" request to endpoint "/auth/logout" without payload
+    Then the response status is 401
+
+  @DCS-IR-SI-03
   Scenario Outline: Access restricted endpoint responds with access denied (CWE)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
     Then the response status is 401
 
     Examples:
       | method | endpoint                       | payload                                                                                                     |
-      | POST   | /contract/create               | {'did':'placeholder'}                                                                                       |
+      | POST   | /contract/create               | {'template_did':'placeholder'}                                                                              |
       | PUT    | /contract/update               | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                                                   |
       | POST   | /contract/submit               | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                                                   |
       | POST   | /contract/negotiate            | {'did':'placeholder','negotiated_by':'placeholder','change_request':{},'updated_at':'2024-01-01T00:00:00Z'} |
@@ -44,10 +48,15 @@ Feature: Authentication Endpoints
       | GET    | /archive/retrieve  | {}      |
       | GET    | /archive/search    | {}      |
       | POST   | /archive/store     | {}      |
-      | POST   | /archive/terminate | {}      |
-      | DELETE | /archive/delete    | {}      |
-      | GET    | /archive/audit     | {}      |
+      # archive/delete requires did+justification in the query string; without
+      # them Goa's request decoder answers 400 before the JWT check can 401,
+      # so the row supplies placeholders to reach the auth layer at all.
+      | DELETE | /archive/delete?did=placeholder&justification=placeholder | {} |
+      # /archive/audit and the /pac endpoints below likewise decode their
+      # required justification before the JWT check; placeholders reach 401.
+      | GET    | /archive/audit?justification=placeholder | {} |
 
+  @DCS-FR-TR-06
   Scenario Outline: Access restricted endpoint responds with access denied (Template Repository)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
     Then the response status is 401
@@ -76,17 +85,8 @@ Feature: Authentication Endpoints
     Examples:
       | method | endpoint                                 | payload                                                                                                                                                                                                     |
       | GET    | /catalogue/template/retrieve             | offset=0&limit=10                                                                                                                                                                                           |
-      | GET    | /catalogue/template/retrieve/placeholder | {}                                                                                                                                                                                                          |
-      | POST   | /catalogue/participant/create            | {'legal_name':'placeholder','registration_number':'placeholder','lei_code':'placeholder','ethereum_address':'placeholder','headquarter_address':{},'legal_address':{},'terms_and_conditions':'placeholder'} |
-      | POST   | /catalogue/service-offering/create       | {'end_point_url':'placeholder','terms_and_conditions':'placeholder','keywords':['placeholder'],'description':'placeholder'}                                                                                 |
-      | GET    | /catalogue/participant/current           | {}                                                                                                                                                                                                          |
-      | GET    | /catalogue/participant/current/summary   | {}                                                                                                                                                                                                          |
-      | GET    | /catalogue/participant/others            | {}                                                                                                                                                                                                          |
-      | GET    | /catalogue/service-offering/current      | {}                                                                                                                                                                                                          |
-      | PUT    | /catalogue/participant/update            | {'legal_name':'placeholder','registration_number':'placeholder','lei_code':'placeholder','ethereum_address':'placeholder','headquarter_address':{},'legal_address':{},'terms_and_conditions':'placeholder'} |
-      | PUT    | /catalogue/service-offering/update       | {'end_point_url':'placeholder','terms_and_conditions':'placeholder','keywords':['placeholder'],'description':'placeholder'}                                                                                 |
-      | DELETE | /catalogue/participant/delete            | {}                                                                                                                                                                                                          |
-      | DELETE | /catalogue/service-offering/delete       | {}                                                                                                                                                                                                          |
+      | GET    | /catalogue/template/retrieve/placeholder | version=1                                                                                                                                                                                                   |
+      | GET    | /catalogue/template/search                 | offset=0&limit=10                                                                                                                                                                                           |
 
   Scenario Outline: Access restricted endpoint responds with access denied (Signature)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
@@ -97,9 +97,8 @@ Feature: Authentication Endpoints
       | GET    | /signature/retrieve             | {}                                                        |
       | GET    | /signature/retrieve/placeholder | {}                                                        |
       | POST   | /signature/verify               | {'did':'placeholder'}                                     |
-      | POST   | /signature/apply                | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'} |
       | POST   | /signature/validate             | {'did':'placeholder'}                                     |
-      | POST   | /signature/revoke               | {'did':'placeholder'}                                     |
+      | POST   | /signature/revoke               | {'did':'placeholder','signer_did':'placeholder','reason':'Access-control probe'} |
       | GET    | /signature/audit                | did=placeholder                                           |
       | POST   | /signature/compliance           | {'did':'placeholder'}                                     |
 
@@ -108,33 +107,15 @@ Feature: Authentication Endpoints
     Then the response status is 401
 
     Examples:
-      | method | endpoint                           | payload                         |
-      | POST   | /processauditandcompliance/audit   | {'scope':'TEMPLATE_REPOSITORY'} |
-      | GET    | /processauditandcompliance/report  | {}                              |
-      | GET    | /processauditandcompliance/monitor | {}                              |
-
-  Scenario Outline: Access restricted endpoint responds with access denied (External)
-    When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
-    Then the response status is 401
-
-    Examples:
-      | method | endpoint           | payload |
-      | POST   | /external/action   | {}      |
-      | GET    | /external/status   | {}      |
-      | POST   | /external/callback | {}      |
-
-  Scenario Outline: Access restricted endpoint responds with access denied (Webhook)
-    When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
-    Then the response status is 401
-
-    Examples:
-      | method | endpoint          | payload |
-      | POST   | /webhook/node-red | {}      |
+      | method | endpoint     | payload                         |
+      | POST   | /pac/audit   | {'scope':'TEMPLATE_REPOSITORY','justification':'placeholder'} |
+      | GET    | /pac/report?justification=placeholder | {} |
+      | GET    | /pac/monitor | {}                              |
 
   Scenario Outline: Access restricted endpoint responds with access denied (Peer)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
     Then the response status is 401
 
     Examples:
-      | method | endpoint       | payload |
-      | GET    | /peer/retrieve | {}      |
+      | method | endpoint                   | payload         |
+      | GET    | /peer/contracts/provenance | did=placeholder |

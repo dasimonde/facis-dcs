@@ -16,27 +16,70 @@ fi
 echo ""
 
 if echo "$STAGED_FILES" | grep -q "^backend/"; then
-  echo "⚙️ Checking Backend..."
-  cd "$PROJECT_ROOT/backend"
+  # backend/internal/base/hsm wraps ThalesGroup/crypto11, a cgo-only PKCS#11
+  # binding. Native Windows Go toolchains have no working cgo/C compiler here,
+  # so `go build`/`go vet` (and therefore golangci-lint's typechecking) fail
+  # with "undefined: pkcs11.ObjectHandle" etc. When this hook runs under a
+  # Windows git client (SmartGit, Git for Windows), bridge into WSL — which
+  # already has a working cgo toolchain — instead of failing every commit.
+  if command -v wsl.exe >/dev/null 2>&1 && { [ "${OS:-}" = "Windows_NT" ] || uname -s | grep -qiE 'mingw|msys|cygwin'; }; then
+    echo "⚙️ Checking Backend (via WSL — required for cgo/PKCS#11 typechecking)..."
 
-  go mod tidy
-  if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
-    echo "❌ Error: backend/go.mod or backend/go.sum are not tidy!"
-    echo "Please stage the changes created by 'go mod tidy'."
-    exit 1
+    WIN_ROOT="$(cd "$PROJECT_ROOT" && { pwd -W 2>/dev/null || pwd; })"
+    WSL_ROOT="$(printf '%s' "$WIN_ROOT" | sed -E 's#^([A-Za-z]):#/mnt/\L\1#')"
+
+    # Write the WSL-side script to a file rather than passing it as a `wsl.exe`
+    # command-line argument: wsl.exe's argv-to-command-line reconstruction is
+    # unreliable for multi-line/quoted strings (silently drops/mangles content).
+    HOOK_TMP_SCRIPT="$PROJECT_ROOT/backend/tmp/pre-commit-wsl.sh"
+    mkdir -p "$PROJECT_ROOT/backend/tmp"
+    cat > "$HOOK_TMP_SCRIPT" <<EOF
+set -e
+cd '${WSL_ROOT}/backend'
+go mod tidy
+if ! git diff --quiet go.mod go.sum; then
+  echo "❌ Error: backend/go.mod or backend/go.sum are not tidy!"
+  echo "Please stage the changes created by 'go mod tidy'."
+  exit 1
+fi
+LOCAL_BIN='${WSL_ROOT}/backend/bin'
+GCL="\$LOCAL_BIN/golangci-lint"
+if [ ! -f "\$GCL" ]; then
+  echo "📥 Installing golangci-lint locally for the project (Linux binary, via WSL)..."
+  curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "\$LOCAL_BIN" v2.12.2
+fi
+"\$GCL" run --new-from-rev=HEAD
+EOF
+
+    MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -- bash "${WSL_ROOT}/backend/tmp/pre-commit-wsl.sh"
+    WSL_STATUS=$?
+    rm -f "$HOOK_TMP_SCRIPT"
+    if [ $WSL_STATUS -ne 0 ]; then
+      exit 1
+    fi
+  else
+    echo "⚙️ Checking Backend..."
+    cd "$PROJECT_ROOT/backend"
+
+    go mod tidy
+    if ! git diff --quiet go.mod go.sum; then
+      echo "❌ Error: backend/go.mod or backend/go.sum are not tidy!"
+      echo "Please stage the changes created by 'go mod tidy'."
+      exit 1
+    fi
+
+    # Define the local binary directory path
+    LOCAL_BIN="$PROJECT_ROOT/backend/bin"
+    GCL="$LOCAL_BIN/golangci-lint"
+
+    # If golangci-lint does not exist locally, download it
+    if [ ! -f "$GCL" ]; then
+      echo "📥 Installing golangci-lint locally for the project..."
+      curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $LOCAL_BIN v2.12.2
+    fi
+
+    $GCL run --new-from-rev=HEAD || exit 1
   fi
-
-  # Define the local binary directory path
-  LOCAL_BIN="$PROJECT_ROOT/backend/bin"
-  GCL="$LOCAL_BIN/golangci-lint"
-
-  # If golangci-lint does not exist locally, download it
-  if [ ! -f "$GCL" ]; then
-    echo "📥 Installing golangci-lint locally for the project..."
-    curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $LOCAL_BIN v2.12.2
-  fi
-
-  $GCL run --new-from-rev=HEAD || exit 1
 
   echo "✅ Backend verification passed."
 fi

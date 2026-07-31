@@ -8,6 +8,10 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base/identity"
+
+	db2 "digital-contracting-service/internal/dcstodcs/db"
+
 	"digital-contracting-service/internal/base/datatype/userrole"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
@@ -20,19 +24,22 @@ import (
 )
 
 type RejectNegotiationCmd struct {
-	ID              string
-	DID             string
-	RejectedBy      string
-	RejectionReason *string
-	HolderDID       string
-	UserRoles       userrole.UserRoles
+	ID              string             `json:"id"`
+	DID             string             `json:"did"`
+	RejectedBy      string             `json:"rejected_by"`
+	RejectionReason *string            `json:"rejection_reason"`
+	HolderDID       string             `json:"holder_did"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+	CauserDID       string             `json:"causer_did"`
 }
 
 type NegotiationRejector struct {
-	DB     *sqlx.DB
-	CRepo  db.ContractRepo
-	NRepo  db.NegotiationRepo
-	NTRepo db.NegotiationTaskRepo
+	DB          *sqlx.DB
+	CRepo       db.ContractRepo
+	NRepo       db.NegotiationRepo
+	NTRepo      db.NegotiationTaskRepo
+	SRepo       db2.SyncRepository
+	DIDDocument identity.DIDDocument
 }
 
 func (h *NegotiationRejector) Handle(ctx context.Context, cmd RejectNegotiationCmd) error {
@@ -47,25 +54,25 @@ func (h *NegotiationRejector) Handle(ctx context.Context, cmd RejectNegotiationC
 		}
 	}(tx)
 
-	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not process core data: %w", err)
 	}
 
-	if processData.State != contractstate.Negotiation.String() || processData.State == contractstate.Terminated.String() {
-		return errors.New("current contract state is invalid")
+	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventRejectNegotiation); err != nil {
+		return err
 	}
 
-	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.RejectedBy)
+	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID)
 	if err != nil {
 		return fmt.Errorf("could not validate negotiator: %w", err)
 	}
 
 	if !isValidNegotiator {
-		return errors.New("invalid user")
+		return ErrNotAParty
 	}
 
-	err = h.NRepo.Reject(ctx, tx, cmd.ID, cmd.RejectedBy, cmd.RejectionReason)
+	err = h.NRepo.Reject(ctx, tx, cmd.ID, cmd.CauserDID, cmd.RejectionReason)
 	if err != nil {
 		return fmt.Errorf("could not reject negotiation %w", err)
 	}

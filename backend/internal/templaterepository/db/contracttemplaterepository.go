@@ -2,10 +2,7 @@ package db
 
 import (
 	"context"
-	"database/sql/driver"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -15,106 +12,87 @@ import (
 
 var ErrContractTemplateNotFound = errors.New("template not found")
 
-type Responsible struct {
-	Creator   string   `json:"creator"`
-	Approver  string   `json:"approver"`
-	Reviewers []string `json:"reviewers"`
-}
-
-func (r Responsible) Value() (driver.Value, error) {
-	return json.Marshal(r)
-}
-
-func (r *Responsible) Scan(src any) error {
-	if src == nil {
-		return nil
-	}
-	var b []byte
-	switch v := src.(type) {
-	case []byte:
-		b = v
-	case string:
-		b = []byte(v)
-	default:
-		return fmt.Errorf("unsupported type: %T", src)
-	}
-	return json.Unmarshal(b, r)
-}
-
 type ContractTemplate struct {
-	DID            string         `db:"did"`
-	DocumentNumber *string        `db:"document_number"`
-	Version        int            `db:"version"`
-	State          string         `db:"state"`
-	TemplateType   string         `db:"template_type"`
-	Name           *string        `db:"name"`
-	Description    *string        `db:"description"`
-	CreatedBy      string         `db:"created_by"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
-	Responsible    *Responsible   `db:"responsible"`
-	TemplateData   *datatype.JSON `db:"template_data"`
+	DID          string         `db:"did"`
+	Version      int            `db:"version"`
+	State        string         `db:"state"`
+	TemplateType string         `db:"template_type"`
+	Name         *string        `db:"name"`
+	Description  *string        `db:"description"`
+	CreatedBy    string         `db:"created_by"`
+	CreatedAt    time.Time      `db:"created_at"`
+	UpdatedAt    time.Time      `db:"updated_at"`
+	TemplateData *datatype.JSON `db:"template_data"`
+	BaseTemplate *string        `db:"base_template"`
 }
 
 type ContractTemplateMetadata struct {
-	DID            string       `db:"did"`
-	DocumentNumber *string      `db:"document_number"`
-	Version        int          `db:"version"`
-	State          string       `db:"state"`
-	TemplateType   string       `db:"template_type"`
-	Name           *string      `db:"name"`
-	Description    *string      `db:"description"`
-	CreatedBy      string       `db:"created_by"`
-	CreatedAt      time.Time    `db:"created_at"`
-	Responsible    *Responsible `db:"responsible"`
-	UpdatedAt      time.Time    `db:"updated_at"`
+	DID          string    `db:"did"`
+	Version      int       `db:"version"`
+	State        string    `db:"state"`
+	TemplateType string    `db:"template_type"`
+	Name         *string   `db:"name"`
+	Description  *string   `db:"description"`
+	CreatedBy    string    `db:"created_by"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
+	BaseTemplate *string   `db:"base_template"`
+	Outdated     *bool     `db:"outdated"`
+	LatestDID    *string   `db:"latest_did"`
 }
 
 type ContractTemplateProcessData struct {
-	DID            string    `db:"did"`
-	DocumentNumber *string   `db:"document_number"`
-	Version        int       `db:"version"`
-	State          string    `db:"state"`
-	CreatedBy      string    `db:"created_by"`
-	UpdatedAt      time.Time `db:"updated_at"`
+	DID       string    `db:"did"`
+	Version   int       `db:"version"`
+	State     string    `db:"state"`
+	CreatedBy string    `db:"created_by"`
+	UpdatedAt time.Time `db:"updated_at"`
+	// ContentUpdatedAt moves only when template_data actually changes, so the
+	// optimistic-lock guard distinguishes a real concurrent content edit from a
+	// benign write (a state transition, the background PDF write) that merely
+	// nudged updated_at.
+	ContentUpdatedAt time.Time `db:"content_updated_at"`
 }
 
 type ContractTemplateUpdateData struct {
-	DID            string         `db:"did"`
-	DocumentNumber *string        `db:"document_number"`
-	State          string         `db:"state"`
-	TemplateType   string         `db:"template_type"`
-	Name           *string        `db:"name"`
-	Description    *string        `db:"description"`
-	Responsible    *Responsible   `db:"responsible"`
-	TemplateData   *datatype.JSON `db:"template_data"`
+	DID          string         `db:"did"`
+	State        string         `db:"state"`
+	TemplateType string         `db:"template_type"`
+	Name         *string        `db:"name"`
+	Description  *string        `db:"description"`
+	TemplateData *datatype.JSON `db:"template_data"`
 }
 
 type ContractTemplateHistory struct {
-	ID             string         `db:"id"`
-	DID            string         `db:"did"`
-	DocumentNumber *string        `db:"document_number"`
-	Version        int            `db:"version"`
-	State          string         `db:"state"`
-	TemplateType   string         `db:"template_type"`
-	Name           *string        `db:"name"`
-	Description    *string        `db:"description"`
-	CreatedBy      string         `db:"created_by"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
-	Responsible    *Responsible   `db:"responsible"`
-	TemplateData   *datatype.JSON `db:"template_data"`
+	ID           string         `db:"id"`
+	DID          string         `db:"did"`
+	Version      int            `db:"version"`
+	State        string         `db:"state"`
+	TemplateType string         `db:"template_type"`
+	Name         *string        `db:"name"`
+	Description  *string        `db:"description"`
+	CreatedBy    string         `db:"created_by"`
+	CreatedAt    time.Time      `db:"created_at"`
+	UpdatedAt    time.Time      `db:"updated_at"`
+	TemplateData *datatype.JSON `db:"template_data"`
+	BaseTemplate *string        `db:"base_template"`
 }
 
 type SearchValues struct {
-	DID            string
-	DocumentNumber string
-	Version        int
-	State          string
-	TemplateType   string
-	Name           string
-	Description    string
-	TemplateData   string
+	DID          string
+	Version      int
+	State        string
+	TemplateType string
+	Name         string
+	Description  string
+	TemplateData string
+}
+
+type ContractTemplatePDFState struct {
+	IPFSCID         string `db:"pdf_ipfs_cid"`
+	RendererVersion string `db:"pdf_renderer_version"`
+	C2PAState       string `db:"pdf_c2pa_state"`
+	PayloadHash     string `db:"pdf_payload_hash"`
 }
 
 type ContractTemplateRepo interface {
@@ -125,7 +103,29 @@ type ContractTemplateRepo interface {
 	ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplate, error)
 	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractTemplateMetadata, error)
 	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues, pagination datatype.Pagination) ([]ContractTemplateMetadata, error)
-	ReadProcessData(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplateProcessData, error)
+	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplateProcessData, error)
 	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractTemplateUpdateData) error
+	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplatePDFState, error)
+	// ReadDIDsMissingStoredPDF returns the DIDs of at most limit templates that
+	// have no PDF in the artifact store — the work list of the background
+	// regenerator's retry pass. Templates in excludeDIDs (attempts the caller
+	// has given up on) are left out, so a permanently unrenderable template
+	// cannot occupy the batch forever.
+	ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error)
+	UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data ContractTemplatePDFState) error
+	InsertProvenanceCredential(ctx context.Context, tx *sqlx.Tx, data TemplateProvenanceCredential) error
+	ReadProvenanceCredentials(ctx context.Context, tx *sqlx.Tx, did string) ([]TemplateProvenanceCredential, error)
+	ReadLatestProvenanceVCID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error)
+}
+
+// TemplateProvenanceCredential is one registered template version's signed
+// W3C provenance VC (DCS-FR-TR-09), linked to its predecessor by vc_id.
+type TemplateProvenanceCredential struct {
+	DID          string        `db:"did"`
+	Version      int           `db:"version"`
+	VCID         string        `db:"vc_id"`
+	PreviousVCID *string       `db:"previous_vc_id"`
+	Credential   datatype.JSON `db:"credential"`
+	CreatedAt    time.Time     `db:"created_at"`
 }

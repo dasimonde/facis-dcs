@@ -20,6 +20,13 @@ spec:
       containers:
         - name: register-clients
           image: alpine:3.19
+          {{- with (.Values.jobResources | default .Values.resources) }}
+          # Its own pod, so this block does not overlap the server's. Without one
+          # a LimitRange default applies and the hook is refused on a namespace
+          # whose limits.cpu quota the release already consumes.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: HYDRA_ADMIN
               value: http://{{ .Release.Name }}-hydra:{{ .Values.service.adminPort }}

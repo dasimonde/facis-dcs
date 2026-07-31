@@ -31,6 +31,38 @@ func (r *PostgresReviewTaskRepo) Create(ctx context.Context, tx *sqlx.Tx, data d
 	return &createdAt, nil
 }
 
+func (r *PostgresReviewTaskRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, data db.ReviewTaskData) error {
+	statement := `
+        INSERT INTO contract_review_task (
+            id, did, state, reviewer, created_by, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+    `
+	_, err := tx.ExecContext(ctx, statement,
+		data.ID, data.DID, data.State, data.Reviewer, data.CreatedBy, data.CreatedAt)
+	return err
+}
+
+func (r *PostgresReviewTaskRepo) RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data db.ReviewTaskData) error {
+	statement := `
+        UPDATE contract_review_task
+        SET state = $1, reviewer = $2
+        WHERE id = $3
+    `
+	res, err := tx.ExecContext(ctx, statement,
+		data.State, data.Reviewer, data.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("no review task found with id %s", data.ID)
+	}
+	return nil
+}
+
 func (r *PostgresReviewTaskRepo) IsValidReviewer(ctx context.Context, tx *sqlx.Tx, did string, reviewer string) (bool, error) {
 	query := `
         SELECT COUNT(*) FROM contract_review_task
@@ -51,20 +83,6 @@ func (r *PostgresReviewTaskRepo) ReopenTasks(ctx context.Context, tx *sqlx.Tx, d
     `
 	_, err := tx.ExecContext(ctx, statement, did)
 	return err
-}
-
-func (r *PostgresReviewTaskRepo) ReadAll(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
-	query := `
-        SELECT id, did, state, reviewer,
-               created_by, created_at
-        FROM contract_review_task WHERE did = $1
-    `
-	var reviewTasks []db.ReviewTaskData
-	err := tx.SelectContext(ctx, &reviewTasks, query, did)
-	if err != nil {
-		return nil, err
-	}
-	return reviewTasks, nil
 }
 
 func (r *PostgresReviewTaskRepo) ReadAllByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
@@ -176,13 +194,4 @@ func (r *PostgresReviewTaskRepo) TaskExist(ctx context.Context, tx *sqlx.Tx, did
 		return false, err
 	}
 	return count > 0, nil
-}
-
-func (r *PostgresReviewTaskRepo) Delete(ctx context.Context, tx *sqlx.Tx, did string) error {
-	statement := `
-        DELETE FROM contract_review_task
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did)
-	return err
 }

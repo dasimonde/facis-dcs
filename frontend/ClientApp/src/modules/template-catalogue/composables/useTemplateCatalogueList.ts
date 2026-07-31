@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { templateCatalogueIntegrationService } from '@/services/template-catalogue-integration-service'
-import type { TemplateResourcesItem } from '@/modules/template-catalogue/models/template-resource'
+import type { TemplateResourcesItem } from '@template-catalogue/models/template-resource'
 
 interface TemplateCatalogueListQuery {
   offset?: number

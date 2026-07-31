@@ -44,24 +44,34 @@ func (c *Client) AuthorizeURL(ctx context.Context, oidcState string) (string, er
 	if err != nil {
 		return "", err
 	}
+
 	params := url.Values{}
 	params.Set("client_id", c.cfg.ClientID)
 	params.Set("redirect_uri", c.cfg.RedirectURI)
 	params.Set("response_type", "code")
 	params.Set("scope", "openid offline_access") // the combination of the open and offline scopes is the standard OpenID Connect method for requesting a Refresh Token
 	params.Set("state", oidcState)
+	params.Set("prompt", "login") // OID4VP login only needs a fresh login_challenge; avoid Hydra reusing a remembered browser session.
 	return metadata.AuthorizationEndpoint + "?" + params.Encode(), nil
 }
 
-// AcceptConsent accepts a consent challenge via the Hydra admin API.
-func (c *Client) AcceptConsent(ctx context.Context, challenge, organization string, roles []string) (string, error) {
+// AcceptConsent accepts a consent challenge via the Hydra admin API. The granted roles and
+// issuer come exclusively from the consent request context, which Hydra copies from the
+// login accept (see AcceptLoginAndConsent).
+func (c *Client) AcceptConsent(ctx context.Context, challenge string) (string, error) {
 	var consentReq consentRequest
 	if err := c.getJSON(ctx, "/admin/oauth2/auth/requests/consent", url.Values{"consent_challenge": {challenge}}, &consentReq); err != nil {
 		return "", err
 	}
 
-	rolesToGrant := rolesFromConsentContext(consentReq.Context, roles)
-	iss := issuerFromConsentContext(consentReq.Context, organization)
+	rolesToGrant, err := rolesFromConsentContext(consentReq.Context)
+	if err != nil {
+		return "", err
+	}
+	iss, err := issuerFromConsentContext(consentReq.Context)
+	if err != nil {
+		return "", err
+	}
 	claims := tokenSessionClaims(rolesToGrant, iss)
 	consentBody := consentAcceptReq{
 		GrantScope:               consentReq.RequestedScope,
@@ -79,12 +89,12 @@ func (c *Client) AcceptConsent(ctx context.Context, challenge, organization stri
 	if consentOut.RedirectTo == "" {
 		return "", fmt.Errorf("hydra consent accept returned empty redirect")
 	}
-	return c.ResolveRedirectChain(ctx, consentOut.RedirectTo, iss, roles)
+	return c.ResolveRedirectChain(ctx, consentOut.RedirectTo)
 }
 
-// ResolveRedirectChain accepts nested Hydra login/consent UI redirects via the admin API until
-// the redirect no longer carries login_challenge or consent_challenge query parameters.
-func (c *Client) ResolveRedirectChain(ctx context.Context, redirectTo, organization string, roles []string) (string, error) {
+// ResolveRedirectChain accepts nested Hydra consent redirects via the admin API until the
+// redirect no longer carries login_challenge or consent_challenge query parameters.
+func (c *Client) ResolveRedirectChain(ctx context.Context, redirectTo string) (string, error) {
 	const maxSteps = 8
 	for step := 0; step < maxSteps; step++ {
 		redirectTo = strings.TrimSpace(redirectTo)
@@ -96,7 +106,7 @@ func (c *Client) ResolveRedirectChain(ctx context.Context, redirectTo, organizat
 			return "", err
 		}
 		if cc := strings.TrimSpace(u.Query().Get("consent_challenge")); cc != "" {
-			redirectTo, err = c.AcceptConsent(ctx, cc, organization, roles)
+			redirectTo, err = c.AcceptConsent(ctx, cc)
 			if err != nil {
 				return "", err
 			}
@@ -110,38 +120,29 @@ func (c *Client) ResolveRedirectChain(ctx context.Context, redirectTo, organizat
 	return "", fmt.Errorf("hydra redirect chain: exceeded %d steps", maxSteps)
 }
 
-func issuerFromConsentContext(ctx map[string]any, fallback string) string {
-	if ctx == nil {
-		return strings.TrimSpace(fallback)
+func issuerFromConsentContext(ctx map[string]any) (string, error) {
+	raw, _ := ctx["iss"].(string)
+	iss := strings.TrimSpace(raw)
+	if iss == "" {
+		return "", fmt.Errorf("hydra consent context is missing iss")
 	}
-	if raw, ok := ctx["iss"].(string); ok && strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw)
-	}
-	return strings.TrimSpace(fallback)
+	return iss, nil
 }
 
-func rolesFromConsentContext(ctx map[string]any, fallback []string) []string {
-	if ctx == nil {
-		return fallback
-	}
-	raw, ok := ctx["roles"]
-	if !ok {
-		return fallback
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return fallback
+func rolesFromConsentContext(ctx map[string]any) ([]string, error) {
+	arr, ok := ctx["roles"].([]any)
+	if !ok || len(arr) == 0 {
+		return nil, fmt.Errorf("hydra consent context is missing roles")
 	}
 	out := make([]string, 0, len(arr))
 	for _, r := range arr {
-		if v, ok := r.(string); ok {
-			out = append(out, v)
+		v, ok := r.(string)
+		if !ok {
+			return nil, fmt.Errorf("hydra consent context roles must be strings")
 		}
+		out = append(out, v)
 	}
-	if len(out) == 0 {
-		return fallback
-	}
-	return out
+	return out, nil
 }
 
 // AcceptLoginAndConsent accepts login and consent via the Hydra admin API.
@@ -169,20 +170,8 @@ func (c *Client) AcceptLoginAndConsent(ctx context.Context, challenge, subject, 
 		return "", fmt.Errorf("hydra login accept returned empty redirect")
 	}
 
-	redirectURL, err := url.Parse(loginOut.RedirectTo)
-	if err != nil {
-		return "", err
-	}
-	consentChallenge := strings.TrimSpace(redirectURL.Query().Get("consent_challenge"))
-	if consentChallenge == "" {
-		return c.ResolveRedirectChain(ctx, loginOut.RedirectTo, organization, roles)
-	}
-
-	redirectTo, err := c.AcceptConsent(ctx, consentChallenge, organization, roles)
-	if err != nil {
-		return "", err
-	}
-	return c.ResolveRedirectChain(ctx, redirectTo, organization, roles)
+	// The redirect chain resolves any consent challenge from the login context.
+	return c.ResolveRedirectChain(ctx, loginOut.RedirectTo)
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, q url.Values, out any) error {
@@ -220,7 +209,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, q url.Values, 
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}

@@ -13,13 +13,18 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
+// MergeChangeRequests folds every accepted (not merely proposed) change
+// request of contractVersion into a single update. Requests are applied in
+// read order, field by field, so a later accepted request silently
+// overwrites an earlier one touching the same field (last-write-wins, no
+// conflict detection).
 func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo, nRepo db.NegotiationRepo, did string, contractVersion int) (*db.ContractUpdateData, error) {
 	changeRequests, err := nRepo.ReadAllAcceptedByContractDIDAndVersion(ctx, tx, did, contractVersion)
 	if err != nil {
 		return nil, err
 	}
 
-	contract, err := cRepo.ReadDataByID(ctx, tx, did)
+	contract, err := cRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
 		return nil, err
 	}
@@ -76,17 +81,11 @@ func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo
 		}
 
 		if change.ContractData != nil {
-			semanticConditionValues, err := readSemanticConditionValues(contractData)
+			updatedContractData, err := mergeContractDataChange(contractData, *change.ContractData)
 			if err != nil {
 				return nil, err
 			}
-
-			for _, value := range change.ContractData.SemanticConditionValues {
-				semanticConditionValues = upsertSemanticConditionValue(semanticConditionValues, value)
-			}
-			contractData["semanticConditionValues"] = semanticConditionValues
-
-			newContractData, err := datatype.NewJSON(contractData)
+			newContractData, err := datatype.NewJSON(updatedContractData)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal contract data: %w", err)
 			}
@@ -95,37 +94,23 @@ func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo
 				return nil, fmt.Errorf("contract data validation failed after merging change requests: %w", err)
 			}
 			updateData.ContractData = normalizedContractData
+			contractData = updatedContractData
 		}
 	}
 
 	return &updateData, nil
 }
 
-func readSemanticConditionValues(contractData map[string]any) ([]SemanticConditionValue, error) {
-	raw, ok := contractData["semanticConditionValues"]
-	if !ok || raw == nil {
-		return []SemanticConditionValue{}, nil
+func mergeContractDataChange(contractData map[string]any, rawChange json.RawMessage) (map[string]any, error) {
+	var changeData map[string]any
+	if err := json.Unmarshal(rawChange, &changeData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal contract data change: %w", err)
 	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal semantic condition values: %w", err)
+	if changeData == nil {
+		return contractData, nil
 	}
-	var values []SemanticConditionValue
-	if err := json.Unmarshal(bytes, &values); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal semantic condition values: %w", err)
+	if _, canonical := changeData["dcs:documentStructure"]; !canonical {
+		return nil, fmt.Errorf("change request contract data must use the canonical dcs:documentStructure envelope")
 	}
-	return values, nil
-}
-
-func upsertSemanticConditionValue(values []SemanticConditionValue, newValue SemanticConditionValue) []SemanticConditionValue {
-	for i, existing := range values {
-		if existing.BlockID == newValue.BlockID &&
-			existing.ParameterName == newValue.ParameterName &&
-			existing.ConditionID == newValue.ConditionID {
-
-			values[i] = newValue // update
-			return values
-		}
-	}
-	return append(values, newValue) // insert
+	return changeData, nil
 }

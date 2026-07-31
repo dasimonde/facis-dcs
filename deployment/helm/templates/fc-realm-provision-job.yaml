@@ -1,0 +1,165 @@
+{{- if and .Values.fcservice.enabled .Values.fcservice.realmProvision.enabled }}
+# fc-service's own boot-time `--import-realm` hits a confirmed, unresolved
+# upstream Keycloak bug for realm files of this size (silent exit partway
+# through import, no error at any log level — see keycloak/keycloak#37745).
+# We disable --import-realm (see values' fcservice.keycloak.args) and do the
+# same import via the Admin REST API instead, which doesn't hit the bug.
+# Also assigns the SCHEMA_*/ASSET_* CLIENT roles (already defined on the
+# `federated-catalogue` client in fc-realm.json) to the service account user
+# — fc-realm.json's seed data leaves that user with only `uma_protection`.
+# fc-service-server reads roles from resource_access.<KEYCLOAK_RESOURCE>.roles
+# (KEYCLOAK_RESOURCE=federated-catalogue, the classic Keycloak adapter claim
+# shape), not realm_access.roles, so these must be CLIENT role mappings
+# (.../role-mappings/clients/{clientUUID}), not realm role mappings — an
+# earlier version of this Job created same-named ROLES at the realm level and
+# assigned those instead, which never appears in that claim and 403s every
+# `list schemas` call DCS makes (confirmed live).
+#
+# No k8s API access needed (no custom ServiceAccount/RBAC either) — this
+# used to also patch fc-service's/fc-demo-portal's issuer env vars via the
+# k8s API, working around the OLD vendored fc-service chart hardcoding them
+# to an unreachable URL after `.Values.env` (values-level overrides lost).
+# charts/federated-catalogue (our own chart, replacing the vendored one)
+# computes the correct issuer directly from values instead, so that patch
+# step became actively harmful: it kept overwriting the chart's already-
+# correct value with a stale internal-only one, 401ing every DCS→FC call
+# again after every sync (confirmed live).
+#
+# Idempotent; runs on every install/upgrade. The event-driven dependency gate
+# below is only for Keycloak realm provisioning. It is not an FC functional
+# warm-up; the backend owns the single functional verification call.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "digital-contracting-service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: fc-realm-provision
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-fc-lifecycle
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-keycloak-readiness
+          image: "{{ .Values.fcservice.realmProvision.image.repository }}:{{ .Values.fcservice.realmProvision.image.tag }}"
+          imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65532
+          command:
+            - kubectl
+            - wait
+            - --for=condition=available
+            - --timeout=-1s
+            - deployment/fc-keycloak
+      containers:
+        - name: fc-realm-provision
+          image: "{{ .Values.fcservice.realmProvision.image.repository }}:{{ .Values.fcservice.realmProvision.image.tag }}"
+          imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65532
+          {{- with (.Values.fcservice.realmProvision.resources | default .Values.resources) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: KC_BASE_URL
+              value: {{ printf "http://%s:8080/auth" .Values.fcservice.realmProvision.keycloakHost | quote }}
+            - name: KC_ADMIN_USER
+              value: {{ .Values.fcservice.realmProvision.adminUser | quote }}
+            - name: KC_ADMIN_PASSWORD
+              value: {{ .Values.fcservice.realmProvision.adminPassword | quote }}
+            - name: REALM
+              value: {{ .Values.fcservice.keycloak.realm | quote }}
+            - name: FC_CLIENT_UUID
+              value: {{ .Values.fcservice.realmProvision.serviceAccountUserID | quote }}
+            - name: FC_CLIENT_ID
+              value: {{ .Values.fcservice.keycloak.clientId | quote }}
+          volumeMounts:
+            - name: realm-config
+              mountPath: /realm
+              readOnly: true
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+
+              admin_token() {
+                curl -sf -X POST "$KC_BASE_URL/realms/master/protocol/openid-connect/token" \
+                  -H "X-Forwarded-Proto: https" \
+                  -d "grant_type=password" -d "client_id=admin-cli" \
+                  -d "username=$KC_ADMIN_USER" -d "password=$KC_ADMIN_PASSWORD" \
+                  | jq -r .access_token
+              }
+              TOKEN="$(admin_token)"
+
+              REALM_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -H "X-Forwarded-Proto: https" \
+                -H "Authorization: Bearer $TOKEN" "$KC_BASE_URL/admin/realms/$REALM")"
+              if [ "$REALM_STATUS" = "200" ]; then
+                echo "Realm $REALM already imported — skipping (idempotent)."
+              else
+                echo "Importing realm $REALM via Admin API (boot-time --import-realm is disabled, see keycloak/keycloak#37745)..."
+                curl -sf -X POST "$KC_BASE_URL/admin/realms" \
+                  -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                  --data-binary @/realm/fc-realm.json
+                curl -sf -X PUT "$KC_BASE_URL/admin/realms/$REALM" \
+                  -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                  --data '{"sslRequired":"NONE"}'
+                echo "Realm imported."
+              fi
+
+              # DCS is the only caller of this service account (its own
+              # boot-time schema sync + template/asset publishing) — grant
+              # every functional `federated-catalogue` CLIENT role fc-realm.
+              # json defines (uma_protection excluded, that one's Keycloak-
+              # internal, added separately below). Narrowing this to just
+              # SCHEMA_*/ASSET_* once caused schema listing (SCHEMA_READ) to
+              # work but asset publishing to still 403 — fc-service-server's
+              # controllers don't all gate on the same uppercase permission-
+              # style roles, some also check the kebab-case composite roles
+              # (asset-creator etc.) or ADMIN_ALL, and DCS has no use for
+              # holding anything back from its own catalogue integration
+              # (confirmed live).
+              TOKEN="$(admin_token)"
+              FC_CLIENT_KC_ID="$(curl -sf -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" \
+                "$KC_BASE_URL/admin/realms/$REALM/clients?clientId=$FC_CLIENT_ID" \
+                | jq -r '.[0].id')"
+
+              TOKEN="$(admin_token)"
+              ROLE_REPS="$(curl -sf -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" \
+                "$KC_BASE_URL/admin/realms/$REALM/clients/$FC_CLIENT_KC_ID/roles" \
+                | jq -c '[.[] | select(.name != "uma_protection")]')"
+
+              echo "Assigning $FC_CLIENT_ID client roles to service-account-federated-catalogue..."
+              curl -sf -o /dev/null -X POST -H "X-Forwarded-Proto: https" \
+                -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                "$KC_BASE_URL/admin/realms/$REALM/users/$FC_CLIENT_UUID/role-mappings/clients/$FC_CLIENT_KC_ID" \
+                --data "$ROLE_REPS"
+
+              echo "fc-realm-provision done."
+      volumes:
+        - name: realm-config
+          configMap:
+            name: fc-keycloak-realm-configmap
+{{- end }}

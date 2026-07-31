@@ -10,10 +10,6 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/postgresql"
     condition: postgresql.enabled
-  - name: keycloak
-    version: "0.1.0"
-    repository: "file://charts/keycloak"
-    condition: keycloak.enabled
   - name: hydra
     version: "0.1.0"
     repository: "file://charts/hydra"
@@ -22,29 +18,34 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/nats"
     condition: nats.enabled
-  - name: neo4j
-    version: "0.1.0"
-    repository: "file://charts/neo4j"
-    condition: neo4j.enabled
   - name: orce
     version: "0.1.0"
     repository: "file://charts/orce"
     condition: orce.enabled
+  - name: dss
+    version: "0.1.0"
+    repository: "file://charts/dss"
+    condition: dss.enabled
   - name: federated-catalogue
     version: "0.1.0"
     repository: "file://charts/federated-catalogue"
-    condition: federatedCatalogue.enabled
-    alias: federatedCatalogue
-  - name: custom-policy-agent
+    condition: fcservice.enabled
+    alias: fcservice
+  - name: keycloak
     version: "0.1.0"
-    repository: "file://charts/custom-policy-agent"
-    condition: customPolicyAgent.enabled
-    alias: customPolicyAgent
-  - name: mongodb
+    repository: "file://charts/keycloak"
+    condition: fcservice.enabled
+    alias: fcKeycloakApp
+  - name: fuseki
     version: "0.1.0"
-    repository: "file://charts/mongodb"
-    condition: mongodb.enabled
-    alias: mongodb
+    repository: "file://charts/fuseki"
+    condition: fcservice.enabled
+    alias: fcFuseki
+  - name: fc-postgres
+    version: "0.1.0"
+    repository: "file://charts/fc-postgres"
+    condition: fcservice.enabled
+    alias: fcPostgres
   - name: ipfs
     version: "0.1.0"
     repository: "file://charts/ipfs"
@@ -55,11 +56,6 @@ dependencies:
     repository: "file://charts/ipfs-document-manager"
     condition: ipfsDocumentManager.enabled
     alias: ipfsDocumentManager
-  - name: crypto-provider
-    version: "0.1.0"
-    repository: "file://charts/crypto-provider"
-    condition: cryptoProvider.enabled
-    alias: cryptoProvider
   - name: statuslist-service
     version: "0.1.0"
     repository: "file://charts/statuslist-service"
@@ -69,7 +65,7 @@ dependencies:
     version: "85.2.0"
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: monitoring.enabled
-  - name: vault
-    version: "0.27.0"
-    repository: "https://helm.releases.hashicorp.com"
-    condition: vault.enabled
+  - name: traefik
+    version: "41.0.0"
+    repository: "https://traefik.github.io/charts"
+    condition: traefik.enabled

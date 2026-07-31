@@ -1,0 +1,20 @@
+{{- if .Values.pkcs11.provisioning.enabled }}
+# Persistent SoftHSM2 token directory. The token state changes on key rotation
+# and must survive pod restarts, so the keys are never baked into the image.
+# SoftHSM2 is a software token for dev/staging/CI only, never a production HSM.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-hsm-token
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml (.Values.pkcs11.provisioning.persistence.accessModes | default (list "ReadWriteOnce")) | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.pkcs11.provisioning.persistence.size | default "128Mi" }}
+  {{- with .Values.pkcs11.provisioning.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

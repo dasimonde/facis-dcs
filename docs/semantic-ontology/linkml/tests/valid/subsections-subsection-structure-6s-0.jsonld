@@ -1,0 +1,167 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:subsection-structure",
+    "@type": "ContractTemplate",
+    "documentTitle": "Nested Obligations Document",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Nested Obligations Document"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:subsection-structure#s1",
+                    "urn:doc:subsection-structure#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-structure#s1",
+                "children": [
+                    "urn:doc:subsection-structure#c1",
+                    "urn:doc:subsection-structure#s1-1",
+                    "urn:doc:subsection-structure#s1-2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-structure#s1-1",
+                "children": [
+                    "urn:doc:subsection-structure#c2",
+                    "urn:doc:subsection-structure#s1-1-1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-structure#s1-1-1",
+                "children": [
+                    "urn:doc:subsection-structure#c3",
+                    "urn:doc:subsection-structure#c4"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-structure#s1-2",
+                "children": [
+                    "urn:doc:subsection-structure#c5"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-structure#s2",
+                "children": [
+                    "urn:doc:subsection-structure#c6",
+                    "urn:doc:subsection-structure#c7",
+                    "urn:doc:subsection-structure#s2-1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-structure#s2-1",
+                "children": [
+                    "urn:doc:subsection-structure#c8"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-structure#s1",
+                "title": "1. General Obligations"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c1",
+                "content": [
+                    "The parties shall comply with all applicable regulations."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-structure#s1-1",
+                "title": "1.1 Data Protection"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c2",
+                "content": [
+                    "Each party shall act as an independent data controller."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-structure#s1-1-1",
+                "title": "1.1.1 Breach Notification"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c3",
+                "content": [
+                    "A party suffering a data breach shall notify the other within 72 hours."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c4",
+                "content": [
+                    "Notification shall include the nature of the breach and remediation steps taken."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-structure#s1-2",
+                "title": "1.2 Health and Safety"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c5",
+                "content": [
+                    "Each party shall maintain a safe working environment at all times."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-structure#s2",
+                "title": "2. Dispute Resolution"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c6",
+                "content": [
+                    "Disputes shall first be referred to a senior representative of each party."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c7",
+                "content": [
+                    "Unresolved disputes shall be submitted to binding arbitration."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-structure#s2-1",
+                "title": "2.1 Arbitration Rules"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-structure#c8",
+                "content": [
+                    "Arbitration shall be conducted under the ICC Rules of Arbitration."
+                ]
+            }
+        ]
+    }
+}

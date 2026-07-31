@@ -1,0 +1,104 @@
+@prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+
+# Structural shape for the canonical dcs:documentStructure JSON-LD envelope
+# (the single supported contract shape since the greenfield rewrite — see
+# CLAUDE.md "Template Editor — JSON-LD as Single Source of Truth"). This is
+# the Semantic Hub's kind="shapes" seed (backend/internal/semantichub/assets,
+# ADR-8) — the sole source AuditContractContent's goRDFlib SHACL engine
+# validates produced contracts against (ADR-9). A contract's own IRI ("@id")
+# is its RDF subject already; sh:nodeKind checks it is a real IRI, not a
+# blank node — SHACL's equivalent of "requires a stable @id".
+
+dcs:CanonicalContractShape
+  a sh:NodeShape ;
+  sh:targetClass dcs:Contract ;
+  sh:nodeKind sh:IRI ;
+  sh:property [
+    sh:path dcs:metadata ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:node dcs:ContractMetadataShape ;
+    sh:message "A canonical contract requires dcs:metadata with a title." ;
+  ] ;
+  sh:property [
+    sh:path dcs:documentStructure ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:message "A canonical contract requires a dcs:documentStructure envelope." ;
+  ] .
+
+dcs:ContractMetadataShape
+  a sh:NodeShape ;
+  sh:targetClass dcs:ContractMetadata ;
+  sh:property [
+    sh:path dcs:title ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:message "A canonical contract requires a title in dcs:metadata." ;
+  ] .
+
+# Every machine-readable ODRL rule must be backed by human-audited prose:
+# dcs:prose references the clause node whose text the rule operationalizes.
+dcs:OdrlDutyProseShape
+  a sh:NodeShape ;
+  sh:targetClass odrl:Duty ;
+  sh:property [
+    sh:path dcs:prose ;
+    sh:minCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:message "An ODRL Duty requires dcs:prose referencing the human-readable clause it is backed by." ;
+  ] .
+
+dcs:OdrlPermissionProseShape
+  a sh:NodeShape ;
+  sh:targetClass odrl:Permission ;
+  sh:property [
+    sh:path dcs:prose ;
+    sh:minCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:message "An ODRL Permission requires dcs:prose referencing the human-readable clause it is backed by." ;
+  ] .
+
+dcs:OdrlProhibitionProseShape
+  a sh:NodeShape ;
+  sh:targetClass odrl:Prohibition ;
+  sh:property [
+    sh:path dcs:prose ;
+    sh:minCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:message "An ODRL Prohibition requires dcs:prose referencing the human-readable clause it is backed by." ;
+  ] .
+
+dcs:ContractFieldShape
+    a sh:NodeShape ;
+    sh:targetClass dcs:ContractField ;
+    sh:property [
+        sh:path dcs:label ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A contract field must declare dcs:label." ;
+    ] ;
+    sh:property [
+        sh:path dcs:datatype ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A contract field must declare dcs:datatype." ;
+    ] ;
+    sh:property [
+        sh:path dcs:required ;
+        sh:datatype xsd:boolean ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A contract field must declare boolean dcs:required." ;
+    ] ;
+    sh:property [
+        sh:path dcs:value ;
+        sh:maxCount 1 ;
+        sh:message "A contract field carries at most one inline dcs:value." ;
+    ] .

@@ -4473,8 +4473,7 @@ Language (ODRL).
 
 
       "https://w3id.org/drk/ontology/ShowTimesAPI",
-      "http://www.w3.org/ns/odrl/2/Asset" ], "http://purl.org/dc/terms/title": [ {
-      "@language": "de", "@value": "AugsburgStaatstheaterShowtimesAPI" } ],
+      "http://www.w3.org/ns/odrl/2/Asset" ], 
       "http://www.w3.org/ns/odrl/2/hasPolicy": [ { "@id":
       "https://w3id.org/drk/ontology/TempoSpatialAccess" } ],
       "http://www.w3.org/ns/odrl/2/uid": [ { "@value":

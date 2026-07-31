@@ -1,0 +1,376 @@
+[
+  {
+    "id": "vci-tab",
+    "type": "tab",
+    "label": "OpenID4VCI",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "vci-get-issuer-metadata",
+    "type": "http in",
+    "z": "vci-tab",
+    "name": "GET /.well-known/openid-credential-issuer",
+    "url": "/.well-known/openid-credential-issuer",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 100,
+    "wires": [
+      [
+        "vci-fn-issuer-metadata"
+      ]
+    ]
+  },
+  {
+    "id": "vci-fn-issuer-metadata",
+    "type": "function",
+    "z": "vci-tab",
+    "name": "build issuer metadata",
+    "func": "const baseUrl = global.get('getBaseUrl')(msg);\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/json' };\nmsg.payload = {\n  credential_issuer: baseUrl,\n  credential_endpoint: baseUrl + '/credential',\n  credential_configurations_supported: {\n    demo_poa: {\n      format: 'dc+sd-jwt',\n      vct: 'urn:dcs:poa:v1',\n      cryptographic_binding_methods_supported: ['jwk'],\n      credential_signing_alg_values_supported: ['ES256'],\n      proof_types_supported: {\n        jwt: { proof_signing_alg_values_supported: ['ES256'] }\n      },\n      claims: {\n        organization: {},\n        roles: {}\n      },\n      display: [{ name: 'FACIS Demo Power of Attorney', locale: 'en' }]\n    }\n  }\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 100,
+    "wires": [
+      [
+        "vci-resp-issuer-metadata"
+      ]
+    ]
+  },
+  {
+    "id": "vci-resp-issuer-metadata",
+    "type": "http response",
+    "z": "vci-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "vci-get-oauth-metadata",
+    "type": "http in",
+    "z": "vci-tab",
+    "name": "GET /.well-known/oauth-authorization-server",
+    "url": "/.well-known/oauth-authorization-server",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 180,
+    "wires": [
+      [
+        "vci-fn-oauth-metadata"
+      ]
+    ]
+  },
+  {
+    "id": "vci-fn-oauth-metadata",
+    "type": "function",
+    "z": "vci-tab",
+    "name": "build oauth metadata",
+    "func": "const baseUrl = global.get('getBaseUrl')(msg);\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/json' };\nmsg.payload = {\n  issuer: baseUrl,\n  token_endpoint: baseUrl + '/token',\n  'pre-authorized_grant_anonymous_access_supported': true,\n  grant_types_supported: ['urn:ietf:params:oauth:grant-type:pre-authorized_code']\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 180,
+    "wires": [
+      [
+        "vci-resp-oauth-metadata"
+      ]
+    ]
+  },
+  {
+    "id": "vci-resp-oauth-metadata",
+    "type": "http response",
+    "z": "vci-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "vci-get-offer",
+    "type": "http in",
+    "z": "vci-tab",
+    "name": "GET /offer",
+    "url": "/offer",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 260,
+    "wires": [
+      [
+        "vci-fn-offer-form"
+      ]
+    ]
+  },
+  {
+    "id": "vci-fn-offer-form",
+    "type": "function",
+    "z": "vci-tab",
+    "name": "render role-selection form",
+    "func": "const baseUrl = global.get('getBaseUrl')(msg);\n// The exact set DCS's local RBAC accepts (backend/internal/base/datatype/\n// userrole/userrole.go) -- evaluateLoginRoles() rejects any disclosed role\n// not in this enum outright, so the demo must only offer these. Grouped by\n// the same buckets the source comments use; system-only roles (Sys.\n// Contract *, Contract Target System, Sys. Auditor -- IsSystemRole()==true)\n// are for automated accounts, not something a demo participant would pick,\n// so left out here.\nconst ROLE_GROUPS = [\n  { label: 'Template', roles: ['Template Creator', 'Template Reviewer', 'Template Approver', 'Template Manager'] },\n  { label: 'Contract', roles: ['Contract Creator', 'Contract Reviewer', 'Contract Approver', 'Contract Manager', 'Contract Negotiator', 'Contract Signer', 'Contract Observer'] },\n  { label: 'Organization-wide', roles: ['Archive Manager', 'Auditor', 'Sys. Administrator', 'Compliance Officer', 'Integration Manager'] }\n];\nconst DEFAULT_CHECKED = ['Contract Manager', 'Contract Signer'];\n// A PoA attests authority granted BY a party, so the organization is the\n// issuer's own participant DID (its host, without the /issuer path), never a\n// value the holder supplies.\nconst _orgRest = baseUrl.replace(/^[a-z]+:\\/\\//i, '');\nconst DEFAULT_ORG = 'did:web:' + encodeURIComponent(_orgRest.split('/')[0]);\n\nconst roleGroupsHtml = ROLE_GROUPS.map((group) => {\n  const boxes = group.roles.map((role) => {\n    const checked = DEFAULT_CHECKED.includes(role) ? ' checked' : '';\n    return '<label class=\"role\"><input type=\"checkbox\" name=\"roles\" value=\"' + role + '\"' + checked + '> ' + role + '</label>';\n  }).join('\\n');\n  return '<div class=\"role-group\"><div class=\"role-group-label\">' + group.label + '</div><div class=\"roles\">' + boxes + '</div></div>';\n}).join('\\n');\n\nconst html = '<!doctype html>\\n' +\n  '<html lang=\"en\">\\n' +\n  '<head>\\n' +\n  '<meta charset=\"utf-8\">\\n' +\n  '<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\n' +\n  '<title>Configure your PoA credential</title>\\n' +\n  '<style>\\n' +\n  ':root{color-scheme:light;}\\n' +\n  '*{box-sizing:border-box;}\\n' +\n  'body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Inter,Roboto,sans-serif;' +\n  'margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;' +\n  'background:linear-gradient(180deg,#eef2ff 0%,#f8fafc 55%);color:#1e1b2e;}\\n' +\n  '.card{background:#fff;border-radius:20px;box-shadow:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.08);' +\n  'max-width:440px;width:100%;padding:2.25rem 2rem 2rem;}\\n' +\n  '.badge{display:inline-flex;align-items:center;gap:.4rem;background:#eef2ff;color:#4338ca;' +\n  'font-size:.75rem;font-weight:600;letter-spacing:.02em;padding:.3rem .7rem;border-radius:999px;margin-bottom:1rem;}\\n' +\n  'h1{font-size:1.35rem;font-weight:700;margin:0 0 .4rem;color:#1e1b4b;}\\n' +\n  'p.lead{color:#64748b;font-size:.92rem;line-height:1.5;margin:0 0 1.5rem;}\\n' +\n  'label.field{display:block;font-size:.78rem;font-weight:600;color:#475569;margin:0 0 .35rem;}\\n' +\n  'input[type=text]{width:100%;padding:.6rem .7rem;border:1px solid #e2e8f0;border-radius:10px;' +\n  'font-size:.85rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:1.25rem;}\\n' +\n  '.role-group{margin-bottom:1rem;}\\n' +\n  '.role-group-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;' +\n  'color:#94a3b8;margin-bottom:.4rem;}\\n' +\n  '.roles{display:flex;flex-direction:column;gap:.5rem;}\\n' +\n  'label.role{display:flex;align-items:center;gap:.6rem;font-size:.85rem;color:#1e1b2e;' +\n  'background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.55rem .75rem;cursor:pointer;}\\n' +\n  'label.role:has(input:checked){background:#eef2ff;border-color:#c7d2fe;}\\n' +\n  'label.role input{width:16px;height:16px;accent-color:#6366f1;flex-shrink:0;}\\n' +\n  'button{width:100%;margin-top:1.5rem;background:#4338ca;color:#fff;border:none;border-radius:10px;' +\n  'padding:.8rem;font-size:.92rem;font-weight:600;cursor:pointer;}\\n' +\n  'button:hover{background:#3730a3;}\\n' +\n  '.footer-links{margin-top:1.5rem;font-size:.75rem;color:#94a3b8;text-align:center;}\\n' +\n  '.footer-links a{color:#6366f1;text-decoration:none;margin:0 .4rem;}\\n' +\n  '</style>\\n' +\n  '</head>\\n' +\n  '<body>\\n' +\n  '<div class=\"card\">\\n' +\n  '<span class=\"badge\">🖋️ FACIS Demo Issuer</span>\\n' +\n  '<h1>Configure your PoA credential</h1>\\n' +\n  '<p class=\"lead\">Pick the roles this demo Power of Attorney credential should carry, then generate a claim QR.</p>\\n' +\n  '<form method=\"POST\" action=\"' + baseUrl + '/offer\">\\n' +\n  '<label class=\"field\" for=\"organization\">Organization (DID) &mdash; set by this issuer</label>\\n' +\n  '<p class=\"orgvalue\" id=\"organization\">' + DEFAULT_ORG + '</p>\\n' +\n  '<label class=\"field\">Roles</label>\\n' +\n  roleGroupsHtml + '\\n' +\n  '<p style=\"font-size:.72rem;color:#94a3b8;margin:.5rem 0 0;\">Only DCS’s registered role set is offered here — typed-in roles would fail DCS’s own login/PoA verification even though a wallet still accepts them.</p>\\n' +\n  '<button type=\"submit\">Generate offer →</button>\\n' +\n  '</form>\\n' +\n  '<div class=\"footer-links\">\\n' +\n  '<a href=\"' + baseUrl + '/pki/jwks.json\">Issuer JWKS</a>·\\n' +\n  '<a href=\"' + baseUrl + '/admin\">Manage issued credentials</a>\\n' +\n  '</div>\\n' +\n  '</div>\\n' +\n  '</body>\\n' +\n  '</html>\\n';\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'text/html' };\nmsg.payload = html;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 260,
+    "wires": [
+      [
+        "vci-resp-offer-form"
+      ]
+    ]
+  },
+  {
+    "id": "vci-resp-offer-form",
+    "type": "http response",
+    "z": "vci-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 690,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "vci-post-offer",
+    "type": "http in",
+    "z": "vci-tab",
+    "name": "POST /offer",
+    "url": "/offer",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 330,
+    "wires": [
+      [
+        "vci-fn-offer"
+      ]
+    ]
+  },
+  {
+    "id": "vci-fn-offer",
+    "type": "function",
+    "z": "vci-tab",
+    "name": "create offer + render QR page",
+    "func": "const baseUrl = global.get('getBaseUrl')(msg);\n// DCS's local RBAC (backend/internal/base/datatype/userrole/userrole.go)\n// only accepts an exact enum of role strings -- evaluateLoginRoles()\n// rejects anything else outright. The /offer form only renders checkboxes\n// from this set, but validate server-side too (defense in depth against a\n// direct POST bypassing the form).\nconst VALID_ROLES = new Set([\n  'Template Creator', 'Template Reviewer', 'Template Approver', 'Template Manager',\n  'Contract Creator', 'Contract Reviewer', 'Contract Approver', 'Contract Manager',\n  'Contract Negotiator', 'Contract Signer', 'Contract Observer',\n  'Archive Manager', 'Auditor', 'Sys. Administrator', 'Compliance Officer',\n  'Integration Manager'\n]);\n\nconst body = msg.payload || {};\n\n// Selected roles from the /offer form -- checkboxes with a shared `name`\n// arrive as an array when 2+ are checked, but as a bare string when only\n// one is (standard qs/body-parser behavior), so normalize either shape.\nlet roles = body.roles;\nif (!roles) roles = [];\nelse if (!Array.isArray(roles)) roles = [roles];\nroles = roles.map((r) => String(r).trim()).filter((r) => VALID_ROLES.has(r));\nif (roles.length === 0) roles = ['Contract Signer'];\nconst _orgRest = baseUrl.replace(/^[a-z]+:\\/\\//i, '');\nconst organization = 'did:web:' + encodeURIComponent(_orgRest.split('/')[0]);\n\nconst id = crypto.randomBytes(12).toString('base64url');\nconst code = crypto.randomBytes(16).toString('base64url');\n\nconst preAuthCodes = global.get('preAuthCodes') || {};\npreAuthCodes[code] = {\n  claims: { organization, roles },\n  used: false,\n  exp: Date.now() + 600000\n};\nglobal.set('preAuthCodes', preAuthCodes);\n\nconst offers = global.get('offers') || {};\noffers[id] = {\n  credential_issuer: baseUrl,\n  credential_configuration_ids: ['demo_poa'],\n  grants: {\n    'urn:ietf:params:oauth:grant-type:pre-authorized_code': {\n      'pre-authorized_code': code\n    }\n  }\n};\nglobal.set('offers', offers);\n\nconst offerUri = 'openid-credential-offer://?credential_offer_uri=' +\n  encodeURIComponent(baseUrl + '/offer/' + id + '/data');\n\nnode.status({ fill: 'blue', shape: 'dot', text: 'offer ' + id + ' issued' });\n\nqrcode.toDataURL(offerUri, { width: 320, margin: 2, color: { dark: '#1e1b4b', light: '#ffffff' } }, (err, qrDataUrl) => {\n  if (err) {\n    msg.statusCode = 500;\n    msg.headers = { 'content-type': 'application/json' };\n    msg.payload = { error: 'server_error', error_description: String(err) };\n    node.send(msg);\n    return;\n  }\n\n  const roleChips = roles.map((r) => '<span class=\"chip\">' + r + '</span>').join(' ');\n\n  const html = '<!doctype html>\\n' +\n    '<html lang=\"en\">\\n' +\n    '<head>\\n' +\n    '<meta charset=\"utf-8\">\\n' +\n    '<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\n' +\n    '<title>Claim your PoA credential</title>\\n' +\n    '<style>\\n' +\n    ':root{color-scheme:light;}\\n' +\n    '*{box-sizing:border-box;}\\n' +\n    'body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Inter,Roboto,sans-serif;' +\n    'margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;' +\n    'background:linear-gradient(180deg,#eef2ff 0%,#f8fafc 55%);color:#1e1b2e;}\\n' +\n    '.card{background:#fff;border-radius:20px;box-shadow:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.08);' +\n    'max-width:420px;width:100%;padding:2.25rem 2rem 2rem;text-align:center;}\\n' +\n    '.badge{display:inline-flex;align-items:center;gap:.4rem;background:#eef2ff;color:#4338ca;' +\n    'font-size:.75rem;font-weight:600;letter-spacing:.02em;padding:.3rem .7rem;border-radius:999px;margin-bottom:1rem;}\\n' +\n    'h1{font-size:1.35rem;font-weight:700;margin:0 0 .4rem;color:#1e1b4b;}\\n' +\n    'p.lead{color:#64748b;font-size:.92rem;line-height:1.5;margin:0 0 1rem;}\\n' +\n    '.chips{margin-bottom:1.5rem;}\\n' +\n    '.chip{display:inline-block;background:#eef2ff;color:#4338ca;font-size:.72rem;font-weight:600;' +\n    'padding:.2rem .55rem;border-radius:999px;margin:0 .2rem .2rem 0;}\\n' +\n    '.qr-frame{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:1rem;display:inline-block;' +\n    'box-shadow:inset 0 0 0 1px rgba(99,102,241,.06);}\\n' +\n    '.qr-frame img{display:block;width:240px;height:240px;border-radius:6px;}\\n' +\n    'ol.steps{text-align:left;font-size:.85rem;color:#475569;margin:1.5rem 0 0;padding-left:1.1rem;line-height:1.7;}\\n' +\n    '.divider{border:none;border-top:1px solid #e2e8f0;margin:1.5rem 0;}\\n' +\n    'details summary{cursor:pointer;font-size:.8rem;color:#6366f1;font-weight:600;outline:none;}\\n' +\n    'textarea{width:100%;margin-top:.75rem;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;' +\n    'border-radius:10px;padding:.6rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;resize:none;}\\n' +\n    '.footer-links{margin-top:1.75rem;font-size:.75rem;color:#94a3b8;}\\n' +\n    '.footer-links a{color:#6366f1;text-decoration:none;margin:0 .4rem;}\\n' +\n    '.footer-links a:hover{text-decoration:underline;}\\n' +\n    '</style>\\n' +\n    '</head>\\n' +\n    '<body>\\n' +\n    '<div class=\"card\">\\n' +\n    '<span class=\"badge\">🖋️ FACIS Demo Issuer</span>\\n' +\n    '<h1>Claim your PoA credential</h1>\\n' +\n    '<p class=\"lead\">Scan this code with your wallet to receive a demo Power of Attorney credential, key-bound to your device.</p>\\n' +\n    '<div class=\"chips\">' + roleChips + '</div>\\n' +\n    '<div class=\"qr-frame\"><img src=\"' + qrDataUrl + '\" alt=\"Credential offer QR code\"></div>\\n' +\n    '<ol class=\"steps\">\\n' +\n    '<li>Open the Paradym Wallet app</li>\\n' +\n    '<li>Tap <strong>Scan</strong></li>\\n' +\n    '<li>Point your camera at the code above</li>\\n' +\n    '</ol>\\n' +\n    '<hr class=\"divider\">\\n' +\n    '<details>\\n' +\n    '<summary>Can\\'t scan? Copy the link instead</summary>\\n' +\n    '<textarea readonly rows=\"3\" onclick=\"this.select()\">' + offerUri + '</textarea>\\n' +\n    '</details>\\n' +\n    '<div class=\"footer-links\">\\n' +\n    '<a href=\"' + baseUrl + '/offer\">← Choose different roles</a>·\\n' +\n    '<a href=\"' + baseUrl + '/pki/jwks.json\">Issuer JWKS</a>·\\n' +\n    '<a href=\"' + baseUrl + '/admin\">Manage issued credentials</a>\\n' +\n    '</div>\\n' +\n    '</div>\\n' +\n    '</body>\\n' +\n    '</html>\\n';\n\n  msg.statusCode = 200;\n  msg.headers = { 'content-type': 'text/html' };\n  msg.payload = html;\n  node.send(msg);\n});\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "qrcode",
+        "module": "qrcode"
+      }
+    ],
+    "x": 420,
+    "y": 330,
+    "wires": [
+      [
+        "vci-resp-offer"
+      ]
+    ]
+  },
+  {
+    "id": "vci-resp-offer",
+    "type": "http response",
+    "z": "vci-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 330,
+    "wires": []
+  },
+  {
+    "id": "vci-get-offer-data",
+    "type": "http in",
+    "z": "vci-tab",
+    "name": "GET /offer/:id/data",
+    "url": "/offer/:id/data",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 340,
+    "wires": [
+      [
+        "vci-fn-offer-data"
+      ]
+    ]
+  },
+  {
+    "id": "vci-fn-offer-data",
+    "type": "function",
+    "z": "vci-tab",
+    "name": "serve offer object",
+    "func": "const id = msg.req.params.id;\nconst offers = global.get('offers') || {};\nconst offer = offers[id];\n\nif (!offer) {\n  msg.statusCode = 404;\n  msg.headers = { 'content-type': 'application/json' };\n  msg.payload = { error: 'not_found', error_description: 'unknown offer id' };\n  return msg;\n}\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/json' };\nmsg.payload = offer;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 340,
+    "wires": [
+      [
+        "vci-resp-offer-data"
+      ]
+    ]
+  },
+  {
+    "id": "vci-resp-offer-data",
+    "type": "http response",
+    "z": "vci-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "vci-post-token",
+    "type": "http in",
+    "z": "vci-tab",
+    "name": "POST /token",
+    "url": "/token",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 420,
+    "wires": [
+      [
+        "vci-fn-token"
+      ]
+    ]
+  },
+  {
+    "id": "vci-fn-token",
+    "type": "function",
+    "z": "vci-tab",
+    "name": "exchange pre-authorized_code",
+    "func": "const body = msg.payload || {};\nconst preAuthCodes = global.get('preAuthCodes') || {};\nconst code = body['pre-authorized_code'];\nconst entry = code ? preAuthCodes[code] : null;\n\nconst valid = body.grant_type === 'urn:ietf:params:oauth:grant-type:pre-authorized_code' &&\n  entry && !entry.used && entry.exp > Date.now();\n\nif (!valid) {\n  msg.statusCode = 400;\n  msg.headers = { 'content-type': 'application/json' };\n  msg.payload = { error: 'invalid_grant' };\n  return msg;\n}\n\nentry.used = true;\nglobal.set('preAuthCodes', preAuthCodes);\n\nconst accessToken = crypto.randomBytes(24).toString('base64url');\nconst cNonce = crypto.randomBytes(16).toString('base64url');\n\nconst accessTokens = global.get('accessTokens') || {};\naccessTokens[accessToken] = {\n  claims: entry.claims,\n  cNonce,\n  exp: Date.now() + 300000\n};\nglobal.set('accessTokens', accessTokens);\n\nmsg.statusCode = 200;\nmsg.headers = { 'content-type': 'application/json' };\nmsg.payload = {\n  access_token: accessToken,\n  token_type: 'bearer',\n  expires_in: 300,\n  c_nonce: cNonce,\n  c_nonce_expires_in: 300\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 420,
+    "y": 420,
+    "wires": [
+      [
+        "vci-resp-token"
+      ]
+    ]
+  },
+  {
+    "id": "vci-resp-token",
+    "type": "http response",
+    "z": "vci-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "vci-post-credential",
+    "type": "http in",
+    "z": "vci-tab",
+    "name": "POST /credential",
+    "url": "/credential",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 500,
+    "wires": [
+      [
+        "vci-fn-credential"
+      ]
+    ]
+  },
+  {
+    "id": "vci-fn-credential",
+    "type": "function",
+    "z": "vci-tab",
+    "name": "issue PoA SD-JWT VC",
+    "func": "function getPki() {\n  const pki = global.get('pki');\n  if (pki && pki.issuerKeyPem) return pki;\n  const issuerKeyPem = fs.readFileSync('/data/pki/issuer.key', 'utf8');\n  return { issuerKeyPem };\n}\n\n// DCS resolves an issuer's key by the mechanism its trust entry declares\n// (backend/internal/auth/oid4vp/sdjwt/keys.go, ResolveIssuerVerification\n// Key): the CONFIGURATION picks the path, so a credential from an issuer\n// configured as jwks or did:web is refused if it arrives carrying an x5c\n// chain instead. This issuer is deployed behind such an entry, so it signs\n// with an embedded `jwk` header (a `kid` into the published JWKS would work\n// as well; `jwk` is self-contained). The same issuer EC key still backs\n// /pki/root-ca.pem's chain for independent inspection and the status list.\nconst CREDENTIAL_JWT_TYP = 'dc+sd-jwt';\nconst CREDENTIAL_VCT = 'urn:dcs:poa:v1';\n\n// This container's clock can be far off real-world time (see the PKI tab's\n// faketime comment for why). Stamping iat/exp from container Date.now()\n// can read as \"not yet valid\" to a verifier on a real device. Anchor both\n// to fixed, safely-past/future timestamps instead -- same 2020 anchor the\n// PKI tab backdates certs to.\nconst SAFE_IAT_FALLBACK = Math.floor(Date.parse('2020-01-01T00:00:00Z') / 1000);\n// exp stays a fixed, generously-future anchor regardless of where iat came\n// from -- so even the fallback path (real-world time fetch failed) never\n// issues an already-expired credential.\nconst SAFE_EXP = Math.floor(Date.parse('2045-01-01T00:00:00Z') / 1000);\n\n// Some wallets bind the proof key via an embedded `jwk` header (what our\n// own test client does); others reference it via a `kid` that is itself a\n// did:jwk DID URL (did:jwk is just base64url(JSON(jwk)), no resolver\n// needed -- decode it locally). Accept either.\nfunction didJwkToJwk(didUrl) {\n  if (typeof didUrl !== 'string') return null;\n  const did = didUrl.split('#')[0];\n  if (!did.startsWith('did:jwk:')) return null;\n  try {\n    const decoded = JSON.parse(Buffer.from(did.slice('did:jwk:'.length), 'base64url').toString('utf8'));\n    if (!decoded.kty || !decoded.x) return null;\n    return { kty: decoded.kty, crv: decoded.crv, x: decoded.x, y: decoded.y };\n  } catch (e) {\n    return null;\n  }\n}\n\n(async () => {\n  try {\n    const baseUrl = global.get('getBaseUrl')(msg);\n\n    const authHeader = (msg.req.headers.authorization || '');\n    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;\n    const accessTokens = global.get('accessTokens') || {};\n    const tokenEntry = token ? accessTokens[token] : null;\n\n    if (!tokenEntry || tokenEntry.exp < Date.now()) {\n      msg.statusCode = 401;\n      msg.headers = { 'content-type': 'application/json' };\n      msg.payload = { error: 'invalid_token' };\n      node.send(msg);\n      return;\n    }\n\n    const body = msg.payload || {};\n    node.warn('[vci /credential] incoming body: ' + JSON.stringify(body).slice(0, 4000));\n\n    // Older OpenID4VCI drafts (and our own test client) send a singular\n    // `proof: {proof_type, jwt}`. Newer drafts (what Paradym/Credo actually\n    // send) use a plural `proofs: {jwt: [\"<jwt>\", ...]}` to support batch\n    // issuance -- accept either, taking the first proof from the array.\n    let proofJwt = null;\n    if (body.proof && body.proof.jwt) {\n      proofJwt = body.proof.jwt;\n    } else if (body.proofs && Array.isArray(body.proofs.jwt) && body.proofs.jwt.length > 0) {\n      proofJwt = body.proofs.jwt[0];\n    }\n    const usedPluralProofs = !!(body.proofs && Array.isArray(body.proofs.jwt));\n\n    if (!proofJwt) {\n      node.warn('[vci /credential] reject: no proof.jwt or proofs.jwt[] in body');\n      msg.statusCode = 400;\n      msg.headers = { 'content-type': 'application/json' };\n      msg.payload = { error: 'invalid_or_missing_proof', error_description: 'no proof.jwt or proofs.jwt[] in request body' };\n      node.send(msg);\n      return;\n    }\n\n    const parts = proofJwt.split('.');\n    if (parts.length !== 3) {\n      node.warn('[vci /credential] reject: proof.jwt has ' + parts.length + ' dot-separated parts, expected 3');\n      msg.statusCode = 400;\n      msg.headers = { 'content-type': 'application/json' };\n      msg.payload = { error: 'invalid_or_missing_proof', error_description: 'proof.jwt is not a 3-part compact JWT' };\n      node.send(msg);\n      return;\n    }\n\n    let header, payload;\n    try {\n      header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));\n      payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));\n    } catch (e) {\n      node.warn('[vci /credential] reject: could not JSON-parse proof header/payload -- ' + e.message);\n      msg.statusCode = 400;\n      msg.headers = { 'content-type': 'application/json' };\n      msg.payload = { error: 'invalid_or_missing_proof', error_description: 'proof header/payload not valid JSON' };\n      node.send(msg);\n      return;\n    }\n    node.warn('[vci /credential] proof header: ' + JSON.stringify(header));\n    node.warn('[vci /credential] proof payload: ' + JSON.stringify(payload));\n\n    let holderJwk = null;\n    if (header.jwk) {\n      holderJwk = { kty: header.jwk.kty, crv: header.jwk.crv, x: header.jwk.x, y: header.jwk.y };\n    } else if (header.kid) {\n      holderJwk = didJwkToJwk(header.kid);\n      if (!holderJwk) node.warn('[vci /credential] header.kid present but not a decodable did:jwk: ' + header.kid);\n    }\n\n    if (header.alg !== 'ES256' || !holderJwk) {\n      node.warn('[vci /credential] reject: alg=' + header.alg + ' hasJwk=' + !!header.jwk + ' kid=' + header.kid + ' resolvedHolderJwk=' + !!holderJwk);\n      msg.statusCode = 400;\n      msg.headers = { 'content-type': 'application/json' };\n      msg.payload = { error: 'invalid_or_missing_proof', error_description: 'proof header must have alg=ES256 and either an embedded jwk or a did:jwk kid' };\n      node.send(msg);\n      return;\n    }\n\n    if (payload.nonce !== tokenEntry.cNonce) {\n      const freshNonce = crypto.randomBytes(16).toString('base64url');\n      tokenEntry.cNonce = freshNonce;\n      global.set('accessTokens', accessTokens);\n      node.warn('[vci /credential] reject: nonce mismatch, rotated c_nonce');\n      msg.statusCode = 400;\n      msg.headers = { 'content-type': 'application/json' };\n      msg.payload = { error: 'invalid_proof', c_nonce: freshNonce, c_nonce_expires_in: 300 };\n      node.send(msg);\n      return;\n    }\n\n    if (payload.aud !== baseUrl) {\n      node.warn('[vci /credential] proof aud mismatch: got ' + payload.aud + ' expected ' + baseUrl);\n    }\n\n    const signingInput = parts[0] + '.' + parts[1];\n    let sigOk = false;\n    try {\n      sigOk = crypto.verify(\n        'sha256',\n        Buffer.from(signingInput),\n        { key: holderJwk, format: 'jwk', dsaEncoding: 'ieee-p1363' },\n        Buffer.from(parts[2], 'base64url')\n      );\n    } catch (e) {\n      node.warn('[vci /credential] signature verify threw: ' + e.message);\n      sigOk = false;\n    }\n    if (!sigOk) {\n      node.warn('[vci /credential] reject: proof signature did not verify against holder jwk');\n      msg.statusCode = 400;\n      msg.headers = { 'content-type': 'application/json' };\n      msg.payload = { error: 'invalid_proof', error_description: 'proof signature did not verify' };\n      node.send(msg);\n      return;\n    }\n\n    // did:jwk is just base64url(JSON(jwk)) -- self-contained, no resolver\n    // needed. Pin member order so the same key always yields the same DID.\n    const holderDidJwk = 'did:jwk:' + Buffer.from(JSON.stringify(holderJwk)).toString('base64url');\n\n    // Registry is disk-backed (boot tab) -- reconcile the in-memory counter\n    // with it after a restart so indices never get reused across a redeploy.\n    const registry = global.get('loadRegistry')();\n    let idx = global.get('statusListNextIdx');\n    if (idx === undefined || idx === null || idx < registry.length) idx = registry.length;\n    global.set('statusListNextIdx', idx + 1);\n\n    const pki = getPki();\n\n    // Paradym's SD-JWT VC verifier only supports resolving the issuer's key\n    // via a DID or x5c (\"unsupported signing method\" otherwise) -- it does\n    // not accept a bare embedded `jwk` header. did:web is the one identity\n    // both sides accept: Paradym resolves it live over HTTPS (see the PKI\n    // tab's /.well-known/did.json), and a DCS trust entry naming this DID\n    // resolves it the same way under mechanism did:web, or reads the key\n    // from its own trust file under mechanism jwks.\n    // Path-segmented when deployed under a prefix, so the DID resolves to\n    // <authority>/<segments>/did.json. Must match the PKI tab's did.json.\n    const _rest = baseUrl.replace(/^[a-z]+:\\/\\//i, '');\n    const _authority = _rest.split('/')[0];\n    const _segs = _rest.split('/').slice(1).filter(Boolean);\n    const issuerDid = 'did:web:' + encodeURIComponent(_authority) + (_segs.length ? ':' + _segs.join(':') : '');\n    const issuerKeyId = issuerDid + '#key-1';\n\n    const signer = async (data) => {\n      const sig = crypto.sign(\n        'sha256',\n        Buffer.from(data),\n        { key: crypto.createPrivateKey(pki.issuerKeyPem), dsaEncoding: 'ieee-p1363' }\n      );\n      return sig.toString('base64url');\n    };\n\n    const sdjwt = new sdjwtVc.SDJwtVcInstance({\n      signer,\n      signAlg: 'ES256',\n      hasher: sdjwtCrypto.digest,\n      hashAlg: 'sha-256',\n      saltGenerator: sdjwtCrypto.generateSalt\n    });\n\n    const realNow = await global.get('getRealWorldNowSeconds')();\n    const iat = realNow || SAFE_IAT_FALLBACK;\n\n    const claims = {\n      iss: issuerDid,\n      sub: holderDidJwk,\n      cnf: { jwk: holderJwk },\n      vct: CREDENTIAL_VCT,\n      iat,\n      exp: SAFE_EXP,\n      status: { status_list: { idx, uri: baseUrl + '/status-list/1' } },\n      organization: tokenEntry.claims.organization,\n      roles: tokenEntry.claims.roles\n    };\n    // organization + roles are selectively disclosed per DCS's claims.go\n    // (RolesFromClaims / OrganizationFromClaims read them via the standard\n    // decode+getClaims merge, so this is transparent either way -- but do it\n    // properly since the library already supports it).\n    const disclosureFrame = { _sd: ['organization', 'roles'] };\n    const jwtHeader = {\n      alg: 'ES256',\n      typ: CREDENTIAL_JWT_TYP,\n      kid: issuerKeyId\n    };\n\n    const encodedSdjwt = await sdjwt.issue(claims, disclosureFrame, { header: jwtHeader });\n\n    registry.push({\n      idx,\n      issuedAt: new Date().toISOString(),\n      claims: tokenEntry.claims,\n      holderDid: holderDidJwk,\n      revoked: false,\n      revokedAt: null\n    });\n    global.get('saveRegistry')(registry);\n\n    // Respond with both the older singular `credential` field and the\n    // newer plural `credentials` array (used when the request itself used\n    // plural `proofs`) -- an extra unused field is harmless, but a missing\n    // one that the client actually reads for is not.\n    msg.statusCode = 200;\n    msg.headers = { 'content-type': 'application/json' };\n    msg.payload = {\n      format: 'dc+sd-jwt',\n      credential: encodedSdjwt,\n      credentials: [{ credential: encodedSdjwt }]\n    };\n    node.log('[vci /credential] issued credential idx=' + idx + ' usedPluralProofs=' + usedPluralProofs);\n    node.send(msg);\n  } catch (err) {\n    node.warn('[vci /credential] unexpected error: ' + (err && err.stack || err));\n    msg.statusCode = 500;\n    msg.headers = { 'content-type': 'application/json' };\n    msg.payload = { error: 'server_error', error_description: String(err) };\n    node.send(msg);\n  }\n})();\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "fs",
+        "module": "fs"
+      },
+      {
+        "var": "sdjwtVc",
+        "module": "@sd-jwt/sd-jwt-vc"
+      },
+      {
+        "var": "sdjwtCrypto",
+        "module": "@sd-jwt/crypto-nodejs"
+      }
+    ],
+    "x": 420,
+    "y": 500,
+    "wires": [
+      [
+        "vci-resp-credential"
+      ]
+    ]
+  },
+  {
+    "id": "vci-resp-credential",
+    "type": "http response",
+    "z": "vci-tab",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 500,
+    "wires": []
+  }
+]

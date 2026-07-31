@@ -3,9 +3,13 @@ import type {
   ContractApproveRequest,
   ContractAuditRequest,
   ContractCreateRequest,
+  ContractDeployRequest,
   ContractHistoryRetrieveRequest,
+  ContractNegotiationDraftRetrieveRequest,
+  ContractNegotiationDraftSaveRequest,
   ContractNegotiationRequest,
   ContractNegotiationRespondRequest,
+  ContractOfferRequest,
   ContractRejectRequest,
   ContractRetrieveByIdRequest,
   ContractRetrieveRequest,
@@ -13,33 +17,53 @@ import type {
   ContractSearchRequest,
   ContractStoreRequest,
   ContractSubmitRequest,
+  ContractTargetDesignateRequest,
+  ContractTargetWriteRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
-} from '@/models/requests/contract-requests'
+  MachineIdentityWriteRequest,
+} from '@/models/requests/contract-request'
 import type {
+  ApprovedContractTemplateRetrieveResponse,
   ContractApproveResponse,
   ContractAuditResponse,
   ContractCreateResponse,
+  ContractDeployResponse,
   ContractHistoryResponse,
+  ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
+  ContractOfferResponse,
   ContractRejectResponse,
   ContractRetrieveResponse,
   ContractReviewResponse,
   ContractSearchResponse,
   ContractStoreResponse,
   ContractSubmitResponse,
+  ContractTarget,
   ContractTerminateResponse,
   ContractUpdateResponse,
+  MachineCredential,
+  MachineIdentity,
+  MachineIdentityCreateResponse,
 } from '@/models/responses/contract-response'
 
 export interface ContractWorkflowService {
   create: (request: ContractCreateRequest) => Promise<ContractCreateResponse>
   update: (request: ContractUpdateRequest) => Promise<ContractUpdateResponse>
+  offer: (request: ContractOfferRequest) => Promise<ContractOfferResponse>
   submit: (request: ContractSubmitRequest) => Promise<ContractSubmitResponse>
   negotiate: (request: ContractNegotiationRequest) => Promise<ContractNegotiationResponse>
+  saveNegotiationDraft: (request: ContractNegotiationDraftSaveRequest) => Promise<ContractNegotiationDraftResponse>
+  retrieveNegotiationDraft: (
+    request: ContractNegotiationDraftRetrieveRequest,
+  ) => Promise<ContractNegotiationDraftResponse>
+  deleteNegotiationDraft: (
+    request: ContractNegotiationDraftRetrieveRequest,
+  ) => Promise<ContractNegotiationDraftResponse>
   respond: (request: ContractNegotiationRespondRequest) => Promise<ContractNegotiationRespondResponse>
   review: (request: ContractReviewRequest) => Promise<ContractReviewResponse>
+  retrieveApprovedTemplates: () => Promise<ApprovedContractTemplateRetrieveResponse>
   retrieve: (request?: ContractRetrieveRequest) => Promise<ContractRetrieveResponse>
   retrieveById: (request: ContractRetrieveByIdRequest) => Promise<Contract | null>
   search: (request: ContractSearchRequest) => Promise<ContractSearchResponse>
@@ -47,17 +71,35 @@ export interface ContractWorkflowService {
   reject: (request: ContractRejectRequest) => Promise<ContractRejectResponse>
   store: (request: ContractStoreRequest) => Promise<ContractStoreResponse>
   terminate: (request: ContractTerminateRequest) => Promise<ContractTerminateResponse>
+  deploy: (request: ContractDeployRequest) => Promise<ContractDeployResponse>
+  // Contract target systems (ADR-25)
+  listTargets: () => Promise<ContractTarget[]>
+  createTarget: (request: ContractTargetWriteRequest) => Promise<ContractTarget>
+  updateTarget: (request: ContractTargetWriteRequest & { id: string }) => Promise<ContractTarget>
+  deleteTarget: (id: string) => Promise<unknown>
+  designateTarget: (request: ContractTargetDesignateRequest) => Promise<unknown>
+  /** Issues the credential a target authenticates its callbacks with. The
+   *  secret is in the response and nowhere else (ADR-27). */
+  rotateTargetSecret: (id: string) => Promise<MachineCredential>
+  listMachineIdentities: () => Promise<MachineIdentity[]>
+  createMachineIdentity: (request: MachineIdentityWriteRequest) => Promise<MachineIdentityCreateResponse>
+  updateMachineIdentity: (
+    request: MachineIdentityWriteRequest & { id: string; enabled: boolean },
+  ) => Promise<MachineIdentity>
+  deleteMachineIdentity: (id: string) => Promise<unknown>
+  rotateMachineIdentitySecret: (id: string) => Promise<MachineCredential>
   audit: (request: ContractAuditRequest) => Promise<ContractAuditResponse>
   retrieveHistoryByDid: (request: ContractHistoryRetrieveRequest) => Promise<ContractHistoryResponse>
   exportPdf: (did: string) => Promise<Blob>
+  exportBundle: (did: string) => Promise<Blob>
   verifyPdf: (did: string) => Promise<{
     match: boolean
     jsonld_hash: string
     base_pdf_hash: string
     stored_base_pdf_hash: string
     c2pa_manifest_found?: boolean
-    c2pa_signature_valid?: boolean
-    vc_proof_valid?: boolean
+    c2pa_signature_status?: string
+    vc_proof_status?: string
     status_list_uri?: string
     lifecycle_status?: string
     status_list_status?: string

@@ -1,0 +1,167 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:determinism-full-lifecycle",
+    "@type": "ContractTemplate",
+    "documentTitle": "Software Licence Agreement v2 (Amended)",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Software Licence Agreement v2 (Amended)"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#s1",
+                    "urn:doc:determinism-full-lifecycle#s2",
+                    "urn:doc:determinism-full-lifecycle#s3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s1",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c1",
+                    "urn:doc:determinism-full-lifecycle#c2",
+                    "urn:doc:determinism-full-lifecycle#s1-1",
+                    "urn:doc:determinism-full-lifecycle#s1-2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s1-1",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s1-2",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c4"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s2",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c5",
+                    "urn:doc:determinism-full-lifecycle#c6"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:determinism-full-lifecycle#s3",
+                "children": [
+                    "urn:doc:determinism-full-lifecycle#c7",
+                    "urn:doc:determinism-full-lifecycle#c8"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s1",
+                "title": "1. Grant of Licence"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c1",
+                "content": [
+                    "The Licensor grants the Licensee a non-exclusive, non-transferable licence."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c2",
+                "content": [
+                    "The licence covers use on up to fifty (50) devices."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s1-1",
+                "title": "1.1 Permitted Use"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c3",
+                "content": [
+                    "The Licensee may use the Software solely for internal business purposes."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s1-2",
+                "title": "1.2 Additional Sites"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c4",
+                "content": [
+                    "Use at additional sites requires prior written consent of the Licensor."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s2",
+                "title": "2. Restrictions"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c5",
+                "content": [
+                    "The Licensee shall not sublicense, sell, or transfer the Software."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c6",
+                "content": [
+                    "Reverse engineering is prohibited except where required by applicable law."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:determinism-full-lifecycle#s3",
+                "title": "3. Audit Rights"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c7",
+                "content": [
+                    "The Licensor may audit the Licensee's use of the Software on thirty (30) days notice."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:determinism-full-lifecycle#c8",
+                "content": [
+                    "Audits shall be conducted during normal business hours at the Licensee's premises."
+                ]
+            }
+        ]
+    },
+    "signatureFields": [
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-licensor",
+            "@id": "urn:doc:determinism-full-lifecycle#sig-licensor"
+        },
+        {
+            "@type": "SignatureField",
+            "signatoryName": "sig-licensee",
+            "@id": "urn:doc:determinism-full-lifecycle#sig-licensee"
+        }
+    ]
+}

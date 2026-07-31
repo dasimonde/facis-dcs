@@ -1,0 +1,18 @@
+{
+    "@context": {
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#"
+    },
+    "@id": "did:web:localhost:template:test-untyped-layout",
+    "@type": "dcs:ContractTemplate",
+    "dcs:documentStructure": {
+        "@id": "did:web:localhost:template:test-untyped-layout#document-structure",
+        "@type": "dcs:DocumentStructure",
+        "dcs:layout": [
+            {
+                "@id": "did:web:localhost:template:test-untyped-layout#node-root",
+                "dcs:children": { "@list": [] },
+                "dcs:isRoot": true
+            }
+        ]
+    }
+}

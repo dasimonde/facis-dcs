@@ -1,0 +1,107 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:offline-amendment",
+    "@type": "ContractTemplate",
+    "documentTitle": "Distribution Agreement",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Distribution Agreement"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:offline-amendment#s1",
+                    "urn:doc:offline-amendment#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:offline-amendment#s1",
+                "children": [
+                    "urn:doc:offline-amendment#c1",
+                    "urn:doc:offline-amendment#c2",
+                    "urn:doc:offline-amendment#s1-1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:offline-amendment#s1-1",
+                "children": [
+                    "urn:doc:offline-amendment#c3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:offline-amendment#s2",
+                "children": [
+                    "urn:doc:offline-amendment#c4",
+                    "urn:doc:offline-amendment#c5"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:offline-amendment#s1",
+                "title": "1. Grant of Rights"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:offline-amendment#c1",
+                "content": [
+                    "The Supplier grants the Distributor exclusive rights to market the Products in the Territory."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:offline-amendment#c2",
+                "content": [
+                    "The Territory is defined as the United Kingdom and the Republic of Ireland."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:offline-amendment#s1-1",
+                "title": "1.1 Sub-Distribution"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:offline-amendment#c3",
+                "content": [
+                    "The Distributor shall not appoint sub-distributors without prior written consent."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:offline-amendment#s2",
+                "title": "2. Minimum Purchase Obligations"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:offline-amendment#c4",
+                "content": [
+                    "The Distributor shall purchase no less than one thousand (1,000) units per quarter."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:offline-amendment#c5",
+                "content": [
+                    "Failure to meet the minimum triggers a right of termination in favour of the Supplier."
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,289 @@
+[
+  {
+    "id": "f1a2b3c4d5e6f7a8",
+    "type": "tab",
+    "label": "Synthetic Peer",
+    "disabled": false,
+    "info": "A did:web identity for BDD/deployment-side simulation of an untrusted peer that passes eIDAS + challenge-response (layers 1/2) but has NO agreement credential (layer 3a, ADR-19): did:web:dcs-orce%3A1880:synthetic-peer. The backend's did:web resolution (identity.DIDWebToHostname) stops at the first ':' after the host component and never uses any path segment that follows, so this identity resolves, host-and-port-wise, to this ORCE pod itself, at the bare /.well-known/ paths (NOT /synthetic-peer/.well-known/... \u2014 that prefix is never actually requested; routing there would be dead code) \u2014 mirroring instance A's real did.json (same key, so the challenge-response signature genuinely verifies) while 404ing the agreement credential.\n\nA second identity, did:web:dcs-orce-mismatch%3A1880 (ADR-19 AC5), shares this same pod via a second Kubernetes Service alias (service-synthetic-peer-mismatch.yaml, same selector/ports) and is told apart purely by the incoming request's Host header (msg.req.headers.host) in both GET handlers below: it serves a STATIC, offline-generated did.json and agreement credential (P-256 test keypair, ecdsa-rdfc-2019 Data Integrity proof \u2014 same proof shape federation.BuildAgreementCredential produces, just software-signed instead of HSM-signed; generated once with backend/cmd/gensyntheticmismatch, which is not part of the running service) whose termsOfUse.hash is deliberately wrong (sha256 of the embedded rules document plus one extra byte) \u2014 exercising the hash-mismatch rejection (AC5) without a second build.\n\nA THIRD identity, did:web:dcs-orce-trusted%3A1880 (ADR-19 AC7/AC8/AC9), shares the pod the same way (service-synthetic-peer-trusted.yaml, same Host-header routing) but publishes nothing checked in: the BDD harness mints a P-256 key pair per run, self-signs an agreement credential naming the federation rules hash the instance under test currently publishes, and pushes did.json + credential to POST /synthetic-trusted/identity. It is the only synthetic peer that PASSES the agreement-credential check (layer 3a), which is what lets an inbound scenario put the policy endpoint (layer 3b) under test on its own. Its documents are generated rather than checked in because a static credential's termsOfUse.hash stops matching the running build the moment backend/internal/base/federation/rules.md changes."
+  },
+  {
+    "id": "a2b3c4d5e6f7a8b9",
+    "type": "http in",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "GET /.well-known/did.json",
+    "url": "/.well-known/did.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 140,
+    "wires": [
+      [
+        "b3c4d5e6f7a8b9c0"
+      ]
+    ]
+  },
+  {
+    "id": "b3c4d5e6f7a8b9c0",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Route by host",
+    "func": "// Mirrors instance A's OWN did.json verbatim, including its real public\n// key, so a challenge-response signed with A's real private key genuinely\n// verifies against it (the whole point of the synthetic-peer trick) \u2014 for\n// Host dcs-orce. Host dcs-orce-mismatch (ADR-19 AC5) is a DIFFERENT,\n// static, offline-generated identity with its own P-256 test key (see the\n// tab info) and takes the second output instead of fetching A at all.\n// Host dcs-orce-trusted (ADR-19 AC7/AC8/AC9) is a third identity, generated\n// per BDD run and published through POST /synthetic-trusted/identity, and\n// takes the third output.\nconst host = (msg.req && msg.req.headers && msg.req.headers.host) || '';\nif (host.indexOf('dcs-orce-mismatch') === 0) {\n  return [null, msg, null];\n}\nif (host.indexOf('dcs-orce-trusted') === 0) {\n  return [null, null, msg];\n}\n// did.json is mounted on the root mux, OUTSIDE DCS_API_PATH (did:web\n// semantics) \u2014 DCS_URL (shared with contract-target-flow.json) carries the\n// API base path for ITS OWN callback legs, so strip any path back down to\n// the bare origin here rather than reusing it verbatim.\nconst raw = env.get('DCS_URL') || 'http://dcs-digital-contracting-service:8991';\nconst origin = (raw.match(/^https?:\\/\\/[^/]+/) || [raw])[0];\nmsg.url = origin + '/.well-known/did.json';\nmsg.method = 'GET';\nreturn [msg, null, null];",
+    "outputs": 3,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 140,
+    "wires": [
+      [
+        "c4d5e6f7a8b9c0d1"
+      ],
+      [
+        "mismatchdid0001"
+      ],
+      [
+        "trusteddid000001"
+      ]
+    ]
+  },
+  {
+    "id": "c4d5e6f7a8b9c0d1",
+    "type": "http request",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Fetch A's did.json",
+    "method": "use",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 720,
+    "y": 140,
+    "wires": [
+      [
+        "d5e6f7a8b9c0d1e2"
+      ]
+    ]
+  },
+  {
+    "id": "d5e6f7a8b9c0d1e2",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Mirror status + body",
+    "func": "msg.headers = { \"Content-Type\": \"application/did+json\" };\nif (msg.statusCode >= 200 && msg.statusCode < 300) {\n  msg.statusCode = 200;\n} else {\n  msg.statusCode = 502;\n  msg.payload = { error: \"could not fetch instance A's did.json\", upstreamStatus: msg.statusCode };\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 990,
+    "y": 140,
+    "wires": [
+      [
+        "e6f7a8b9c0d1e2f3"
+      ]
+    ]
+  },
+  {
+    "id": "e6f7a8b9c0d1e2f3",
+    "type": "http response",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 1250,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "a7b8c9d0e1f2a3b5",
+    "type": "http in",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "GET /.well-known/dcs-agreement-credential.json",
+    "url": "/.well-known/dcs-agreement-credential.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 250,
+    "y": 240,
+    "wires": [
+      [
+        "b8c9d0e1f2a3b5c6"
+      ]
+    ]
+  },
+  {
+    "id": "b8c9d0e1f2a3b5c6",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Route by host",
+    "func": "// Host dcs-orce (the plain synthetic-peer identity, AC4/AC6): no\n// agreement credential at all, 404. Host dcs-orce-mismatch (ADR-19 AC5):\n// a genuine, signature-valid static credential whose termsOfUse.hash is\n// deliberately wrong \u2014 takes the second output instead. Host\n// dcs-orce-trusted (ADR-19 AC7/AC8/AC9): the credential published for this\n// run, which does name the running build's rules hash \u2014 third output.\nconst host = (msg.req && msg.req.headers && msg.req.headers.host) || '';\nif (host.indexOf('dcs-orce-mismatch') === 0) {\n  return [null, msg, null];\n}\nif (host.indexOf('dcs-orce-trusted') === 0) {\n  return [null, null, msg];\n}\nmsg.statusCode = 404;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = { error: \"synthetic peer publishes no agreement credential\" };\nreturn [msg, null, null];",
+    "outputs": 3,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 620,
+    "y": 240,
+    "wires": [
+      [
+        "c9d0e1f2a3b5c6d7"
+      ],
+      [
+        "mismatchcred0001"
+      ],
+      [
+        "trustedcred00001"
+      ]
+    ]
+  },
+  {
+    "id": "c9d0e1f2a3b5c6d7",
+    "type": "http response",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 900,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "mismatchdid0001",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Static mismatch did.json",
+    "func": "// Offline-generated, checked-in static asset (ADR-19 AC5) \u2014 a genuine\n// P-256 TEST keypair with no relation to any instance's real HSM-held\n// identity, generated once via backend/cmd/gensyntheticmismatch (not part\n// of the running service) and pasted here verbatim.\nconst MISMATCH_DID_DOCUMENT = {\"@context\":[\"https://www.w3.org/ns/did/v1\",\"https://w3id.org/security/suites/jws-2020/v1\"],\"assertionMethod\":[\"did:web:dcs-orce-mismatch%3A1880#dev-key-1\",\"did:web:dcs-orce-mismatch%3A1880#dcs-vc\"],\"id\":\"did:web:dcs-orce-mismatch%3A1880\",\"verificationMethod\":[{\"controller\":\"did:web:dcs-orce-mismatch%3A1880\",\"id\":\"did:web:dcs-orce-mismatch%3A1880#dev-key-1\",\"publicKeyJwk\":{\"alg\":\"ES256\",\"crv\":\"P-256\",\"kid\":\"dev-key-1\",\"kty\":\"EC\",\"x\":\"qkKH5CWrPWFEcBvF5urE7wr27xCbdP1oEnS_0R82zbI\",\"x5c\":[\"MIIBxjCCAW2gAwIBAgIIGMTtpTRS7qowCgYIKoZIzj0EAwIwQTELMAkGA1UEBhMCREUxETAPBgNVBAoTCERDUyBUZXN0MR8wHQYDVQQDExZkY3Mtb3JjZS1taXNtYXRjaDoxODgwMB4XDTI2MDcyMzEyMTcyNloXDTM2MDcyMzEzMTcyNlowQTELMAkGA1UEBhMCREUxETAPBgNVBAoTCERDUyBUZXN0MR8wHQYDVQQDExZkY3Mtb3JjZS1taXNtYXRjaDoxODgwMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqkKH5CWrPWFEcBvF5urE7wr27xCbdP1oEnS/0R82zbIoNEaFwZ7CziCPs8kHAQES8uI//0wqtr9w/9q1ZRyKi6NPME0wDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAcBgNVHREEFTATghFkY3Mtb3JjZS1taXNtYXRjaDAKBggqhkjOPQQDAgNHADBEAiBFyHKMSqgaJrpgw3ssi+chF8gINtn1ITSsuHQWykhi0gIgU2ZQWoL+o4DNufIZ78tNKwHNCSCXyRbEe4nRpMibF5U=\"],\"y\":\"KDRGhcGews4gj7PJBwEBEvLiP_9MKra_cP_atWUcios\"},\"type\":\"JsonWebKey2020\"},{\"controller\":\"did:web:dcs-orce-mismatch%3A1880\",\"id\":\"did:web:dcs-orce-mismatch%3A1880#dcs-vc\",\"publicKeyJwk\":{\"alg\":\"ES256\",\"crv\":\"P-256\",\"kid\":\"dcs-vc\",\"kty\":\"EC\",\"x\":\"qkKH5CWrPWFEcBvF5urE7wr27xCbdP1oEnS_0R82zbI\",\"x5c\":[\"MIIBxjCCAW2gAwIBAgIIGMTtpTRS7qowCgYIKoZIzj0EAwIwQTELMAkGA1UEBhMCREUxETAPBgNVBAoTCERDUyBUZXN0MR8wHQYDVQQDExZkY3Mtb3JjZS1taXNtYXRjaDoxODgwMB4XDTI2MDcyMzEyMTcyNloXDTM2MDcyMzEzMTcyNlowQTELMAkGA1UEBhMCREUxETAPBgNVBAoTCERDUyBUZXN0MR8wHQYDVQQDExZkY3Mtb3JjZS1taXNtYXRjaDoxODgwMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqkKH5CWrPWFEcBvF5urE7wr27xCbdP1oEnS/0R82zbIoNEaFwZ7CziCPs8kHAQES8uI//0wqtr9w/9q1ZRyKi6NPME0wDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAcBgNVHREEFTATghFkY3Mtb3JjZS1taXNtYXRjaDAKBggqhkjOPQQDAgNHADBEAiBFyHKMSqgaJrpgw3ssi+chF8gINtn1ITSsuHQWykhi0gIgU2ZQWoL+o4DNufIZ78tNKwHNCSCXyRbEe4nRpMibF5U=\"],\"y\":\"KDRGhcGews4gj7PJBwEBEvLiP_9MKra_cP_atWUcios\"},\"type\":\"JsonWebKey2020\"}]};\nmsg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/did+json\" };\nmsg.payload = MISMATCH_DID_DOCUMENT;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 190,
+    "wires": [
+      [
+        "e6f7a8b9c0d1e2f3"
+      ]
+    ]
+  },
+  {
+    "id": "mismatchcred0001",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Static mismatch agreement credential",
+    "func": "// Offline-generated, checked-in static asset (ADR-19 AC5): a self-signed\n// W3C Verifiable Credential (ecdsa-rdfc-2019 Data Integrity proof, same\n// shape federation.BuildAgreementCredential produces) signed with the\n// SAME P-256 test key published as this identity's did.json second\n// verificationMethod (so the signature genuinely verifies), whose\n// termsOfUse.hash is sha256(the embedded rules document + one extra\n// byte) \u2014 deliberately wrong, not the instance's real federation.Hash().\n// Generated once via backend/cmd/gensyntheticmismatch and pasted here\n// verbatim; not part of the running service.\nconst MISMATCH_AGREEMENT_CREDENTIAL = {\"@context\":[\"https://www.w3.org/ns/credentials/v2\",\"https://w3id.org/security/data-integrity/v2\",{\"FederationAgreementCredential\":\"dcs:FederationAgreementCredential\",\"TrustFrameworkPolicy\":\"dcs:TrustFrameworkPolicy\",\"dcs\":\"https://w3id.org/facis/dcs/ontology/v1#\",\"hash\":\"dcs:rulesHash\",\"policyId\":{\"@id\":\"dcs:policyId\",\"@type\":\"@id\"}}],\"credentialSubject\":{\"id\":\"did:web:dcs-orce-mismatch%3A1880\"},\"id\":\"urn:dcs:vc:cba77f1d15a39e3cb05889c8344ac427c6a4893f609d428bbede0e5997ca67c8\",\"issuer\":\"did:web:dcs-orce-mismatch%3A1880\",\"proof\":{\"created\":\"2026-07-23T13:17:26Z\",\"cryptosuite\":\"ecdsa-rdfc-2019\",\"proofPurpose\":\"assertionMethod\",\"proofValue\":\"z25jS5ctcsnXZNjgYMnk96hBAXCj6Le452FQRNitNqRVVjt9iPN2gB3hxUToM3RCPhUWAiKQucVHGPWM6gVgFakC4\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:web:dcs-orce-mismatch%3A1880#dcs-vc\"},\"termsOfUse\":{\"hash\":\"b7ca5b79b22d8e3189c13a3dd82f08e7ed069189392698f1f48944d71dfecc1e\",\"policyId\":\"http://dcs-orce-mismatch:1880/.well-known/dcs-federation-rules.md\",\"type\":\"TrustFrameworkPolicy\"},\"type\":[\"VerifiableCredential\",\"FederationAgreementCredential\"],\"validFrom\":\"2026-07-23T13:17:26Z\"};\nmsg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = MISMATCH_AGREEMENT_CREDENTIAL;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 630,
+    "y": 290,
+    "wires": [
+      [
+        "c9d0e1f2a3b5c6d7"
+      ]
+    ]
+  },
+  {
+    "id": "trusteddid000001",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Published trusted did.json",
+    "func": "// Serves the did.json the harness published for this run (see the \"Store\n// published trusted identity\" node). Nothing is checked in for this\n// identity: its agreement credential has to name the RUNNING build's\n// federation rules hash, which a static asset stops doing the day\n// federation/rules.md changes.\nconst published = flow.get('trusted_identity');\nmsg.headers = { \"Content-Type\": \"application/did+json\" };\nif (!published || !published.didDocument) {\n  msg.statusCode = 404;\n  msg.payload = { error: \"no trusted synthetic peer identity published \u2014 POST /synthetic-trusted/identity first\" };\n} else {\n  msg.statusCode = 200;\n  msg.payload = published.didDocument;\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 340,
+    "wires": [
+      [
+        "e6f7a8b9c0d1e2f3"
+      ]
+    ]
+  },
+  {
+    "id": "trustedcred00001",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Published trusted agreement credential",
+    "func": "// Serves the agreement credential the harness published for this run: it is\n// issued by this identity's own DID, signed with the VC key the did.json\n// above publishes, and names the running build's federation rules hash \u2014 so\n// the receiving instance's layer-3a check passes and the PDP is the only\n// gate left (ADR-19 AC7/AC8/AC9).\nconst published = flow.get('trusted_identity');\nmsg.headers = { \"Content-Type\": \"application/json\" };\nif (!published || !published.agreementCredential) {\n  msg.statusCode = 404;\n  msg.payload = { error: \"no trusted synthetic peer identity published \u2014 POST /synthetic-trusted/identity first\" };\n} else {\n  msg.statusCode = 200;\n  msg.payload = published.agreementCredential;\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 390,
+    "wires": [
+      [
+        "c9d0e1f2a3b5c6d7"
+      ]
+    ]
+  },
+  {
+    "id": "trustedin0000001",
+    "type": "http in",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "POST /synthetic-trusted/identity",
+    "url": "/synthetic-trusted/identity",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 450,
+    "wires": [
+      [
+        "trustedstore0001"
+      ]
+    ]
+  },
+  {
+    "id": "trustedstore0001",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "Store published trusted identity",
+    "func": "// Control surface for the dcs-orce-trusted identity: the BDD harness mints a\n// P-256 key pair, self-signs the agreement credential over the rules hash the\n// instance under test currently publishes, and pushes both documents here.\nconst body = msg.payload || {};\nmsg.headers = { \"Content-Type\": \"application/json\" };\nif (!body.didDocument || !body.didDocument.id || !body.agreementCredential) {\n  msg.statusCode = 400;\n  msg.payload = { error: \"expected {didDocument: {id, ...}, agreementCredential: {...}}\" };\n  return msg;\n}\nflow.set('trusted_identity', {\n  didDocument: body.didDocument,\n  agreementCredential: body.agreementCredential\n});\nmsg.statusCode = 200;\nmsg.payload = { published: body.didDocument.id };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 580,
+    "y": 450,
+    "wires": [
+      [
+        "trustedresp00001"
+      ]
+    ]
+  },
+  {
+    "id": "trustedresp00001",
+    "type": "http response",
+    "z": "f1a2b3c4d5e6f7a8",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 900,
+    "y": 450,
+    "wires": []
+  }
+]

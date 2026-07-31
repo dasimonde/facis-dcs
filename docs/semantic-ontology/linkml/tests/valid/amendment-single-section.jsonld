@@ -1,0 +1,51 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:amendment-base",
+    "@type": "ContractTemplate",
+    "documentTitle": "Amendment Test Document",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Amendment Test Document"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:amendment-base#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:amendment-base#s1",
+                "children": [
+                    "urn:doc:amendment-base#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:amendment-base#s1",
+                "title": "1. Original Terms"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:amendment-base#c1",
+                "content": [
+                    "Original clause established at document creation."
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,258 @@
+@prefix dcs:  <https://w3id.org/facis/dcs/ontology/v1#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# Clause catalog (DCS-FR-TR-03/TR-04, Phase 3 / ADR-10): typed clause
+# instances the template builder's palette generates a form from
+# (GET /semantic/clauses) and server-side validation checks the same way it
+# checks the rest of a contract's SHACL shapes (concatenated with the
+# canonical shapes graph — see validateAgainstHubShapes, ADR-9). One source
+# of truth: authoring a clause type here changes both the generated form and
+# what's enforced. Versions independently of the canonical shapes
+# (kind="shapes", name="clause-catalog" vs. name="facis-dcs").
+#
+# This file is also the DECLARATION of the terms below — dcs:PaymentClause,
+# dcs:amount, dcs:currency, dcs:dueDays, dcs:invoiceReference. There is no
+# ontology to look them up in and there is deliberately not going to be one:
+# a property shape already carries the datatype, the permitted values, the
+# bounds, the name and the description, so a second declaration elsewhere
+# could only repeat it or contradict it. sh:name and sh:description are what
+# a reader and a generated form both read.
+#
+# These are also the only value constraints in the system that are enforced.
+# The dcs:pattern / dcs:minInclusive / dcs:allowedValue in
+# facis-sla-ontology.ttl drive form widgets and a client-side check; the
+# sh:pattern / sh:in / sh:minInclusive here are compared against submitted
+# values by the SHACL engine at offer, submit and sign.
+
+dcs:PaymentClauseShape
+  a sh:NodeShape ;
+  sh:targetClass dcs:PaymentClause ;
+  rdfs:label "Payment terms" ;
+  sh:property [
+    sh:path dcs:amount ;
+    sh:datatype xsd:integer ;
+    sh:minInclusive 0 ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:currency ;
+    sh:datatype xsd:string ;
+    sh:in ( "EUR" "USD" ) ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:dueDays ;
+    sh:datatype xsd:integer ;
+    sh:minInclusive 0 ;
+    sh:maxInclusive 365 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:invoiceReference ;
+    sh:datatype xsd:string ;
+    sh:pattern "^INV-[0-9]{4,}$" ;
+    sh:maxCount 1 ;
+  ] .
+
+# Hub-templated ODRL: the obligation rule shape the builder derives ODRL
+# from (shacl-form renders it; the same shape validates every odrl:Duty a
+# document carries, since this catalog concatenates into the enforcement
+# graph). Prose backing (dcs:prose) is enforced by the canonical shapes.
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+# The action vocabulary every ODRL rule draws from, whatever its deontic
+# type: the ODRL 2.2 core actions the DCS ODRL profile imports
+# (owl:imports <http://www.w3.org/ns/odrl/2/>) plus the actions that profile
+# itself declares. ODRL 2.2 attaches no action restriction to a rule's
+# deontic type — odrl:compensate is the specification's own archetypal Duty
+# action — so Permission, Prohibition and Duty share one list rather than
+# three hand-picked subsets. Named (rather than inlined three times) so the
+# permitted set cannot drift between rule types; it is kept identical to the
+# authoring UI's ODRL_ACTIONS by a parity test, since a term the picker
+# offers but this list omits yields a template no contract can ever satisfy.
+dcs:odrlActionVocabulary
+  rdf:first dcs:provideCompliantValue ;
+  rdf:rest (
+    odrl:use odrl:transfer odrl:grantUse odrl:acceptTracking odrl:aggregate
+    odrl:annotate odrl:anonymize odrl:archive odrl:attribute odrl:compensate
+    odrl:concurrentUse odrl:delete odrl:derive odrl:digitize odrl:display
+    odrl:distribute odrl:ensureExclusivity odrl:execute odrl:extract odrl:give
+    odrl:include odrl:index odrl:inform odrl:install odrl:modify odrl:move
+    odrl:nextPolicy odrl:obtainConsent odrl:play odrl:present odrl:print
+    odrl:read odrl:reproduce odrl:reviewPolicy odrl:sell odrl:stream
+    odrl:synchronize odrl:textToSpeech odrl:transform odrl:translate
+    odrl:uninstall odrl:watermark
+  ) .
+
+dcs:OdrlObligationShape
+  a sh:NodeShape ;
+  sh:targetClass odrl:Duty ;
+  rdfs:label "ODRL Obligation" ;
+  sh:property [
+    sh:path odrl:action ;
+    sh:name "Action" ;
+    sh:description "What the assignee is obliged to do." ;
+    sh:order 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:in dcs:odrlActionVocabulary ;
+  ] ;
+  sh:property [
+    sh:path odrl:constraint ;
+    sh:name "Constraint" ;
+    sh:order 2 ;
+    sh:or ( dcs:OdrlConstraintShape dcs:OdrlLogicalConstraintShape ) ;
+  ] .
+
+# Grants and bans (the SRS Appendix C agreement — API access for named
+# parties under spatial/temporal constraints — is an odrl:Permission carrying
+# odrl:spatial / odrl:dateTime constraints; nothing about it is code, it is
+# all expressible through these hub-served shapes).
+
+dcs:OdrlPermissionShape
+  a sh:NodeShape ;
+  sh:targetClass odrl:Permission ;
+  rdfs:label "ODRL Permission" ;
+  sh:property [
+    sh:path odrl:action ;
+    sh:name "Action" ;
+    sh:description "What the assignees are permitted to do." ;
+    sh:order 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:in dcs:odrlActionVocabulary ;
+  ] ;
+  sh:property [
+    sh:path odrl:assigner ;
+    sh:name "Assigner" ;
+    sh:description "The party granting the permission (IRI)." ;
+    sh:order 2 ;
+    sh:nodeKind sh:IRI ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path odrl:assignee ;
+    sh:name "Assignees" ;
+    sh:description "The parties receiving the permission (one IRI per party)." ;
+    sh:order 3 ;
+    sh:nodeKind sh:IRI ;
+  ] ;
+  sh:property [
+    sh:path odrl:target ;
+    sh:name "Target asset" ;
+    sh:description "The asset the permission applies to (IRI)." ;
+    sh:order 4 ;
+    sh:nodeKind sh:IRI ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path odrl:constraint ;
+    sh:name "Constraints" ;
+    sh:order 5 ;
+    sh:or ( dcs:OdrlConstraintShape dcs:OdrlLogicalConstraintShape ) ;
+  ] .
+
+dcs:OdrlProhibitionShape
+  a sh:NodeShape ;
+  sh:targetClass odrl:Prohibition ;
+  rdfs:label "ODRL Prohibition" ;
+  sh:property [
+    sh:path odrl:action ;
+    sh:name "Action" ;
+    sh:description "What the assignees are prohibited from doing." ;
+    sh:order 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:in dcs:odrlActionVocabulary ;
+  ] ;
+  sh:property [
+    sh:path odrl:assigner ;
+    sh:name "Assigner" ;
+    sh:order 2 ;
+    sh:nodeKind sh:IRI ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path odrl:assignee ;
+    sh:name "Assignees" ;
+    sh:order 3 ;
+    sh:nodeKind sh:IRI ;
+  ] ;
+  sh:property [
+    sh:path odrl:target ;
+    sh:name "Target asset" ;
+    sh:order 4 ;
+    sh:nodeKind sh:IRI ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path odrl:constraint ;
+    sh:name "Constraints" ;
+    sh:order 5 ;
+    sh:or ( dcs:OdrlConstraintShape dcs:OdrlLogicalConstraintShape ) ;
+  ] .
+
+# An atomic constraint, reached through a rule's odrl:constraint. Deliberately
+# not targeted by class: that would newly validate constraints nested inside a
+# logical tree, and a clause-catalog change applies retroactively to every
+# stored document (HubShapeSource.ShapesAt resolves the ACTIVE catalog whatever
+# version a document pins), so only relaxations are safe to make here.
+dcs:OdrlConstraintShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path odrl:leftOperand ;
+    sh:name "Left operand" ;
+    sh:description "What the constraint governs: an ODRL left operand (odrl:spatial, odrl:dateTime, ...) or a contract-data field (dcs:ContractField IRI)." ;
+    sh:order 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path odrl:operator ;
+    sh:name "Operator" ;
+    sh:order 2 ;
+    sh:nodeKind sh:IRI ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    # Every ODRL 2.2 relational and set operator the policy engine evaluates
+    # (opaodrl.go, whose Rego is parity-tested against the Go pass). isA,
+    # hasPart, isPartOf and isAllOf were implemented and offered by the
+    # authoring UI but omitted here, so a rule using one validated as
+    # non-conformant despite being evaluable. dcs:matchesRegex is deliberately
+    # absent: it is a dcs:ValueConstraint operator, not an odrl:Constraint one.
+    sh:in ( odrl:eq odrl:neq odrl:gt odrl:gteq odrl:lt odrl:lteq
+            odrl:isA odrl:hasPart odrl:isPartOf odrl:isAllOf
+            odrl:isAnyOf odrl:isNoneOf ) ;
+  ] ;
+  sh:property [
+    sh:path odrl:rightOperand ;
+    sh:name "Required value" ;
+    sh:order 3 ;
+    sh:minCount 1 ;
+  ] .
+
+# A logical constraint combines other constraints (ODRL IM 2.6). It carries
+# none of leftOperand/operator/rightOperand, so requiring the atomic shape of
+# every odrl:constraint value rejected every and/or/xone tree the authoring UI
+# can build — while the policy engine evaluated those trees correctly
+# (odrlexpanded.go). Rules therefore accept either shape. Tree members are not
+# themselves validated yet; doing so needs class targeting, which is a
+# tightening and so belongs with a version bump rather than here.
+dcs:OdrlLogicalConstraintShape
+  a sh:NodeShape ;
+  rdfs:label "ODRL Logical Constraint" ;
+  sh:or (
+    [ sh:property [ sh:path odrl:and ; sh:minCount 1 ] ]
+    [ sh:property [ sh:path odrl:or ; sh:minCount 1 ] ]
+    [ sh:property [ sh:path odrl:xone ; sh:minCount 1 ] ]
+    [ sh:property [ sh:path odrl:andSequence ; sh:minCount 1 ] ]
+  ) .

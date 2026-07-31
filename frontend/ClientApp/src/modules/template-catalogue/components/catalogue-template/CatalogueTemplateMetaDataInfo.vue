@@ -1,3 +1,10 @@
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+
+const { customMetaData } = storeToRefs(useDcsDraftStore())
+</script>
+
 <template>
   <div class="card border border-base-300 bg-base-100 shadow-sm">
     <div class="card-body">
@@ -24,10 +31,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { storeToRefs } from 'pinia'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-
-const { customMetaData } = storeToRefs(useTemplateDraftStore())
-</script>

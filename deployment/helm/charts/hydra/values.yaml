@@ -13,7 +13,11 @@ service:
 config:
   # For production, use a persistent DSN (for example PostgreSQL).
   dsn: "memory"
+  # REQUIRED: public-facing base URL browsers use to reach Hydra (e.g. https://dcs.example.com).
+  # Hydra stamps this into every redirect_to URL it returns, so it must be externally reachable.
+  # Route Hydra's public paths (/oauth2, /.well-known) through the parent ingress via route.paths.
   selfIssuerURL: ""
+  internalIssuerURL: ""
   loginURL: ""
   consentURL: ""
   logoutURL: ""
@@ -23,8 +27,21 @@ config:
   # Never set to true in production.
   dev: false
 
+# Paths on the parent chart's ingress to proxy to Hydra's public port.
+# The parent ingress must be enabled (ingress.enabled=true) for these to take effect.
+route:
+  paths:
+    - /oauth2
+    - /.well-known
+
 secrets:
   # Required for non-dev deployments. Leave empty for generated fallback.
   system: ""
 
 resources: {}
+
+# Sizes the client-registration hook Job, a separate pod from the server. Falls
+# back to `resources` when unset; set it on namespaces with a limits.cpu quota,
+# where an unsized hook inherits the LimitRange default and is refused once the
+# release's own containers consume the quota.
+jobResources: {}

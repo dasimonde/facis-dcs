@@ -1,27 +1,45 @@
 image:
   repository: quay.io/keycloak/keycloak
-  tag: "26.0"
+  tag: "26.6.0@sha256:b0e5dbced1775de4d629f103c0a9cfc057decc62ce8d3cb1c54f8849a6c6eb62"
   pullPolicy: IfNotPresent
+
+replicas: 1
 
 service:
   type: ClusterIP
   port: 8080
+  # Pin the port when type is NodePort, so a backend running outside the
+  # cluster (dev-stack.sh runs it under air on the host) has a fixed address
+  # to put in its .env rather than whatever the scheduler picks.
   nodePort: null
   annotations: {}
-  loadBalancerIP: ""
-  externalTrafficPolicy: ""
 
-# Route path when Keycloak is behind a reverse proxy at a subpath (e.g., "/auth").
-# Sets KC_HTTP_RELATIVE_PATH automatically.
+# Legacy "/auth" context path — kept so every already-working fixed URL
+# elsewhere in this chart (fc-realm-provision-job.yaml's KC_BASE_URL,
+# fc-service's KEYCLOAK_AUTH_SERVER_URL, values.bdd.yml's
+# fcKeycloak.realmURL) keeps resolving unchanged. Empty = Keycloak's modern
+# root ("/") context path.
 route:
-  path: ""
+  path: "auth"
+
+# Public hostname Keycloak reports to clients (KC_HOSTNAME) and the reverse
+# proxy (ingress) is served on. Required to be a real, externally reachable
+# https URL for wallet/browser OIDC flows — see deployment/README.md
+# and the fc-service-side issuer wiring in ../federated-catalogue.
+hostname: ""
+
+# KC_PROXY_HEADERS=xforwarded (trust X-Forwarded-* from the ingress) and
+# KC_CACHE=local (single replica — the clustered ispn/JGroups cache this
+# image defaults to is unneeded complexity and fails to form without a
+# JGroups discovery mechanism in-cluster) are always set, not values-gated —
+# see templates/deployment.yaml.
 
 ingress:
   enabled: false
   className: ""
   annotations: {}
   host: ""
-  path: "/"
+  path: "/auth"
   pathType: Prefix
   tls: []
 
@@ -29,16 +47,23 @@ auth:
   adminUser: admin
   adminPassword: admin
 
-extraEnv: []
+database:
+  hostname: "fc-postgres"
+  port: 5432
+  name: "keycloak"
+  username: "keycloak"
+  existingSecret: "fc-postgres"
+  existingSecretPasswordKey: "password"
 
-# Realm import configuration.
-# When enabled, imports the gaia-x realm with pre-configured clients (federated-catalogue, dcs-client) and roles on startup.
+# federated-catalogue-realm, imported via the parent chart's Admin-API Job
+# (fc-realm-provision-job.yaml) rather than boot-time --import-realm, which
+# hits a confirmed unresolved upstream Keycloak bug for realm files this
+# size (keycloak/keycloak#37745, silent partial import, no error logged).
+# This chart still publishes the realm-configmap the Job reads from —
+# see templates/realm-configmap.yaml and files/fc-realm.json.
 realm:
-  import: false
-  dcsClient:
-    redirectUris:
-      - "*"
-    webOrigins:
-      - "*"
+  name: "federated-catalogue-realm"
+
+extraEnv: []
 
 resources: {}

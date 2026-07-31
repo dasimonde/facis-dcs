@@ -1,0 +1,26 @@
+{{- /*
+Service alias for the ADR-19 AC5 "mismatched federation rules" synthetic peer
+(did:web:{{ .Release.Name }}-orce-mismatch%3A1880): same selector/ports as the
+primary orce Service (service.yaml) — same pod, same Node-RED process — so
+the synthetic-peer-flow.json flow can tell the two identities apart purely by
+the incoming request's Host header (msg.req.headers.host), without any
+runtime crypto or a second deployment. ClusterIP only: this identity is
+resolved in-cluster, by the backend pod's own did:web fetch, never from
+outside the cluster.
+*/}}
+{{- if .Values.syntheticPeer.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-orce-mismatch
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.service.port | default 1880 }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: orce
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

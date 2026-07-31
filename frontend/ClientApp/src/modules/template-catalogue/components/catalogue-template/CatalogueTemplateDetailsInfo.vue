@@ -1,3 +1,11 @@
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { TemplateType } from '@template-repository/models/contract-template'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+
+const { templateType, name, description, version } = storeToRefs(useDcsDraftStore())
+</script>
+
 <template>
   <div class="card border border-base-300 bg-base-100 shadow-sm">
     <div class="card-body">
@@ -14,20 +22,26 @@
           <div class="mt-1 grid grid-cols-2 gap-3">
             <div
               class="pointer-events-none card border-2 transition-all"
-              :class="templateType === TemplateType.frameContract ? 'border-primary bg-primary/5' : 'border-base-300'"
+              :class="
+                templateType === TemplateType.contractTemplate ? 'border-primary bg-primary/5' : 'border-base-300'
+              "
             >
               <div class="card-body gap-1 p-4">
-                <span class="card-title text-sm">Frame Contract</span>
-                <p class="text-xs font-normal text-base-content/60">Top-level agreement that groups subcontracts</p>
+                <span class="card-title text-sm">Contract</span>
+                <p class="text-xs font-normal text-base-content/60">
+                  Top-level contract template that can serve as parent
+                </p>
               </div>
             </div>
             <div
               class="pointer-events-none card border-2 transition-all"
-              :class="templateType === TemplateType.subContract ? 'border-primary bg-primary/5' : 'border-base-300'"
+              :class="templateType === TemplateType.component ? 'border-primary bg-primary/5' : 'border-base-300'"
             >
               <div class="card-body gap-1 p-4">
-                <span class="card-title text-sm">Subcontract</span>
-                <p class="text-xs font-normal text-base-content/60">Scoped agreement under a frame contract</p>
+                <span class="card-title text-sm">Component</span>
+                <p class="text-xs font-normal text-base-content/60">
+                  Reusable partial contract, embeddable in other templates
+                </p>
               </div>
             </div>
           </div>
@@ -46,11 +60,3 @@
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { storeToRefs } from 'pinia'
-import { TemplateType } from '@template-repository/models/contract-template'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-
-const { templateType, name, description, version } = storeToRefs(useTemplateDraftStore())
-</script>

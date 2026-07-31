@@ -1,0 +1,51 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:manifest-extract",
+    "@type": "ContractTemplate",
+    "documentTitle": "Manifest Extract Test",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Manifest Extract Test"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:manifest-extract#s1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:manifest-extract#s1",
+                "children": [
+                    "urn:doc:manifest-extract#c1"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:manifest-extract#s1",
+                "title": "1. Content"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:manifest-extract#c1",
+                "content": [
+                    "Extract the manifest."
+                ]
+            }
+        ]
+    }
+}

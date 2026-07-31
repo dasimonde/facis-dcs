@@ -1,3 +1,9 @@
+// Package command implements the write-side CQRS use cases for the template
+// repository: one file per Goa endpoint. Templates use copy-on-version
+// (see copy.go, register.go): every version is its own row/DID linked by a
+// base_template lineage key, unlike contractworkflowengine's contracts,
+// which mutate a single row in place and keep history in a separate table
+// (see ADR-0006 for the rationale).
 package command
 
 import (

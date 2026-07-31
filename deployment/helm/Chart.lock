@@ -2,29 +2,29 @@ dependencies:
 - name: postgresql
   repository: file://charts/postgresql
   version: 0.1.0
-- name: keycloak
-  repository: file://charts/keycloak
-  version: 0.1.0
 - name: hydra
   repository: file://charts/hydra
   version: 0.1.0
 - name: nats
   repository: file://charts/nats
   version: 0.1.0
-- name: neo4j
-  repository: file://charts/neo4j
-  version: 0.1.0
 - name: orce
   repository: file://charts/orce
+  version: 0.1.0
+- name: dss
+  repository: file://charts/dss
   version: 0.1.0
 - name: federated-catalogue
   repository: file://charts/federated-catalogue
   version: 0.1.0
-- name: custom-policy-agent
-  repository: file://charts/custom-policy-agent
+- name: keycloak
+  repository: file://charts/keycloak
   version: 0.1.0
-- name: mongodb
-  repository: file://charts/mongodb
+- name: fuseki
+  repository: file://charts/fuseki
+  version: 0.1.0
+- name: fc-postgres
+  repository: file://charts/fc-postgres
   version: 0.1.0
 - name: ipfs
   repository: file://charts/ipfs
@@ -32,17 +32,14 @@ dependencies:
 - name: ipfs-document-manager
   repository: file://charts/ipfs-document-manager
   version: 0.1.0
-- name: crypto-provider
-  repository: file://charts/crypto-provider
-  version: 0.1.0
 - name: statuslist-service
   repository: file://charts/statuslist-service
   version: 0.1.0
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 85.2.0
-- name: vault
-  repository: https://helm.releases.hashicorp.com
-  version: 0.27.0
-digest: sha256:5a0ce1e31a44b6a0c6e6fd03d2e1b50e1711f50916bb01f9cd41d4ac8d19b3ee
-generated: "2026-06-10T10:04:21.347257716+02:00"
+- name: traefik
+  repository: https://traefik.github.io/charts
+  version: 41.0.0
+digest: sha256:0e5a5847ec037dbb031a3098dbe320c51a3cb237bd310ce877b4f2e6f08688c8
+generated: "2026-07-30T15:40:27.652447149+02:00"

@@ -1,8 +1,9 @@
+import axios, { AxiosError } from 'axios'
 import { getConfig } from '@/config'
 import { authenticationService } from '@/services/authentication-service'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useErrorStore } from '@/stores/error-store'
-import axios, { AxiosError } from 'axios'
+import { bindReportedHttpError } from '@/utils/report-action-error'
 
 const http = axios.create({
   baseURL: getConfig().API_BASE_URL,
@@ -28,7 +29,8 @@ http.interceptors.response.use(
       }
     }
     const message = axios.isAxiosError(err) ? (err.response?.data?.message ?? err.message) : err.message
-    errorStore.add(String(message))
+    const messageId = errorStore.add(String(message))
+    bindReportedHttpError(err, messageId)
     return Promise.reject(err)
   },
 )

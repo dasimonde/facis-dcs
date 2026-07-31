@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fc-postgres
+description: PostgreSQL backing store shared by the owned Federated Catalogue (fc-service) and its Keycloak
+type: application
+version: 0.1.0
+appVersion: "16"

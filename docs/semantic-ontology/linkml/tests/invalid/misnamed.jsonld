@@ -1,0 +1,21 @@
+{
+    "@context": {
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#"
+    },
+    "@id": "did:web:localhost:template:test-misnamed",
+    "@type": "dcs:ContractTemplate",
+    "dcs:contractData": [
+        {
+            "@id": "did:web:localhost:template:test-misnamed#field-1",
+            "@type": "dcs:ContractTemplate",
+            "dcs:label": "Contract Jurisdiction",
+            "dcs:datatype": "xsd:string",
+            "dcs:required": true
+        }
+    ],
+    "dcs:metadata": {
+        "@id": "did:web:localhost:template:test-misnamed#metadata",
+        "@type": "dcs:TemplateMetadata",
+        "dcs:title": "misnamed contract-data node"
+    }
+}

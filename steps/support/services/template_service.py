@@ -10,6 +10,9 @@ from steps.support.services.auth_service import AuthService
 class TemplateService: 
     """Service class for template-related operations."""
 
+    CONTRACT_TEMPLATE_TYPE = "CONTRACT_TEMPLATE"
+    COMPONENT_TEMPLATE_TYPE = "COMPONENT"
+
     @staticmethod
     def template_env_key(name: str) -> str:
         normalized = re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper()
@@ -20,10 +23,47 @@ class TemplateService:
     def template_type_for_category(category: str) -> str:
         category_key = category.strip().lower()
         return {
-            "legal": "FRAME_CONTRACT",
-            "procurement": "SUB_CONTRACT",
+            "legal": TemplateService.CONTRACT_TEMPLATE_TYPE,
+            "procurement": TemplateService.COMPONENT_TEMPLATE_TYPE,
         }.get(category_key, category.strip().upper().replace(" ", "_"))
 
+    @staticmethod
+    def canonical_document_data(title: str, clause_text: str = "Confidentiality clause", document_type: str = "dcs:ContractTemplate") -> dict:
+        """Build the canonical dcs:documentStructure envelope (single fixture
+        source for template_data/contract_data across all step modules — the
+        flat {"title", "clauses"} shape is rejected by
+        NormalizeTemplateData/NormalizeContractData, see
+        backend/internal/base/validation/documentdata.go isCanonicalEnvelope).
+        """
+        metadata_type = "dcs:ContractMetadata" if document_type == "dcs:Contract" else "dcs:TemplateMetadata"
+        return {
+            "@context": {"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
+            "@type": document_type,
+            "dcs:metadata": {
+                "@type": metadata_type,
+                "dcs:title": title,
+            },
+            "dcs:documentStructure": {
+                "@type": "dcs:DocumentStructure",
+                "dcs:blocks": {
+                    "@list": [
+                        {
+                            "@id": "urn:uuid:block-clause-1",
+                            "@type": "dcs:Clause",
+                            "dcs:content": {"@list": [clause_text]},
+                        }
+                    ]
+                },
+                "dcs:layout": [
+                    {
+                        "@id": "urn:uuid:block-root",
+                        "@type": "dcs:LayoutNode",
+                        "dcs:isRoot": True,
+                        "dcs:children": {"@list": [{"@id": "urn:uuid:block-clause-1"}]},
+                    }
+                ],
+            },
+        }
 
     @staticmethod
     def create_fresh_template(context, name="Standard Template", description="BDD auto-created template", title="BDD Standard NDA") -> tuple:
@@ -33,10 +73,7 @@ class TemplateService:
             "template_type": TemplateService.template_type_for_category("legal"),
             "name": name,
             "description": description,
-            "template_data": {
-                "title": title,
-                "clauses": [{"id": "c1", "text": "Confidentiality clause"}],
-            },
+            "template_data": TemplateService.canonical_document_data(title),
         }
         resp = post_json(context, template_create_url(context), payload, headers=headers)
         assert resp.status_code == 200, f"Template create failed: {resp.text}"
@@ -139,16 +176,30 @@ class TemplateService:
 
     @staticmethod
     def do_submit(context, did: str, updated_at: str) -> str:
-        """Submit template as Template Creator; return refreshed updated_at."""
+        """Submit template as Template Creator; return refreshed updated_at.
+
+        The genesis PDF render that create triggers is asynchronous and bumps
+        updated_at shortly after create, so the first submit can lose the
+        optimistic-lock race ("updated elsewhere"). Re-fetch the current
+        updated_at and retry on that conflict.
+        """
+        import time
+
         headers = AuthService.get_headers_for_roles(["Template Creator"])
-        resp = post_json(
-            context,
-            template_submit_url(context),
-            TemplateService.template_submit_payload(context, did, updated_at),
-            headers=headers,
-        )
+        for _ in range(6):
+            resp = post_json(
+                context,
+                template_submit_url(context),
+                TemplateService.template_submit_payload(context, did, updated_at),
+                headers=headers,
+            )
+            if resp.status_code == 200:
+                return TemplateService.fetch_template(context, did, headers=headers).get("updated_at")
+            if "updated elsewhere" not in resp.text:
+                break
+            time.sleep(0.5)
+            updated_at = TemplateService.fetch_template(context, did, headers=headers).get("updated_at")
         assert resp.status_code == 200, f"Template submit failed: {resp.text}"
-        return TemplateService.fetch_template(context, did, headers=headers).get("updated_at")
 
     @staticmethod
     def do_verify(context, did: str, updated_at: str) -> str:

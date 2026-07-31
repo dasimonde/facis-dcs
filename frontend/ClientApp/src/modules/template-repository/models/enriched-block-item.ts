@@ -1,14 +1,16 @@
-import type { DocumentBlock, MergedApprovedTemplateBlock } from './contract-template'
+import type { DcsBlock } from '@/models/dcs-jsonld'
 
 /**
  * One block row in the editor list:
  * flattened outline item + block data + toolbar capabilities.
  */
 export interface EnrichedBlockItem {
+  /** Full JSON-LD @id IRI. */
   blockId: string
-  block?: DocumentBlock
+  block?: DcsBlock
   siblingIndex: number
   siblingCount: number
+  /** Full JSON-LD @id IRI. */
   parentBlockId: string
   depthLevel: number
   prevSiblingBlockId?: string
@@ -19,9 +21,4 @@ export interface EnrichedBlockItem {
   outdentInsertIndex: number
   indentParentBlockId: string
   indentInsertIndex: number
-  /**
-   * Some approved blocks are merged into the main document for editing
-   * without conflicting with the original approved template.
-   */
-  mergedApprovedBlock?: MergedApprovedTemplateBlock
 }

@@ -6,10 +6,13 @@ metadata:
   labels:
     app.kubernetes.io/name: statuslist-service
     app.kubernetes.io/instance: {{ .Release.Name }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+    {{- if .Values.ingress.stripPrefix }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s-statuslist-strip-prefix@kubernetescrd" .Release.Namespace .Release.Name | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
@@ -34,9 +37,9 @@ spec:
             pathType: {{ .pathType | default "Prefix" }}
             backend:
               service:
-                name: {{ .Release.Name }}-statuslist-service
+                name: {{ $.Release.Name }}-statuslist-service
                 port:
-                  number: {{ .Values.service.port | default 8080 }}
+                  number: {{ $.Values.service.port | default 8080 }}
           {{- end }}
     {{- end }}
 {{- end }}

@@ -1,32 +1,12 @@
-<template>
-  <div class="grid min-h-128 grid-cols-1 gap-4 lg:grid-cols-2">
-    <DiffPane
-      :title="leftPaneTitle"
-      :blocks="leftBlocks"
-      :diff-rows="contractDiffDocument.leftRows"
-      :highlight-diff="highlightDiff"
-      :show-no-prior-version="!hasLeftContractData"
-      :show-line-numbers="showLineNumbers"
-    />
-    <DiffPane
-      :title="rightPaneTitle"
-      :blocks="rightBlocks"
-      :diff-rows="contractDiffDocument.rightRows"
-      :highlight-diff="highlightDiff"
-      :show-line-numbers="showLineNumbers"
-    />
-  </div>
-</template>
-
 <script setup lang="ts">
-import type { ContractData } from '@/models/contract-data'
+import { computed } from 'vue'
+import DiffPane from '@contract-workflow-engine/components/diff-view/DiffPane.vue'
+import { useContractBlockDiff } from '@contract-workflow-engine/composables/useContractBlockDiff'
 import {
   type ContractPlainTextBlock,
   useContractPlainTextConverter,
-} from '@/modules/contract-workflow-engine/composables/useContractPlainTextConverter'
-import { useContractBlockDiff } from '@/modules/contract-workflow-engine/composables/useContractBlockDiff'
-import DiffPane from '@/modules/contract-workflow-engine/components/diff-view/DiffPane.vue'
-import { computed } from 'vue'
+} from '@contract-workflow-engine/composables/useContractPlainTextConverter'
+import type { ContractData } from '@/models/contract/contract-data'
 
 const props = withDefaults(
   defineProps<{
@@ -62,3 +42,23 @@ const rightBlocks = computed<ContractPlainTextBlock[]>(() => {
 
 const contractDiffDocument = computed(() => buildContractBlockDiff(leftBlocks.value, rightBlocks.value))
 </script>
+
+<template>
+  <div class="grid min-h-128 grid-cols-1 gap-4 lg:grid-cols-2">
+    <DiffPane
+      :title="leftPaneTitle"
+      :blocks="leftBlocks"
+      :diff-rows="contractDiffDocument.leftRows"
+      :highlight-diff="highlightDiff"
+      :show-no-prior-version="!hasLeftContractData"
+      :show-line-numbers="showLineNumbers"
+    />
+    <DiffPane
+      :title="rightPaneTitle"
+      :blocks="rightBlocks"
+      :diff-rows="contractDiffDocument.rightRows"
+      :highlight-diff="highlightDiff"
+      :show-line-numbers="showLineNumbers"
+    />
+  </div>
+</template>

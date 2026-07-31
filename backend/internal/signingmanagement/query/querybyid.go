@@ -8,6 +8,8 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/signingmanagement/datatype/signingstatus"
+
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 
 	"digital-contracting-service/internal/contractworkflowengine/datatype/expirationpolicy"
@@ -19,7 +21,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/signingmanagement/datatype/contractstate"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/signingmanagement/db"
 	signingmanagementevents "digital-contracting-service/internal/signingmanagement/event"
 )
@@ -31,7 +33,7 @@ type GetByIDQry struct {
 	UserRoles   userrole.UserRoles
 }
 
-type GetByIDResult struct {
+type Contract struct {
 	DID             string
 	ContractVersion int
 	State           contractstate.ContractState
@@ -46,6 +48,23 @@ type GetByIDResult struct {
 	ExpPolicy       *expirationpolicy.ExpirationPolicy
 	ExpNoticePeriod *int
 	Responsible     *db.Responsible
+}
+
+type SignatureEnvelope struct {
+	ContractDID    string
+	SignerDID      string
+	CredentialType string
+	Status         signingstatus.SigningStatus
+	SignedAt       *string
+	RevokedAt      *string
+	IpfsCID        *string
+}
+
+type GetByIDResult struct {
+	Contract Contract
+	// SignatureEnvelope is nil for an APPROVED-unsigned contract: no signature
+	// has been submitted yet, so no envelope exists.
+	SignatureEnvelope *SignatureEnvelope
 }
 
 type GetByIDHandler struct {
@@ -68,15 +87,21 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 		}
 	}(tx)
 
-	data, err := h.CRepo.ReadDataByID(ctx, tx, query.DID)
+	contractResult, err := h.CRepo.ReadDataByDID(ctx, tx, query.DID)
 	if err != nil {
-		return nil, fmt.Errorf("could not get contract data: %w", err)
+		return nil, fmt.Errorf("could not read contract data: %w", err)
 	}
+
+	envelopResult, err := h.CRepo.ReadLatestEnvelopeByContractDID(ctx, tx, query.DID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("could not read signature envelope: %w", err)
+	}
+	envelopeMissing := errors.Is(err, sql.ErrNoRows)
 
 	evt := signingmanagementevents.RetrieveByIDEvent{
 		DID:         query.DID,
 		RetrievedBy: query.RetrievedBy,
-		OccurredAt:  time.Now(),
+		OccurredAt:  time.Now().UTC(),
 		HolderDID:   query.HolderDID,
 		UserRoles:   query.UserRoles,
 	}
@@ -90,34 +115,58 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 		return nil, fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	state, err := contractstate.NewContractState(data.State)
+	state, err := contractstate.NewContractState(contractResult.State)
 	if err != nil {
 		return nil, fmt.Errorf("could not create contract state: %w", err)
 	}
 
 	var expPolicy *expirationpolicy.ExpirationPolicy
-	if data.ExpPolicy != nil {
-		policy, err := expirationpolicy.NewExpirationPolicy(*data.ExpPolicy)
+	if contractResult.ExpPolicy != nil {
+		policy, err := expirationpolicy.NewExpirationPolicy(*contractResult.ExpPolicy)
 		if err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
 		expPolicy = &policy
 	}
 
-	return &GetByIDResult{
+	contract := Contract{
 		DID:             query.DID,
-		ContractVersion: data.ContractVersion,
+		ContractVersion: contractResult.ContractVersion,
 		State:           state,
-		Name:            data.Name,
-		Description:     data.Description,
-		CreatedBy:       data.CreatedBy,
-		CreatedAt:       data.CreatedAt,
-		UpdatedAt:       data.UpdatedAt,
-		ContractData:    data.ContractData,
-		StartDate:       data.StartDate,
-		ExpDate:         data.ExpDate,
+		Name:            contractResult.Name,
+		Description:     contractResult.Description,
+		CreatedBy:       contractResult.CreatedBy,
+		CreatedAt:       contractResult.CreatedAt,
+		UpdatedAt:       contractResult.UpdatedAt,
+		ContractData:    contractResult.ContractData,
+		StartDate:       contractResult.StartDate,
+		ExpDate:         contractResult.ExpDate,
 		ExpPolicy:       expPolicy,
-		ExpNoticePeriod: data.ExpNoticePeriod,
-		Responsible:     data.Responsible,
+		ExpNoticePeriod: contractResult.ExpNoticePeriod,
+		Responsible:     contractResult.Responsible,
+	}
+
+	if envelopeMissing {
+		return &GetByIDResult{Contract: contract}, nil
+	}
+
+	signingStatus, err := signingstatus.NewSigningStatus(envelopResult.Status)
+	if err != nil {
+		return nil, fmt.Errorf("could not create signing status: %w", err)
+	}
+
+	envelop := SignatureEnvelope{
+		ContractDID:    envelopResult.ContractDID,
+		SignerDID:      envelopResult.SignerDID,
+		CredentialType: envelopResult.CredentialType,
+		Status:         signingStatus,
+		SignedAt:       envelopResult.SignedAt,
+		RevokedAt:      envelopResult.RevokedAt,
+		IpfsCID:        envelopResult.IpfsCID,
+	}
+
+	return &GetByIDResult{
+		Contract:          contract,
+		SignatureEnvelope: &envelop,
 	}, nil
 }

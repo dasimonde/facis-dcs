@@ -1,0 +1,440 @@
+openapi: 3.0.3
+info:
+    title: DCS-PDF-CORE semantic ledger engine
+    description: Deterministic PDF/A-3a compiler and semantic ledger engine
+    version: 0.1.0
+servers:
+    - url: http://localhost:8080
+tags:
+    - name: dcspdfcore
+      description: DCS-PDF-CORE endpoints
+paths:
+    /download:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Compile JSON-LD to PDF
+            description: Compile deterministic PDF/A-3a bytes from a JSON-LD payload
+            operationId: download
+            requestBody:
+                required: true
+                content:
+                    application/ld+json:
+                        schema:
+                            type: object
+                            description: JSON-LD or plain-JSON semantic payload
+                        example:
+                            '@context':
+                                '@vocab': http://localhost:8080/ontology/dcs-pdf-core#
+                                dcs-pdf-core: http://localhost:8080/ontology/dcs-pdf-core#
+                            '@id': urn:doc:example
+                            '@type': dcs-pdf-core:Document
+                            title: Example Contract
+                            sections:
+                                - '@type': dcs-pdf-core:Section
+                                  heading: 1. Terms
+                                  clauses:
+                                    - The parties agree to the following terms.
+            responses:
+                "200":
+                    description: OK response.
+                    content:
+                        application/pdf:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+    /verify:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Verify PDF integrity and provenance
+            description: |
+                Verify that a PDF was deterministically compiled from its embedded JSON-LD payload.
+                Returns a JSON result containing the match outcome, C2PA validity, the SHA-256
+                digests the match verdict was reached on, and — when a contract-lifecycle-vc.json
+                attachment is present — the base64-encoded VC bytes so the caller can perform
+                status-list revocation checks without parsing PDF bytes.
+
+                The digests are the evidence for the verdict: base_pdf_hash and
+                stored_base_pdf_hash are equal exactly when the submitted document re-renders to
+                its stored bytes. They are reported on a 409 content mismatch too, where they name
+                which side diverged.
+            operationId: verify
+            requestBody:
+                required: true
+                content:
+                    application/pdf:
+                        schema:
+                            type: string
+                            format: binary
+                            description: Compiled or incrementally-updated PDF to verify
+            responses:
+                "200":
+                    description: Verification result.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                required:
+                                    - match
+                                    - c2pa_signature_valid
+                                    - vc_present
+                                    - jsonld_hash
+                                    - base_pdf_hash
+                                    - stored_base_pdf_hash
+                                    - artifact
+                                properties:
+                                    match:
+                                        type: boolean
+                                        description: True when the PDF was deterministically produced from its embedded payload.
+                                    c2pa_signature_valid:
+                                        type: boolean
+                                        description: True when every manifest's COSE_Sign1 claim signature verified against its own x5chain leaf and the assertions the signed claim commits to still hash to the recorded values.
+                                    c2pa_signature_error:
+                                        type: string
+                                        description: The reason the claim-signature check failed, present only when c2pa_signature_valid is false.
+                                    pades_signed:
+                                        type: boolean
+                                        description: True when the PDF carries a PAdES signature, so the last manifest's whole-file hard binding stops short of the appended signature revisions.
+                                    vc_bytes:
+                                        type: string
+                                        description: Base64-encoded contract-lifecycle-vc.json bytes, present only when the PDF contains that attachment.
+                                    vc_present:
+                                        type: boolean
+                                        description: True when the PDF carries a lifecycle-credential attachment. Whether its proof verifies is decided by the caller against the issuer's published assertion key — pdf-core holds no key material and resolves no DID.
+                                    jsonld_hash:
+                                        type: string
+                                        description: SHA-256 hex of the machine-readable payload embedded in the submitted PDF — the latest one on an amended document.
+                                    base_pdf_hash:
+                                        type: string
+                                        description: SHA-256 hex of the deterministic re-render produced from that payload, over ZeroCOSESignatures-normalized bytes.
+                                    stored_base_pdf_hash:
+                                        type: string
+                                        description: SHA-256 hex of the stored bytes that re-render was compared against — the leading span of the submitted PDF, excluding the append-only PAdES signature layers, normalized the same way. Equal to base_pdf_hash exactly when the document reproduces.
+                                    artifact:
+                                        type: string
+                                        description: Base64-encoded verification-witness PDF. The witness PDF is the submitted PDF with a second C2PA manifest appended, proving the verification event occurred.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "409":
+                    description: |
+                        Content mismatch: the submitted PDF is not the deterministic re-render of its
+                        own embedded payload. The Error body additionally carries jsonld_hash,
+                        base_pdf_hash and stored_base_pdf_hash — the digests the refusal rests on.
+                        A digest that could not be computed is omitted rather than sent empty.
+                    content:
+                        application/json:
+                            schema:
+                                allOf:
+                                    - $ref: '#/components/schemas/Error'
+                                    - type: object
+                                      properties:
+                                          jsonld_hash:
+                                              type: string
+                                          base_pdf_hash:
+                                              type: string
+                                          stored_base_pdf_hash:
+                                              type: string
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+    /verify/content:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Verify a PDF's human-readable content against its embedded payload
+            description: |
+                Verify that a PDF's visible page content is the deterministic re-render of its own
+                embedded machine-readable JSON-LD payload. Unlike /verify (which requires byte-prefix
+                reproduction), this compares only the page content streams, so C2PA, signature and
+                amendment layers a peer legitimately appended do not cause a mismatch while tampered
+                page content does. Used to gate a peer-received contract PDF before it is carried over.
+            operationId: verifyContent
+            requestBody:
+                required: true
+                content:
+                    application/pdf:
+                        schema:
+                            type: string
+                            format: binary
+                            description: Received PDF whose page content is checked against its embedded payload
+            responses:
+                "200":
+                    description: Content verification result.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                required:
+                                    - match
+                                properties:
+                                    match:
+                                        type: boolean
+                                        description: True when every page content stream re-renders from the embedded payload.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+    /verify/content-match:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Verify a PDF's human-readable content against a reference PDF
+            description: |
+                Compare a submitted PDF's visible page content against a reference PDF's, resolving
+                the LAST definition of every object on both sides. Neither side is re-rendered, so
+                this carries none of /verify/content's dependence on render determinism and answers a
+                different question: not whether the PDF renders its own embedded payload (which an
+                appended revision superseding both pages and attachment would still satisfy), but
+                whether it still renders the reference document. An appended revision that supersedes
+                a page content stream diverges; append-only signature, C2PA, evidence and timestamp
+                layers do not. Used to gate a wallet-submitted signed PDF against the bytes pinned at
+                prepare.
+            operationId: verifyContentMatch
+            requestBody:
+                required: true
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required:
+                                - pdf
+                                - reference
+                            properties:
+                                pdf:
+                                    type: string
+                                    format: binary
+                                    description: Submitted PDF whose page content is checked
+                                reference:
+                                    type: string
+                                    format: binary
+                                    description: Reference PDF whose page content the submission must reproduce
+            responses:
+                "200":
+                    description: Content comparison result.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                required:
+                                    - match
+                                properties:
+                                    match:
+                                        type: boolean
+                                        description: True when every page content stream of the submission equals the reference's.
+                                    mismatch:
+                                        type: string
+                                        description: Which page diverged and a snippet of both sides, present only when match is false.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+    /update:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Amend PDF with new JSON-LD payload
+            description: 'Amend an existing PDF with a new JSON-LD payload via multipart/form-data (fields: pdf, payload)'
+            operationId: update
+            requestBody:
+                required: true
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required:
+                                - pdf
+                                - payload
+                            properties:
+                                pdf:
+                                    type: string
+                                    format: binary
+                                    description: Existing PDF document to amend
+                                payload:
+                                    type: string
+                                    format: binary
+                                    description: New JSON-LD semantic payload
+                                vc:
+                                    type: string
+                                    format: binary
+                                    description: |
+                                        Optional W3C Verifiable Credential JSON to embed as
+                                        "contract-lifecycle-vc.json" in the incremental update.
+                                        When provided the call proceeds even when the JSON-LD
+                                        payload is identical to the current embedded revision,
+                                        because the VC attachment is itself a provenance event.
+                                manifest_url:
+                                    type: string
+                                    description: |
+                                        Optional stable public URL at which the C2PA manifest
+                                        store for this document can be retrieved
+                                        (DCS-OR-C2PA-008). When supplied, the URL is embedded
+                                        in the remote_manifests field of the signed C2PA claim
+                                        CBOR so verifiers can fetch the full manifest chain
+                                        without having the PDF on hand.
+            responses:
+                "200":
+                    description: OK response.
+                    content:
+                        application/pdf:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+    /claim:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Claim PDF with JSON-LD payload
+            description: Verify that a supplied JSON-LD payload produces the same page content as the submitted PDF (which need not contain embedded metadata). Returns the canonical compiled PDF — with the JSON-LD embedded and a C2PA verification witness — as evidence of the match.
+            operationId: claim
+            requestBody:
+                required: true
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required:
+                                - pdf
+                                - payload
+                            properties:
+                                pdf:
+                                    type: string
+                                    format: binary
+                                    description: PDF whose page content is being claimed (embedded JSON-LD need not be present)
+                                payload:
+                                    type: string
+                                    format: binary
+                                    description: JSON-LD document claiming to produce the submitted PDF
+            responses:
+                "200":
+                    description: OK response.
+                    content:
+                        application/pdf:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+    /manifest/extract:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Extract embedded C2PA manifest store
+            description: |
+                Extract the raw JUMBF C2PA manifest store bytes from an existing PDF
+                (DCS-OR-C2PA-008). Returns the manifest store as an octet-stream so
+                callers can inspect or relay the manifest independently of the PDF.
+            operationId: extractManifest
+            requestBody:
+                required: true
+                content:
+                    application/pdf:
+                        schema:
+                            type: string
+                            format: binary
+                            description: PDF containing an embedded C2PA manifest store
+            responses:
+                "200":
+                    description: Raw JUMBF manifest store bytes.
+                    content:
+                        application/octet-stream:
+                            schema:
+                                type: string
+                                format: binary
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+    /ontology/dcs-pdf-core:
+        get:
+            tags:
+                - dcspdfcore
+            summary: Serve JSON-LD context
+            description: Serve the DCS-PDF-CORE JSON-LD context document
+            operationId: ontologyContext
+            responses:
+                "200":
+                    description: OK response.
+                    content:
+                        application/ld+json:
+                            schema:
+                                type: string
+                                format: binary
+components:
+    schemas:
+        Error:
+            type: object
+            required:
+                - name
+                - id
+                - message
+                - temporary
+                - timeout
+                - fault
+            properties:
+                name:
+                    type: string
+                    description: Name is the name of this class of errors.
+                    example: bad_request
+                id:
+                    type: string
+                    description: ID is a unique identifier for this particular occurrence of the problem.
+                    example: 123abc
+                message:
+                    type: string
+                    description: Message is a human-readable explanation specific to this occurrence of the problem.
+                    example: parameter 'p' must be an integer
+                temporary:
+                    type: boolean
+                    description: Is the error temporary?
+                    example: false
+                timeout:
+                    type: boolean
+                    description: Is the error a timeout?
+                    example: false
+                fault:
+                    type: boolean
+                    description: Is the error a server-side fault?
+                    example: false
+    responses:
+        BadRequest:
+            description: Bad Request response.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Conflict:
+            description: Conflict response.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        UnsupportedMediaType:
+            description: Unsupported Media Type response.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        UnprocessableEntity:
+            description: Unprocessable Entity response.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'

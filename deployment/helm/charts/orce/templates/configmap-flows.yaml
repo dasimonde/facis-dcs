@@ -1,0 +1,45 @@
+{{- $dir := .Values.flowsDir | default "flows" }}
+{{- $glob := printf "%s/*.json" $dir }}
+{{- if .Files.Glob $glob }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-orce-flows
+data:
+  {{- range $path, $_ := .Files.Glob $glob }}
+  {{- if and (or $.Values.syntheticPeer.enabled (ne (base $path) "synthetic-peer-flow.json")) (or $.Values.adminFlows.enabled (ne (base $path) "flow-admin.json")) }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
+  {{- end }}
+{{- end }}{{- if and .Values.flowsFile.enabled (.Files.Glob $glob) }}
+---
+# Merged flows rendered at chart level and mounted as Node-RED's flows file
+# (deployment.yaml subPath mount at /data/flows.json): every ORCE pod starts
+# with the chart's flows already loaded. This replaces the runtime /flows
+# import for chart-shipped flows — the import hook raced pod rollouts (it
+# could post to the terminating pod; with persistence disabled the fresh pod
+# then served no routes at all).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-orce-flows-merged
+data:
+  flows.json: |
+    {{- $merged := list }}
+    {{- range $path, $_ := .Files.Glob $glob }}
+    {{- /* The synthetic-peer fixture claims GET /.well-known/did.json. Two
+           http-in nodes on one method+path collide in Node-RED, and a real
+           deployment that also hosts a credential issuer here needs that route
+           for the issuer's own DID document — so the fixture follows the same
+           gate its Service already does. */}}
+    {{- /* The admin tab exposes credential revoke/unrevoke with no
+           authorization of its own. An issuer is published for wallets to
+           reach /offer, which puts an unauthenticated un-revoke on the
+           internet with it, so it ships only where someone asks for it. */}}
+    {{- if and (or $.Values.syntheticPeer.enabled (ne (base $path) "synthetic-peer-flow.json")) (or $.Values.adminFlows.enabled (ne (base $path) "flow-admin.json")) }}
+    {{- $merged = concat $merged ($.Files.Get $path | fromJsonArray) }}
+    {{- end }}
+    {{- end }}
+    {{- $merged | toJson | nindent 4 }}
+{{- end }}

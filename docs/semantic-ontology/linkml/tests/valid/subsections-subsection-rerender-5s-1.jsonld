@@ -1,0 +1,139 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:subsection-rerender",
+    "@type": "ContractTemplate",
+    "documentTitle": "Environmental Compliance Policy",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Environmental Compliance Policy"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:subsection-rerender#s1",
+                    "urn:doc:subsection-rerender#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-rerender#s1",
+                "children": [
+                    "urn:doc:subsection-rerender#c1",
+                    "urn:doc:subsection-rerender#s1-1",
+                    "urn:doc:subsection-rerender#s1-2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-rerender#s1-1",
+                "children": [
+                    "urn:doc:subsection-rerender#c2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-rerender#s1-2",
+                "children": [
+                    "urn:doc:subsection-rerender#c3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-rerender#s2",
+                "children": [
+                    "urn:doc:subsection-rerender#c4",
+                    "urn:doc:subsection-rerender#s2-1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:subsection-rerender#s2-1",
+                "children": [
+                    "urn:doc:subsection-rerender#c5",
+                    "urn:doc:subsection-rerender#c6"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-rerender#s1",
+                "title": "1. Scope"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-rerender#c1",
+                "content": [
+                    "This policy applies to all operations of the Organisation."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-rerender#s1-1",
+                "title": "1.1 Definitions"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-rerender#c2",
+                "content": [
+                    "\"Operations\" includes manufacturing, logistics, and office activities."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-rerender#s1-2",
+                "title": "1.2 Exclusions"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-rerender#c3",
+                "content": [
+                    "Research and development activities are governed by a separate policy."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-rerender#s2",
+                "title": "2. Reporting"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-rerender#c4",
+                "content": [
+                    "Annual environmental reports shall be submitted to the Board."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:subsection-rerender#s2-1",
+                "title": "2.1 Metrics"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-rerender#c5",
+                "content": [
+                    "Reports shall include carbon footprint, water usage, and waste volumes."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:subsection-rerender#c6",
+                "content": [
+                    "Metrics shall be independently verified by a registered environmental auditor."
+                ]
+            }
+        ]
+    }
+}

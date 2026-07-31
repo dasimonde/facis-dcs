@@ -14,7 +14,6 @@ def step_when_create_schema(context, schema_name):
             "type": "object",
             "properties": {
                 "did": {"type": "string"},
-                "document_number": {"type": "string"},
                 "version": {"type": "integer", "minimum": 0},
                 "schema_version": {"type": "integer", "minimum": 1},
                 "name": {"type": "string"},
@@ -47,7 +46,6 @@ def step_when_create_schema(context, schema_name):
                 }
             },
             "required": [
-                "document_number",
                 "version",
                 "schema_version",
                 "name",

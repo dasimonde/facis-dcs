@@ -5,7 +5,11 @@ CREATE TABLE access_attempts (
     attempted_at TIMESTAMP,
     success     BOOLEAN,
     service VARCHAR(64),
-    method VARCHAR(64)
+    method VARCHAR(64),
+    roles TEXT,
+    scope TEXT,
+    did TEXT,
+    justification TEXT
 );
 
 CREATE TABLE ip_lockouts (

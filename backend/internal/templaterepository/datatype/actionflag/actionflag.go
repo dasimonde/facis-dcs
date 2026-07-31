@@ -1,3 +1,7 @@
+// Package actionflag is the "forward_to" decision on Submit while a template
+// is in SUBMITTED (Approval routes to REVIEWED, Draft routes back to DRAFT
+// for rework). Note this is a different value set than
+// contractworkflowengine/datatype/actionflag's Approval/Reject.
 package actionflag
 
 import (
@@ -25,7 +29,7 @@ func NewActionFlag(s string) (ActionFlag, error) {
 	return flag, nil
 }
 
-// IsValid checks if the ActionFlag is a valid role
+// IsValid reports whether the value is one of the declared ActionFlag values.
 func (f ActionFlag) IsValid() bool {
 	upper := ActionFlag(strings.ToUpper(string(f)))
 	return validFlag[upper]

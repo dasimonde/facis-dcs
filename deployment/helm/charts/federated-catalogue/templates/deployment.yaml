@@ -1,16 +1,20 @@
-{{- $keycloakInternalUrl := .Values.keycloak.internalUrl | default (printf "http://%s-keycloak:%d" .Release.Name (.Values.keycloak.port | default 8080 | int)) }}
+{{- $fusekiURI := .Values.fuseki.uri | default "http://fc-fuseki:3030/ds" }}
+{{- $keycloakInternalUrl := .Values.keycloak.internalUrl | default "http://fc-keycloak-http:8080/auth" }}
 {{- $keycloakIssuerUrl := "" }}
 {{- if .Values.keycloak.issuerUrl }}
 {{- $keycloakIssuerUrl = .Values.keycloak.issuerUrl }}
 {{- else if .Values.keycloak.hostname }}
-{{- $keycloakIssuerUrl = printf "%s://%s" (.Values.keycloak.issuerScheme | default "https") .Values.keycloak.hostname }}
+{{- $keycloakIssuerUrl = printf "%s://%s/auth" (.Values.keycloak.issuerScheme | default "https") .Values.keycloak.hostname }}
 {{- else }}
 {{- $keycloakIssuerUrl = $keycloakInternalUrl }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-federated-catalogue
+  name: fc-service
+  labels:
+    app.kubernetes.io/name: federated-catalogue
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.replicaCount | default 1 }}
   selector:
@@ -24,52 +28,73 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       containers:
-        - name: fc-service
+        # Container name matches fc-realm-provision-job.yaml's hardcoded
+        # FC_CONTAINER="fcservice" (its patch_env targets this container by
+        # name in a strategic-merge-patch) — do not rename without also
+        # updating that Job.
+        - name: fcservice
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           ports:
             - name: http
               containerPort: 8081
           env:
-            # Neo4j / Graph Store
-            - name: GRAPHSTORE_URI
-              value: {{ .Values.neo4j.uri | default (printf "bolt://%s-neo4j:%d" .Release.Name (7687 | int)) | quote }}
-            - name: GRAPHSTORE_USER
-              value: {{ .Values.neo4j.username | default "neo4j" | quote }}
-            - name: GRAPHSTORE_PASSWORD
-              value: {{ .Values.neo4j.password | default "changeme" | quote }}
-            - name: GRAPHSTORE_QUERY_TIMEOUT_IN_SECONDS
-              value: "5"
+            # Graph store: Fuseki, not neo4j (see ../fuseki's chart comment
+            # for why — neo4j's n10s plugin crash-loops on patch-version
+            # image drift; Fuseki has no such plugin surface).
+            - name: GRAPHSTORE_IMPL
+              value: "fuseki"
+            - name: GRAPHSTORE_FUSEKI_URI
+              value: {{ $fusekiURI | quote }}
+            # Spring Data Neo4j autoconfigures a health indicator regardless
+            # of GRAPHSTORE_IMPL — without disabling it, /actuator/health
+            # stays DOWN forever since no neo4j is deployed at all.
+            - name: MANAGEMENT_HEALTH_NEO4J_ENABLED
+              value: "false"
             # PostgreSQL
             {{- if .Values.database.url }}
             - name: SPRING_DATASOURCE_URL
               value: {{ .Values.database.url | quote }}
             {{- else }}
             - name: SPRING_DATASOURCE_URL
-              value: {{ printf "jdbc:postgresql://%s-postgresql:5432/%s" .Release.Name (.Values.database.name | default "fc") | quote }}
+              value: "jdbc:postgresql://fc-postgres:5432/postgres"
             {{- end }}
             - name: SPRING_DATASOURCE_USERNAME
-              value: {{ .Values.database.username | default "dcs" | quote }}
+              value: {{ .Values.database.username | default "keycloak" | quote }}
+            {{- if .Values.database.password }}
             - name: SPRING_DATASOURCE_PASSWORD
-              value: {{ .Values.database.password | default "dcs" | quote }}
+              value: {{ .Values.database.password | quote }}
+            {{- else }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fc-postgres
+                  key: password
+            {{- end }}
             # Keycloak
-            - name: KEYCLOAK_ENABLED
-              value: {{ .Values.security.enabled | toString | quote }}
             {{- if .Values.security.enabled }}
             - name: KEYCLOAK_AUTH_SERVER_URL
               value: {{ $keycloakInternalUrl | quote }}
             - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
-              value: {{ printf "%s/realms/%s" $keycloakIssuerUrl (.Values.keycloak.realm | default "gaia-x") | quote }}
+              value: {{ printf "%s/realms/%s" $keycloakIssuerUrl (.Values.keycloak.realm | default "federated-catalogue-realm") | quote }}
             - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
-              value: {{ printf "%s/realms/%s/protocol/openid-connect/certs" $keycloakInternalUrl (.Values.keycloak.realm | default "gaia-x") | quote }}
+              value: {{ printf "%s/realms/%s/protocol/openid-connect/certs" $keycloakInternalUrl (.Values.keycloak.realm | default "federated-catalogue-realm") | quote }}
             - name: KEYCLOAK_REALM
-              value: {{ .Values.keycloak.realm | default "gaia-x" | quote }}
+              value: {{ .Values.keycloak.realm | default "federated-catalogue-realm" | quote }}
             - name: KEYCLOAK_RESOURCE
               value: {{ .Values.keycloak.clientId | default "federated-catalogue" | quote }}
+            {{- if .Values.keycloak.clientSecret }}
             - name: KEYCLOAK_CREDENTIALS_SECRET
-              value: {{ .Values.keycloak.clientSecret | default "federated-catalogue-secret" | quote }}
+              value: {{ .Values.keycloak.clientSecret | quote }}
+            {{- else }}
+            - name: KEYCLOAK_CREDENTIALS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: fc-keycloak-client-secret
+                  key: keycloak_client_secret
             {{- end }}
-            # FC Service config
+            {{- end }}
+            # FC service config
             - name: FEDERATED_CATALOGUE_VERIFICATION_SIGNATURES
               value: {{ .Values.verifySignatures | default "false" | quote }}
             - name: FEDERATED_CATALOGUE_VERIFICATION_VP_SIGNATURE
@@ -89,17 +114,33 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          livenessProbe:
-            httpGet:
-              path: {{ .Values.route.path | default "" }}/actuator/health
-              port: http
-            initialDelaySeconds: 240
-            periodSeconds: 30
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+            - name: tmp
+              mountPath: /tmp
+            - name: filestore
+              mountPath: /var/lib/fc-service/filestore
+          # Native actuator health is the sole workload-readiness signal. The
+          # DCS performs the one functional verification call after this turns
+          # UP; no artificial cache warm-up is used.
           readinessProbe:
             httpGet:
               path: {{ .Values.route.path | default "" }}/actuator/health
               port: http
-            initialDelaySeconds: 60
-            periodSeconds: 10
+            periodSeconds: 2
+            timeoutSeconds: 2
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: filestore
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: fc-service-filestore
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

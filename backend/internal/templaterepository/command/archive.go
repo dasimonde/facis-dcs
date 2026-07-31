@@ -45,12 +45,13 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 		}
 	}(tx)
 
-	processData, err := h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
+	processData, err := h.CTRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
 
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	// Optimistic concurrency (see command package doc / ADR-0007).
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 
@@ -59,7 +60,7 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 		return errors.New("invalid contract template state")
 	}
 
-	if processData.State == contracttemplatestate.Approved.String() || processData.State == contracttemplatestate.Published.String() {
+	if processData.State == contracttemplatestate.Registered.String() || processData.State == contracttemplatestate.Published.String() {
 
 		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Deprecated.String())
 		if err != nil {
@@ -75,13 +76,12 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 	}
 
 	evt := templateevents.ArchiveEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		ArchivedBy:     cmd.ArchivedBy,
-		OccurredAt:     time.Now().UTC(),
-		HolderDID:      cmd.HolderDID,
-		UserRoles:      cmd.UserRoles,
+		DID:        cmd.DID,
+		Version:    processData.Version,
+		ArchivedBy: cmd.ArchivedBy,
+		OccurredAt: time.Now().UTC(),
+		HolderDID:  cmd.HolderDID,
+		UserRoles:  cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

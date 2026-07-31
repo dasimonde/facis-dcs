@@ -1,0 +1,107 @@
+{
+    "@context": {
+        "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
+        "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "children": {
+            "@type": "@id",
+            "@container": "@list"
+        }
+    },
+    "@id": "urn:doc:tamper-c2pa",
+    "@type": "ContractTemplate",
+    "documentTitle": "Escrow Agreement",
+    "metadata": {
+        "@type": "TemplateMetadata",
+        "title": "Escrow Agreement"
+    },
+    "documentStructure": {
+        "@type": "DocumentStructure",
+        "layout": [
+            {
+                "@type": "LayoutNode",
+                "isRoot": true,
+                "children": [
+                    "urn:doc:tamper-c2pa#s1",
+                    "urn:doc:tamper-c2pa#s2"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:tamper-c2pa#s1",
+                "children": [
+                    "urn:doc:tamper-c2pa#c1",
+                    "urn:doc:tamper-c2pa#c2",
+                    "urn:doc:tamper-c2pa#s1-1"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:tamper-c2pa#s1-1",
+                "children": [
+                    "urn:doc:tamper-c2pa#c3"
+                ]
+            },
+            {
+                "@type": "LayoutNode",
+                "@id": "urn:doc:tamper-c2pa#s2",
+                "children": [
+                    "urn:doc:tamper-c2pa#c4",
+                    "urn:doc:tamper-c2pa#c5"
+                ]
+            }
+        ],
+        "blocks": [
+            {
+                "@type": "Section",
+                "@id": "urn:doc:tamper-c2pa#s1",
+                "title": "1. Deposit"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-c2pa#c1",
+                "content": [
+                    "The Depositor shall place the Source Code into escrow within thirty (30) days of execution."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-c2pa#c2",
+                "content": [
+                    "The Escrow Agent shall acknowledge receipt in writing."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:tamper-c2pa#s1-1",
+                "title": "1.1 Verification of Deposit"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-c2pa#c3",
+                "content": [
+                    "The Beneficiary may request a technical verification of the deposited materials once per year."
+                ]
+            },
+            {
+                "@type": "Section",
+                "@id": "urn:doc:tamper-c2pa#s2",
+                "title": "2. Release Conditions"
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-c2pa#c4",
+                "content": [
+                    "Escrow materials shall be released upon insolvency of the Depositor."
+                ]
+            },
+            {
+                "@type": "Clause",
+                "@id": "urn:doc:tamper-c2pa#c5",
+                "content": [
+                    "A written request from the Beneficiary is required to trigger release."
+                ]
+            }
+        ]
+    }
+}
