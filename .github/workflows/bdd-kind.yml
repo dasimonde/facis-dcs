@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # The kind node loads the heavy DSS demo bundle (~1-2GB) alongside the two
       # DCS images, pdf-core, and the Postgres/Keycloak/IPFS/ORCE/FC base images;
@@ -176,6 +178,125 @@ jobs:
         run: |
           set -euo pipefail
           make -C tests/bdd kind_delete KIND_CLUSTER_NAME=dcs-bdd || true
+
+  audit-isolated-ci-gate:
+    name: audit-isolated-ci-gate
+    permissions:
+      contents: read
+      checks: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: audit-isolated-ci-gate-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/share/swift || true
+          sudo docker image prune -af || true
+          echo "After:"; df -h /
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Cache audit BDD Python venv
+        uses: actions/cache@v4
+        with:
+          path: tests/bdd/.venv
+          key: audit-bdd-venv-py312-${{ hashFiles('testWallet/requirements.txt', 'tests/bdd/Makefile') }}
+          restore-keys: |
+            audit-bdd-venv-py312-
+
+      - name: Cache DSS demo image
+        id: audit-dss-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/audit-dss-image.tar
+          key: audit-dss-image-conectx-dss-demo-6.2.1
+      - name: Load cached DSS image
+        if: steps.audit-dss-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/audit-dss-image.tar
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Expose GitHub Actions cache to buildx
+        uses: crazy-max/ghaction-github-runtime@v3
+
+      - name: Install kind
+        uses: helm/kind-action@v1.10.0
+        with:
+          version: v0.23.0
+
+      - name: Run isolated audit BDD gate
+        run: |
+          set -euo pipefail
+          make -C tests/bdd run_bdd_audit_kind_ci \
+            KIND_CLUSTER_NAME=dcs-audit-bdd \
+            DOCKER_IMAGE_REPOSITORY=digital-contracting-service \
+            DOCKER_IMAGE_TAG=bdd \
+            DOCKER_BUILD="docker buildx build --load" \
+            DCS_BUILD_CACHE="--cache-from type=gha,scope=audit-dcs-image --cache-to type=gha,mode=max,scope=audit-dcs-image" \
+            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=audit-pdf-core-image --cache-to type=gha,mode=max,scope=audit-pdf-core-image"
+
+      - name: Save DSS image to cache
+        if: always() && steps.audit-dss-cache.outputs.cache-hit != 'true'
+        run: docker save conectx/dss-demo:6.2.1 -o /tmp/audit-dss-image.tar || true
+
+      - name: Dump audit namespace info on failure
+        if: failure()
+        env:
+          KUBECONFIG: ${{ github.workspace }}/tests/bdd/.tmp/kind-kubeconfig
+        run: |
+          set -euo pipefail
+          kubectl get pods -n dcs-bdd -o wide || true
+          kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
+            -c digital-contracting-service --tail=2000 --prefix || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
+            --all-containers --tail=200 --prefix || true
+          kubectl get pods -n dcs-bdd -o 'custom-columns=POD:.metadata.name,CONTAINER:.status.containerStatuses[*].name,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount' || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=200 --prefix || true
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=dss --tail=100 --prefix || true
+          kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=200 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-hsm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=-1 | grep -E 'WARN|ERROR|extracted roles|Completed [45]' || true
+
+      - name: Publish audit BDD test report
+        if: always() && hashFiles('tests/bdd/.reports/junit/*.xml') != ''
+        uses: dorny/test-reporter@v1
+        with:
+          name: Audit Isolated BDD Test Results
+          path: tests/bdd/.reports/junit/*.xml
+          reporter: java-junit
+          fail-on-error: false
+          list-suites: all
+          list-tests: all
+
+      - name: Upload audit BDD reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-isolated-bdd-reports
+          path: tests/bdd/.reports/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Teardown audit kind cluster
+        if: always()
+        run: |
+          set -euo pipefail
+          make -C tests/bdd kind_delete KIND_CLUSTER_NAME=dcs-audit-bdd || true
 
   e2e-playwright:
     permissions:

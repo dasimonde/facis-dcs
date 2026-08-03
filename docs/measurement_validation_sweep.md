@@ -20,6 +20,25 @@ Refresh snapshot:
   A report is evidence only when its timestamp and originating command are recorded; the directory
   count alone is not a test result.
 
+Final Ticket-27 addendum (`2026-07-29`):
+
+- Scope: external sequential audit-checkpoint publication and the shared Semantic Hub/ORCE gates for
+  submission, offer, approval, signature and deployment. Exact requirement trace is
+  DCS-FR-TR-03 (`docs/SRS_FACIS_DCS.txt:2301-2306`), DCS-FR-PACM-02
+  (`docs/SRS_FACIS_DCS.txt:2874-2877`) and DCS-FR-PACM-03
+  (`docs/SRS_FACIS_DCS.txt:2879-2882`), refined by ADR-6, ADR-8, ADR-9, ADR-11 and ADR-16.
+- Independent final verification reported all 27 Ticket-27 scenarios and 188 steps green. The final
+  semantic re-verification reported 22 scenarios and 162 steps green. The verifier also reported the
+  complete backend suite, race checks, ORCE flow and Helm checks, JUnit output and the specification
+  fingerprint guard green.
+- This addendum verifies the concrete, configured semantic-rule and executor behavior. It does not
+  create a generic legal-compliance oracle. Production PoA trust profile, QES/credential policy,
+  domain-specific status mapping and further Federated Catalogue decisions remain deferred/out of
+  scope.
+- Recovery/lease handling for a manual-review continuation left in `DISPATCHING` by a hard process
+  termination is a separate future ticket. The current implementation durably refuses parallel
+  continuation (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:581-599`).
+
 Status vocabulary used in this refresh:
 
 - `partial`: implementation/test candidates exist, but required coverage or clean execution is
@@ -54,10 +73,13 @@ Scope decision recorded on `2026-07-27`:
 - Whether a concrete rule represents a legal, organizational or domain policy is metadata/governance
   of that registered rule. Runtime enforcement is based on its SHACL/validation-profile content and
   severity, not on DCS interpreting the name of a legal framework.
-- Deployment-specific/custom runtime policies may be delegated to ORCE as an external PDP/low-code
-  extension point, with the XFSC Custom Policy Agent as a future integration candidate. Existing such
-  policies are placeholders/examples; this is an explicit integration seam, not implemented evidence
-  of legal or regulatory compliance.
+- Deployment-specific/custom runtime policies are delegated through the
+  versioned `facis-pac-audit-executor/v1` HTTP boundary. The shipped ORCE
+  `/audit/run` flow is the reference implementation for this environment; a
+  deployment may configure another compatible executor. This proves an
+  executable integration seam, but its findings remain the result of the
+  configured rules and must not be presented as blanket legal or regulatory
+  compliance.
 
 DSS result-policy safety defaults accepted on `2026-07-27`:
 
@@ -201,11 +223,11 @@ behavioral obligation, not a claim that a single endpoint or existing test cover
 | VAL-15 Deterministic MR-to-HR rendering | DCS-FR-CSA-06, UC-03-05; stakeholder input 2026-07-27 | Authoritative machine-readable contract and `dcs:documentStructure` | Human-readable PDF is deterministically recompiled from the machine-readable contract; no independent HR-to-MR ingestion path exists because accepted documents pass through the template authoring lifecycle | Non-deterministic output, missing/reordered rendered section, wrong source/version, modified PDF not matching a deterministic rebuild | **observed_failure** — direction and authority are resolved; the current feature recorded 9 passing cases and 2 errors, so clean deterministic-rebuild evidence is still required |
 | VAL-16 Generic pre-archive legal-framework compliance | DCS-FR-CSA-07; scope decision 2026-07-27 | Original generic eIDAS/GDPR/ISO/internal-policy check | No independent generic legal-framework oracle is implemented or claimed | Reports must not present a Semantic Hub rule result as blanket legal compliance | **not_applicable_by_decision** — the unbounded generic requirement is withdrawn; concrete Semantic Hub rule enforcement is traced by VAL-18 |
 | VAL-17 Archived-contract compliance | DCS-FR-CSA-19 | Archived document, retention/signature/metadata policy | Non-compliant archive entry is flagged | Expired retention, invalid signature, incomplete metadata, immutable evidence unavailable | **candidate_not_run + underspecified** — exact archive/audit feature exists but all 20 scenarios were excluded by the normal suite tag expression; policy profiles remain absent |
-| VAL-18 Workflow Semantic Hub/PDP rule enforcement | DCS-FR-PACM-03; ADR-8/-9/-23; stakeholder input 2026-07-27 | Contract at each defined gate plus its active or artifact-pinned Semantic Hub shapes/profile, embedded ODRL rules and any explicitly configured external ORCE/PDP decision | Error-severity Hub violations block the defined submission/signature gates; warnings/info remain findings; an optional PDP result must remain separately attributable and fail according to its configured gate | Rule activation/rollback, pinned old version, missing/unavailable Hub, conflicting context, warning/error boundary, unavailable/malformed PDP result | **partial + integration_gap** — Hub source/severity is resolved and ODRL scenarios passed; Semantic Hub feature 23 was not captured, while ORCE policies are placeholders and the XFSC Custom Policy Agent integration is future work |
+| VAL-18 Workflow Semantic Hub/PDP rule enforcement | DCS-FR-TR-03, DCS-FR-PACM-02/-03; ADR-6/-8/-9/-11 | Contract at submission, offer, approval, signature and deployment plus its immutable, artifact-pinned Semantic Hub shapes/libraries/profile and one configured executor decision | Local blocking findings prevent dispatch; combined precedence is `BLOCKED > REVIEW > PASSED`; REVIEW persists one immutable Compliance Officer decision and resumes without executor redispatch; only PASSED continues automatically | Activation/rollback and old pins; missing/unknown/unavailable Hub assets; timeout/non-2xx/malformed/mismatched/invalid executor result; empty valid result; same-snapshot concurrency and exactly-one dispatch | **verified for the concrete Ticket-27 gate scope** — `features/27_external_checkpoint_and_workflow_gates/semantic_workflow_gates.feature:4-118`; independent final Ticket-27 run 27/27 scenarios and 188/188 steps green, final semantic re-verification 22/22 scenarios and 162/162 steps green. Generic legal-framework interpretation and the separately listed deferred policy choices are not claimed |
 | VAL-19 Multi-contract structural integrity | DCS-FR-PACM-06; stakeholder input 2026-07-27 | Locally IRI-reachable parent-linked contracts and annexes | Bundle export walks the local graph and emits each reachable contract once; cycles are permitted and flattened by a visited set; a deleted/missing linked artifact is a hard failure | Missing/deleted/orphan/wrong-version component; cycle termination and de-duplication; link to a contract not imported into the local DCS | **candidate_not_run + integration_gap** — hierarchy/bundle feature exists; cross-DCS linkage is not a remote dereference contract and requires prior import/transfer, which is not yet a complete workflow |
 | VAL-20 Template correctness/semantics/authenticity | UC-02-07 | Template, JSON-LD context, SHACL/schema, signature/VC provenance | Report lists schema and authenticity checks; failures block generation | Invalid JSON-LD/SHACL, missing context, signature/VC invalid, mixed pass/fail | **missing_trace** — related template integrity/SHACL candidates exist, but no exact UC trace or combined schema-plus-authenticity evidence was identified |
 | VAL-21 Counterparty signature use case | UC-04-03; stakeholder input 2026-07-27 | PDF, expected document hash, VC/status response in W3C or supported XFSC compatibility format | Report shows PDF integrity, hash match and a freshly renewed status check; official W3C support is the target while the XFSC format remains a compatibility path | Encoding mismatch, stale response, unknown entry, outage, incompatible bit order | **candidate_not_run + compatibility_gap** — exact OID4VP/real-signing traces exist; W3C plus XFSC dual-format behavior and the no-false-positive boundary need explicit tests |
-| VAL-22 Pre-execution contract validation | UC-10-02 | Deployable contract plus integrity/compliance rules | Violations block deployment; detailed report stored with contract | Report persistence failure, stale rules, warning/block boundary, repeatability | **missing_trace** — no exact current feature or complete implementation/evidence candidate identified |
+| VAL-22 Pre-execution contract validation | UC-10-02; DCS-FR-PACM-03; ADR-8/-9/-11 | Deployable contract plus its immutable Semantic Hub bundle and configured executor | The shared deployment gate persists the correlated run; blocked results prevent deployment and review results require an immutable Compliance Officer decision | Missing/unavailable pinned rules, executor failure, warning/block boundary, concurrent same-snapshot requests and review continuation | **verified for the Ticket-27 semantic workflow-gate scope** — deployment appears in the success and manual-review gate matrices at `features/27_external_checkpoint_and_workflow_gates/semantic_workflow_gates.feature:16-22` and `features/27_external_checkpoint_and_workflow_gates/semantic_workflow_gates.feature:47-53`; aggregate legal-framework claims remain excluded |
 | VAL-23 System-driven API review | UC-12-02 | Contract review API request and rule set | Issues returned; failing contract cannot proceed to approval | Empty/malformed request, unauthorized caller, evaluator failure, concurrent transition | **partial** — exact lifecycle-via-API feature passed 3 scenarios; evaluator failure, concurrency and persisted review report remain unproven |
 | VAL-24 OIDC token validation | DCS-IR-SI-07, DCS-IR-CI-05; stakeholder input 2026-07-27 | Hydra discovery metadata, JWKS and token/client assertions | Issuer, signature, audience/client, expiry and required claims validate against the deployed Hydra provider | Key rotation, unknown `kid`, stale cache, bad issuer/audience/clock, discovery outage | **partial** — provider choice is resolved and the authentication feature passed 7 scenarios; rotation, cache and discovery-outage boundaries remain |
 | VAL-25 Credential/status validation interface | DCS-IR-SI-09, DCS-IR-CI-09; stakeholder input 2026-07-27 | Credential/contract identifier and official W3C status list or supported XFSC compatibility format | Current state is refreshed for enforcement and publication becomes visible within the binding <= 5-minute window | Encoding incompatibility, stale response, unknown entry, outage, suspended/revoked transition, refresh after cache expiry | **candidate_not_run + compatibility_gap** — five-minute target and refresh requirement are supplied; exact W3C profile, XFSC mapping and clean evidence remain |
@@ -214,6 +236,7 @@ behavioral obligation, not a claim that a single endpoint or existing test cover
 | VAL-28 C2PA/PDF update compatibility | DCS-OR-C2PA-002/-010; stakeholder input 2026-07-27 | PAdES Baseline B-T candidate profile and one or more C2PA/signature increments | Existing PDF signatures remain valid after every append; a re-signing adds a new incremental signature rather than replacing history | Update/sign ordering, repeat update, corrupted xref/increment, peer synchronization, every formally supported signature profile | **observed_failure + confirmation_required** — “Baseline B-T” is plausible but must be confirmed by exact ETSI profile/version; provenance feature had 5 pre-fix timeout errors and needs a clean rerun |
 | VAL-29 C2PA remote fallback | DCS-OR-C2PA-008 | PDF with stripped/missing embedded credential plus contract-bound remote link | Verifier obtains and validates remote manifest | Missing/wrong/tampered/unavailable remote artifact; link substitution | **partial** — public manifest/history/link scenarios passed in the focused run, but the actual strip-then-remote-verify scenario remains skipped |
 | VAL-30 C2PA VC/status binding | DCS-OR-C2PA-004/-005 | Lifecycle assertion, status VC and published list | All binding fields agree and status publication meets <= 5 minutes | Field mismatch, revoked/untrusted VC, stale list, time boundary | **missing_trace** — no exact C2PA-004 or C2PA-005 feature trace was found |
+| VAL-31 External audit-checkpoint publication | DCS-FR-PACM-02; ADR-16 | Every unconfirmed public Merkle checkpoint, in sequence, to the configured authenticated HTTPS sink | Only the public allowlist is sent; stable idempotency survives lost responses/restart; confirmation advances only after 2xx; a chain gap durably blocks later publication | Sequence gap, previous-root mismatch, lost response, restart, authentication/path/timeout and payload leakage | **verified for Ticket 27** — `features/27_external_checkpoint_and_workflow_gates/external_checkpoint_sink.feature:4-43`; included in the independent 27/27-scenario, 188/188-step final run. The separate external and internal timeout controls are defined at `deployment/helm/charts/orce/values.yaml:30-43` |
 
 ## C. Validation surfaces that must not become separate truth sources
 
@@ -260,9 +283,11 @@ Each validation path needs all of the following before it can be classified as s
 - The former generic eIDAS/GDPR/ISO/internal-policy validation obligation is removed by the
   `2026-07-27` scope decision. Concrete versioned Semantic Hub SHACL shapes and validation profiles
   are the only external rule source; DCS makes no blanket legal-compliance claim.
-- Semantic Hub error-severity findings block the submission and signature gates through
-  `RequireHubConformance`; warnings/info remain findings. Additional lifecycle gates require an
-  explicit concrete use case rather than inheriting the removed generic obligation.
+- Semantic Hub and configured executor findings guard submission, offer, approval, signature and
+  deployment through the shared snapshot coordinator. Blocking results dominate review results;
+  review dominates pass. This concrete gate set is verified by Ticket 27 and does not reinstate the
+  removed generic legal-compliance obligation
+  (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:304-333`).
 - UC-04-03 explicitly limits full status-list validation because of an incompatible external
   encoding. Any report that calls retrieval alone a successful status validation is a false positive.
 - Linked paths such as MR/HR consistency must be assessed per atomic obligation; an aggregate
@@ -285,7 +310,7 @@ promoted to an approved requirement.
 | TSA trust | EU Trusted List-qualified services or explicitly configured certificate chains | Direction supplied; exact LOTL/Trusted List path validation and configured-anchor policy remain |
 | Credential revocation | Preserve contract/history; surface compliance state in UI, optionally alert | Decision supplied; exact alert severity and downstream blocking behavior remain |
 | Re-signing | Append another signature to the existing contract and synchronize to peers | Decision supplied; concurrency, ordering and partial-sync recovery remain |
-| Extensible policies | Semantic Hub remains the semantic rule source; deployment-specific/custom policies may be delegated to ORCE as PDP/low-code integration, with a future XFSC Custom Policy Agent integration | Architecture direction supplied; current policies are placeholders/examples, so this is an explicit integration gap, not a compliance claim |
+| Extensible policies | Semantic Hub remains the DCS technical semantic-rule source; deployment-specific/custom PAC findings are produced through `facis-pac-audit-executor/v1`, with shipped ORCE `/audit/run` as this environment's reference and a configurable compatible replacement | Implemented and independently verified for the executor boundary; the configured rule set determines what is actually checked, so this is not a blanket compliance claim |
 | MR/HR | MR is authoritative; HR PDF is deterministically compiled from MR using `dcs:documentStructure`; there is no independent HR-to-MR path | Decision supplied |
 | Contract hierarchy | Parent linkage; cycles allowed and flattened with a visited set during bundle export | Decision supplied |
 | Cross-DCS bundle references | Bundle traversal is local IRI reachability; a needed foreign contract must first be transferred/imported into the local DCS | Integration gap: a general existing-contract import/transfer workflow is not complete |
@@ -345,6 +370,8 @@ promoted to an approved requirement.
 | `features/17_peer_trust/two_instance_peer_trust.feature` JUnit (`2026-07-26`) | 9 passed, 5 failed, 1 error | Current failing evidence for VAL-26; requires diagnosis/rerun |
 | `features/08_audit_compliance/c2pa_provenance_export.feature` JUnit (`2026-07-26`) | 5 timeout errors before the infrastructure fix | Inconclusive for VAL-28; clean rerun required |
 | `make -C tests/bdd run_bdd_kind_once F=features/19_c2pa_conformance/c2pa_conformance.feature` | 9 passed, 2 skipped after the infrastructure fix | Clean partial evidence for VAL-27/29 |
+| Ticket-27 independent final run (`2026-07-29`) | 27 scenarios passed, 188 steps passed; backend full/race, ORCE flow/Helm, JUnit and fingerprint checks reported green | Final evidence for VAL-18, VAL-22 and VAL-31 |
+| Ticket-27 final Semantic re-verification (`2026-07-29`) | 22 scenarios passed, 162 steps passed | Focused final evidence for deterministic bundles, all five gates, fail-closed behavior, review and concurrency |
 
 The JUnit directory must be cleaned or made run-scoped before the next evidence run. Its current
 append-only behavior mixes timestamps and can make stale XML files appear to belong to the latest
@@ -357,14 +384,15 @@ command.
    lifecycle-event scope and exact W3C status-list profile. The QES/default-contract rule and DSS
    policy contract are decided; their implementation and exhaustive mapping tests remain.
    The generic regulatory-rule question is closed: semantic rules are versioned Hub artifacts, while
-   custom deployment policy is an explicit ORCE/PDP integration seam rather than a DCS legal oracle.
+   custom deployment policy runs through the verified external audit-executor
+   boundary rather than a DCS legal oracle.
 2. **Repair evidence hygiene.** Produce a unique report directory per command, record commit,
    configuration and cluster identity, and avoid mixing old XML with current results.
 3. **Rerun current inconclusive paths on the fixed cluster.** At minimum rerun VAL-13, VAL-15,
    VAL-26 and VAL-28 candidates, then retain their logs and reports.
 4. **Execute newly added but uncaptured features.** Run hierarchy/bundle, PoA-at-signing,
    signing-hardening, OID4VP retrieval, real-signing and PKI consolidation independently.
-5. **Implement or trace the missing paths.** VAL-09, VAL-20, VAL-22 and VAL-30 currently lack exact,
+5. **Implement or trace the missing paths.** VAL-09, VAL-20 and VAL-30 currently lack exact,
    complete traceability. VAL-16 is intentionally retained only as a record of the removed generic
    requirement and requires no implementation.
 6. **Unskip only by implementation or approved decision.** Resolve the PoA trusted-root chain walk,

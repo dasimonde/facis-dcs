@@ -72,6 +72,8 @@ identity:
 
 oid4vp:
   trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: true
     # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
     # issuer" scenarios) verifies against this baked-in dev cert.
@@ -227,10 +229,10 @@ fcservice:
   resources:
     requests:
       cpu: 500m
-      memory: 512Mi
+      memory: 768Mi
     limits:
       cpu: "2"
-      memory: 1Gi
+      memory: 2Gi
   portal:
     enabled: false
 
@@ -364,6 +366,13 @@ systemClients:
 
 orce:
   enabled: true
+  checkpointSink:
+    enabled: true
+    url: "https://host.docker.internal:18443/checkpoints"
+    timeoutSeconds: 2
+    internalTimeoutSeconds: 30
+    allowInsecureTLS: true
+    bearerToken: "bdd-checkpoint-sink-token"
   # The ADR-19 AC5 mismatched-federation-rules scenario resolves this second
   # did:web against the same ORCE pod; off by default in the chart because it is
   # a test fixture.
@@ -376,6 +385,8 @@ orce:
   # own registered OAuth2 client (ADR-27): the callback proves WHICH target is
   # reporting, so a target can acknowledge its own deployments and no others.
   extraEnv:
+    - name: ORCE_AUDIT_EXECUTOR_TEST_CONTROLS_ENABLED
+      value: "true"
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
     # legs append /contract/deployment/callback to it.
@@ -414,6 +425,14 @@ orce:
     hosts:
       - host: "localhost"
         path: /contract-target
+
+auditExecutor:
+  url: "http://dcs-orce:1880/customer-audit/run"
+  timeout: "2s"
+
+workflowGateExecutor:
+  url: "http://dcs-orce:1880/workflow-gate/run"
+  timeout: "2s"
 
 signing:
   # Wired as TSA_URL env var; fatal on startup if empty.

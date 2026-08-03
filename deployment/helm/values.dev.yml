@@ -55,7 +55,10 @@ postgresql:
     database: dcs
   additionalDatabases: ["fc", "statuslist", "hydra"]
   persistence:
-    enabled: false
+    # The dependency stack is upgraded in place by dev-stack.sh. Keeping the
+    # databases on emptyDir loses Hydra clients, status lists and DCS data as
+    # soon as PostgreSQL rolls during an upgrade.
+    enabled: true
   service:
     type: NodePort
     nodePort: 30432

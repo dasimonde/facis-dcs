@@ -9,6 +9,7 @@ from behave import given, then, when
 
 from steps.support.services.template_service import TemplateService
 from support.api_client import get_with_headers, pac_audit_url, post_json, template_search_url
+from steps.support.services.orce_audit_control_service import OrceAuditControlService
 from support.services.auth_service import AuthService
 
 @given('I hold an expired credential with roles: "{roles}"')
@@ -189,6 +190,8 @@ def step_then_login_presentation_audited(context):
     matches = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
+        OrceAuditControlService.reset(context, "audit")
+        OrceAuditControlService.set_mode(context, "audit", "success")
         response = post_json(
             context,
             pac_audit_url(context),
@@ -200,7 +203,7 @@ def step_then_login_presentation_audited(context):
         )
         matches = [
             entry
-            for scope_result in response.json()
+            for scope_result in OrceAuditControlService.evidence_groups(context, "SYSTEM")
             for entry in (scope_result.get("audit_trail") or [])
             if isinstance(entry, dict)
             and entry.get("event_type") == "OID4VP_PRESENTATION_SUCCEEDED"

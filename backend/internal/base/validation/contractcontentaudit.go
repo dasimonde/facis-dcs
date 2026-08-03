@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,29 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	// the hub cannot serve it.
 	if _, err := requireDomainOntology(ctx); err != nil {
 		return nil, err
+	}
+	if policy.EnforceValidationProfile {
+		pinnedProfile := pinnedHubProfileVersion(contract)
+		if pinnedProfile <= 0 {
+			if _, hasBundle := contract["dcs:effectiveShapes"]; hasBundle {
+				return nil, errors.New("immutable semantic bundle is missing dcterms:conformsTo")
+			}
+		} else {
+			bundleSource, ok := source.(EffectiveBundleShapeSource)
+			if !ok {
+				return nil, errors.New("shape source cannot resolve immutable validation profile")
+			}
+			profileContent, loadErr := bundleSource.ProfileAt(ctx, pinnedProfile)
+			if loadErr != nil {
+				return nil, fmt.Errorf("load pinned validation profile v%d: %w", pinnedProfile, loadErr)
+			}
+			hubProfile, parseErr := LoadValidationProfileYAML([]byte(profileContent))
+			if parseErr != nil {
+				return nil, fmt.Errorf("parse pinned validation profile v%d: %w", pinnedProfile, parseErr)
+			}
+			policy.profiles = []ValidationProfile{hubProfile}
+			policy.ProfileVersion = pinnedProfile
+		}
 	}
 
 	findings := []PolicyFinding{}
@@ -208,12 +232,10 @@ func normalizeContractContentPolicy(ctx context.Context, raw any, metadata Contr
 		}
 	}
 
-	// EnforceCanonicalShapes drives validateAgainstHubShapes (called from
-	// AuditContractContent, where the document being audited — needed for
-	// ADR-8 version pinning — is in scope). Here, only the validation
-	// profile: content always comes from the hub (ADR-8/ADR-9 — no disk
-	// fallback), the currently-active version (profile pinning is not part
-	// of the ShapeSource contract, unlike shapes).
+	// At this normalization stage the contract is not yet in scope, so load the
+	// hub's active profile as the provisional policy. AuditContractContent
+	// replaces it with the document's pinned ProfileAt version when an immutable
+	// effective bundle is present. There is no disk or executor-side fallback.
 	if policy.EnforceValidationProfile {
 		profileContent, profileVersion, err := activeShapeSource.ActiveProfile(ctx)
 		if err != nil {

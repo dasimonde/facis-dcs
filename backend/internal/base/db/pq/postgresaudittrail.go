@@ -172,6 +172,20 @@ func (r *PostgresAuditTrailRepository) ReadLatestCheckpoint(ctx context.Context,
 	return &record, nil
 }
 
+func (r *PostgresAuditTrailRepository) ReadCheckpointBySequence(ctx context.Context, tx *sqlx.Tx, seq int64) (*datatype.AuditCheckpointRecord, error) {
+	var record datatype.AuditCheckpointRecord
+	if err := tx.GetContext(ctx, &record, `
+        SELECT seq, cid, root, prev_root, leaf_count, tsa_signature, created_at, timestamped_at
+        FROM audit_checkpoints WHERE seq = $1
+    `, seq); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &record, nil
+}
+
 // ReadCheckpointForEntry returns the checkpoint that commits to entryCID, that
 // checkpoint's leaf hashes in order, and the entry's index among them.
 func (r *PostgresAuditTrailRepository) ReadCheckpointForEntry(ctx context.Context, tx *sqlx.Tx, entryCID string) (*datatype.AuditCheckpointRecord, []string, int, error) {

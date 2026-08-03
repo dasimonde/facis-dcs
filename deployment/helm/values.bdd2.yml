@@ -48,6 +48,16 @@ extraEnv:
   - name: DCS_SYNC_FAIL_RETRY_INTERVAL
     value: "10s"
 
+# Instance B deliberately shares instance A's ORCE deployment. Explicit URLs
+# avoid the empty-value helper deriving unavailable dcs2-orce service names.
+auditExecutor:
+  url: "http://dcs-orce:1880/customer-audit/run"
+  timeout: "2s"
+
+workflowGateExecutor:
+  url: "http://dcs-orce:1880/workflow-gate/run"
+  timeout: "2s"
+
 # DID identity (fatal on startup when missing). The <fullname>-identity
 # Secret (identitySecretName helper — unique per release, so this doesn't
 # collide with instance A's own identity Secret in the same namespace) is
@@ -58,7 +68,10 @@ identity:
 
 oid4vp:
   trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: true
+    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 # Own PostgreSQL: this instance's own DCS database plus its own Hydra's
 # database. No "fc" or "statuslist" database — B doesn't run the Federated

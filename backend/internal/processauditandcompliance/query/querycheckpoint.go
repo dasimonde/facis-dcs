@@ -86,6 +86,23 @@ func (h *CheckpointAuditor) Head(ctx context.Context) (*CheckpointHead, error) {
 	return &head, nil
 }
 
+func (h *CheckpointAuditor) BySequence(ctx context.Context, seq int64) (*CheckpointHead, error) {
+	tx, err := h.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	record, err := h.ARepo.ReadCheckpointBySequence(ctx, tx, seq)
+	if err != nil {
+		return nil, fmt.Errorf("could not read checkpoint %d: %w", seq, err)
+	}
+	if record == nil {
+		return nil, nil
+	}
+	head := headOf(*record)
+	return &head, nil
+}
+
 // Proof builds the inclusion proof for one anchored entry. It verifies the
 // proof it just built against the stored root before handing it out, so a
 // corrupted leaf index surfaces here rather than at the auditor.

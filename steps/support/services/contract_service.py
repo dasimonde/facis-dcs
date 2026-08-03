@@ -1,6 +1,7 @@
 """Contract service API client for test steps."""
 
 import os
+import time
 
 import requests
 
@@ -468,6 +469,42 @@ class ContractService:
         assert resp.status_code == 200, resp.text
         context.contract_updated_at[contract_name] = resp.json().get("updated_at")
         return resp.json()
+
+    @staticmethod
+    def post_transition_with_current_version(
+        context,
+        did: str,
+        url: str,
+        payload_factory,
+        headers,
+        attempts: int = 6,
+    ):
+        """Post a transition using a freshly retrieved optimistic-lock token.
+
+        Asynchronous PDF/C2PA writers can update a contract between retrieve
+        and transition. Retry only that explicit conflict; all other responses
+        remain the caller's responsibility.
+        """
+        response = None
+        for attempt in range(attempts):
+            retrieve = get_with_headers(
+                context,
+                contract_retrieve_by_id_url(context, did),
+                headers=headers,
+            )
+            assert retrieve.status_code == 200, retrieve.text
+            updated_at = retrieve.json().get("updated_at")
+            response = post_json(
+                context,
+                url,
+                payload_factory(updated_at),
+                headers=headers,
+            )
+            if response.status_code == 200 or "updated elsewhere" not in response.text:
+                return response
+            if attempt + 1 < attempts:
+                time.sleep(0.5)
+        return response
 
     @staticmethod
     def _prepare_contract_under_review(context, contract_name: str):

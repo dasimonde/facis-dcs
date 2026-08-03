@@ -16,6 +16,8 @@ const filteredRisks = computed(() => {
   }
   return risks.value.filter((risk) => risk.did.toLowerCase().includes(term))
 })
+const hasCompletedSweep = computed(() => checkedAt.value !== null)
+const hasActiveFilter = computed(() => searchTerm.value.trim() !== '')
 
 const runMonitoringSweep = async () => {
   sweepLoading.value = true
@@ -97,45 +99,65 @@ const submitIncidentReport = async () => {
         </button>
       </div>
 
-      <p v-if="checkedAt" class="mb-3 text-sm opacity-70">Last checked: {{ checkedAt }}</p>
-      <div v-if="sweepError" class="mb-3 alert rounded-box alert-error">{{ sweepError }}</div>
-
-      <div v-if="filteredRisks.length === 0" data-testid="monitor-empty-state" class="alert rounded-box alert-info">
-        No compliance risks were found for the current filter.
+      <div v-if="sweepLoading" class="alert rounded-box alert-info" role="status">Running monitoring sweep…</div>
+      <div v-else-if="sweepError" class="alert rounded-box alert-error" role="alert">{{ sweepError }}</div>
+      <div
+        v-else-if="!hasCompletedSweep"
+        data-testid="monitor-idle-state"
+        class="alert rounded-box alert-info"
+        role="status"
+      >
+        Run a monitoring sweep to check for compliance risks.
       </div>
-
-      <table v-else class="table table-zebra">
-        <thead>
-          <tr>
-            <th>Contract DID</th>
-            <th>Risk Type</th>
-            <th>Detail</th>
-            <th>Detected At</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="risk in filteredRisks"
-            :key="`${risk.did}-${risk.risk_type}-${risk.detected_at}`"
-            data-testid="monitor-risk-row"
-            :class="isUnderperformance(risk) ? 'bg-warning/10' : ''"
-          >
-            <td data-testid="monitor-risk-did">{{ risk.did }}</td>
-            <td data-testid="monitor-risk-type">
-              <span
-                v-if="isUnderperformance(risk)"
-                class="mr-2 badge badge-sm badge-warning"
-                data-testid="monitor-risk-underperformance-badge"
+      <template v-else>
+        <p class="mb-3 text-sm opacity-70">Last checked: {{ checkedAt }}</p>
+        <div
+          v-if="filteredRisks.length === 0"
+          data-testid="monitor-empty-state"
+          class="alert rounded-box alert-info"
+          role="status"
+        >
+          {{
+            hasActiveFilter && risks.length > 0
+              ? 'No compliance risks match the current filter.'
+              : 'Monitoring sweep completed. No compliance risks were found.'
+          }}
+        </div>
+        <div v-else class="max-w-full overflow-x-auto rounded-box">
+          <table class="table table-zebra">
+            <thead>
+              <tr>
+                <th>Contract DID</th>
+                <th>Risk Type</th>
+                <th>Detail</th>
+                <th>Detected At</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="risk in filteredRisks"
+                :key="`${risk.did}-${risk.risk_type}-${risk.detected_at}`"
+                data-testid="monitor-risk-row"
+                :class="isUnderperformance(risk) ? 'bg-warning/10' : ''"
               >
-                Underperformance
-              </span>
-              {{ risk.risk_type }}
-            </td>
-            <td data-testid="monitor-risk-detail">{{ risk.detail }}</td>
-            <td data-testid="monitor-risk-detected-at">{{ risk.detected_at }}</td>
-          </tr>
-        </tbody>
-      </table>
+                <td data-testid="monitor-risk-did">{{ risk.did }}</td>
+                <td data-testid="monitor-risk-type">
+                  <span
+                    v-if="isUnderperformance(risk)"
+                    class="mr-2 badge badge-sm badge-warning"
+                    data-testid="monitor-risk-underperformance-badge"
+                  >
+                    Underperformance
+                  </span>
+                  {{ risk.risk_type }}
+                </td>
+                <td data-testid="monitor-risk-detail">{{ risk.detail }}</td>
+                <td data-testid="monitor-risk-detected-at">{{ risk.detected_at }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
     </div>
 
     <div class="rounded-box border border-base-content/10 p-4">
@@ -187,8 +209,13 @@ const submitIncidentReport = async () => {
         </div>
       </form>
 
-      <div v-if="incidentError" class="mt-3 alert rounded-box alert-error">{{ incidentError }}</div>
-      <div v-if="incidentSuccess" data-testid="incident-success" class="mt-3 alert rounded-box alert-success">
+      <div v-if="incidentError" class="mt-3 alert rounded-box alert-error" role="alert">{{ incidentError }}</div>
+      <div
+        v-if="incidentSuccess"
+        data-testid="incident-success"
+        class="mt-3 alert rounded-box alert-success"
+        role="status"
+      >
         Incident report submitted successfully.
       </div>
     </div>

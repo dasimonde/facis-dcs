@@ -60,7 +60,6 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 	if envelope.DID == "" {
 		return nil
 	}
-
 	_, err := s.Deployer.Handle(ctx, command.DeployCmd{
 		DID:         envelope.DID,
 		RequestedBy: "system:auto-deploy",

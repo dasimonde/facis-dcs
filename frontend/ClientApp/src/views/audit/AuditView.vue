@@ -9,7 +9,7 @@ import type { AuditFinding } from '@/models/responses/auditing-response'
 
 const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
 const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})
-const executedAuditScopes = ref<Partial<Record<AuditScope, boolean>>>({})
+const successfulAuditQueries = ref<Partial<Record<AuditScope, string>>>({})
 const selectedFindingId = ref<number | string | null>(null)
 const auditLoadingScope = ref<AuditScope | null>(null)
 const reportLoadingScope = ref<AuditScope | null>(null)
@@ -35,11 +35,9 @@ const isArchiveManagerOnly = computed(
   () => authStore.user?.roles.includes('ARCHIVE_MANAGER') && !authStore.user?.roles.includes('AUDITOR'),
 )
 type AuditResult = 'passed' | 'failed' | 'review'
-type AuditTab = 'checks' | 'timeline'
 type TableFilterKey = 'result' | 'category' | 'component' | 'did'
 
 const emptyValueLabel = '-'
-const activeAuditTab = ref<AuditTab>('checks')
 const tableFilters = ref<Record<TableFilterKey, Record<string, boolean>>>({
   result: {},
   category: {},
@@ -66,14 +64,15 @@ watch(
 
 const findings = computed(() => auditFindingsByScope.value[selectedScope.value] ?? [])
 const error = computed(() => auditErrorsByScope.value[selectedScope.value] ?? null)
-const hasExecutedAudit = computed(() => executedAuditScopes.value[selectedScope.value] === true)
+const currentAuditQuery = computed(() => `${selectedScope.value}:${didFilter.value.trim()}`)
+const hasExecutedAudit = computed(() => successfulAuditQueries.value[selectedScope.value] === currentAuditQuery.value)
 const auditLoading = computed(() => auditLoadingScope.value !== null)
 const reportLoading = computed(() => reportLoadingScope.value !== null)
 const selectedAuditLoading = computed(() => auditLoadingScope.value === selectedScope.value)
 const selectedReportLoading = computed(() => reportLoadingScope.value === selectedScope.value)
 
 const filteredFindings = computed(() => {
-  return checkFindings.value.filter((finding) => {
+  return findings.value.filter((finding) => {
     return (
       tableFilterEnabled('result', auditResultLabel(finding)) &&
       tableFilterEnabled('category', finding.category) &&
@@ -85,75 +84,56 @@ const filteredFindings = computed(() => {
 const selectedFinding = computed(() => {
   return findings.value.find((finding) => String(finding.id) === String(selectedFindingId.value)) ?? null
 })
-const selectedFindingKind = computed(() => (selectedFinding.value ? auditItemKind(selectedFinding.value) : null))
-const selectedFindingEventData = computed(() => {
-  if (!selectedFinding.value) {
-    return null
+watch(filteredFindings, (visibleFindings) => {
+  if (
+    selectedFindingId.value !== null &&
+    !visibleFindings.some((finding) => String(finding.id) === String(selectedFindingId.value))
+  ) {
+    selectedFindingId.value = null
   }
-  if (isObjectRecord(selectedFinding.value.details)) {
-    const eventData = selectedFinding.value.details.event_data ?? selectedFinding.value.details.eventData
-    return isObjectRecord(eventData) ? eventData : null
-  }
-  return null
 })
 const selectedFindingDetailRows = computed(() => {
   const finding = selectedFinding.value
-  const eventData = selectedFindingEventData.value
   if (!finding) {
     return []
   }
-  if (selectedFindingKind.value === 'event') {
-    return [
-      { label: 'Event Type', value: stringDetail(rawEventType(finding)) },
-      { label: 'Actor', value: stringDetail(actorFromEventData(eventData)) },
-      { label: 'Timestamp', value: stringDetail(formatDateTime(finding.created_at)) },
-      { label: 'Component', value: stringDetail(finding.component) },
-      { label: 'DID', value: stringDetail(finding.did) },
-    ].filter((row) => row.value !== emptyValueLabel)
-  }
+  const details = findingDetails(finding)
   return [
     { label: 'Checked', value: stringDetail(checkAssertion(finding)) },
-    { label: 'Rule ID', value: stringDetail(eventData?.ruleId) },
-    { label: 'Policy Set', value: stringDetail(eventData?.policySetId) },
-    { label: 'Policy Version', value: stringDetail(eventData?.policyVersion) },
-    { label: 'Requirement', value: detailValue(eventData?.requirement) },
-    { label: 'Actual value', value: detailValue(eventData?.actualValue) },
-    { label: 'Expected value', value: detailValue(eventData?.expectedValue) },
-    { label: 'Expected values', value: detailValue(eventData?.expectedValues) },
-    { label: 'Operator', value: detailValue(eventData?.operator) },
-    { label: 'Field IRI', value: stringDetail(eventData?.fieldIri) },
-    { label: 'Path', value: stringDetail(eventData?.path) },
-    { label: 'Ontology Term', value: stringDetail(eventData?.ontologyTerm) },
-    { label: 'Object Type', value: stringDetail(eventData?.objectType ?? finding.object_type) },
-    { label: 'Contract Version', value: stringDetail(eventData?.contractVersion) },
-    { label: 'Audited By', value: stringDetail(eventData?.auditedBy) },
+    { label: 'Rule ID', value: stringDetail(details?.rule_id ?? details?.ruleId) },
+    { label: 'Policy Set', value: stringDetail(details?.policySetId) },
+    { label: 'Policy Version', value: stringDetail(details?.policyVersion) },
+    { label: 'Requirement', value: detailValue(details?.requirement) },
+    { label: 'Actual value', value: detailValue(details?.actualValue) },
+    { label: 'Expected value', value: detailValue(details?.expectedValue) },
+    { label: 'Expected values', value: detailValue(details?.expectedValues) },
+    { label: 'Operator', value: detailValue(details?.operator) },
+    { label: 'Field IRI', value: stringDetail(details?.fieldIri) },
+    { label: 'Path', value: stringDetail(details?.path) },
+    { label: 'Ontology Term', value: stringDetail(details?.ontologyTerm) },
+    { label: 'Object Type', value: stringDetail(details?.objectType ?? finding.object_type) },
+    { label: 'Contract Version', value: stringDetail(details?.contractVersion) },
+    { label: 'Audited By', value: stringDetail(details?.auditedBy) },
     { label: 'Component', value: stringDetail(finding.component) },
     { label: 'DID', value: stringDetail(finding.did) },
   ].filter((row) => row.value !== emptyValueLabel)
 })
 
-const checkFindings = computed(() => findings.value.filter((finding) => auditItemKind(finding) === 'check'))
-const timelineEvents = computed(() => {
-  return [...findings.value]
-    .filter((finding) => auditItemKind(finding) === 'event')
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
-})
-const failedCheckCount = computed(
-  () => checkFindings.value.filter((finding) => auditResult(finding) === 'failed').length,
+const failedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'failed').length : 0,
 )
-const passedCheckCount = computed(
-  () => checkFindings.value.filter((finding) => auditResult(finding) === 'passed').length,
+const passedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'passed').length : 0,
 )
-const reviewCheckCount = computed(
-  () => checkFindings.value.filter((finding) => auditResult(finding) === 'review').length,
+const reviewCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'review').length : 0,
 )
 const auditIsEmpty = computed(() => hasExecutedAudit.value && findings.value.length === 0 && !error.value)
 const auditHasPassed = computed(
   () =>
     hasExecutedAudit.value &&
-    checkFindings.value.length > 0 &&
-    failedCheckCount.value === 0 &&
-    reviewCheckCount.value === 0 &&
+    findings.value.length > 0 &&
+    passedCheckCount.value === findings.value.length &&
     !error.value,
 )
 const tableFilterGroups: { key: TableFilterKey; label: string }[] = [
@@ -163,10 +143,10 @@ const tableFilterGroups: { key: TableFilterKey; label: string }[] = [
   { key: 'did', label: 'DID' },
 ]
 const tableFilterOptions = computed<Record<TableFilterKey, string[]>>(() => ({
-  result: uniqueTableValues(checkFindings.value.map((finding) => auditResultLabel(finding))),
-  category: uniqueTableValues(checkFindings.value.map((finding) => finding.category)),
-  component: uniqueTableValues(checkFindings.value.map((finding) => finding.component)),
-  did: uniqueTableValues(checkFindings.value.map((finding) => finding.did)),
+  result: uniqueTableValues(findings.value.map((finding) => auditResultLabel(finding))),
+  category: uniqueTableValues(findings.value.map((finding) => finding.category)),
+  component: uniqueTableValues(findings.value.map((finding) => finding.component)),
+  did: uniqueTableValues(findings.value.map((finding) => finding.did)),
 }))
 
 watch(
@@ -186,14 +166,16 @@ watch(
 
 watch(selectedScope, () => {
   selectedFindingId.value = null
-  activeAuditTab.value = checkFindings.value.length > 0 ? 'checks' : 'timeline'
 })
 
 const executeAudit = async () => {
   const scope = selectedScope.value
+  const query = currentAuditQuery.value
   auditLoadingScope.value = scope
   auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: undefined }
-  executedAuditScopes.value = { ...executedAuditScopes.value, [scope]: true }
+  successfulAuditQueries.value = { ...successfulAuditQueries.value, [scope]: undefined }
+  auditFindingsByScope.value = { ...auditFindingsByScope.value, [scope]: [] }
+  selectedFindingId.value = null
   try {
     const scopeFindings = await auditingService.audit({
       scope,
@@ -201,8 +183,8 @@ const executeAudit = async () => {
       justification: justification.value.trim(),
     })
     auditFindingsByScope.value = { ...auditFindingsByScope.value, [scope]: scopeFindings }
+    successfulAuditQueries.value = { ...successfulAuditQueries.value, [scope]: query }
     selectedFindingId.value = null
-    activeAuditTab.value = scopeFindings.some((finding) => auditItemKind(finding) === 'check') ? 'checks' : 'timeline'
   } catch (err) {
     console.error('Audit Error:', err)
     auditErrorsByScope.value = {
@@ -277,11 +259,6 @@ function selectFinding(finding: AuditFinding): void {
   selectedFindingId.value = finding.id
 }
 
-function selectTab(tab: AuditTab): void {
-  activeAuditTab.value = tab
-  selectedFindingId.value = null
-}
-
 function stringDetail(value: unknown): string {
   if (typeof value === 'string' && value.trim()) {
     return value
@@ -313,7 +290,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-error' | 'badge-warning' {
+function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-error' | 'badge-warning' | 'badge-ghost' {
   const result = auditResult(finding)
   if (result === 'passed') {
     return 'badge-success'
@@ -321,62 +298,23 @@ function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-erro
   if (result === 'failed') {
     return 'badge-error'
   }
-  return 'badge-warning'
+  return result === 'review' ? 'badge-warning' : 'badge-ghost'
 }
 
-function auditItemKind(finding: AuditFinding): 'check' | 'event' {
-  const eventType = rawEventType(finding)?.toUpperCase()
-  const eventData = eventDataFromFinding(finding)
-  if (
-    eventType?.includes('POLICY_AUDIT_FINDING') ||
-    eventType?.includes('COMPLIANCE_FINDING') ||
-    eventType?.includes('AUDIT_CHECK')
-  ) {
-    return 'check'
-  }
-  if (eventData?.ruleId || eventData?.policySetId || eventData?.fieldIri || eventData?.severity) {
-    return 'check'
-  }
-  return 'event'
-}
-
-function auditResult(finding: AuditFinding): AuditResult {
-  const value = finding.status?.trim().toLowerCase()
-  if (
-    value === 'passed' ||
-    value === 'pass' ||
-    value === 'success' ||
-    value === 'successful' ||
-    value === 'ok' ||
-    value === 'compliant' ||
-    value === 'info'
-  ) {
+function auditResult(finding: AuditFinding): AuditResult | null {
+  if (finding.status === 'PASSED') {
     return 'passed'
   }
-  if (
-    value === 'failed' ||
-    value === 'fail' ||
-    value === 'error' ||
-    value === 'critical' ||
-    value === 'blocking' ||
-    value === 'violation' ||
-    value === 'non_compliant'
-  ) {
+  if (finding.status === 'FAILED') {
     return 'failed'
   }
-  if (value === 'warning' || value === 'warn') {
+  if (finding.status === 'REVIEW') {
     return 'review'
   }
-  if (finding.category === 'violation') {
-    return 'failed'
-  }
-  if (finding.category === 'inconsistency') {
-    return 'review'
-  }
-  return 'review'
+  return null
 }
 
-function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Warning' | 'Needs review' {
+function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs Review' | 'Unknown' {
   const result = auditResult(finding)
   if (result === 'passed') {
     return 'Passed'
@@ -384,10 +322,7 @@ function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Warning
   if (result === 'failed') {
     return 'Failed'
   }
-  if (isWarningSeverity(finding)) {
-    return 'Warning'
-  }
-  return 'Needs review'
+  return result === 'review' ? 'Needs Review' : 'Unknown'
 }
 
 function auditResultSummary(finding: AuditFinding): string {
@@ -399,15 +334,15 @@ function auditResultSummary(finding: AuditFinding): string {
   if (result === 'failed') {
     return assertion ? `Failed: ${assertion}` : 'Check failed'
   }
-  if (isWarningSeverity(finding)) {
-    return assertion ? `Warning: ${assertion}` : 'Warning'
+  if (result === 'review') {
+    return assertion ? `Review: ${assertion}` : 'Review required'
   }
-  return assertion ? `Review: ${assertion}` : 'Review required'
+  return assertion ? `Unknown result: ${assertion}` : 'Unknown result'
 }
 
 function checkAssertion(finding: AuditFinding): string {
-  const eventData = eventDataFromFinding(finding)
-  const message = stringDetail(eventData?.message)
+  const details = findingDetails(finding)
+  const message = stringDetail(details?.message ?? details?.reason)
   if (message !== emptyValueLabel) {
     return message
   }
@@ -430,16 +365,12 @@ function checkAssertion(finding: AuditFinding): string {
 }
 
 function severityLabel(finding: AuditFinding): string {
-  return finding.status?.trim() ?? 'not set'
-}
-
-function isWarningSeverity(finding: AuditFinding): boolean {
-  const severity = finding.status?.trim().toLowerCase()
-  return severity === 'warning' || severity === 'warn'
+  return stringDetail(findingDetails(finding)?.severity)
 }
 
 function severityBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-error' | 'badge-warning' | 'badge-ghost' {
-  const severity = finding.status?.trim().toLowerCase()
+  const severityValue = findingDetails(finding)?.severity
+  const severity = typeof severityValue === 'string' ? severityValue.trim().toLowerCase() : ''
   if (
     severity === 'error' ||
     severity === 'critical' ||
@@ -465,47 +396,14 @@ function severityBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-err
   return 'badge-ghost'
 }
 
-function eventDataFromFinding(finding: AuditFinding): Record<string, unknown> | null {
+function findingDetails(finding: AuditFinding): Record<string, unknown> | null {
   if (!isObjectRecord(finding.details)) {
     return null
   }
-  const eventData = finding.details.event_data ?? finding.details.eventData
-  return isObjectRecord(eventData) ? eventData : null
-}
-
-function rawEventType(finding: AuditFinding): string | undefined {
-  if (!isObjectRecord(finding.details)) {
-    return undefined
+  if (isObjectRecord(finding.details.finding)) {
+    return finding.details.finding
   }
-  const eventType = finding.details.event_type ?? finding.details.eventType
-  return typeof eventType === 'string' ? eventType : undefined
-}
-
-function actorFromEventData(eventData: Record<string, unknown> | null): string | undefined {
-  if (!eventData) {
-    return undefined
-  }
-  const explicitActor = eventData.actor ?? eventData.user ?? eventData.username ?? eventData.auditedBy
-  if (typeof explicitActor === 'string') {
-    return explicitActor
-  }
-  for (const [key, value] of Object.entries(eventData)) {
-    if (key.endsWith('_by') && typeof value === 'string') {
-      return value
-    }
-  }
-  return undefined
-}
-
-function formatDateTime(value?: string): string {
-  if (!value) {
-    return emptyValueLabel
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return date.toLocaleString()
+  return finding.details
 }
 </script>
 
@@ -517,8 +415,11 @@ function formatDateTime(value?: string): string {
   </div>
 
   <section class="space-y-4 px-4">
-    <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-      <div class="stats stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal">
+    <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
+      <div
+        v-if="hasExecutedAudit"
+        class="stats max-w-full stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal"
+      >
         <div class="stat">
           <div class="stat-title flex items-center gap-2 text-base-content/70">
             <span class="size-2 rounded-full bg-error/50"></span>
@@ -542,7 +443,7 @@ function formatDateTime(value?: string): string {
         </div>
       </div>
 
-      <div class="flex flex-col gap-3 sm:flex-row">
+      <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap">
         <label class="form-control w-full sm:w-48">
           <span class="label-text mb-1">Scope</span>
           <select
@@ -587,9 +488,9 @@ function formatDateTime(value?: string): string {
           <span v-else>Execute Audit</span>
         </button>
 
-        <div class="flex flex-wrap gap-2 sm:self-end">
+        <div class="flex flex-nowrap gap-2 sm:self-end">
           <button
-            class="btn rounded-box btn-outline"
+            class="btn rounded-box whitespace-nowrap btn-outline"
             :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
             @click="generateReport('json')"
           >
@@ -600,7 +501,7 @@ function formatDateTime(value?: string): string {
             <span v-else>JSON</span>
           </button>
           <button
-            class="btn rounded-box btn-outline"
+            class="btn rounded-box whitespace-nowrap btn-outline"
             :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
             @click="generateReport('csv')"
           >
@@ -611,7 +512,7 @@ function formatDateTime(value?: string): string {
             <span v-else>CSV</span>
           </button>
           <button
-            class="btn rounded-box btn-outline"
+            class="btn rounded-box whitespace-nowrap btn-outline"
             :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
             @click="generateReport('pdf')"
           >
@@ -625,42 +526,20 @@ function formatDateTime(value?: string): string {
       </div>
     </div>
 
-    <div v-if="selectedAuditLoading" class="p-4">Executing audit...</div>
-    <div v-else-if="error" class="alert rounded-box alert-error">{{ error }}</div>
-    <div v-if="auditHasPassed" class="alert rounded-box alert-success">
+    <div v-if="selectedAuditLoading" class="p-4" role="status">Executing audit...</div>
+    <div v-else-if="error" class="alert rounded-box alert-error" role="alert">{{ error }}</div>
+    <div v-if="auditHasPassed" class="alert rounded-box alert-success" role="status">
       Audit passed. No failed checks or review findings were returned.
     </div>
-    <div v-if="auditIsEmpty" class="alert rounded-box alert-info">
+    <div v-if="auditIsEmpty" class="alert rounded-box alert-info" role="status">
       Audit completed successfully. No matching entries were found.
     </div>
 
-    <div v-if="!selectedAuditLoading && !error" class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div class="overflow-x-auto rounded-box border border-base-content/10">
+    <div v-if="!selectedAuditLoading && !error" class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="min-w-0 overflow-x-auto rounded-box border border-base-content/10">
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 px-4 py-3">
-          <div role="tablist" class="tabs-box tabs">
-            <button
-              type="button"
-              role="tab"
-              class="tab text-base-content/70"
-              :class="activeAuditTab === 'checks' ? 'tab-active' : ''"
-              @click="selectTab('checks')"
-            >
-              Checks
-              <span class="ml-2 badge badge-sm">{{ checkFindings.length }}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              class="tab text-base-content/70"
-              :class="activeAuditTab === 'timeline' ? 'tab-active' : ''"
-              @click="selectTab('timeline')"
-            >
-              Timeline
-              <span class="ml-2 badge badge-sm">{{ timelineEvents.length }}</span>
-            </button>
-          </div>
-
-          <div v-if="activeAuditTab === 'checks'" class="flex flex-wrap items-center gap-2">
+          <h3 class="font-bold">Findings</h3>
+          <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-medium opacity-70">Table filters</span>
             <details v-for="group in tableFilterGroups" :key="group.key" class="dropdown">
               <summary class="btn rounded-box btn-outline btn-sm">
@@ -698,7 +577,7 @@ function formatDateTime(value?: string): string {
             </details>
           </div>
         </div>
-        <table v-if="activeAuditTab === 'checks'" class="table table-zebra">
+        <table class="table table-zebra">
           <thead>
             <tr class="text-base-content/70">
               <th>Status</th>
@@ -735,43 +614,8 @@ function formatDateTime(value?: string): string {
             <tr v-if="filteredFindings.length === 0">
               <td colspan="3" class="py-8 text-center opacity-70">
                 {{
-                  hasExecutedAudit ? 'No checks match the selected filters.' : 'Select a scope and execute an audit.'
+                  hasExecutedAudit ? 'No findings match the selected filters.' : 'Select a scope and execute an audit.'
                 }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <table v-else class="table table-zebra">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Event</th>
-              <th>Actor</th>
-              <th>DID</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="event in timelineEvents"
-              :key="event.id"
-              class="cursor-pointer"
-              :class="String(selectedFindingId) === String(event.id) ? 'bg-primary/10' : ''"
-              tabindex="0"
-              @click="selectFinding(event)"
-              @keydown.enter.prevent="selectFinding(event)"
-              @keydown.space.prevent="selectFinding(event)"
-            >
-              <td class="whitespace-nowrap">{{ formatDateTime(event.created_at) }}</td>
-              <td class="max-w-xl min-w-72">
-                <div class="font-medium">{{ event.title ?? formatLabel(rawEventType(event) ?? 'Audit event') }}</div>
-              </td>
-              <td>{{ actorFromEventData(eventDataFromFinding(event)) ?? '-' }}</td>
-              <td>{{ event.did ?? '-' }}</td>
-            </tr>
-            <tr v-if="timelineEvents.length === 0">
-              <td colspan="4" class="py-8 text-center opacity-70">
-                {{ hasExecutedAudit ? 'No timeline events were returned.' : 'Select a scope and execute an audit.' }}
               </td>
             </tr>
           </tbody>
@@ -780,7 +624,7 @@ function formatDateTime(value?: string): string {
 
       <aside class="min-h-80 rounded-box border border-base-content/10 bg-base-100 xl:sticky xl:top-4 xl:self-start">
         <div class="flex items-center justify-between border-b border-base-content/10 px-4 py-3">
-          <h3 class="font-bold">{{ selectedFindingKind === 'event' ? 'Event Details' : 'Check Details' }}</h3>
+          <h3 class="font-bold">Finding Details</h3>
           <button v-if="selectedFinding" type="button" class="btn btn-ghost btn-xs" @click="selectedFindingId = null">
             Close
           </button>
@@ -789,7 +633,7 @@ function formatDateTime(value?: string): string {
           Select a row to inspect the corresponding audit evidence.
         </div>
         <div v-else class="space-y-4 p-4">
-          <div v-if="selectedFindingKind === 'check'">
+          <div>
             <div class="mb-2 badge" :class="findingBadgeClass(selectedFinding)">
               {{ auditResultLabel(selectedFinding) }}
             </div>
@@ -805,14 +649,6 @@ function formatDateTime(value?: string): string {
                 Severity: {{ severityLabel(selectedFinding) }}
               </span>
             </div>
-          </div>
-
-          <div v-else>
-            <div class="mb-2 badge badge-outline">Timeline event</div>
-            <h4 class="leading-snug font-bold">
-              {{ selectedFinding.title ?? formatLabel(rawEventType(selectedFinding) ?? 'Audit event') }}
-            </h4>
-            <div class="mt-2 text-xs opacity-80">{{ formatDateTime(selectedFinding.created_at) }}</div>
           </div>
 
           <p class="text-sm wrap-break-word whitespace-pre-wrap opacity-80">{{ selectedFinding.description }}</p>

@@ -3,7 +3,10 @@ package semantichub
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+
+	"digital-contracting-service/internal/base/validation"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -48,14 +51,34 @@ func (h HubShapeSource) ActiveDomainOntology(ctx context.Context) (string, int, 
 	return h.active(ctx, SLAOntologyName, "ontology")
 }
 
-// ShapesAt returns the SHACL shapes at a specific version, concatenated
-// with the clause catalog's active version.
+// ShapesAt returns exactly the canonical SHACL shapes at a specific version.
+// Mixing an immutable canonical version with today's active libraries would
+// silently change old artifacts after an activation or rollback.
 func (h HubShapeSource) ShapesAt(ctx context.Context, version int) (string, error) {
 	content, err := h.versionContent(ctx, ShapesName, "shapes", version)
 	if err != nil {
 		return "", fmt.Errorf("semantic hub: pinned shapes v%d: %w", version, err)
 	}
-	return h.withClauseCatalog(ctx, content)
+	return content, nil
+}
+
+func (h HubShapeSource) ShapesBundleAt(ctx context.Context, refs []validation.VersionedShapeRef) (string, error) {
+	if len(refs) == 0 {
+		return "", fmt.Errorf("semantic hub: effective shapes bundle is empty")
+	}
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		content, err := h.versionContent(ctx, ref.Name, "shapes", ref.Version)
+		if err != nil {
+			return "", fmt.Errorf("semantic hub: effective shapes %s v%d: %w", ref.Name, ref.Version, err)
+		}
+		parts = append(parts, content)
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
+func (h HubShapeSource) ProfileAt(ctx context.Context, version int) (string, error) {
+	return h.versionContent(ctx, ProfileName, "profile", version)
 }
 
 // ContextByIRI returns the active version of a context registered under the

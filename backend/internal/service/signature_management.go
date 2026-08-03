@@ -25,6 +25,7 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
 	"digital-contracting-service/internal/signingmanagement/dss"
@@ -87,6 +88,7 @@ type signatureManagementsrvc struct {
 	ArchiveRepo   cwedb.ContractRepo
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    *tsa.APIClient
+	WorkflowGate  *workflowgate.Coordinator
 	// RequestSigner signs the pending-ceremony PID/PoA presentation request
 	// object (JAR) — the SAME HSM JAR signer + Hydra client_id the auth
 	// service's login flow uses (jwk header, no x509_san_dns claim).
@@ -125,12 +127,12 @@ type signatureManagementsrvc struct {
 func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, ceremonyRepo db.CeremonyRepo,
 	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string,
 	ipfsClient *ipfs.APIClient, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
-	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
+	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer, workflowGate *workflowgate.Coordinator,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
 	docRetrievalSigner oid4vprequest.Signer, docRetrievalClientID string,
 	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig) signaturemanagement.Service {
 
-	return &signatureManagementsrvc{
+	service := &signatureManagementsrvc{
 		JWTAuthenticator:     jwtAuth,
 		DB:                   db,
 		CRepo:                cRepo,
@@ -144,6 +146,7 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		ArchiveRepo:          archiveRepo,
 		ArchiveNotary:        archiveNotary,
 		ArchiveTSA:           archiveTSA,
+		WorkflowGate:         workflowGate,
 		RequestSigner:        requestSigner,
 		OID4VPClientID:       oid4vpClientID,
 		PublicAPIBase:        publicAPIBase,
@@ -153,6 +156,7 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		DCQLQuery:            dcqlQuery,
 		Trust:                trust,
 	}
+	return service
 }
 
 func (s *signatureManagementsrvc) Retrieve(ctx context.Context, req *signaturemanagement.SMContractRetrieveRequest) (res *signaturemanagement.SMContractRetrieveResponse, err error) {
@@ -375,7 +379,6 @@ func (s *signatureManagementsrvc) PrepareSignature(ctx context.Context, req *sig
 	if req.CeremonyID != nil {
 		ceremonyID = *req.CeremonyID
 	}
-
 	handler := s.newApplier()
 	document, err := handler.Prepare(ctx, command.ApplyCmd{
 		DID:            req.Did,
@@ -417,7 +420,6 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 	if req.CeremonyID != nil {
 		ceremonyID = *req.CeremonyID
 	}
-
 	handler := s.newApplier()
 	if err := handler.SubmitSignature(ctx, command.SubmitSignatureCmd{
 		ApplyCmd: command.ApplyCmd{

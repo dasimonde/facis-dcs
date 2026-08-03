@@ -79,14 +79,32 @@ can. This is what makes proofs publishable.
 `GET /pac/audit/checkpoint/proof/{entry_cid}` returns a proof and the head of
 the checkpoint that commits to the entry — never the entry.
 
-**6. External anchoring via ORCE — pull wired, sink still TODO.** The ORCE flow
-`deployment/helm/charts/orce/flows/audit-checkpoint-anchor-flow.json` polls
-`GET /pac/audit/checkpoint/head` every 15 minutes and skips a `seq` it has
-already seen. It currently drops each new head on a **debug node** carrying an
-explicit TODO: a debug node anchors nothing, and evidence that never leaves the
-operator's reach proves nothing against the operator. The sink — a notary, a
-chain, a counterparty, anything third-party and append-only — is the deliberate
-next step; the flow exists so that step is a rewire, not a rebuild.
+**6. External anchoring via ORCE — sequential, authenticated and durable.** The
+ORCE flow
+`deployment/helm/charts/orce/flows/audit-checkpoint-anchor-flow.json:1-110`
+polls `GET /pac/audit/checkpoint/head` every 15 minutes, fetches every missing
+checkpoint and publishes only `seq`, `root`, `prev_root`, `leaf_count`,
+`created_at`, `tsa_timestamp` and `timestamped_at` to a configured HTTPS sink.
+Contract data, CIDs, nonces and identities are not part of this public
+projection.
+
+Publication is strictly sequential: only `confirmed_seq + 1` may be sent and
+its `prev_root` must equal the last confirmed root. Every request carries the
+stable idempotency key `facis-dcs-checkpoint:<seq>:<root>`. The worker records a
+sequence as confirmed only after a successful 2xx response and stores that
+confirmation on the existing `/data` volume, so a lost response or pod restart
+repeats the same idempotent request instead of skipping or duplicating an
+append. A sequence gap or previous-root mismatch durably blocks later
+publication until an operator resolves the chain fault
+(`deployment/helm/charts/orce/flows/audit-checkpoint-anchor-flow.json:56`).
+
+The sink is disabled by default and, when enabled, must have an HTTPS URL and a
+Bearer token supplied directly or through a Kubernetes Secret. Invalid
+configuration fails Helm rendering. The sink request timeout is intentionally
+separate from the longer internal Hydra/DCS lookup timeout
+(`deployment/helm/charts/orce/templates/deployment.yaml:5-18`,
+`deployment/helm/charts/orce/templates/deployment.yaml:94-116`,
+`deployment/helm/charts/orce/values.yaml:30-43`).
 
 Because every root chains to its predecessor, **one published head transitively
 commits to the entire log before it**, so polling every few minutes is
@@ -172,6 +190,11 @@ the SRS proper the next time that document is revised.
   not hide them, it simply never covered them.
 - Published heads leak batch size and cadence, i.e. activity volume. Accepted;
   padding would blunt it if it ever matters.
+- A durable external-chain block is deliberately not self-healing. It prevents
+  later roots from being published over a gap and requires operator
+  intervention; ordinary transport failures leave the sequence unconfirmed and
+  are retried with the same idempotency key on the next worker run
+  (`deployment/helm/charts/orce/flows/audit-checkpoint-anchor-flow.json:56`).
 - The audit trail's authority still rests on IPFS content addressing; the
   Postgres tables (`audit_checkpoints`, `audit_checkpoint_leaves`) are an index
   over it, holding the head, the walk order and the pending timestamps.

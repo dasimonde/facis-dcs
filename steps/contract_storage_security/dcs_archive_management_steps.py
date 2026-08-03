@@ -24,6 +24,7 @@ from steps.support.api_client import (
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+from steps.support.services.orce_audit_control_service import OrceAuditControlService
 
 
 @when("the Archive Manager retrieves the archive")
@@ -153,6 +154,8 @@ def step_then_archive_deletion_audited(context, name):
         # Workflow events (delete/annotate) live in the PAC audit trail under
         # the CONTRACT_STORAGE_ARCHIVE component; /archive/audit serves the
         # archive-integrity view (entries + notary-chain checks).
+        OrceAuditControlService.reset(context, "audit")
+        OrceAuditControlService.set_mode(context, "audit", "success")
         resp = post_json(
             context,
             pac_audit_url(context),
@@ -160,8 +163,7 @@ def step_then_archive_deletion_audited(context, name):
             headers=headers,
         )
         assert resp.status_code == 200, f"Archive audit query failed: {resp.status_code} {resp.text}"
-        entries = resp.json()
-        assert isinstance(entries, list), f"Expected a list of audit scopes, got: {entries}"
+        entries = OrceAuditControlService.evidence_groups(context, "archive")
         event_types_for_did = [
             str(entry.get("event_type", "")).upper()
             for scope_result in entries
@@ -378,6 +380,8 @@ def step_then_archive_annotation_audited(context, name):
         # Workflow events (delete/annotate) live in the PAC audit trail under
         # the CONTRACT_STORAGE_ARCHIVE component; /archive/audit serves the
         # archive-integrity view (entries + notary-chain checks).
+        OrceAuditControlService.reset(context, "audit")
+        OrceAuditControlService.set_mode(context, "audit", "success")
         resp = post_json(
             context,
             pac_audit_url(context),
@@ -385,8 +389,7 @@ def step_then_archive_annotation_audited(context, name):
             headers=headers,
         )
         assert resp.status_code == 200, f"Archive audit query failed: {resp.status_code} {resp.text}"
-        entries = resp.json()
-        assert isinstance(entries, list), f"Expected a list of audit scopes, got: {entries}"
+        entries = OrceAuditControlService.evidence_groups(context, "archive")
         event_types_for_did = [
             str(entry.get("event_type", "")).upper()
             for scope_result in entries

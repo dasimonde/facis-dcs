@@ -1,0 +1,70 @@
+[
+  {
+    "id": "workflow-gate-tab",
+    "type": "tab",
+    "label": "Semantic Workflow Gate",
+    "disabled": false,
+    "info": "Provider-neutral reference PAC workflow-gate executor. Local SHACL/profile/ODRL evidence is supplied by DCS and this flow returns one correlated decision."
+  },
+  {
+    "id": "workflow-gate-in",
+    "type": "http in",
+    "z": "workflow-gate-tab",
+    "name": "POST /workflow-gate/run",
+    "url": "/workflow-gate/run",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 100,
+    "wires": [["workflow-gate-execute"]]
+  },
+  {
+    "id": "workflow-gate-execute",
+    "type": "function",
+    "z": "workflow-gate-tab",
+    "name": "Execute exactly once",
+    "func": "const expectedToken = env.get('ORCE_WORKFLOW_GATE_BEARER_TOKEN') || '';\nconst supplied = (msg.req.headers.authorization || '').replace(/^Bearer\\s+/i, '');\nif (expectedToken && supplied !== expectedToken) {\n    msg.statusCode = 401;\n    msg.payload = {error: 'unauthorized'};\n    return [msg, null];\n}\nconst request = msg.payload || {};\nconst mode = global.get('workflowGateMode') || 'success_empty';\nconst observations = global.get('workflowGateRequests') || [];\nobservations.push({payload: request, path: msg.req.path || msg.req.url, headers: msg.req.headers});\nglobal.set('workflowGateRequests', observations);\nif (mode === 'non_2xx_response') {\n    msg.statusCode = 503;\n    msg.payload = {error: 'controlled failure'};\n    return [msg, null];\n}\nif (mode === 'malformed_json' || mode === 'malformed_JSON') {\n    msg.headers = {'content-type': 'application/json'};\n    msg.payload = '{broken';\n    return [msg, null];\n}\nlet result = 'PASSED';\nlet findings = [];\nif (mode === 'failed') {\n    result = 'FAILED';\n    findings = [{rule_id:'BDD-WORKFLOW-FAILED',result:'FAILED',reason:'controlled failed result',severity:'error'}];\n} else if (mode === 'review') {\n    result = 'REVIEW';\n    findings = [{rule_id:'BDD-WORKFLOW-REVIEW',result:'REVIEW',reason:'controlled review result',severity:'warning'}];\n}\nconst response = {\n    contract_version: request.contract_version,\n    correlation_id: request.correlation_id,\n    snapshot_id: request.snapshot_id,\n    gate: request.gate,\n    result,\n    findings,\n    executor_id: 'facis-orce-workflow-gate',\n    executor_version: '1.0.0',\n    executed_at: new Date().toISOString()\n};\nif (mode === 'mismatched_correlation') response.correlation_id = '00000000-0000-4000-8000-000000000000';\nif (mode === 'invalid_result') response.result = 'INVALID';\nmsg.payload = response;\nif (mode === 'timeout') return [null, msg];\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 100,
+    "wires": [["workflow-gate-response"], ["workflow-gate-delay"]]
+  },
+  {
+    "id": "workflow-gate-delay",
+    "type": "delay",
+    "z": "workflow-gate-tab",
+    "name": "Controlled timeout",
+    "pauseType": "delay",
+    "timeout": "30",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 700,
+    "y": 150,
+    "wires": [["workflow-gate-response"]]
+  },
+  {
+    "id": "workflow-gate-response",
+    "type": "http response",
+    "z": "workflow-gate-tab",
+    "name": "Workflow gate response",
+    "statusCode": "",
+    "headers": {},
+    "x": 940,
+    "y": 100,
+    "wires": []
+  }
+]

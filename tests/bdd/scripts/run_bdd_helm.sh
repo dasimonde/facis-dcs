@@ -84,6 +84,10 @@ wait_for_running_pod() {
 # so this is not release-scoped the way BDD_HSMSIGN_EXEC is.
 mkdir -p .tmp .reports/junit
 REPORTS_JUNIT_DIR="$PWD/.reports/junit"
+# A previous local run must not satisfy the fail-closed scenario-count gate
+# below. Behave writes one report per feature, so remove only its generated
+# JUnit XML artifacts before starting the selected suite.
+find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
 
 # Emits `--resolve <host>:<port>:127.0.0.1` for a URL's host[:port], so
 # *.localhost hostnames the host machine's own resolver may not know (e.g.
@@ -354,6 +358,7 @@ done
 export BDD_ORCE_ARCHIVE_NOTARY_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive/notary"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive-audit-events.jsonl"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN="$ORCE_TOKEN"
+export BDD_ORCE_AUDIT_CONTROL_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit-executor/test"
 export BDD_ORCE_NAMESPACE="$K8S_NAMESPACE"
 export BDD_ORCE_DEPLOYMENT="$ORCE_DEPLOYMENT"
 export BDD_KUBECTL="$KUBECTL_BIN"
@@ -447,4 +452,5 @@ else
 
   JUNIT_COUNT=$(find "$REPORTS_JUNIT_DIR" -name "*.xml" 2>/dev/null | wc -l || true)
   echo "Generated $JUNIT_COUNT junit XML files in $REPORTS_JUNIT_DIR/"
+  python "$PWD/tests/bdd/scripts/assert_junit_scenarios.py" "$REPORTS_JUNIT_DIR"
 fi

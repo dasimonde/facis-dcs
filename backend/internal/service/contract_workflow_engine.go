@@ -39,6 +39,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
 	"digital-contracting-service/internal/middleware"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 
 	"github.com/jmoiron/sqlx"
@@ -64,6 +65,7 @@ type contractWorkflowEnginesrvc struct {
 	ArchiveNotary        command.ArchiveNotary
 	ArchiveTSA           *tsa.APIClient
 	TargetClient         command.ContractTargetClient
+	WorkflowGate         *workflowgate.Coordinator
 	// MachineIdentities is the registry every machine caller is resolved
 	// against, and HydraAdmin provisions the OAuth2 clients they present
 	// (ADR-27).
@@ -81,10 +83,11 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	ipfsClient *ipfs.APIClient, archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
 	deploymentRepo db.DeploymentRepo, targetRepo db.ContractTargetRepo,
 	targetClient command.ContractTargetClient,
+	workflowGate *workflowgate.Coordinator,
 	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
 	hydraPublicIssuerURL string) contractworkflowengine.Service {
 
-	return &contractWorkflowEnginesrvc{
+	service := &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
 		CRepo:            cRepo,
@@ -104,11 +107,13 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		ArchiveNotary:    archiveNotary,
 		ArchiveTSA:       archiveTSA,
 		TargetClient:     targetClient,
+		WorkflowGate:     workflowGate,
 
 		MachineIdentities:    machineIdentities,
 		HydraAdmin:           hydraAdmin,
 		HydraPublicIssuerURL: hydraPublicIssuerURL,
 	}
+	return service
 }
 
 // mapContractCommandError classifies a contract command handler error for
@@ -328,7 +333,6 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-
 	cmd := command.SubmitCmd{
 		DID:          req.Did,
 		UpdatedAt:    updatedAt,
@@ -1110,7 +1114,6 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-
 	cmd := command.ApproveCmd{
 		DID:        req.Did,
 		UpdatedAt:  updatedAt,
@@ -1356,7 +1359,6 @@ func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractwor
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-
 	cmd := command.OfferCmd{
 		DID:       req.Did,
 		UpdatedAt: updatedAt,
@@ -1511,7 +1513,14 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-
+	targetID := ""
+	if req.TargetID != nil {
+		targetID = *req.TargetID
+	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
 	handler := command.Deployer{
 		DB:             s.DB,
 		CRepo:          s.CRepo,
@@ -1519,21 +1528,12 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		TargetRepo:     s.TargetRepo,
 		Target:         s.TargetClient,
 	}
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
-		DID:         req.Did,
-		UpdatedAt:   updatedAt,
-		RequestedBy: middleware.GetParticipantID(ctx),
-		LocalPeer:   localPeer,
-		TargetIDOverride: func() string {
-			if req.TargetID != nil {
-				return *req.TargetID
-			}
-			return ""
-		}(),
+		DID:              req.Did,
+		UpdatedAt:        updatedAt,
+		RequestedBy:      middleware.GetParticipantID(ctx),
+		LocalPeer:        localPeer,
+		TargetIDOverride: targetID,
 	})
 	if err != nil {
 		return nil, mapContractCommandError(err)

@@ -16,6 +16,29 @@ export interface AuditFinding {
 
 export type AuditResponse = AuditFinding[]
 
+export interface PACAuditExecutorFinding {
+  rule_id: string
+  result: 'PASSED' | 'FAILED' | 'REVIEW'
+  reason: string
+  severity?: string
+  evidence_refs?: string[]
+}
+
+export interface PACAuditExecutorResponse {
+  contract_version: string
+  audit_id: string
+  correlation_id: string
+  scope: string
+  resource?: { did: string }
+  executor: {
+    id: string
+    version: string
+  }
+  executed_at: string
+  findings: PACAuditExecutorFinding[]
+  receipt?: unknown
+}
+
 export interface AuditReportSummary {
   totalEvents: number
   totalChecks: number

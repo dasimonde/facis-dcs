@@ -453,3 +453,28 @@ func TestNormalizedDocumentsClaimNoValidationProfile(t *testing.T) {
 	// The shapes anchor is standard SHACL and stays.
 	require.Contains(t, result, "sh:shapesGraph")
 }
+
+func TestPinSemanticBundleRecordsCompleteImmutableReferences(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@context": []any{map[string]any{"custom": "https://example.test/custom#"}},
+		"@id":      "did:web:example.test:contract",
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{
+			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
+			"https://dcs.test/semantic/shapes/customer-library?version=7",
+		},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	require.Len(t, document["dcs:effectiveShapes"], 3)
+	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+		document["dcterms:conformsTo"].(map[string]any)["@id"])
+}

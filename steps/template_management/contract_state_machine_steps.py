@@ -230,14 +230,14 @@ def _advance_to_reviewed(context, name):
     _advance_to_submitted(context, name)
     did, _ = ContractService._contract_data(context, name)
     reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
-    assert retrieve.status_code == 200, retrieve.text
-    updated_at = retrieve.json().get("updated_at")
-    review_submit = post_json(
+    review_submit = ContractService.post_transition_with_current_version(
         context,
+        did,
         contract_submit_url(context),
-        ContractService._contract_reviewer_submit_payload(context, did, updated_at),
-        headers=reviewer_h,
+        lambda updated_at: ContractService._contract_reviewer_submit_payload(
+            context, did, updated_at
+        ),
+        reviewer_h,
     )
     assert review_submit.status_code == 200, (
         f"Reviewer submit (forward_to=approval) failed while preparing REVIEWED state for "
@@ -327,13 +327,18 @@ def _revoke_signature(context, name):
 
 
 def _terminate_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
+    did, _ = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    resp = post_json(
+    resp = ContractService.post_transition_with_current_version(
         context,
+        did,
         contract_terminate_url(context),
-        {"did": did, "reason": "BDD setup", "updated_at": updated_at},
-        headers=manager_h,
+        lambda updated_at: {
+            "did": did,
+            "reason": "BDD setup",
+            "updated_at": updated_at,
+        },
+        manager_h,
     )
     assert resp.status_code == 200, (
         f"Terminate failed while preparing TERMINATED state for '{name}': {resp.status_code} {resp.text}"

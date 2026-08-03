@@ -69,6 +69,41 @@ type Schema struct {
 	CreatedAt string `db:"created_at"`
 }
 
+type EffectiveBundle struct {
+	ContextVersion int
+	ProfileVersion int
+	Shapes         []Schema
+}
+
+// ResolveEffectiveBundle selects the complete active validation bundle in a
+// deterministic order. The returned versions are immutable and can be pinned
+// into an artifact before the surrounding creation transaction commits.
+func ResolveEffectiveBundle(ctx context.Context, tx *sqlx.Tx) (EffectiveBundle, error) {
+	var bundle EffectiveBundle
+	if err := tx.GetContext(ctx, &bundle.ContextVersion,
+		`SELECT version FROM semantic_schemas WHERE name=$1 AND kind='context' AND active`,
+		ContextName); err != nil {
+		return bundle, fmt.Errorf("semantic hub: active context: %w", err)
+	}
+	if err := tx.GetContext(ctx, &bundle.ProfileVersion,
+		`SELECT version FROM semantic_schemas WHERE name=$1 AND kind='profile' AND active`,
+		ProfileName); err != nil {
+		return bundle, fmt.Errorf("semantic hub: active profile: %w", err)
+	}
+	if err := tx.SelectContext(ctx, &bundle.Shapes, `
+        SELECT name, version, kind, media_type, content, active, created_by, created_at::text
+        FROM semantic_schemas
+        WHERE kind='shapes' AND active
+        ORDER BY CASE name WHEN $1 THEN 0 WHEN $2 THEN 1 ELSE 2 END, name`,
+		ShapesName, ClauseCatalogName); err != nil {
+		return bundle, fmt.Errorf("semantic hub: active shapes bundle: %w", err)
+	}
+	if len(bundle.Shapes) == 0 || bundle.Shapes[0].Name != ShapesName {
+		return bundle, fmt.Errorf("semantic hub: canonical active shapes are unavailable")
+	}
+	return bundle, nil
+}
+
 // ErrSchemaNotFound is returned when no matching schema (name/version) exists.
 var ErrSchemaNotFound = errors.New("semantic hub: schema not found")
 

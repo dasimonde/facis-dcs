@@ -51,6 +51,7 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
   @REQ-audit-ui-archive-orce-AC2 @DCS-IR-PACM-01
   @clean_db
   Scenario: An empty audit is an explicit successful state
+    Given the audit executor returns a successful empty result
     When the Auditor runs scope "archive" with justification "empty state BDD-4716"
     Then the audit response is a successful empty result
 
@@ -123,7 +124,7 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
   Scenario Outline: Every report format contains the complete filtered audit result
     Given contract "Complete Report Contract" is submitted, reviewed, approved, and signed via the standard workflow
     When the Auditor exports scope "archive" for that contract as "<format>" with justification "external report BDD-4720"
-    Then the "<format>" report contains lifecycle events with actors and timestamps
+    Then the "<format>" report contains timestamped audit results
     And the "<format>" report contains archive findings with rule references and results
     And the exact delivered report bytes have a recorded SHA-256 hash and IPFS CID
 

@@ -8,11 +8,29 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"digital-contracting-service/internal/base/datatype"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
+
+func TestArchiveTSATimestampComparisonUsesRFC3161SecondPrecision(t *testing.T) {
+	storedAt := time.Date(2026, 7, 30, 21, 31, 43, 900_000_000, time.UTC)
+
+	if archiveTSATimestampPrecedesStoredAt(
+		time.Date(2026, 7, 30, 21, 31, 43, 0, time.UTC),
+		storedAt,
+	) {
+		t.Fatal("a TSA timestamp in the same whole second must not precede storedAt")
+	}
+	if !archiveTSATimestampPrecedesStoredAt(
+		time.Date(2026, 7, 30, 21, 31, 42, 0, time.UTC),
+		storedAt,
+	) {
+		t.Fatal("a TSA timestamp from the previous second must precede storedAt")
+	}
+}
 
 func TestParseArchiveNotaryChainAcceptsValidChain(t *testing.T) {
 	first := archiveNotaryEvent{

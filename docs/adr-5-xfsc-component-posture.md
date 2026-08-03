@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted. Revised 2026-07-27 to record the retained Federated Catalogue's
-supported graph-store and deployment lifecycle.
+Accepted. Revised 2026-07-28 to record the retained Federated Catalogue's
+supported graph-store and deployment lifecycle and ORCE's role as the
+reference PAC audit executor.
 
 ## Context
 
@@ -23,7 +24,7 @@ substituted.
 |---|---|
 | Federated Catalogue | Retained. DCS integrates with its asset, schema, query and verification interfaces (`backend/internal/templatecatalogueintegration/client/client.go:100-105`, `backend/internal/templatecatalogueintegration/client/client.go:108-183`). The supported co-deployment uses Fuseki as its graph store; Neo4j/n10s is no longer a runtime dependency (`deployment/helm/charts/federated-catalogue/templates/deployment.yaml:41-53`). |
 | XFSC Status List Service | Retained, integrated as specified — credential revocation status (`backend/internal/auth/oid4vp/status_list*.go`) and C2PA lifecycle status publication both resolve to it. |
-| ORCE (orchestration engine) | Retained; IR-SI-02's Node-RED-webhook compatibility is satisfied by the shipped example flow (`deployment/helm/charts/orce/flows/contract-target-flow.json`). |
+| ORCE (orchestration engine) | Retained. IR-SI-02's Node-RED-webhook compatibility is satisfied by the shipped flows. In addition to contract-target orchestration, ORCE provides this environment's reference implementation of the versioned PAC audit-executor contract (`deployment/helm/charts/orce/flows/audit-executor-flow.json:1-94`). |
 | Crypto Provider Service (Appendix D's "essential crypto parts") | **Substituted** by PKCS#11/HSM key custody (ADR-1). IR-HI-01's "standardized interfaces" wording is read as satisfied by PKCS#11 itself being the standardized interface — DCS does not require the specific Crypto Provider Service REST API to satisfy that requirement, since PKCS#11 already is one. |
 | OCM W-Stack (issuance/verification/retrieval/well-known) | Not used for VC signing — see [adr-ocmw-vc-signing.md](adr-ocmw-vc-signing.md) for the detailed evaluation of why the OCM-W protocol (OID4VCI wallet-pull) does not fit DCS's synchronous in-process signing requirement. Remains the natural integration point if DCS later issues credentials *to* wallet holders (a different feature than what it does today). |
 
@@ -54,7 +55,7 @@ Readiness is a lifecycle, not a fixed delay:
 5. DCS performs one semantic `/verification` call and one schema
    synchronization before exposing `/readyz` as ready
    (`backend/internal/templatecatalogueintegration/client/client.go:108-183`,
-   `backend/cmd/dcs/main.go:497-507`,
+   `backend/cmd/dcs/main.go:509-547`,
    `backend/cmd/dcs/readiness.go:19-28`).
 
 This sequence deliberately contains no FC warm-up request, schema-sync retry or
@@ -62,6 +63,59 @@ blanket readiness sleep. A terminal response is returned immediately to the
 deployment entry point, which prints the relevant Deployment, Job, Pod and log
 diagnostics (`deployment/helm/deploy.sh:90-101`,
 `deployment/helm/deploy.sh:119-147`).
+
+### ORCE-backed PAC audit execution
+
+`POST /pac/audit` remains the authenticated DCS boundary. DCS authorizes the
+request, validates its scope and gathers the applicable template, contract,
+signature or archive evidence before making one HTTP request to the configured
+executor (`backend/internal/service/process_audit_and_compliance.go:66-110`,
+`backend/internal/service/process_audit_and_compliance.go:355-405`). For
+signature audits, the evidence is a safe metadata projection; raw signature
+bytes and the JAdES token are deliberately excluded
+(`backend/internal/service/signature_audit_evidence.go:13-31`,
+`backend/internal/service/signature_audit_evidence.go:70-93`).
+
+The integration contract is `facis-pac-audit-executor/v1`. It correlates the
+audit and request, identifies scope and optional resource, carries requester,
+justification and DCS-procured evidence, and returns executor identity,
+execution time, findings and an optional receipt
+(`backend/internal/processauditandcompliance/auditexecutor/client.go:17-65`).
+The DCS performs exactly one bounded dispatch. It does not retry, substitute
+local findings or fall back to another executor. Non-2xx responses, timeouts,
+oversized or malformed JSON, unknown fields and mismatched correlation,
+version, scope, resource or finding result fail closed
+(`backend/internal/processauditandcompliance/auditexecutor/client.go:92-138`,
+`backend/internal/processauditandcompliance/auditexecutor/client.go:152-187`).
+
+The shipped ORCE flow exposes `/audit/run` as the reference implementation for
+this environment and produces the final PAC findings from the supplied
+evidence. Specialized DCS validators may contribute technical check evidence,
+but ORCE does not duplicate DCS-local SHACL execution
+(`deployment/helm/charts/orce/flows/audit-executor-flow.json:1-53`). A customer
+may replace ORCE with any endpoint implementing the same versioned contract by
+setting the Helm executor URL. URL, path, timeout and an optional bearer token
+from a Secret are deployment configuration; no DCS code change is required
+(`deployment/helm/values.yaml:108-124`,
+`deployment/helm/templates/deployment.yaml:345-363`). The BDD profile proves
+this replacement boundary by selecting the compatible
+`/customer-audit/run` endpoint (`deployment/helm/values.bdd.yml:422-424`).
+
+Only a validated successful response is persisted. `pac_audit_runs` is
+append-only and keeps both queryable JSONB and the exact response bytes,
+together with request/response hashes and executor provenance
+(`backend/migrations/sql/20260728b_pac_audit_runs.sql:1-36`). The run and its
+`PAC_AUDIT_EXECUTED` outbox event are committed in the same database
+transaction (`backend/internal/service/pac_audit_run.go:48-82`). Reports never
+execute the checks again: JSON returns the exact stored response bytes, while
+CSV and PDF are projections of that same run
+(`backend/internal/service/audit_report.go:107-127`,
+`backend/internal/service/process_audit_and_compliance.go:449-503`). The exact
+emitted report bytes are hashed, stored in IPFS when configured, and recorded
+with scope, format, CID, justification and summary in
+`PAC_REPORT_GENERATED`
+(`backend/internal/service/process_audit_and_compliance.go:481-500`,
+`backend/internal/service/process_audit_and_compliance.go:520-563`).
 
 ## Consequences
 
@@ -83,3 +137,12 @@ diagnostics (`deployment/helm/deploy.sh:90-101`,
   the lifecycle contract verifies deterministic rendering plus digest-pinned FC
   images (`deployment/helm/tests/federated_catalogue_lifecycle_test.sh:16-29`,
   `deployment/helm/tests/federated_catalogue_lifecycle_test.sh:59-87`).
+- ORCE is the reference executor shipped with this environment, not a
+  hard-coded compliance authority. Operators retain the responsibility for
+  the rules and compatible executor used in their deployment.
+- Executor unavailability cannot silently turn into locally synthesized
+  findings. A failed dispatch produces no successful persisted run; an
+  operator must correct the executor or explicitly initiate another audit.
+- The executor's returned bytes are durable evidence. Append-only persistence,
+  response hashes and report generation from those stored bytes make the
+  executor result and every exported representation independently traceable.

@@ -4,10 +4,14 @@ metadata:
   name: {{ .Release.Name }}-ipfs
 spec:
   replicas: 1
-  # The repo volume is RWO, so the default rolling update deadlocks: the
-  # replacement pod cannot attach while the outgoing one still holds it.
+  # The repo volume is RWO, so an update must terminate the current pod before
+  # creating its replacement. Keeping RollingUpdate avoids an invalid
+  # server-side-apply migration from the chart's previous strategy.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: ipfs

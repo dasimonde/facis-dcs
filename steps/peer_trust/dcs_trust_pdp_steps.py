@@ -64,6 +64,7 @@ from behave import given, then
 
 from steps.support.api_client import pac_audit_url, post_json
 from steps.support.services.auth_service import AuthService
+from steps.support.services.orce_audit_control_service import OrceAuditControlService
 
 
 def _control_url(context) -> str:
@@ -183,12 +184,13 @@ def _pac_audit_entries(context, scope="PROCESS_AUDIT_AND_COMPLIANCE", api_base=N
     # there (same caveat already documented for the cross-instance
     # offer/approve scenarios above).
     headers = AuthService.get_headers_for_roles(["Auditor"], api_base=api_base) if api_base else AuthService.get_headers_for_roles(["Auditor"])
+    OrceAuditControlService.reset(context, "audit")
+    OrceAuditControlService.set_mode(context, "audit", "success")
     resp = post_json(context, pac_audit_url(context), {"scope": scope, "justification": "BDD PDP-gate audit re-trigger"}, headers=headers)
     assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
-    body = resp.json()
     return [
         entry
-        for scope_result in body
+        for scope_result in OrceAuditControlService.evidence_groups(context, scope)
         for entry in (scope_result.get("audit_trail") or [])
         if isinstance(entry, dict)
     ]

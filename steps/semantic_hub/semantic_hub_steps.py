@@ -18,6 +18,7 @@ from steps.support.api_client import (
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+from steps.support.services.orce_audit_control_service import OrceAuditControlService
 from steps.support.services.template_service import TemplateService
 
 
@@ -420,7 +421,7 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
-    body = context.requests_response.json()
+    body = OrceAuditControlService.evidence_groups(context, "contracts")
     resource = next((r for r in body if r.get("did") == did), None)
     assert resource is not None, (
         f"Expected a contract-content audit trail entry for '{name}' (did={did}), "

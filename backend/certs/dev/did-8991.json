@@ -8,6 +8,9 @@
     "did:web:localhost%3A8991#dcs-vc"
   ],
   "id": "did:web:localhost%3A8991",
+  "keyAgreement": [
+    "did:web:localhost%3A8991#dcs-ecdh"
+  ],
   "services": [
     {
       "id": "did:web:localhost%3A8991#dcs",
@@ -45,6 +48,19 @@
           "MIIBrTCCAVOgAwIBAgIIGMY4d/lyTw0wCgYIKoZIzj0EAwIwODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkxMB4XDTI2MDcyNzE3MTk1MFoXDTI4MDcyNzE4MTk1MFowODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkxMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEAEy/mHAjCOLKPeoE14wItyHNmjiMIzNyebIxkuQxpeG9QRspQ0E0BLspKD14kVakDJsbiYVJU8Z3SdROVQxUz6NHMEUwDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAUBgNVHREEDTALgglsb2NhbGhvc3QwCgYIKoZIzj0EAwIDSAAwRQIhALcVvAu9W/E7qe4RYqg5pE1Ot1+/Lja1Q6PMf01Jb83xAiB2fuC5sEVYussATFKvBwbs/Oh/ZPU8SFUnwgVw59YAnw=="
         ],
         "y": "vUEbKUNBNAS7KSg9eJFWpAybG4mFSVPGd0nUTlUMVM8"
+      },
+      "type": "JsonWebKey2020"
+    },
+    {
+      "controller": "did:web:localhost%3A8991",
+      "id": "did:web:localhost%3A8991#dcs-ecdh",
+      "publicKeyJwk": {
+        "crv": "P-256",
+        "kid": "dcs-ecdh",
+        "kty": "EC",
+        "use": "enc",
+        "x": "_tnDxbp_SIbrUXKNYCekTlk9cnea5O-uCj4wPZ3Wsac",
+        "y": "fxd6BI-c1Uphatjbga-m5swTnaespJKIJV8-WCb9a_g"
       },
       "type": "JsonWebKey2020"
     }

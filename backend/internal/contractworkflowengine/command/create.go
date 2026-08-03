@@ -25,6 +25,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	"digital-contracting-service/internal/contractworkflowengine/query/contracttemplate"
+	"digital-contracting-service/internal/semantichub"
 )
 
 type CreateCmd struct {
@@ -55,6 +56,35 @@ type Creator struct {
 	ATRepo      db.ApprovalTaskRepo
 	NTRepo      db.NegotiationTaskRepo
 	DIDDocument identity.DIDDocument
+}
+
+type semanticBundleRefs struct {
+	Context         string
+	CanonicalShapes string
+	Shapes          []string
+	Profile         string
+}
+
+func effectiveBundleRefs(bundle semantichub.EffectiveBundle) (semanticBundleRefs, error) {
+	if bundle.ContextVersion <= 0 || bundle.ProfileVersion <= 0 || len(bundle.Shapes) == 0 {
+		return semanticBundleRefs{}, errors.New("complete versioned semantic bundle is required")
+	}
+	if bundle.Shapes[0].Name != semantichub.ShapesName || bundle.Shapes[0].Version <= 0 {
+		return semanticBundleRefs{}, errors.New("canonical shapes must be the first versioned bundle entry")
+	}
+	shapeRefs := make([]string, 0, len(bundle.Shapes))
+	for _, shape := range bundle.Shapes {
+		if strings.TrimSpace(shape.Name) == "" || shape.Version <= 0 {
+			return semanticBundleRefs{}, errors.New("every effective shape requires a name and version")
+		}
+		shapeRefs = append(shapeRefs, semantichub.AnchorURL("shapes", shape.Name, shape.Version))
+	}
+	return semanticBundleRefs{
+		Context:         semantichub.AnchorURL("context", semantichub.ContextName, bundle.ContextVersion),
+		CanonicalShapes: shapeRefs[0],
+		Shapes:          shapeRefs,
+		Profile:         semantichub.AnchorURL("profile", semantichub.ProfileName, bundle.ProfileVersion),
+	}, nil
 }
 
 // createTasks opens this instance's own review, negotiation, and approval
@@ -129,6 +159,24 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	normalizedContractData, err := validation.NormalizeContractDataForPersistence(contractDocument, cmd.DID, false)
 	if err != nil {
 		return fmt.Errorf("contract data validation failed: %w", err)
+	}
+	bundle, err := semantichub.ResolveEffectiveBundle(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("could not resolve effective Semantic Hub bundle: %w", err)
+	}
+	bundleRefs, err := effectiveBundleRefs(bundle)
+	if err != nil {
+		return fmt.Errorf("could not resolve effective Semantic Hub bundle references: %w", err)
+	}
+	normalizedContractData, err = validation.PinSemanticBundle(
+		normalizedContractData,
+		bundleRefs.Context,
+		bundleRefs.CanonicalShapes,
+		bundleRefs.Shapes,
+		bundleRefs.Profile,
+	)
+	if err != nil {
+		return fmt.Errorf("could not pin effective Semantic Hub bundle: %w", err)
 	}
 	// Parties are attached after normalization for the same reason renewal's
 	// dcs:renewsContract is (see attachRenewsContractReference): the rebase

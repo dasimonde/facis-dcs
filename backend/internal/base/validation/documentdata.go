@@ -43,6 +43,41 @@ func SetSchemaAnchorRefs(contextRef, shapesRef string) {
 	}
 }
 
+// PinSemanticBundle stamps the effective Semantic Hub bundle selected while a
+// new artifact is created. Existing anchors are intentionally replaced only
+// on that creation path; subsequent normalizations preserve the pins.
+func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, effectiveShapeRefs []string, profileRef string) (*datatype.JSON, error) {
+	if raw == nil || strings.TrimSpace(contextRef) == "" || strings.TrimSpace(canonicalShapesRef) == "" ||
+		len(effectiveShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
+		return nil, errors.New("complete semantic bundle references are required")
+	}
+	var data documentData
+	if err := json.Unmarshal(*raw, &data); err != nil {
+		return nil, fmt.Errorf("decode semantic bundle document: %w", err)
+	}
+	contextEntries := []any{contextRef}
+	switch current := data["@context"].(type) {
+	case []any:
+		for _, entry := range current {
+			if iri, ok := entry.(string); ok && isHubContextAnchor(iri) {
+				continue
+			}
+			contextEntries = append(contextEntries, entry)
+		}
+	case map[string]any:
+		contextEntries = append(contextEntries, current)
+	}
+	data["@context"] = contextEntries
+	data["sh:shapesGraph"] = map[string]any{"@id": canonicalShapesRef}
+	refs := make([]any, 0, len(effectiveShapeRefs))
+	for _, ref := range effectiveShapeRefs {
+		refs = append(refs, map[string]any{"@id": ref})
+	}
+	data["dcs:effectiveShapes"] = refs
+	data["dcterms:conformsTo"] = map[string]any{"@id": profileRef}
+	return encodeDocumentData(data)
+}
+
 // SetCanonicalOntologyIRIs installs the ACTIVE hub context's prefix -> IRI
 // map for enforcement during normalization.
 func SetCanonicalOntologyIRIs(iris map[string]string) {

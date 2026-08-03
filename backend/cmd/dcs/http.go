@@ -38,6 +38,7 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/service"
 	"digital-contracting-service/internal/webhookplatform"
 
@@ -351,9 +352,31 @@ type bundleExportRefusedResponse struct {
 
 func (e *bundleExportRefusedResponse) StatusCode() int { return http.StatusUnprocessableEntity }
 
+type workflowGateBlockedResponse struct {
+	Name      string `json:"name"`
+	Message   string `json:"message"`
+	GateRunID string `json:"gate_run_id,omitempty"`
+	Status    string `json:"status"`
+}
+
+func (e *workflowGateBlockedResponse) StatusCode() int {
+	if e.Status == "BLOCKED" {
+		return http.StatusUnprocessableEntity
+	}
+	return http.StatusConflict
+}
+
 // errorFormatter maps named ServiceErrors to the correct HTTP status codes.
 // All other errors fall through to the default Goa heuristic.
 func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
+	var gateBlocked *workflowgate.BlockedError
+	if errors.As(err, &gateBlocked) {
+		return &workflowGateBlockedResponse{
+			Name: "workflow_gate_blocked", Message: gateBlocked.Error(),
+			GateRunID: gateBlocked.RunID, Status: gateBlocked.Status,
+		}
+	}
+
 	// A bundle-export refusal is its own error type (not a *goa.ServiceError),
 	// so it must be handled before the generic heuristic that would discard its
 	// findings. This covers both ExportContractBundle and ExportTemplateBundle,

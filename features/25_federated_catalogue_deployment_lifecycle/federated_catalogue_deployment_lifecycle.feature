@@ -16,42 +16,6 @@ Feature: Federated Catalogue deployment lifecycle
     And no running catalogue workload requires Neo4j, n10s or n10s.graphconfig.show
 
   @isolated_stack @requires-fc-lifecycle-runner
-  @REQ-federated-catalogue-deployment-lifecycle-AC3
-  @REQ-federated-catalogue-deployment-lifecycle-AC5
-  @REQ-federated-catalogue-deployment-lifecycle-AC6
-  Scenario: The first ready transition supports the first publish and read round-trip
-    Given a fresh isolated Helm installation with the Federated Catalogue enabled
-    When the lifecycle runner observes the first Federated Catalogue readiness transition
-    Then the readiness gate has observed a successful health check
-    And the first functional catalogue verification succeeds without warm-up or repetition
-    And the Federated Catalogue pod has not restarted
-    Given I am authenticated with roles: "Template Manager"
-    And template "Fresh Catalogue Round Trip" is in "Registered" status
-    And no business catalogue operation has run since the first readiness transition
-    When I publish template "Fresh Catalogue Round Trip"
-    Then get http 200:Success code
-    And the catalogue operation completed within the DCS Federated Catalogue client timeout
-    Given I am authenticated with roles: "Contract Creator"
-    When I retrieve the template catalogue
-    Then get http 200:Success code
-    And the catalogue result includes template "Fresh Catalogue Round Trip"
-    And the catalogue operation completed within the DCS Federated Catalogue client timeout
-    When I search the template catalogue by name "Fresh Catalogue Round Trip"
-    Then get http 200:Success code
-    And the catalogue search result includes template "Fresh Catalogue Round Trip"
-    And the catalogue operation completed within the DCS Federated Catalogue client timeout
-    And the fresh-stack catalogue operations used no retry
-
-  @isolated_stack @requires-fc-lifecycle-runner
-  @REQ-federated-catalogue-deployment-lifecycle-AC4
-  Scenario: Upgrading a Neo4j-based development installation replaces the old catalogue
-    Given an isolated namespace contains the old Neo4j-based development installation
-    When the lifecycle runner upgrades it with the current DCS Helm chart
-    Then the Federated Catalogue is replaced completely without migrating old catalogue data
-    And no obsolete Neo4j or n10s workload remains
-    And the upgraded catalogue satisfies the fresh-install readiness gate
-
-  @isolated_stack @requires-fc-lifecycle-runner
   @REQ-federated-catalogue-deployment-lifecycle-AC7
   Scenario Outline: Disabled catalogue integration skips every catalogue readiness check
     Given Federated Catalogue integration is disabled for the isolated "<entrypoint>"

@@ -32,7 +32,22 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 	var err error
 	var shapesTTL string
 	var shapesVersion int
-	if pinned := pinnedHubShapesVersion(contract); pinned > 0 {
+	refs, refsErr := effectiveShapeRefs(contract)
+	if refsErr != nil {
+		return nil, 0, refsErr
+	}
+	if len(refs) > 0 {
+		bundleSource, ok := source.(EffectiveBundleShapeSource)
+		if !ok {
+			return nil, 0, fmt.Errorf("shape source cannot resolve immutable effective bundle")
+		}
+		pinned := pinnedHubShapesVersion(contract)
+		if pinned <= 0 || refs[0].Name != "facis-dcs" || refs[0].Version != pinned {
+			return nil, 0, fmt.Errorf("effective shapes bundle does not match sh:shapesGraph")
+		}
+		shapesTTL, err = bundleSource.ShapesBundleAt(ctx, refs)
+		shapesVersion = pinned
+	} else if pinned := pinnedHubShapesVersion(contract); pinned > 0 {
 		shapesTTL, err = source.ShapesAt(ctx, pinned)
 		shapesVersion = pinned
 	} else {

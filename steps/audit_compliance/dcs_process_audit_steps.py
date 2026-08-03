@@ -17,11 +17,28 @@ from steps.support.api_client import (
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+from steps.support.services.orce_audit_control_service import OrceAuditControlService
+
+
+def _observed_audit_entries(context, evidence_scope: str) -> list[dict]:
+    entries = []
+    for observation in OrceAuditControlService.observations(context, "audit"):
+        request = observation.get("request", observation) if isinstance(observation, dict) else {}
+        for scope_result in ((request.get("evidence") or {}).get(evidence_scope) or []):
+            if isinstance(scope_result, dict):
+                entries.extend(
+                    entry
+                    for entry in (scope_result.get("audit_trail") or [])
+                    if isinstance(entry, dict)
+                )
+    return entries
 
 
 @when('the Auditor triggers a process audit with scope "{scope}"')
 def step_when_auditor_triggers_audit(context, scope):
     headers = AuthService.get_headers_for_roles(["Auditor"])
+    OrceAuditControlService.reset(context, "audit")
+    OrceAuditControlService.set_mode(context, "audit", "success")
     context.requests_response = post_json(context, pac_audit_url(context), {"scope": scope, "justification": "BDD process audit"}, headers=headers)
 
 
@@ -160,16 +177,15 @@ def step_then_flagged_risk_audited(context, name):
     found = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
+        OrceAuditControlService.reset(context, "audit")
+        OrceAuditControlService.set_mode(context, "audit", "success")
         resp = post_json(
             context, pac_audit_url(context), {"scope": "PROCESS_AUDIT_AND_COMPLIANCE", "justification": "BDD audit re-trigger"}, headers=headers
         )
         assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
-        body = resp.json()
         found = [
             (entry.get("event_type"), entry.get("did"))
-            for scope_result in body
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict)
+            for entry in _observed_audit_entries(context, "PROCESS_AUDIT_AND_COMPLIANCE")
         ]
         if ("PAC_COMPLIANCE_RISK", did) in found:
             return
@@ -202,6 +218,8 @@ def step_then_incident_report_recorded(context, name, risk_type):
     found = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
+        OrceAuditControlService.reset(context, "audit")
+        OrceAuditControlService.set_mode(context, "audit", "success")
         resp = post_json(
             context,
             pac_audit_url(context),
@@ -209,12 +227,9 @@ def step_then_incident_report_recorded(context, name, risk_type):
             headers=headers,
         )
         assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
-        body = resp.json()
         found = [
             (entry.get("event_type"), entry.get("did"), (entry.get("event_data") or {}).get("risk_type"))
-            for scope_result in body
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict)
+            for entry in _observed_audit_entries(context, "PROCESS_AUDIT_AND_COMPLIANCE")
         ]
         if ("PAC_INCIDENT_REPORT", did, risk_type) in found:
             return
@@ -240,11 +255,11 @@ def step_then_monitor_response_shape(context):
 
 @then('the process audit response includes an audit trail entry for contract "{name}"')
 def step_then_audit_response_includes_contract(context, name):
-    # The audit trail is anchored asynchronously by the outbox processor
-    # (TSA+IPFS per event) — a contract created moments before the audit
-    # trigger may not be anchored yet when the first snapshot is taken. Same
-    # polling convention as the contract-audit steps: re-trigger the audit
-    # until the entry appears or the deadline expires.
+    # POST /pac/audit now returns the versioned external-executor result, not
+    # the legacy PACAuditResponse list. The DCS-procured timeline remains in
+    # the request observed by the bundled ORCE executor. Inspect that request
+    # so this assertion still proves that the newly created contract was part
+    # of the audited evidence rather than merely accepting any 200 response.
     import time  # noqa: PLC0415
 
     did, _ = ContractService._contract_data(context, name)
@@ -253,18 +268,28 @@ def step_then_audit_response_includes_contract(context, name):
     deadline = time.monotonic() + 90
     while True:
         body = context.requests_response.json()
-        assert isinstance(body, list) and body, f"Expected a non-empty PACAuditResponse list, got: {body}"
+        assert isinstance(body, dict) and body.get("contract_version"), (
+            f"Expected a versioned external PAC audit result, got: {body}"
+        )
+        observations = OrceAuditControlService.observations(context, "audit")
+        requests = [
+            observation.get("request", observation)
+            for observation in observations
+            if isinstance(observation, dict)
+        ]
         all_dids = [
-            entry.get("did")
-            for scope_result in body
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict)
+            scope_result.get("did")
+            for request in requests
+            for scope_result in ((request.get("evidence") or {}).get("contracts") or [])
+            if isinstance(scope_result, dict)
         ]
         if did in all_dids:
             return
         if time.monotonic() > deadline:
             break
         time.sleep(2)
+        OrceAuditControlService.reset(context, "audit")
+        OrceAuditControlService.set_mode(context, "audit", "success")
         context.requests_response = post_json(
             context, pac_audit_url(context), {"scope": "CONTRACT_WORKFLOW_ENGINE", "justification": "BDD audit re-trigger"}, headers=headers
         )

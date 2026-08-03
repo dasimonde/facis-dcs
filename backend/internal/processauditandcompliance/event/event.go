@@ -21,6 +21,30 @@ type AuditEvent struct {
 	Justification string                      `json:"justification"`
 }
 
+// AuditExecutedEvent records the immutable external-executor result committed
+// in pac_audit_runs. It intentionally carries hashes and executor provenance,
+// while the full validated response remains in the run table.
+type AuditExecutedEvent struct {
+	AuditID         string    `json:"audit_id"`
+	CorrelationID   string    `json:"correlation_id"`
+	Scope           string    `json:"scope"`
+	DID             string    `json:"did,omitempty"`
+	ExecutorID      string    `json:"executor_id"`
+	ExecutorVersion string    `json:"executor_version"`
+	ExecutedAt      time.Time `json:"executed_at"`
+	RequestHash     string    `json:"request_hash"`
+	ResponseHash    string    `json:"response_hash"`
+}
+
+func (e AuditExecutedEvent) EventType() string { return "PAC_AUDIT_EXECUTED" }
+
+func (e AuditExecutedEvent) GetDID() string {
+	if e.DID == "" {
+		return "*"
+	}
+	return e.DID
+}
+
 // EventType implements the Event interface.
 func (e AuditEvent) EventType() string {
 	return eventtype.Audit.String()

@@ -38,6 +38,50 @@ type ShapeSource interface {
 	ActiveDomainOntology(ctx context.Context) (content string, version int, err error)
 }
 
+type VersionedShapeRef struct {
+	Name    string
+	Version int
+}
+
+// EffectiveBundleShapeSource is implemented by the production Semantic Hub.
+// It keeps independently-versioned shape libraries immutable for produced
+// artifacts without widening ShapeSource for remote/fixture implementations.
+type EffectiveBundleShapeSource interface {
+	ShapesBundleAt(context.Context, []VersionedShapeRef) (string, error)
+	ProfileAt(context.Context, int) (string, error)
+}
+
+func effectiveShapeRefs(contract map[string]any) ([]VersionedShapeRef, error) {
+	raw, ok := contract["dcs:effectiveShapes"]
+	if !ok {
+		return nil, nil
+	}
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil, errors.New("dcs:effectiveShapes must be a non-empty array")
+	}
+	refs := make([]VersionedShapeRef, 0, len(items))
+	for _, item := range items {
+		iri := anchorIRI(item)
+		version := anchorVersion(iri)
+		const marker = "/semantic/shapes/"
+		index := strings.Index(iri, marker)
+		if index < 0 || version <= 0 {
+			return nil, fmt.Errorf("invalid effective shapes reference %q", iri)
+		}
+		name := strings.SplitN(iri[index+len(marker):], "?", 2)[0]
+		if strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("invalid effective shapes reference %q", iri)
+		}
+		refs = append(refs, VersionedShapeRef{Name: name, Version: version})
+	}
+	return refs, nil
+}
+
+func pinnedHubProfileVersion(contract map[string]any) int {
+	return anchorVersion(anchorIRI(contract["dcterms:conformsTo"]))
+}
+
 // activeShapeSource is the process-wide enforcement source, installed at
 // startup (cmd/dcs/main.go); nil until SetShapeSource runs.
 var activeShapeSource ShapeSource

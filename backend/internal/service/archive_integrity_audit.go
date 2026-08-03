@@ -341,10 +341,17 @@ func verifyArchiveTSAEvidence(entry db.ContractArchiveEntry, receipt *archiveNot
 	if err != nil {
 		return fmt.Errorf("archive TSA receipt verification failed: %w", err)
 	}
-	if stamp.Time.Before(storedAt) {
+	if archiveTSATimestampPrecedesStoredAt(stamp.Time, storedAt) {
 		return errors.New("archive TSA timestamp precedes storedAt")
 	}
 	return nil
+}
+
+func archiveTSATimestampPrecedesStoredAt(stampTime, storedAt time.Time) bool {
+	// RFC 3161 tokens produced by the configured TSA encode whole seconds,
+	// while the archive event may retain sub-second precision. Treat both
+	// timestamps as simultaneous when they fall in the same UTC second.
+	return stampTime.Before(storedAt.Truncate(time.Second))
 }
 
 func archiveIntegrityRuleForError(err error) string {

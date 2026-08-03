@@ -1,0 +1,45 @@
+dependencies:
+- name: postgresql
+  repository: file://charts/postgresql
+  version: 0.1.0
+- name: hydra
+  repository: file://charts/hydra
+  version: 0.1.0
+- name: nats
+  repository: file://charts/nats
+  version: 0.1.0
+- name: orce
+  repository: file://charts/orce
+  version: 0.1.0
+- name: dss
+  repository: file://charts/dss
+  version: 0.1.0
+- name: federated-catalogue
+  repository: file://charts/federated-catalogue
+  version: 0.1.0
+- name: keycloak
+  repository: file://charts/keycloak
+  version: 0.1.0
+- name: fuseki
+  repository: file://charts/fuseki
+  version: 0.1.0
+- name: fc-postgres
+  repository: file://charts/fc-postgres
+  version: 0.1.0
+- name: ipfs
+  repository: file://charts/ipfs
+  version: 0.1.0
+- name: ipfs-document-manager
+  repository: file://charts/ipfs-document-manager
+  version: 0.1.0
+- name: statuslist-service
+  repository: file://charts/statuslist-service
+  version: 0.1.0
+- name: kube-prometheus-stack
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 85.2.0
+- name: traefik
+  repository: https://traefik.github.io/charts
+  version: 41.0.0
+digest: sha256:0e5a5847ec037dbb031a3098dbe320c51a3cb237bd310ce877b4f2e6f08688c8
+generated: "2026-07-30T15:40:27.652447149+02:00"

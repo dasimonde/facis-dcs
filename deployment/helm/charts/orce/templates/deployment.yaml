@@ -2,6 +2,20 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-orce
+{{- if .Values.checkpointSink.enabled }}
+{{- if not (hasPrefix "https://" (trim .Values.checkpointSink.url)) }}
+{{- fail "orce.checkpointSink.url must be a non-empty HTTPS URL when checkpointSink.enabled=true" }}
+{{- end }}
+{{- if le (int .Values.checkpointSink.internalTimeoutSeconds) 0 }}
+{{- fail "orce.checkpointSink.internalTimeoutSeconds must be a positive integer when checkpointSink.enabled=true" }}
+{{- end }}
+{{- if and (not (trim .Values.checkpointSink.bearerToken)) (not (trim .Values.checkpointSink.bearerTokenSecretRef.name)) }}
+{{- fail "orce.checkpointSink requires bearerToken or bearerTokenSecretRef.name when enabled" }}
+{{- end }}
+{{- if and .Values.checkpointSink.bearerTokenSecretRef.name (not (trim .Values.checkpointSink.bearerTokenSecretRef.key)) }}
+{{- fail "orce.checkpointSink.bearerTokenSecretRef.key must be non-empty when a Secret is configured" }}
+{{- end }}
+{{- end }}
 spec:
   replicas: {{ .Values.replicaCount | default 1 }}
   selector:
@@ -13,6 +27,10 @@ spec:
       labels:
         app.kubernetes.io/name: orce
         app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- if .Values.flowsFile.enabled }}
+      annotations:
+        checksum/flows: {{ include (print $.Template.BasePath "/configmap-flows.yaml") . | sha256sum }}
+      {{- end }}
     spec:
       {{- if or .Values.localTSA.enabled .Values.persistence.enabled }}
       initContainers:
@@ -57,10 +75,55 @@ spec:
             - name: http
               containerPort: 1880
               protocol: TCP
-          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.extraEnv }}
+          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken .Values.checkpointSink.url .Values.extraEnv }}
           env:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if or .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken }}
+            - name: ORCE_WORKFLOW_GATE_BEARER_TOKEN
+              {{- if .Values.global.workflowGateTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.workflowGateTokenSecretRef.name | quote }}
+                  key: {{ .Values.global.workflowGateTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.global.workflowGateToken | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if .Values.checkpointSink.enabled }}
+            - name: CHECKPOINT_SINK_ENABLED
+              value: "true"
+            - name: CHECKPOINT_SINK_URL
+              value: {{ .Values.checkpointSink.url | quote }}
+            - name: CHECKPOINT_SINK_TIMEOUT_SECONDS
+              value: {{ .Values.checkpointSink.timeoutSeconds | quote }}
+            - name: CHECKPOINT_INTERNAL_TIMEOUT_SECONDS
+              value: {{ .Values.checkpointSink.internalTimeoutSeconds | quote }}
+            - name: CHECKPOINT_SINK_ALLOW_INSECURE_TLS
+              value: {{ .Values.checkpointSink.allowInsecureTLS | quote }}
+            {{- if or .Values.checkpointSink.bearerTokenSecretRef.name .Values.checkpointSink.bearerToken }}
+            - name: CHECKPOINT_SINK_BEARER_TOKEN
+              {{- if .Values.checkpointSink.bearerTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.checkpointSink.bearerTokenSecretRef.name | quote }}
+                  key: {{ .Values.checkpointSink.bearerTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.checkpointSink.bearerToken | quote }}
+              {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if or .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken }}
+            - name: ORCE_AUDIT_EXECUTOR_BEARER_TOKEN
+              {{- if .Values.global.auditExecutorTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.auditExecutorTokenSecretRef.name | quote }}
+                  key: {{ .Values.global.auditExecutorTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.global.auditExecutorToken | quote }}
+              {{- end }}
             {{- end }}
             {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken }}
             - name: ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN

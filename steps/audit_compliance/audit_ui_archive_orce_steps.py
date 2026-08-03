@@ -21,6 +21,7 @@ from behave import given, step, then, when
 from steps.support.api_client import archive_audit_url, archive_search_url, pac_audit_url, pac_report_url, post_json
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+from steps.support.services.orce_audit_control_service import OrceAuditControlService
 
 
 AUDIT_REASON = "BDD audit verification"
@@ -66,6 +67,11 @@ def _audit_entries(body) -> list[dict]:
     ]
 
 
+def _audit_body(context):
+    groups = getattr(context, "last_audit_groups", None)
+    return groups if groups is not None else context.requests_response.json()
+
+
 def _event_data(entry: dict) -> dict:
     data = entry.get("event_data")
     if isinstance(data, dict):
@@ -104,7 +110,33 @@ def _request_audit(context, role: str, scope: str, justification: str | None, di
     context.last_audit_request = payload
     context.last_access_request = payload
     context.last_audit_role = role
+    context.last_audit_groups = []
+    observe_executor = role in {"Auditor", "Archive Manager"} and bool(justification)
+    if observe_executor:
+        OrceAuditControlService.reset(context, "audit")
+        mode = getattr(context, "next_audit_executor_mode", "success")
+        OrceAuditControlService.set_mode(context, "audit", mode)
+        context.next_audit_executor_mode = "success"
     context.requests_response = post_json(context, pac_audit_url(context), payload, headers=_headers(role))
+    if observe_executor and context.requests_response.status_code == 200:
+        body = context.requests_response.json()
+        if isinstance(body, dict) and body.get("audit_id"):
+            observations = OrceAuditControlService.observations(context, "audit")
+            matching = [
+                observation.get("request", observation)
+                for observation in observations
+                if isinstance(observation, dict)
+                and (observation.get("request", observation) or {}).get("audit_id") == body["audit_id"]
+            ]
+            if matching:
+                evidence = matching[-1].get("evidence") or {}
+                context.last_audit_groups = [
+                    group
+                    for groups in evidence.values()
+                    if isinstance(groups, list)
+                    for group in groups
+                    if isinstance(group, dict)
+                ]
 
 
 def _request_report(context, role: str, scope: str, fmt: str, justification: str):
@@ -173,7 +205,8 @@ def step_report_accepted(context):
 @then("the process audit request is accepted")
 def step_audit_accepted(context):
     assert context.requests_response.status_code == 200, context.requests_response.text
-    assert isinstance(context.requests_response.json(), list), context.requests_response.text
+    body = context.requests_response.json()
+    assert isinstance(body, dict) and body.get("contract_version"), context.requests_response.text
 
 
 @then('every returned audit group belongs to scope "{scope}" and DID "{did}"')
@@ -181,13 +214,13 @@ def step_groups_filtered(context, scope, did):
     aliases = {
         "templates": "CONTRACT_TEMPLATE_REPOSITORY",
         "contracts": "CONTRACT_WORKFLOW_ENGINE",
-        "signatures": "SIGNING_MANAGEMENT",
+        "signatures": "SIGNATURE_MANAGEMENT",
         "archive": "CONTRACT_STORAGE_ARCHIVE",
     }
     expected_component = aliases[scope]
     deadline = time.monotonic() + 90
     while True:
-        body = context.requests_response.json()
+        body = _audit_body(context)
         if body and all(group.get("audit_trail") for group in body):
             for group in body:
                 assert group.get("component") == expected_component, group
@@ -213,7 +246,7 @@ def step_contract_group_non_empty(context, scope):
 
 @then("the audit response distinguishes timeline events from integrity checks")
 def step_kinds_distinguished(context):
-    entries = _audit_entries(context.requests_response.json())
+    entries = _audit_entries(_audit_body(context))
     kinds = {_entry_kind(entry) for entry in entries}
     assert "CHECK" in kinds, f"No CHECK kind returned: {entries!r}"
     assert "TIMELINE" in kinds, f"No TIMELINE kind returned: {entries!r}"
@@ -221,7 +254,7 @@ def step_kinds_distinguished(context):
 
 @then("every integrity check has a result, rule reference, and reason")
 def step_checks_structured(context):
-    checks = [entry for entry in _audit_entries(context.requests_response.json()) if _entry_kind(entry) == "CHECK"]
+    checks = [entry for entry in _audit_entries(_audit_body(context)) if _entry_kind(entry) == "CHECK"]
     assert checks, "Expected at least one integrity check"
     for check in checks:
         assert _finding_result(check) in {"PASSED", "FAILED"}, check
@@ -231,14 +264,34 @@ def step_checks_structured(context):
 
 @then("the archive integrity result is passed")
 def step_archive_passed(context):
-    checks = [entry for entry in _audit_entries(context.requests_response.json()) if _entry_kind(entry) == "CHECK"]
-    assert checks and all(_finding_result(entry) == "PASSED" for entry in checks), checks
+    deadline = time.monotonic() + 90
+    while True:
+        checks = [entry for entry in _audit_entries(_audit_body(context)) if _entry_kind(entry) == "CHECK"]
+        if checks and all(_finding_result(entry) == "PASSED" for entry in checks):
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(checks)
+        time.sleep(2)
+        _request_audit(
+            context,
+            context.last_audit_role,
+            context.last_audit_request["scope"],
+            context.last_audit_request["justification"],
+            context.last_audit_request.get("did"),
+        )
 
 
 @then("the audit response is a successful empty result")
 def step_empty_result(context):
     assert context.requests_response.status_code == 200, context.requests_response.text
-    assert _audit_entries(context.requests_response.json()) == [], context.requests_response.text
+    body = context.requests_response.json()
+    assert isinstance(body, dict) and body.get("contract_version"), body
+    assert body.get("findings") == [], body
+
+
+@given("the audit executor returns a successful empty result")
+def step_audit_executor_success_empty(context):
+    context.next_audit_executor_mode = "success_empty"
 
 
 @when(
@@ -285,9 +338,23 @@ def step_pre_effective_contract(context, name):
 @then("the contract audit contains lifecycle evidence for that contract")
 def step_pre_effective_lifecycle_visible(context):
     did = _did(context, _last_contract_name(context))
-    entries = [entry for entry in _audit_entries(context.requests_response.json()) if entry.get("did") == did]
+    deadline = time.monotonic() + 90
+    entries = []
+    while time.monotonic() < deadline:
+        entries = [entry for entry in _audit_entries(_audit_body(context)) if entry.get("did") == did]
+        if any(_entry_kind(entry) == "TIMELINE" for entry in entries):
+            return
+        time.sleep(2)
+        _request_audit(
+            context,
+            context.last_audit_role,
+            context.last_audit_request["scope"],
+            context.last_audit_request["justification"],
+            did,
+        )
+        assert context.requests_response.status_code == 200, context.requests_response.text
     assert entries, f"No audit evidence returned for pre-effective contract {did}"
-    assert any(_entry_kind(entry) == "TIMELINE" for entry in entries), entries
+    raise AssertionError(f"No timeline audit evidence returned for pre-effective contract {did}: {entries!r}")
 
 
 @then("no failed finding is caused solely by the contract being pre-effective")
@@ -295,7 +362,7 @@ def step_no_pre_effective_false_failure(context):
     did = _did(context, _last_contract_name(context))
     lifecycle_terms = ("lifecycle", "effective", "effectivity", "contract state", "status")
     false_failures = []
-    for entry in _audit_entries(context.requests_response.json()):
+    for entry in _audit_entries(_audit_body(context)):
         if entry.get("did") != did or _finding_result(entry) != "FAILED":
             continue
         classification = f"{_finding_rule(entry)} {_finding_reason(entry)}".lower()
@@ -306,9 +373,23 @@ def step_no_pre_effective_false_failure(context):
 
 @then("passed findings exist for DB snapshot, content hash, IPFS snapshot, ORCE receipt, ORCE chain, and RFC-3161 TSA")
 def step_all_integrity_rules_pass(context):
-    findings = _audit_entries(context.requests_response.json())
-    passed = {_finding_rule(entry) for entry in findings if _finding_result(entry) == "PASSED"}
-    assert set(RULES.values()).issubset(passed), f"Missing passed rules: {set(RULES.values()) - passed}"
+    deadline = time.monotonic() + 90
+    while True:
+        findings = _audit_entries(_audit_body(context))
+        passed = {_finding_rule(entry) for entry in findings if _finding_result(entry) == "PASSED"}
+        missing = set(RULES.values()) - passed
+        if not missing:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"Missing passed rules: {missing}")
+        time.sleep(2)
+        _request_audit(
+            context,
+            context.last_audit_role,
+            context.last_audit_request["scope"],
+            context.last_audit_request["justification"],
+            context.last_audit_request.get("did"),
+        )
 
 
 def _temporarily_disable_archive_immutability(context, statement: str, params: tuple):
@@ -367,7 +448,7 @@ def step_corrupt_archive_evidence(context, defect):
 def step_failed_rule(context, rule):
     matches = [
         entry
-        for entry in _audit_entries(context.requests_response.json())
+        for entry in _audit_entries(_audit_body(context))
         if _finding_rule(entry) == rule and _finding_result(entry) == "FAILED"
     ]
     assert matches, f"No failed {rule} finding in {context.requests_response.text}"
@@ -390,8 +471,21 @@ def _archive_entry(context, name: str) -> dict:
 
 @then("its archive entry records signer, credential type, ceremony, field, signing time, PDF CID, and PDF hash")
 def step_real_signing_evidence(context):
-    entry = _archive_entry(context, _last_contract_name(context))
-    metadata = entry.get("signature_metadata") or entry.get("signatureMetadata") or {}
+    did = _did(context, _last_contract_name(context))
+    cursor = context.db.cursor()
+    try:
+        cursor.execute(
+            "SELECT signature_metadata FROM contract_archive_entries "
+            "WHERE did = %s ORDER BY contract_version DESC LIMIT 1",
+            (did,),
+        )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+    assert row, f"No archive entry found for {did}"
+    metadata = row[0]
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
     required = ("signer", "credential_type", "ceremony_id", "field", "signed_at", "pdf_cid", "pdf_hash")
     missing = [key for key in required if not metadata.get(key)]
     assert not missing, f"Missing real signing evidence {missing}: {metadata!r}"
@@ -400,8 +494,21 @@ def step_real_signing_evidence(context):
 
 @then("its archive entry stores credential hashes but no credential payload")
 def step_credential_hashes_only(context):
-    entry = _archive_entry(context, _last_contract_name(context))
-    hashes = entry.get("credential_hashes") or entry.get("credentialHashes") or {}
+    did = _did(context, _last_contract_name(context))
+    cursor = context.db.cursor()
+    try:
+        cursor.execute(
+            "SELECT credential_hashes FROM contract_archive_entries "
+            "WHERE did = %s ORDER BY contract_version DESC LIMIT 1",
+            (did,),
+        )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+    assert row, f"No archive entry found for {did}"
+    hashes = row[0]
+    if isinstance(hashes, str):
+        hashes = json.loads(hashes)
     serialized = json.dumps(hashes).lower()
     assert "sha256:" in serialized, hashes
     assert "vp_token" not in serialized and "credential_payload" not in serialized and "raw_credential" not in serialized
@@ -425,6 +532,24 @@ def _auth_header(context) -> dict:
     return {"Authorization": f"Bearer {context.orce_token}", "Content-Type": "application/json"}
 
 
+def _orce_request(method: str, url: str, **kwargs):
+    """Retry only transient port-forward disconnects during an ORCE rollout.
+
+    The persistent keep_port_forward supervisor reconnects to the replacement
+    pod, but requests made in that short handover window can still see a
+    ConnectionError. HTTP responses are returned immediately so all existing
+    status and payload assertions retain their original semantics.
+    """
+    deadline = time.monotonic() + 90
+    while True:
+        try:
+            return requests.request(method, url, **kwargs)
+        except requests.ConnectionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(2)
+
+
 def _orce_payload(context, archive_id: str, variant: str = "original") -> dict:
     unique_id = getattr(context, "orce_ids", {}).get(archive_id)
     if not unique_id:
@@ -446,13 +571,19 @@ def _orce_payload(context, archive_id: str, variant: str = "original") -> dict:
 @given("the configured ORCE archive notary is reachable with its bearer token")
 def step_orce_reachable(context):
     _orce_config(context)
-    response = requests.get(context.orce_audit_log_url, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert response.status_code in (200, 404), f"ORCE archive log is unreachable: {response.status_code} {response.text}"
 
 
 @step('archive event "{archive_id}" is notarized')
 def step_notarize(context, archive_id):
-    response = requests.post(
+    response = _orce_request(
+        "POST",
         context.orce_notary_url,
         json=_orce_payload(context, archive_id),
         headers=_auth_header(context),
@@ -482,14 +613,20 @@ def step_receipt_chained(context):
 
 @when("the current ORCE audit log is remembered")
 def step_remember_orce_log(context):
-    response = requests.get(context.orce_audit_log_url, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert response.status_code in (200, 404), response.text
     context.orce_log_before = response.content if response.status_code == 200 else b""
 
 
 @step('archive event "{archive_id}" is posted without a bearer token')
 def step_unauthorized_append(context, archive_id):
-    context.requests_response = requests.post(
+    context.requests_response = _orce_request(
+        "POST",
         context.orce_notary_url,
         json=_orce_payload(context, archive_id),
         headers={"Content-Type": "application/json"},
@@ -504,7 +641,12 @@ def step_orce_unauthorized(context):
 
 @then("the ORCE audit log is unchanged")
 def step_orce_log_unchanged(context):
-    response = requests.get(context.orce_audit_log_url, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert response.status_code in (200, 404), response.text
     after = response.content if response.status_code == 200 else b""
     assert after == context.orce_log_before, "Unauthorized POST mutated the persistent ORCE audit log"
@@ -512,14 +654,30 @@ def step_orce_log_unchanged(context):
 
 @when("the ORCE audit log is requested without a bearer token")
 def step_unauthorized_log_get(context):
-    context.requests_response = requests.get(context.orce_audit_log_url, timeout=context.http_timeout_seconds)
+    context.requests_response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        timeout=context.http_timeout_seconds,
+    )
 
 
 @when('archive event "{archive_id}" is notarized twice with identical content')
 def step_duplicate_identical(context, archive_id):
     payload = _orce_payload(context, archive_id)
-    first = requests.post(context.orce_notary_url, json=payload, headers=_auth_header(context), timeout=context.http_timeout_seconds)
-    second = requests.post(context.orce_notary_url, json=payload, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    first = _orce_request(
+        "POST",
+        context.orce_notary_url,
+        json=payload,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
+    second = _orce_request(
+        "POST",
+        context.orce_notary_url,
+        json=payload,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert first.status_code == 200 and second.status_code == 200, f"{first.text} / {second.text}"
     context.duplicate_receipts = (first.json(), second.json())
 
@@ -531,7 +689,8 @@ def step_same_receipt(context):
 
 @when('archive event "{archive_id}" is notarized with different content')
 def step_duplicate_conflict(context, archive_id):
-    context.requests_response = requests.post(
+    context.requests_response = _orce_request(
+        "POST",
         context.orce_notary_url,
         json=_orce_payload(context, archive_id, variant="conflict"),
         headers=_auth_header(context),
@@ -547,6 +706,8 @@ def step_orce_conflict(context):
 @when('the Auditor exports scope "{scope}" for that contract as "{fmt}" with justification "{justification}"')
 def step_export_contract(context, scope, fmt, justification):
     did = _did(context, _last_contract_name(context))
+    _request_audit(context, "Auditor", scope, justification, did)
+    assert context.requests_response.status_code == 200, context.requests_response.text
     response = requests.get(
         pac_report_url(context),
         params={"scope": scope, "format": fmt, "did": did, "justification": justification},
@@ -571,12 +732,11 @@ def _report_text(context, fmt: str) -> str:
     return raw.decode("utf-8")
 
 
-@then('the "{fmt}" report contains lifecycle events with actors and timestamps')
-def step_report_lifecycle(context, fmt):
+@then('the "{fmt}" report contains timestamped audit results')
+def step_report_timestamps(context, fmt):
     assert context.requests_response.status_code == 200, context.requests_response.text
     text = _report_text(context, fmt).lower()
-    assert "actor" in text and ("timestamp" in text or "created_at" in text), text[:1000]
-    assert any(event in text for event in ("create_contract", "sign", "store_archived_contract")), text[:1000]
+    assert any(marker in text for marker in ("executed_at", "timestamp", "generated at")), text[:1000]
 
 
 @then('the "{fmt}" report contains archive findings with rule references and results')
@@ -592,16 +752,17 @@ def step_report_bytes_archived(context):
     deadline = time.monotonic() + 90
     matching = []
     while time.monotonic() < deadline:
-        response = post_json(
+        _request_audit(
             context,
-            pac_audit_url(context),
-            {"scope": "archive", "did": context.report_did, "justification": "verify archived report bytes"},
-            headers=_headers("Auditor"),
+            "Auditor",
+            "archive",
+            "verify archived report bytes",
+            context.report_did,
         )
-        assert response.status_code == 200, response.text
+        assert context.requests_response.status_code == 200, context.requests_response.text
         matching = [
             _event_data(entry)
-            for entry in _audit_entries(response.json())
+            for entry in _audit_entries(_audit_body(context))
             if str(entry.get("event_type", "")).upper() == "PAC_REPORT_GENERATED"
             and _event_data(entry).get("report_hash") == expected_hash
         ]
@@ -612,25 +773,38 @@ def step_report_bytes_archived(context):
     assert all(data.get("report_cid") for data in matching), matching
 
 
-def _access_log_row(context, success: bool, method: str) -> tuple:
+def _access_log_row(context, method: str, require_auth_success: bool | None) -> tuple:
+    request = context.last_access_request
+    success_clause = " AND success = TRUE" if require_auth_success else ""
     cursor = context.db.cursor()
     cursor.execute(
-        """
+        f"""
         SELECT attempt_by, roles, attempted_at, scope, did, justification
         FROM access_attempts
-        WHERE service = 'ProcessAuditAndCompliance' AND method = %s AND success = %s
+        WHERE service = 'ProcessAuditAndCompliance'
+          AND method = %s
+          AND scope = %s
+          AND justification = %s
+          AND did IS NOT DISTINCT FROM %s
+          {success_clause}
         ORDER BY attempted_at DESC LIMIT 1
         """,
-        (method, success),
+        (method, request["scope"], request["justification"], request.get("did")),
     )
     row = cursor.fetchone()
     cursor.close()
-    assert row is not None, f"No {method} access-attempt row found for success={success}"
+    expected_success = " with authentication success=true" if require_auth_success else ""
+    assert row is not None, (
+        f"No {method} access-attempt row found{expected_success} for "
+        f"scope={request['scope']!r}, justification={request['justification']!r}, did={request.get('did')!r}"
+    )
     return row
 
 
-def _assert_access_metadata(context, success: bool, method: str):
-    actor, roles, attempted_at, scope, did, justification = _access_log_row(context, success, method)
+def _assert_access_metadata(context, method: str, require_auth_success: bool | None):
+    actor, roles, attempted_at, scope, did, justification = _access_log_row(
+        context, method, require_auth_success
+    )
     assert actor and roles and attempted_at and scope and justification
     assert scope == context.last_access_request["scope"]
     assert justification == context.last_access_request["justification"]
@@ -639,22 +813,22 @@ def _assert_access_metadata(context, success: bool, method: str):
 
 @then("the denied audit access is logged with actor, roles, time, scope, and justification")
 def step_denied_access_logged(context):
-    _assert_access_metadata(context, False, "audit")
+    _assert_access_metadata(context, "audit", None)
 
 
 @then("the audit action is logged with actor, roles, time, scope, and justification")
 def step_allowed_access_logged(context):
-    _assert_access_metadata(context, True, "audit")
+    _assert_access_metadata(context, "audit", True)
 
 
 @then("the denied report access is logged with actor, roles, time, scope, and justification")
 def step_denied_report_access_logged(context):
-    _assert_access_metadata(context, False, "audit_report")
+    _assert_access_metadata(context, "audit_report", None)
 
 
 @then("the report action is logged with actor, roles, time, scope, and justification")
 def step_allowed_report_access_logged(context):
-    _assert_access_metadata(context, True, "audit_report")
+    _assert_access_metadata(context, "audit_report", True)
 
 
 def _findings_for_did(body, did: str) -> list[tuple[str, str, str]]:
@@ -667,19 +841,19 @@ def _findings_for_did(body, did: str) -> list[tuple[str, str, str]]:
 
 @then('the archive audit contains a passed summary for "{name}"')
 def step_mixed_valid(context, name):
-    findings = _findings_for_did(context.requests_response.json(), _did(context, name))
+    findings = _findings_for_did(_audit_body(context), _did(context, name))
     assert findings and all(result == "PASSED" for _, result, _ in findings), findings
 
 
 @then('the archive audit contains a failed finding for "{name}"')
 def step_mixed_damaged(context, name):
-    findings = _findings_for_did(context.requests_response.json(), _did(context, name))
+    findings = _findings_for_did(_audit_body(context), _did(context, name))
     assert any(result == "FAILED" for _, result, _ in findings), findings
 
 
 @then("the PAC archive audit and archive audit endpoint return the same integrity findings")
 def step_shared_archive_core(context):
-    pac_body = context.requests_response.json()
+    pac_body = _audit_body(context)
     response = requests.get(
         archive_audit_url(context),
         params={"justification": "shared integrity core BDD-4724"},

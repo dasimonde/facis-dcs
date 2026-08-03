@@ -24,6 +24,7 @@ type AuditTrailRepository interface {
 	AppendCheckpointLeaves(ctx context.Context, tx *sqlx.Tx, seq int64, entryCIDs, leafHashes []string) error
 	ReadLatestCheckpointRoot(ctx context.Context, tx *sqlx.Tx) (*string, error)
 	ReadLatestCheckpoint(ctx context.Context, tx *sqlx.Tx) (*datatype.AuditCheckpointRecord, error)
+	ReadCheckpointBySequence(ctx context.Context, tx *sqlx.Tx, seq int64) (*datatype.AuditCheckpointRecord, error)
 	// ReadCheckpointForEntry locates the checkpoint an anchored entry belongs
 	// to, with the ordered leaf hashes of that checkpoint and the entry's
 	// position in them — everything an inclusion proof is built from.

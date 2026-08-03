@@ -27,11 +27,33 @@ persistence:
     - ReadWriteOnce
 
 extraEnv: []
+checkpointSink:
+  enabled: false
+  url: ""
+  timeoutSeconds: 5
+  # Hydra and DCS are internal control-plane dependencies. Keep their budget
+  # independent from the externally observable sink request timeout.
+  internalTimeoutSeconds: 30
+  # Test-only escape hatch for the BDD HTTPS sink's ephemeral self-signed
+  # certificate. The flow ignores this unless test controls are also enabled.
+  allowInsecureTLS: false
+  bearerToken: ""
+  bearerTokenSecretRef:
+    name: ""
+    key: "CHECKPOINT_SINK_BEARER_TOKEN"
 global:
   archiveAuditToken: ""
   archiveAuditTokenSecretRef:
     name: ""
     key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  auditExecutorToken: ""
+  auditExecutorTokenSecretRef:
+    name: ""
+    key: "PAC_AUDIT_EXECUTOR_BEARER_TOKEN"
+  workflowGateToken: ""
+  workflowGateTokenSecretRef:
+    name: ""
+    key: "PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"
 
 # Local RFC3161 dev TSA: the /tsa flow signs timestamp replies in-pod with a
 # provisioned dev cert (see configmap-tsa.yaml) instead of forwarding to an

@@ -5,7 +5,7 @@
 The DCS retains the XFSC Federated Catalogue for publishing and discovering
 contract templates. The supported co-deployment consists of FC service,
 Fuseki, PostgreSQL and Keycloak. Neo4j and its n10s plugin are not part of this
-runtime (`deployment/helm/values.yaml:334-345`,
+runtime (`deployment/helm/values.yaml:392-403`,
 `deployment/helm/charts/federated-catalogue/templates/deployment.yaml:41-53`).
 
 This guide describes the deployment lifecycle. For the catalogue's identity and
@@ -40,15 +40,16 @@ fcservice:
 ```
 
 No FC client settings are injected into the backend when integration is
-disabled (`deployment/helm/templates/deployment.yaml:201-226`). The standard
-local development profiles use this mode
-(`deployment/helm/values.dev.yml:97-103`,
-`deployment/helm/values.dev2.yml:97-103`), so development startup does not wait
-for or probe a catalogue.
+disabled (`deployment/helm/templates/deployment.yaml:201-226`). This is the
+chart's deliberately optional default
+(`deployment/helm/values.yaml:404-426`), not the configured state of the
+supported development and BDD environments. Enabling the integration requires
+the complete API, realm and credential configuration described below.
 
 ### Owned catalogue
 
-The BDD profile is an executable example of the required wiring:
+The development and BDD profiles both enable and co-deploy the catalogue. The
+BDD profile is an executable example of the required wiring:
 
 ```yaml
 federatedCatalogue:
@@ -67,19 +68,21 @@ fcservice:
     enabled: true
 ```
 
-The source profile is `deployment/helm/values.bdd.yml:198-226`. For
+The development configuration is at
+`deployment/helm/values.dev.yml:110-124`; the BDD configuration is at
+`deployment/helm/values.bdd.yml:213-226`. For
 non-ephemeral environments, supply the client secret through the existing
 Secret references instead of an inline value
-(`deployment/helm/values.yaml:346-359`). Configure persistence for FC's file
+(`deployment/helm/values.yaml:411-417`). Configure persistence for FC's file
 store, Fuseki and FC PostgreSQL according to the environment
-(`deployment/helm/charts/federated-catalogue/values.yaml:58-63`,
-`deployment/helm/values.yaml:436-444`).
+(`deployment/helm/charts/federated-catalogue/values.yaml:62-67`,
+`deployment/helm/values.yaml:494-502`).
 
 The semantic verification cold path is CPU-bound. The supported floor is a
 500m CPU request with a 2 CPU limit
-(`deployment/helm/charts/federated-catalogue/values.yaml:65-74`); the chart's
+(`deployment/helm/charts/federated-catalogue/values.yaml:69-78`); the chart's
 top-level FC defaults carry the same values
-(`deployment/helm/values.yaml:367-376`).
+(`deployment/helm/values.yaml:425-434`).
 
 ### Remote catalogue
 
@@ -126,12 +129,12 @@ The startup path is event- and function-driven:
 5. DCS validates complete FC configuration, performs the native health check
    for an owned catalogue, sends exactly one semantic `/verification` request
    and synchronizes schemas once
-   (`backend/cmd/dcs/main.go:471-507`,
+   (`backend/cmd/dcs/main.go:509-547`,
    `backend/internal/templatecatalogueintegration/client/client.go:108-183`).
 6. Until all initialization succeeds, `/readyz` returns 503. The final server
    returns 200 only after the startup sequence completes
-   (`backend/cmd/dcs/readiness.go:19-28`,
-   `backend/cmd/dcs/main.go:769-775`).
+(`backend/cmd/dcs/readiness.go:19-28`,
+`backend/cmd/dcs/main.go:829-832`).
 
 There is no FC warm-up loop, schema-sync retry or fixed multi-minute FC sleep.
 The FC HTTP client applies a 30-second bound to each request
@@ -158,7 +161,7 @@ command bounds; it does not add application retries or warm-up behavior
 Do not add `helm --wait` to this flow. The HSM provisioner is a post-install
 hook whose output is required before `/readyz` can become successful; waiting
 inside the Helm install would deadlock that ordering
-(`deployment/helm/values.yaml:141-146`,
+(`deployment/helm/values.yaml:153-159`,
 `deployment/helm/tests/federated_catalogue_lifecycle_test.sh:248-256`).
 
 ## Upgrade from the obsolete Neo4j development stack
@@ -192,7 +195,7 @@ Interpret the first terminal cause:
 | Visible error | Meaning | Action |
 |---|---|---|
 | `remote Federated Catalogue requires ... acknowledgeAdminAllTrustBoundary=true` | A remote catalogue was selected without accepting ADR-18's administrator boundary. | Use an owned catalogue, or confirm that the remote catalogue is inside one mutually trusted administrative boundary before setting the acknowledgement. |
-| `incomplete Federated Catalogue configuration; missing ...` | At least one API, realm or client-credential field is absent. | Supply every named value; partial FC configuration is rejected (`backend/cmd/dcs/main.go:471-497`). |
+| `incomplete Federated Catalogue configuration; missing ...` | At least one API, realm or client-credential field is absent. | Supply every named value; partial FC configuration is rejected (`backend/cmd/dcs/main.go:509-538`). |
 | `Federated Catalogue realm provisioning Job ... failed` | Keycloak realm import or client-role assignment reached a terminal Job failure. | Use the printed Job reason and provisioning logs; the backend does not wait for another attempt (`deployment/helm/templates/deployment.yaml:109-120`). |
 | `federated catalogue health ... expected UP` | An owned FC actuator reports a failed dependency. | Inspect FC, Fuseki, FC PostgreSQL and Keycloak logs; do not extend the timeout (`backend/internal/templatecatalogueintegration/client/client.go:113-147`). |
 | `federated catalogue functional verification failed` | Native health succeeded, but schema/semantic processing did not. | Inspect the returned status/body and FC logs; the single verification is intentionally not repeated (`backend/internal/templatecatalogueintegration/client/client.go:149-180`). |
@@ -216,6 +219,6 @@ The executable acceptance specification is
 |---|---|
 | DCS-PC-04, DCS-OE-01, DCS-OE-03 | Kubernetes/Helm lifecycle, locked dependencies and successful deployment tests (`deployment/helm/deploy.sh:103-147`, `deployment/helm/tests/federated_catalogue_lifecycle_test.sh:16-29`). |
 | DCS-OE-06 | XFSC Federated Catalogue remains integrated through its native health, verification, schema, asset and query interfaces (`backend/internal/templatecatalogueintegration/client/client.go:100-183`). |
-| DCS-NFR-PER-01 | Startup uses Kubernetes condition watches and one bounded functional request, with no polling warm-up or schema-sync retry (`deployment/helm/templates/deployment.yaml:48-123`, `backend/cmd/dcs/main.go:497-507`). |
+| DCS-NFR-PER-01 | Startup uses Kubernetes condition watches and one bounded functional request, with no polling warm-up or schema-sync retry (`deployment/helm/templates/deployment.yaml:48-123`, `backend/cmd/dcs/main.go:540-547`). |
 | DCS-NFR-PER-03 | Terminal Job failure and FC functional failure are diagnosed and stop startup; `/readyz` cannot become green prematurely (`deployment/helm/templates/deployment.yaml:88-123`, `backend/cmd/dcs/readiness.go:19-28`). |
 | DCS-NFR-SQ-02, DCS-NFR-SQ-03 | The repository provides locked Helm build/deploy scripts and digest-pinned container manifests (`deployment/helm/deploy.sh:103-126`, `deployment/helm/tests/federated_catalogue_lifecycle_test.sh:59-87`). |
