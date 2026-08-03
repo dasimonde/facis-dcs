@@ -62,21 +62,21 @@ volumeMounts: []
 
 oid4vp:
   trust:
-    enabled: true
-    # Baked into the container image (see deployment/docker/Dockerfile).
-    dataPath: /app/config/oid4vp/trust.dev.json
+    # Trust is deployment state. The chart default deliberately trusts no
+    # development issuer or Dev Root; dev/demo/BDD overlays opt in explicitly.
+    enabled: false
+    dataPath: ""
     # Name of an operator-supplied ConfigMap holding the trust document, for
     # deployments that must trust a REAL credential issuer rather than the dev
     # fixture baked into the image. When set it is mounted read-only and
     # dataPath above is ignored in favour of the mounted file, so the issuer
     # registry is deployment state rather than a hand-applied patch that the
-    # next upgrade silently reverts. Unset keeps the in-image default.
+    # next upgrade silently reverts.
     existingConfigMap: ""
     # Key within that ConfigMap; also the mounted file name.
     existingConfigMapKey: trust.json
     # Where the ConfigMap is mounted. The file lands at <mountPath>/<key>.
     existingConfigMapMountPath: /etc/dcs/oid4vp
-    xfscAllowUnsignedFallback: false
     # Optional: trust anchors an x5c-bearing credential's certificate chain
     # (e.g. a real EUDI wallet's issued PID) must verify against. Empty means
     # unset — an x5c-bearing credential is then refused outright, never
@@ -100,10 +100,8 @@ archiveNotary:
   baseURL: ""
   notaryPath: "/archive/notary"
   auditLogPath: "/archive-audit-events.jsonl"
-  auditLogBearerToken: ""
-  auditLogBearerTokenSecretRef:
-    name: ""
-    key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  # The audit-log bearer token is NOT configured here: the wired source is
+  # global.archiveAuditToken / global.archiveAuditTokenSecretRef below.
 
 # External PAC audit executor. The bundled ORCE endpoint is selected when URL
 # is empty and orce.enabled=true; a customer replaces it through configuration
@@ -226,6 +224,14 @@ federation:
 signing:
   # DID of this DCS instance (embedded in C2PA lifecycle assertions as authority).
   issuerDID: ""
+
+  # Path to the PEM certificate chain that publishes this instance's signing key.
+  # It is what the status list this instance serves carries as its x5c header,
+  # and its last certificate is the anchor a verifier — this instance included —
+  # has to hold to accept that list (ADR-34). Empty uses the chain the
+  # provisioning job leaves on the shared token volume; a deployment holding a
+  # real HSM key sets the path its own chain is mounted at.
+  issuerX5ChainPath: ""
   issuerDIDSecretRef:
     name: ""
     key: "ISSUER_DID"
@@ -253,19 +259,14 @@ pkcs11:
     key: "PKCS11_PIN"
   provisioning:
     enabled: true
-    # Publish the provisioned did.json and C2PA x5chain as Secrets via the
-    # Kubernetes API, which requires the job to carry its own ServiceAccount +
-    # Role + RoleBinding.
+    # Publish the provisioned did.json as a Secret via the Kubernetes API, which
+    # requires the job to carry its own ServiceAccount + Role + RoleBinding.
     #
     # Set false on clusters that do not grant the installer rbac.authorization
     # (a common on-prem namespace restriction — the install otherwise fails on
     # "cannot create resource roles"). The job then writes nothing to the API:
-    # every artifact stays on the shared token volume it already writes them to,
-    # the backend reads DCS_DID from there, and pdf-core mounts the same volume
-    # read-only for the x5chain. That co-mount is why pdf-core is pinned to the
-    # backend's node in this mode — a ReadWriteOnce volume admits multiple pods
-    # only on one node. Supply persistence.accessModes: ["ReadWriteMany"] to
-    # drop the pinning.
+    # every artifact stays on the shared token volume it already writes them to
+    # and the backend reads DCS_DID from there.
     publishSecrets: true
     # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
     tokenDir: "/var/lib/softhsm"
@@ -277,6 +278,9 @@ pkcs11:
       # surfaces as pods stuck Pending rather than as an install error.
       size: "1Gi"
       accessModes: ["ReadWriteOnce"]
+      # Empty uses the cluster default StorageClass. The token directory holds
+      # the SoftHSM2 private keys — set an encrypted class per environment
+      # (DCS-NFR-SEC-14); deploy.sh asserts the bound class when one is set.
       storageClassName: ""
     # Resource block for the provisioning job itself. Set it on namespaces with a
     # limits.cpu quota — see the template for why an unset block blocks install.
@@ -286,7 +290,13 @@ pkcs11:
     image:
       repository: ""
       tag: ""
-      pullPolicy: IfNotPresent
+      # Empty so the job follows image.pullPolicy. The provisioning script and
+      # the gendid tool it runs ship inside the application image, so pinning
+      # this to IfNotPresent while the application pulls Always lets a node's
+      # cached copy of a mutable tag provision an older key set than the
+      # application expects — the backend then exits at startup on a key the
+      # provisioner never created.
+      pullPolicy: ""
 
 # ---- Co-deployed dependencies ----------------------------------------
 # Each sub-chart owns its full set of configurable values.
@@ -314,6 +324,10 @@ postgresql:
   persistence:
     enabled: false
     size: 1Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class per
+    # environment (DCS-NFR-SEC-14) — this volume holds the dcs/hydra/statuslist
+    # databases; deploy.sh asserts the bound class when one is set.
+    storageClassName: ""
 
 hydra:
   enabled: false
@@ -375,19 +389,33 @@ statusListLocalhostProxy:
   listenPort: 18080
   upstream: ""
   ingressHost: localhost
+  # Prefixes of the public origin this sidecar answers for. A credential names
+  # its status list by absolute URL and the verifier requires the served token's
+  # `sub` to equal that URL exactly, so the Pod has to fetch the credential's own
+  # URL rather than an in-cluster equivalent.
+  #
+  # `host` is the Ingress host the prefix is routed under, defaulting to
+  # ingressHost — this release's own. The credential issuer is a SEPARATE release
+  # published once at one origin (ADR-34), so its prefix names that origin
+  # outright and stays right for a release answering on some other host.
+  paths:
+    - prefix: /statuslist/
+    - prefix: /issuer/
+      host: localhost
   # Functional HTTP route used by the sidecar readiness probe. Environments
   # that require a particular seeded status list can override this path.
   readinessPath: "/statuslist/health"
 
-# XFSC Status List Service (DCS-OR-C2PA-005)
-# Manages verifiable credential status lists (Status List 2021/2023 format).
-# When enabled, STATUSLIST_SERVICE_URL is auto-derived and wired into DCS.
-# See charts/statuslist-service/values.yaml for all configurable fields.
+# XFSC Status List Service.
+# Nothing points at it: the credentials this deployment issues name the status
+# list it serves and signs itself (ADR-34), and they were the last consumer.
+# It is still deployable while its removal is staged; deleting the subchart is a
+# separate step. See charts/statuslist-service/values.yaml for its fields.
 statuslistService:
   enabled: false
   # url overrides the auto-wired ClusterIP URL when enabled=true.
   url: ""
-  # tenantID is the tenant identifier passed as STATUSLIST_TENANT_ID (defaults to "default" when empty).
+  # tenantID is the tenant identifier used by the service itself.
   tenantID: ""
   image:
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/status-list-service
@@ -541,21 +569,10 @@ pdfCore:
   # pdf-core at startup). Default: auto-derived from the pdf-core service URL,
   # keeping it consistent with the contextIRI default above.
   ontologyBaseURL: ""
-  signing:
-    # No default key/cert ships in this chart (clean-product sweep freeze-day
-    # grep gate: no PEM private key material in committed values files). This
-    # path only matters when pkcs11.provisioning.enabled=false (SoftHSM2/PKCS#11
-    # provisioning is the default and does not use these values at all — see
-    # pdf-core-signing-secret.yaml's render guard). If you disable PKCS11
-    # provisioning, either set existingSecret below, or supply signerKeyPEM +
-    # x5ChainPEM explicitly via --set-file / a values overlay that is NOT
-    # committed to the chart.
-    signerKeyPEM: ""
-    x5ChainPEM: ""
-    # Set to use an existing Secret instead of auto-creating one from the inline values above.
-    existingSecret: ""
-    existingSecretSignerKeyKey: "signer-key-pem"
-    existingSecretX5ChainKey: "x5chain-pem"
+  # pdf-core holds no signing material. The backend signs the COSE
+  # Sig_structures with its PKCS#11 dcs-c2pa key and sends the matching
+  # certificate chain per request in the X-DCS-C2PA-X5Chain header, so this
+  # chart configures no key, cert or Secret for pdf-core.
 
 ipfs:
   enabled: false
@@ -567,6 +584,13 @@ ipfs:
   mfsBaseURLSecretRef:
     name: ""
     key: "IPFS_MFS_BASE_URL"
+  persistence:
+    enabled: false
+    size: 5Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class per
+    # environment (DCS-NFR-SEC-14) — the Kubo repo holds all pinned artifact
+    # ciphertext; deploy.sh asserts the bound class when one is set.
+    storageClassName: ""
 
 ipfsDocumentManager:
   enabled: false
@@ -689,6 +713,35 @@ acmeRenewal:
     size: "1Gi"
     accessModes: ["ReadWriteOnce"]
     storageClassName: ""
+
+# ---- Continuous compliance monitoring (DCS-FR-PACM-02) ----------------
+#
+# Runs the compliance sweep on a schedule instead of waiting for someone to call
+# GET /pac/monitor, so missing approvals, denied access attempts, breached KPIs
+# and failed deployments are detected unattended. Each violation alerts once,
+# when it first appears (and again if it recurs after being resolved), never on
+# every run.
+#
+# Keep enabled: with this off, risks are only ever found by someone asking, and
+# the "continuously monitor" requirement is not met.
+complianceMonitor:
+  enabled: true
+  # Every five minutes. The time-based rules (missing approvals, expiries) are
+  # served well by this; the event-driven ones (unauthorized access, failed
+  # deployment) are therefore reported with up to five minutes' delay. Kubernetes
+  # cannot schedule finer than one minute.
+  schedule: "*/5 * * * *"
+  # Skip a sweep that could not start on time rather than queueing it — the next
+  # run re-derives the same state anyway.
+  startingDeadlineSeconds: 120
+  timeout: "2m"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
 
 # ---- Shared supporting services for a resource-constrained peer -------
 # Exposes this instance's stateless services under https://<host>/shared/<name>

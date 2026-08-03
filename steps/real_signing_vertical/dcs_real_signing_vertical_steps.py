@@ -33,7 +33,7 @@ and PID binding.
    signed-document callback later reuses once the ceremony is published. Both
    presentations are built with the existing testWallet/dcs_wallet signing
    primitives, the same library AuthService already uses for the OID4VP login
-   flow, just with PID-shaped claims (vct urn:eudi:pid:de:1, given_name/
+   flow, just with PID-shaped claims (vct urn:dcs:pid:demo:v1, given_name/
    family_name) instead of the role-credential shape, and bound to the
    ceremony's own request nonce (fetched from its pending-stage request
    object, never invented locally).
@@ -87,13 +87,24 @@ from steps.template_management.contract_state_machine_steps import (
 )
 
 
-# The ceremony's fixed OID4VP audience/client_id (backend/internal/
-# signingmanagement/pidverify.Audience) and the DCQL credential query ids
-# (backend/internal/auth/oid4vp/pid.go PIDCredentialQueryID, poa.go
-# PoACredentialQueryID) a wallet's combined vp_token is keyed by.
-CEREMONY_AUD = "dcs-signature-ceremony"
+# The DCQL credential query ids (backend/internal/auth/oid4vp/pid.go
+# PIDCredentialQueryID, poa.go PoACredentialQueryID) a wallet's combined
+# vp_token is keyed by.
 PID_QUERY_ID = "eudi_pid_credential"
 POA_QUERY_ID = "dcs_poa_credential"
+
+
+def ceremony_aud(context) -> str:
+    """The ceremony's OID4VP client_id, and therefore the audience its KB-JWTs
+    must be bound to. It is the deployment's own x509_san_dns identifier, so it
+    is read from the request object the DCS actually published (recorded by
+    _fetch_pending_nonce) rather than hardcoded."""
+    client_id = str(getattr(context, "ceremony_client_id", "") or "").strip()
+    assert client_id, (
+        "no ceremony client_id recorded - fetch the ceremony request object "
+        "(_fetch_pending_nonce) before building a presentation for it"
+    )
+    return client_id
 
 
 def _fetch_pending_nonce(context, ceremony_id: str) -> str:
@@ -117,33 +128,32 @@ def _fetch_pending_nonce(context, ceremony_id: str) -> str:
     claims = _decode_jwt_claims(resp.text.strip())
     nonce = str(claims.get("nonce") or "").strip()
     assert nonce, f"pending ceremony request object carries no nonce: {claims}"
+    client_id = str(claims.get("client_id") or "").strip()
+    assert client_id, f"pending ceremony request object carries no client_id: {claims}"
+    context.ceremony_client_id = client_id
     return nonce
 
 
 def _build_poa_presentation(*, organization: str, roles: list[str], aud: str, nonce: str) -> str:
     """Build a Power of Attorney SD-JWT VC + KB-JWT presentation authorizing
-    organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03).
-    Uses BDD_CREDENTIAL_TENANT — the SAME status-list tenant
-    AuthService.build_vp_token issues the login/role credential against and
-    ensure_statuslist_for_dev.py seeds — not issue_stored_credential's
-    "default" tenant, which the BDD/CI stack does not reliably provision."""
+    organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03). It
+    names the same issuer status list AuthService.build_vp_token issues the
+    login credential against, on the organization's own index."""
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.issuer import DEFAULT_ISSUER_DID, issue_access_credential  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE  # noqa: PLC0415
+    from dcs_wallet.status_list import role_credential_index  # noqa: PLC0415
 
     import os  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
     issuer_did = os.getenv("BDD_ISSUER_DID", DEFAULT_ISSUER_DID)
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
     return issue_access_credential(
         organization=organization,
         roles=roles,
         issuer_private=keys.issuer_private,
         wallet_private=keys.wallet_private,
+        status_index=role_credential_index(organization=organization, roles=roles),
         issuer_did=issuer_did,
-        statuslist_service_base=status_base,
-        statuslist_tenant=BDD_CREDENTIAL_TENANT,
         aud=aud,
         nonce=nonce,
     )
@@ -158,7 +168,7 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     """Build a real, protocol-correct PID SD-JWT VC + KB-JWT presentation
     using the same testWallet/dcs_wallet signing primitives already used by
     AuthService for the DCS role-credential OID4VP login flow — just with
-    PID-shaped claims (vct urn:eudi:pid:de:1) instead of organization/roles.
+    PID-shaped claims (vct urn:dcs:pid:demo:v1) instead of organization/roles.
     Returns (compact_presentation, issuer_jwt, disclosures, subject_did).
 
     holder_private lets a scenario present as a DIFFERENT natural person than
@@ -168,8 +178,6 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     must be signed by two distinct identities).
     """
     AuthService._ensure_dcs_wallet_importable()
-    import os  # noqa: PLC0415
-
     from dcs_wallet.issuer import (  # noqa: PLC0415
         DEFAULT_ISSUER_DID,
         sign_credential_sd_jwt,
@@ -177,7 +185,7 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     )
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk  # noqa: PLC0415
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status  # noqa: PLC0415
+    from dcs_wallet.status_list import build_credential_status, pid_credential_index  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
     holder_key = holder_private or keys.wallet_private
@@ -185,23 +193,19 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     subject_did = did_jwk_from_public_jwk(holder_public)
 
     now = int(time.time())
-    # A real status claim (ADR-20): VerifyPID's status-list check is no
-    # longer skipped now that EUDIPLO — which omitted status — is gone, so a
-    # PID presentation with no status claim would be rejected outright. The
-    # seed (given_name/family_name in place of organization/roles) just needs
-    # to be a stable, collision-free per-identity key into the same dev
-    # status-list tenant testWallet/scripts/ensure_statuslist_for_dev.py seeds.
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
+    # A real status claim (ADR-20): VerifyPID's status-list check is no longer
+    # skipped now that EUDIPLO — which omitted status — is gone, so a PID
+    # presentation with no status claim would be rejected outright. One bit per
+    # natural person, on the issuer's own signed list.
     visible_claims = {
         "iss": DEFAULT_ISSUER_DID,
         "sub": subject_did,
-        "vct": "urn:eudi:pid:de:1",
+        "vct": "urn:dcs:pid:demo:v1",
         "iat": now - 3600,
         "exp": now + 3600,
         "cnf": {"jwk": cnf_jwk(holder_public)},
         "status": build_credential_status(
-            sub=subject_did, organization=given_name, roles=[family_name],
-            service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+            index=pid_credential_index(given_name=given_name, family_name=family_name),
         ),
     }
     selective_claims = {"given_name": given_name, "family_name": family_name}
@@ -224,11 +228,12 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
 
 def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, nonce: str, trusted: bool = True):
     """Same as _build_pid_presentation, but the issuer credential JWT carries
-    an x5c certificate chain in its header instead of a bare jwk+kid trusted
-    via DID allow-list — what a real EUDI wallet's issued PID actually looks
-    like (ResolveIssuerVerificationKeyForPID). trusted=False signs with an
-    UNRELATED self-signed cert never configured as an OID4VP_X5C_TRUST_
-    ANCHORS_PATH root, for the negative "untrusted issuer is refused" case.
+    an x5c certificate chain in its header instead of a bare jwk+kid — what a
+    real EUDI wallet's issued PID actually looks like. The dev issuer's cert
+    names its DID in a SAN URI, because the chain is only accepted for an
+    issuer the leaf identifies. trusted=False signs with an UNRELATED
+    self-signed cert never configured as an OID4VP_X5C_TRUST_ANCHORS_PATH
+    root, for the negative "untrusted issuer is refused" case.
     """
     AuthService._ensure_dcs_wallet_importable()
     from cryptography import x509  # noqa: PLC0415
@@ -237,9 +242,7 @@ def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, 
     from dcs_wallet.issuer import sign_credential_sd_jwt_x5c, sign_key_binding_jwt  # noqa: PLC0415
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, load_json, private_key_material, public_jwk  # noqa: PLC0415
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status  # noqa: PLC0415
-
-    import os  # noqa: PLC0415
+    from dcs_wallet.status_list import build_credential_status, pid_credential_index  # noqa: PLC0415
 
     keys_dir = AuthService.resolve_wallet_keys_dir()
     if trusted:
@@ -285,17 +288,15 @@ def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, 
     subject_did = did_jwk_from_public_jwk(holder_public)
 
     now_ts = int(time.time())
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
     visible_claims = {
         "iss": issuer_did,
         "sub": subject_did,
-        "vct": "urn:eudi:pid:de:1",
+        "vct": "urn:dcs:pid:demo:v1",
         "iat": now_ts - 3600,
         "exp": now_ts + 3600,
         "cnf": {"jwk": cnf_jwk(holder_public)},
         "status": build_credential_status(
-            sub=subject_did, organization=given_name, roles=[family_name],
-            service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+            index=pid_credential_index(given_name=given_name, family_name=family_name),
         ),
     }
     selective_claims = {"given_name": given_name, "family_name": family_name}
@@ -351,7 +352,7 @@ def _complete_ceremony_via_presentation(
     vp_token = {PID_QUERY_ID: [presentation]}
     if poa_organization:
         vp_token[POA_QUERY_ID] = [
-            _build_poa_presentation(organization=poa_organization, roles=["Contract Signer"], aud=CEREMONY_AUD, nonce=nonce)
+            _build_poa_presentation(organization=poa_organization, roles=["Contract Signer"], aud=ceremony_aud(context), nonce=nonce)
         ]
     import json  # noqa: PLC0415
 
@@ -389,7 +390,7 @@ def _run_full_ceremony(context, name, field_name, signatory_name, holder_private
     nonce = _fetch_pending_nonce(context, ceremony_id)
     given_name, family_name = signatory_name, "BDD-Testperson"
     presentation, issuer_jwt, disclosures, subject_did = _build_pid_presentation(
-        given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce,
+        given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce,
         holder_private=holder_private,
     )
     resp = _complete_ceremony_via_presentation(
@@ -563,7 +564,11 @@ def step_when_revoke_post_sign_update(context, name):
     context.requests_response = post_json(
         context,
         signature_revoke_url(context),
-        {"did": did, "signer_did": signer_did},
+        {
+            "did": did,
+            "signer_did": signer_did,
+            "reason": "Post-sign C2PA lifecycle revocation",
+        },
         headers=manager_h,
     )
 
@@ -589,7 +594,7 @@ def step_when_start_ceremony_as_role(context, name, field_name, role):
         nonce = _fetch_pending_nonce(context, ceremony_id)
         given_name, family_name = field_name, "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
-            given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce
+            given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce
         )
         if not hasattr(context, "pid_presentations"):
             context.pid_presentations = {}
@@ -638,7 +643,7 @@ def step_when_presentation_wrong_nonce(context, name):
     wrong_nonce = str(uuid.uuid4())
     presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
         given_name=presentation_info["given_name"], family_name=presentation_info["family_name"],
-        aud=CEREMONY_AUD, nonce=wrong_nonce,
+        aud=ceremony_aud(context), nonce=wrong_nonce,
     )
     context.requests_response = _complete_ceremony_via_presentation(
         context,
@@ -653,9 +658,9 @@ def step_when_presentation_wrong_nonce(context, name):
 
 def _present_pid_x5c(context, name, field_name, *, trusted):
     """Start a fresh ceremony and present a PID whose issuer credential is
-    x5c-signed instead of DID/JWKS-trusted — what a real EUDI wallet's PID
-    actually looks like (ResolveIssuerVerificationKeyForPID). trusted=False
-    signs with an unrelated cert never configured as a trust anchor."""
+    x5c-signed instead of JWKS-trusted — what a real EUDI wallet's PID
+    actually looks like. trusted=False signs with an unrelated cert never
+    configured as a trust anchor."""
     signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
     start_resp = _start_ceremony(context, name, field_name, signer_h)
     assert start_resp.status_code == 200, (
@@ -667,7 +672,7 @@ def _present_pid_x5c(context, name, field_name, *, trusted):
     nonce = _fetch_pending_nonce(context, ceremony_id)
     given_name, family_name = field_name, "BDD-Testperson"
     presentation, subject_did = _build_pid_presentation_x5c(
-        given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce, trusted=trusted,
+        given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce, trusted=trusted,
     )
     if not hasattr(context, "ceremony_ids"):
         context.ceremony_ids = {}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
@@ -19,6 +20,7 @@ import (
 type AuditTrailReader struct {
 	ARepo      db.AuditTrailRepository
 	IPFSClient *ipfs.APIClient
+	Artifacts  *artifactstore.Store
 }
 
 func (r AuditTrailReader) ReadAuditLogEntriesByComponentAndDID(ctx context.Context, tx *sqlx.Tx, componentType componenttype.ComponentType, did string) ([]datatype.AuditLogEntry, error) {
@@ -39,7 +41,7 @@ func (r AuditTrailReader) ReadAuditLogEntriesByComponentAndDID(ctx context.Conte
 		if err != nil {
 			return nil, fmt.Errorf("read body: %w", err)
 		}
-		logEntry, err := decodeAuditLogEntry(result.Data)
+		logEntry, err := r.openAuditLogEntry(ctx, result.Data)
 		if err != nil {
 			return nil, fmt.Errorf("decode response: %w", err)
 		}
@@ -90,7 +92,7 @@ func (r AuditTrailReader) ReadAuditLogEntriesByComponent(ctx context.Context, tx
 				if err != nil {
 					return fmt.Errorf("read body: %w", err)
 				}
-				logEntry, err := decodeAuditLogEntry(fetched.Data)
+				logEntry, err := r.openAuditLogEntry(gctx, fetched.Data)
 				if err != nil {
 					return fmt.Errorf("decode response: %w", err)
 				}
@@ -127,12 +129,12 @@ func (r AuditTrailReader) ReadAllAuditLogEntries(ctx context.Context, tx *sqlx.T
 
 	logEntries := make([]datatype.AuditLogEntry, 0)
 	for _, record := range checkpoints {
-		fetched, err := r.IPFSClient.FetchFile(record.CID)
+		fetched, err := r.Artifacts.Get(ctx, r.Artifacts.InstanceScope(), record.CID)
 		if err != nil {
 			return nil, fmt.Errorf("read checkpoint %d: %w", record.Seq, err)
 		}
 		var checkpoint datatype.AuditCheckpoint
-		if err := json.Unmarshal(fetched.Data, &checkpoint); err != nil {
+		if err := json.Unmarshal(fetched, &checkpoint); err != nil {
 			return nil, fmt.Errorf("decode checkpoint %d: %w", record.Seq, err)
 		}
 
@@ -148,7 +150,7 @@ func (r AuditTrailReader) ReadAllAuditLogEntries(ctx context.Context, tx *sqlx.T
 				if err != nil {
 					return fmt.Errorf("read entry %s of checkpoint %d: %w", cid, record.Seq, err)
 				}
-				entry, err := decodeAuditLogEntry(leaf.Data)
+				entry, err := r.openAuditLogEntry(gctx, leaf.Data)
 				if err != nil {
 					return fmt.Errorf("decode entry %s of checkpoint %d: %w", cid, record.Seq, err)
 				}
@@ -167,10 +169,31 @@ func (r AuditTrailReader) ReadAllAuditLogEntries(ctx context.Context, tx *sqlx.T
 	return logEntries, nil
 }
 
-func decodeAuditLogEntry(data []byte) (datatype.AuditLogEntry, error) {
+// openAuditLogEntry decodes a stored entry and opens its private body: the
+// plaintext header is returned as-is, EventData is decrypted under the entry's
+// CEK scope. Once the scope is shredded, the body becomes the defined erased
+// marker instead of an error — the header and the chain stay readable.
+func (r AuditTrailReader) openAuditLogEntry(ctx context.Context, data []byte) (datatype.AuditLogEntry, error) {
 	var logEntry datatype.AuditLogEntry
 	if err := json.Unmarshal(data, &logEntry); err != nil {
 		return datatype.AuditLogEntry{}, err
 	}
+	if logEntry.CEKScopeKind == "" || len(logEntry.EventData) == 0 {
+		return logEntry, nil
+	}
+	var body []byte
+	if err := json.Unmarshal(logEntry.EventData, &body); err != nil {
+		return datatype.AuditLogEntry{}, fmt.Errorf("decode encrypted body of entry %d: %w", logEntry.ID, err)
+	}
+	scope := artifactstore.Scope{Kind: artifactstore.Kind(logEntry.CEKScopeKind), ID: logEntry.CEKScopeID}
+	plaintext, err := r.Artifacts.Decrypt(ctx, scope, body)
+	if err != nil {
+		if artifactstore.IsShredded(err) {
+			logEntry.EventData = datatype.ErasedEventData
+			return logEntry, nil
+		}
+		return datatype.AuditLogEntry{}, fmt.Errorf("decrypt body of entry %d: %w", logEntry.ID, err)
+	}
+	logEntry.EventData = plaintext
 	return logEntry, nil
 }

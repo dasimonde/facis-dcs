@@ -3,10 +3,8 @@ package envelope
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -269,70 +267,4 @@ func padBigInt(v *big.Int, size int) []byte {
 	b := v.Bytes()
 	copy(out[size-len(b):], b)
 	return out
-}
-
-func ParseECPrivateKeyFromJWK(raw []byte) (*ecdsa.PrivateKey, error) {
-	var jwk struct {
-		KTY string `json:"kty"`
-		CRV string `json:"crv"`
-		D   string `json:"d"`
-		X   string `json:"x"`
-		Y   string `json:"y"`
-	}
-	if err := json.Unmarshal(raw, &jwk); err != nil {
-		return nil, err
-	}
-	if jwk.KTY != "EC" || jwk.CRV != "P-256" {
-		return nil, fmt.Errorf("unsupported jwk curve")
-	}
-	d, err := decodeBase64URLInt(jwk.D)
-	if err != nil {
-		return nil, err
-	}
-	x, err := decodeBase64URLInt(jwk.X)
-	if err != nil {
-		return nil, err
-	}
-	y, err := decodeBase64URLInt(jwk.Y)
-	if err != nil {
-		return nil, err
-	}
-	return &ecdsa.PrivateKey{
-		PublicKey: ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y},
-		D:         d,
-	}, nil
-}
-
-func ParseEd25519PrivateKeyFromJWK(raw []byte) (ed25519.PrivateKey, error) {
-	var jwk struct {
-		KTY string `json:"kty"`
-		CRV string `json:"crv"`
-		D   string `json:"d"`
-	}
-	if err := json.Unmarshal(raw, &jwk); err != nil {
-		return nil, err
-	}
-	if jwk.KTY != "OKP" || jwk.CRV != "Ed25519" {
-		return nil, fmt.Errorf("unsupported ed25519 jwk")
-	}
-	seed, err := decodeBase64URLBytes(jwk.D)
-	if err != nil {
-		return nil, err
-	}
-	if len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("invalid ed25519 seed length")
-	}
-	return ed25519.NewKeyFromSeed(seed), nil
-}
-
-func decodeBase64URLInt(s string) (*big.Int, error) {
-	raw, err := decodeBase64URLBytes(s)
-	if err != nil {
-		return nil, err
-	}
-	return new(big.Int).SetBytes(raw), nil
-}
-
-func decodeBase64URLBytes(s string) ([]byte, error) {
-	return base64.RawURLEncoding.DecodeString(strings.TrimSpace(s))
 }

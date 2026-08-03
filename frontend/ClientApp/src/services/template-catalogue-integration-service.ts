@@ -15,7 +15,6 @@ export const templateCatalogueIntegrationService = {
     return http
       .get<TemplateCatalogueRetrieveResponse>('/catalogue/template/retrieve', { params: request })
       .then((res) => res.data)
-      .catch(() => ({ totalCount: 0, items: [] }))
   },
 
   async retrieve_template_by_id(
@@ -34,6 +33,5 @@ export const templateCatalogueIntegrationService = {
     return http
       .get<TemplateCatalogueRetrieveResponse>('/catalogue/template/search', { params: request })
       .then((res) => res.data)
-      .catch(() => ({ totalCount: 0, items: [] }))
   },
 }

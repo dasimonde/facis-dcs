@@ -1,77 +1,21 @@
 package contracttemplate
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
-
-	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/validation"
-	"digital-contracting-service/internal/contractworkflowengine/db"
 )
-
-type GetTemplateDataByDIDQry struct {
-	DID string
-}
-
-type GetTemplateDataByDIDHandler struct {
-	DB     *sqlx.DB
-	CTRepo db.ContractTemplateRepo
-}
-
-func (h *GetTemplateDataByDIDHandler) Handle(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-	templateData, version, err := h.getTemplateData(ctx, qry)
-	if err != nil {
-		return nil, err
-	}
-	return ConvertTemplateDataToContractData(templateData, qry.DID, version)
-}
-
-func (h *GetTemplateDataByDIDHandler) getTemplateData(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, int, error) {
-	templateData, version, err := h.getContractTemplateDataFromDB(ctx, qry.DID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not read template data from DB: %w", err)
-	}
-
-	return templateData, version, nil
-}
-
-func (h *GetTemplateDataByDIDHandler) getContractTemplateDataFromDB(ctx context.Context, templateDID string) (*datatype.JSON, int, error) {
-	tx, err := h.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not create transaction: %w", err)
-	}
-	defer func(tx *sqlx.Tx) {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Printf("could not rollback transaction: %v", err)
-		}
-	}(tx)
-
-	templateData, err := h.CTRepo.ReadContractTemplateDataByID(ctx, tx, templateDID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not read contract template data: %w", err)
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not commit transaction: %w", err)
-	}
-	return templateData.TemplateData, templateData.TemplateVersion, nil
-}
 
 // ConvertTemplateDataToContractData derives a contract document from a
 // stored template document: @type becomes dcs:Contract, dcs:metadata's
 // @type becomes dcs:ContractMetadata, derivedFromTemplate provenance is
 // attached, and every party IRI the ODRL rules reference is materialized
-// as a typed dcs:CompanyParty node. Used by both the creation preview
-// (this package's query handler) and the create command.
+// as a typed dcs:CompanyParty node.
 func ConvertTemplateDataToContractData(raw *datatype.JSON, templateDID string, templateVersions ...int) (*datatype.JSON, error) {
 	if raw == nil || !raw.IsNotNullValue() {
 		return raw, nil

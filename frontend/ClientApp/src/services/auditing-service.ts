@@ -44,6 +44,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 function categoryFromResult(result: PACAuditExecutorResponse['findings'][number]['result']): AuditFinding['category'] {
   if (result === 'FAILED') return 'violation'
   if (result === 'REVIEW') return 'inconsistency'
+  if (result === 'NOT_EVALUATED') return 'not_evaluated'
   return 'compliance_check'
 }
 

@@ -1,7 +1,6 @@
 import datetime
 import os
 import subprocess
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -18,11 +17,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _make_c2pa_signing_material():
     """Generate the test P-256 key and its self-signed leaf certificate.
 
-    pdf-core is keyless: it embeds this leaf as the COSE x5chain but never signs.
-    The harness holds the private key and signs the Sig_structures pdf-core
-    returns from /download and /update, posting the signatures to /c2pa/embed —
-    exactly as the DCS backend signs with its dcs-c2pa HSM key in production. The
-    leaf is self-signed; c2patool does not enforce a trust anchor by default.
+    pdf-core holds no signing material: the harness sends this leaf as the COSE
+    x5chain on every request and keeps the private key, signing the Sig_structures
+    pdf-core returns from /render and /render/amendment and posting the signatures
+    to /c2pa/embed — exactly as the DCS backend does with its dcs-c2pa HSM key.
+    The leaf is self-signed; c2patool does not enforce a trust anchor by default.
     """
     key = ec.generate_private_key(ec.SECP256R1())
     subject = issuer = x509.Name([
@@ -45,11 +44,7 @@ def _make_c2pa_signing_material():
         .add_extension(x509.ExtendedKeyUsage([x509.ObjectIdentifier("1.3.6.1.5.5.7.3.4")]), critical=False)
         .sign(key, hashes.SHA256())
     )
-    pem = cert.public_bytes(serialization.Encoding.PEM)
-    fh = tempfile.NamedTemporaryFile(prefix="dcs-c2pa-bdd-x5chain-", suffix=".pem", delete=False)
-    fh.write(pem)
-    fh.close()
-    return key, fh.name
+    return key, cert.public_bytes(serialization.Encoding.PEM)
 
 
 def _load_dev_env(env):
@@ -69,14 +64,12 @@ def before_all(context):
     _load_dev_env(env)
     env.setdefault("GO111MODULE", "on")
 
-    # pdf-core no longer signs: generate the test key + self-signed leaf, point the
-    # server's embedded x5chain at it, and drop the removed signing-endpoint var.
-    # The harness signs Sig_structures with the matching key (see the steps'
-    # sign_sig_structure) and posts them to /c2pa/embed.
-    signing_key, x5chain_path = _make_c2pa_signing_material()
+    # pdf-core neither signs nor stores a certificate: generate the test key and
+    # its leaf here, send the leaf on every request (see the steps' _raw_request)
+    # and sign the returned Sig_structures with the matching key.
+    signing_key, x5chain_pem = _make_c2pa_signing_material()
     context.c2pa_private_key = signing_key
-    env["DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE"] = x5chain_path
-    env.pop("DCS_PDF_CORE_C2PA_X5CHAIN_PEM", None)
+    context.c2pa_x5chain_pem = x5chain_pem
     env.pop("DCS_PDF_CORE_C2PA_SIGNING_ENDPOINT", None)
 
     # Keep BDD runtime stable and deterministic on the documented loopback port.

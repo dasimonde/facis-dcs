@@ -99,14 +99,17 @@ Feature: Contract deployment, execution evidence, and KPIs
   # The target system itself reports a KPI it genuinely measures — the
   # latency between receiving the dispatch and activating the contract —
   # over the callback channel it authenticates on (DCS-FR-CWE-31: "KPIs ...
-  # sent from the target system").
+  # sent from the target system"). No rule in the deployed policy constrains
+  # that latency, so the flow concludes nothing about it and states no
+  # verdict; the DCS records the measurement as not evaluated rather than
+  # reading silence as compliance (ADR-33).
   @DCS-FR-CWE-31 @DCS-FR-CWE-09 @DCS-IR-SI-02 @DCS-IR-SI-05
   Scenario: The contract target itself reports a measured KPI over the callback channel
     Given contract "Target Reported KPI Contract" has reached contract state "SIGNED"
     And an authorized user deploys contract "Target Reported KPI Contract" to the configured contract target
     And get http 200:Success code
     When the contract target acknowledges the deployment of contract "Target Reported KPI Contract"
-    Then the contract detail for "Target Reported KPI Contract" shows a target-reported KPI "activation_latency_ms"
+    Then the contract detail for "Target Reported KPI Contract" shows a target-reported KPI "activation_latency_ms" recorded as "not_evaluated"
 
   @DCS-FR-CWE-31 @DCS-FR-CWE-09
   Scenario: A KPI reported via callback for an ACTIVE contract appears on the contract detail
@@ -118,22 +121,74 @@ Feature: Contract deployment, execution evidence, and KPIs
     Then get http 200:Success code
     And the contract detail for "KPI Dashboard Contract" shows KPI "uptime_percent" with value "99.5"
 
+  # The target system executes the contract, so it is the component that
+  # classifies (ADR-33): the callback carries its verdict on the rule it
+  # concluded about, and the DCS records that verdict instead of deriving a
+  # second opinion from a value it cannot see the context of.
   @DCS-FR-CWE-09 @DCS-FR-UC-06-1
-  Scenario: A KPI that violates its contractual SLA threshold sets a violation flag
+  Scenario: A KPI the target concludes breaches a contractual rule is recorded as violated
     Given contract "KPI Violation Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
     And contract "KPI Violation Contract" is submitted, reviewed, approved, and signed via the standard workflow
     And an authorized user deploys contract "KPI Violation Contract" to the configured contract target
     And get http 200:Success code
     And the contract target acknowledges the deployment of contract "KPI Violation Contract"
-    When the target reports a KPI value for the ODRL-bound field of contract "KPI Violation Contract" = "80"
+    When the target reports KPI "coverage_percent" = "80" for contract "KPI Violation Contract", concluding "violated" on the rule it deployed
     Then get http 200:Success code
-    And the contract detail for "KPI Violation Contract" shows a KPI violation flag for its ODRL-bound field
-    And the semantic KPI observations for "KPI Violation Contract" record a violated observation for its ODRL-bound field
+    And the contract detail for "KPI Violation Contract" records KPI "coverage_percent" with verdict "violated"
+    And the semantic KPI observations for "KPI Violation Contract" record "coverage_percent" as "violated" against the rule it deployed
+
+  # A verdict is evidence about ONE term of the signed contract, so it has to
+  # name that term: the rule @id the target quotes back is the @id that
+  # travelled to it verbatim in the deployment envelope's odrl:policy, which
+  # is what makes the recorded row traceable to the clause it judges.
+  @DCS-FR-CWE-09 @DCS-FR-CWE-31 @DCS-IR-SI-05
+  Scenario: A recorded verdict names the ODRL rule it concerns
+    Given contract "KPI Attribution Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
+    And contract "KPI Attribution Contract" is submitted, reviewed, approved, and signed via the standard workflow
+    And an authorized user deploys contract "KPI Attribution Contract" to the configured contract target
+    And get http 200:Success code
+    And the contract target acknowledges the deployment of contract "KPI Attribution Contract"
+    When the target reports KPI "coverage_percent" = "99" for contract "KPI Attribution Contract", concluding "satisfied" on the rule it deployed
+    Then get http 200:Success code
+    And the contract detail for "KPI Attribution Contract" attributes KPI "coverage_percent" to the rule it deployed
+    And the semantic KPI observations for "KPI Attribution Contract" record "coverage_percent" as "satisfied" against the rule it deployed
+
+  # An untraceable conclusion is a malformed report, not a verdict: the DCS
+  # may refuse it (ADR-33), which is the only way the rule @id on a recorded
+  # row can be relied on afterwards.
+  @DCS-FR-CWE-09 @DCS-IR-SI-05
+  Scenario: A verdict naming a rule the contract never deployed is refused
+    Given contract "KPI Foreign Rule Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
+    And contract "KPI Foreign Rule Contract" is submitted, reviewed, approved, and signed via the standard workflow
+    And an authorized user deploys contract "KPI Foreign Rule Contract" to the configured contract target
+    And get http 200:Success code
+    And the contract target acknowledges the deployment of contract "KPI Foreign Rule Contract"
+    When the target reports KPI "coverage_percent" = "80" for contract "KPI Foreign Rule Contract", concluding "violated" on rule "urn:uuid:rule-from-another-contract"
+    Then the response status is 400
+
+  # The DCS holds the terms and the target holds the events, so a report that
+  # states no conclusion leaves the rule unobserved. Recording that as
+  # compliance would turn a check that never ran into a green row, which is
+  # precisely what ADR-33 removes.
+  @DCS-FR-CWE-09 @DCS-FR-CWE-31
+  Scenario: A KPI report carrying no verdict is recorded as not evaluated, never as compliance
+    Given contract "KPI Unevaluated Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
+    And contract "KPI Unevaluated Contract" is submitted, reviewed, approved, and signed via the standard workflow
+    And an authorized user deploys contract "KPI Unevaluated Contract" to the configured contract target
+    And get http 200:Success code
+    And the contract target acknowledges the deployment of contract "KPI Unevaluated Contract"
+    When the target reports a KPI value "coverage_percent" = "80" for contract "KPI Unevaluated Contract"
+    Then get http 200:Success code
+    And the contract detail for "KPI Unevaluated Contract" records KPI "coverage_percent" with verdict "not_evaluated"
+    And the contract detail for "KPI Unevaluated Contract" attributes no rule to KPI "coverage_percent"
+    And the semantic KPI observations for "KPI Unevaluated Contract" record "coverage_percent" as "not_evaluated" naming no rule
 
   # DCS-FR-CWE-31 requires more than recording the breach: "Alerts MUST be
-  # raised for underperformance or missed targets". A violation flag sitting on
-  # a contract nobody opens is not an alert, so the compliance monitor — the
-  # surface an officer actually watches — must surface it too.
+  # raised for underperformance or missed targets". A verdict sitting on a
+  # contract nobody opens is not an alert, so the compliance monitor — the
+  # surface an officer actually watches — must surface it too. Alerting on a
+  # reported breach stays the DCS's own competence under ADR-33; only the
+  # classification moved.
   @DCS-FR-CWE-31 @DCS-FR-PACM-03 @DCS-IR-PACM-03
   Scenario: A breached KPI raises an underperformance alert on the compliance monitor
     Given contract "KPI Alert Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
@@ -141,7 +196,7 @@ Feature: Contract deployment, execution evidence, and KPIs
     And an authorized user deploys contract "KPI Alert Contract" to the configured contract target
     And get http 200:Success code
     And the contract target acknowledges the deployment of contract "KPI Alert Contract"
-    And the target reports a KPI value for the ODRL-bound field of contract "KPI Alert Contract" = "80"
+    And the target reports KPI "coverage_percent" = "80" for contract "KPI Alert Contract", concluding "violated" on the rule it deployed
     And get http 200:Success code
     When the Compliance Officer requests continuous monitoring
     Then get http 200:Success code

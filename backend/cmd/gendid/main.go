@@ -71,8 +71,9 @@ func main() {
 
 	// The federation agreement credential (ADR-19) is signed by a SEPARATE
 	// HSM key, published here as its own verificationMethod so a verifier can
-	// tell the eIDAS/JAdES identity key (verificationMethod[0], above) apart
-	// from the VC signing key.
+	// tell the eIDAS/JAdES identity key (#dev-key-1, above) apart from the VC
+	// signing key. Which is which is stated by the relationships below, not by
+	// the order of this list.
 	vcLabel := hsm.KeyLabelVC()
 	vcSigner, err := h.Signer(vcLabel)
 	if err != nil {
@@ -94,6 +95,17 @@ func main() {
 	vcJWK["alg"] = "ES256"
 	vcJWK["x5c"] = []string{base64.StdEncoding.EncodeToString(vcCertDER)}
 
+	// Key-agreement key: peers wrap content-encryption keys to this public
+	// key. Published without x5c — it never signs anything.
+	ecdhLabel := hsm.KeyLabelECDH()
+	ecdhJWK, err := h.PublicJWK(ecdhLabel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: load ecdh key: %v\n", err)
+		os.Exit(1)
+	}
+	ecdhJWK["kid"] = ecdhLabel
+	ecdhJWK["use"] = "enc"
+
 	doc := map[string]any{
 		"@context": []string{
 			"https://www.w3.org/ns/did/v1",
@@ -113,8 +125,20 @@ func main() {
 				"controller":   *did,
 				"publicKeyJwk": vcJWK,
 			},
+			{
+				"id":           *did + "#" + ecdhLabel,
+				"type":         "JsonWebKey2020",
+				"controller":   *did,
+				"publicKeyJwk": ecdhJWK,
+			},
 		},
+		// The identity key authenticates this instance to a peer (the DCS-to-DCS
+		// challenge-response) and asserts (JAdES, JAR); the VC key only asserts;
+		// the key-agreement key does neither. A consumer resolves a key by the
+		// relationship its use requires, so each one has to be stated.
+		"authentication":  []string{*did + "#dev-key-1"},
 		"assertionMethod": []string{*did + "#dev-key-1", *did + "#" + vcLabel},
+		"keyAgreement":    []string{*did + "#" + ecdhLabel},
 	}
 	if *endpoint != "" {
 		doc["services"] = []map[string]any{

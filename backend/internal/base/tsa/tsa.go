@@ -147,11 +147,6 @@ func (c *APIClient) TimestampBytes(ctx context.Context, data []byte) (*Receipt, 
 	return receiptFromTimestamp(token, ts), nil
 }
 
-func RequestTimestamp(ctx context.Context, tsaURL string, data []byte) ([]byte, error) {
-	token, _, err := requestTimestampToken(ctx, &http.Client{Timeout: 10 * time.Second}, tsaURL, data)
-	return token, err
-}
-
 func VerifyReceipt(receipt Receipt, data []byte) (*timestamp.Timestamp, error) {
 	if strings.TrimSpace(receipt.Token) == "" {
 		return nil, fmt.Errorf("TSA token is empty")

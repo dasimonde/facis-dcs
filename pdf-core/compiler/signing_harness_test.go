@@ -10,8 +10,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"math/big"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -32,15 +30,26 @@ func (testDeterministicSigner) Sign(_ context.Context, data []byte) ([]byte, err
 	return deterministicES256(testC2PASigner, data), nil
 }
 
-// testSigningContext returns a context carrying the in-process test signer, as
-// the DCS backend's prepare/embed flow supplies a real signer in production.
-func testSigningContext() context.Context {
-	return WithSigner(context.Background(), testDeterministicSigner{})
+// testC2PAChain is the DER x5chain tests render under. pdf-core reads no chain
+// from its environment, so every test render names one the same way a request
+// does.
+var testC2PAChain [][]byte
+
+// testChainContext returns a context naming the chain test renders sign under,
+// for tests that inject their own signer.
+func testChainContext() context.Context {
+	return WithSigningChain(context.Background(), testC2PAChain)
 }
 
-// startTestSigningServer generates a P-256 key + self-signed leaf, writes the
-// leaf as an x5chain PEM into dir, and sets testC2PASigner. pdf-core embeds the
-// x5chain but never signs; tests sign in-process via testSigningContext.
+// testSigningContext returns a context carrying the in-process test signer and
+// the chain it signs under, as a real request carries both.
+func testSigningContext() context.Context {
+	return WithSigningChain(WithSigner(context.Background(), testDeterministicSigner{}), testC2PAChain)
+}
+
+// startTestSigningServer generates a P-256 key + self-signed leaf and records
+// both the key and the chain tests render under. pdf-core embeds an x5chain but
+// never signs and never stores one; tests supply both via testSigningContext.
 func startTestSigningServer(dir string) error {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -61,12 +70,11 @@ func startTestSigningServer(dir string) error {
 	if err != nil {
 		return err
 	}
-	chainPath := filepath.Join(dir, "x5chain.pem")
-	if err := os.WriteFile(chainPath, certPEM(der), 0o644); err != nil {
+	chain, err := ParseSigningChainPEM(certPEM(der))
+	if err != nil {
 		return err
 	}
-
-	_ = os.Setenv(envX5ChainPEMFile, chainPath)
+	testC2PAChain = chain
 	return nil
 }
 
@@ -153,9 +161,5 @@ func rfc6979Nonce(n, d *big.Int, hash []byte) *big.Int {
 // x5chain cert + the in-process test key) available to every test that compiles
 // a PDF. It fails the process hard if setup fails.
 func setupTestSigning() error {
-	dir, err := os.MkdirTemp("", "dcs-c2pa-test")
-	if err != nil {
-		return err
-	}
-	return startTestSigningServer(dir)
+	return startTestSigningServer("")
 }

@@ -9,18 +9,24 @@ import (
 	didservice "digital-contracting-service/gen/did_service"
 )
 
+// AgreementCredentialSource hands out an agreement credential that is currently
+// in force (federation.CredentialIssuer), kept as a local interface so this
+// package does not depend on federation.
+type AgreementCredentialSource interface {
+	Current(ctx context.Context) (json.RawMessage, error)
+}
+
 type DIDSrv struct {
 	DIDocument          identity.DIDDocument
-	AgreementCredential []byte
+	AgreementCredential AgreementCredentialSource
 	FederationRules     []byte
 }
 
-// NewDIDService takes the already-built (and signed) agreement credential
-// bytes (federation.BuildAgreementCredential, built once at startup with the
-// HSM VC signer — ADR-19) and the embedded federation rules document
-// (federation.Rules()), so this request handler stays a pure read of
-// precomputed state.
-func NewDIDService(didDocument identity.DIDDocument, agreementCredential, federationRules []byte) (didservice.Service, error) {
+// NewDIDService takes the issuer of this instance's signed agreement credential
+// (ADR-19) and the embedded federation rules document (federation.Rules()). The
+// credential is asked for per request rather than passed as bytes because it
+// carries a bounded validUntil and is re-minted before it lapses.
+func NewDIDService(didDocument identity.DIDDocument, agreementCredential AgreementCredentialSource, federationRules []byte) (didservice.Service, error) {
 	return &DIDSrv{
 		DIDocument:          didDocument,
 		AgreementCredential: agreementCredential,
@@ -35,8 +41,12 @@ func (s DIDSrv) GetServiceDID(ctx context.Context) (res any, err error) {
 // GetAgreementCredential serves this instance's self-signed federation
 // agreement credential (ADR-19).
 func (s DIDSrv) GetAgreementCredential(ctx context.Context) (res any, err error) {
+	credential, err := s.AgreementCredential.Current(ctx)
+	if err != nil {
+		return nil, didservice.MakeInternalError(err)
+	}
 	var content map[string]interface{}
-	if err := json.Unmarshal(s.AgreementCredential, &content); err != nil {
+	if err := json.Unmarshal(credential, &content); err != nil {
 		return nil, didservice.MakeInternalError(err)
 	}
 	return content, nil

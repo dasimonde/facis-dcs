@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,8 +13,8 @@ import (
 
 	"goa.design/clue/log"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/identity"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 
@@ -22,6 +23,8 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/command"
 
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/semantichub"
 
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 
@@ -45,9 +48,12 @@ type dcsToDcssrvc struct {
 	SRepo       db2.SyncRepository
 	DIDDocument identity.DIDDocument
 	TrustPool   *identity.EUTrustPool
-	IPFSClient  *ipfs.APIClient
+	Artifacts   *artifactstore.Store
 	PDFCore     *pdfcore.Client
 	TrustGate   trustgate.TrustGate
+	PoAGate     trustgate.CounterpartyPoAGate
+	Shredder    trustgate.ScopeShredder
+	Parties     trustgate.ContractParties
 	auth.JWTAuthenticator
 }
 
@@ -55,7 +61,8 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	cRepo db.ContractRepo, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo,
 	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo, syncRepo db2.SyncRepository,
 	trustPool *identity.EUTrustPool,
-	didDocument identity.DIDDocument, ipfsClient *ipfs.APIClient, pdfCore *pdfcore.Client, trustGate trustgate.TrustGate) dcstodcs.Service {
+	didDocument identity.DIDDocument, artifacts *artifactstore.Store, pdfCore *pdfcore.Client, trustGate trustgate.TrustGate,
+	poaGate trustgate.CounterpartyPoAGate, shredder trustgate.ScopeShredder) dcstodcs.Service {
 
 	return &dcsToDcssrvc{
 		JWTAuthenticator: jwtAuth,
@@ -69,25 +76,29 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		SRepo:            syncRepo,
 		DIDDocument:      didDocument,
 		TrustPool:        trustPool,
-		IPFSClient:       ipfsClient,
+		Artifacts:        artifacts,
 		PDFCore:          pdfCore,
 		TrustGate:        trustGate,
+		PoAGate:          poaGate,
+		Shredder:         shredder,
+		Parties:          &trustgate.DBContractParties{DB: db, CRepo: cRepo},
 	}
 }
+
+// fetchPeerDIDDocument resolves the requesting peer's did:web document;
+// injectable for tests.
+var fetchPeerDIDDocument = identity.FetchDIDDocument
 
 // PostPdf receives a contract PDF a counterparty shipped (ADR-13). It
 // authenticates the peer (the same layers post_sync applied), asks pdf-core to
 // extract the embedded JSON-LD, and upserts this instance's own local copy of
 // the contract. No tasks cross the boundary — each DCS runs its own workflow.
 func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContractPdfRequest) (res *dcstodcs.DCSToDCSContractPdfResponse, err error) {
-	remoteDIDDocument, err := identity.FetchDIDDocument(req.FromPeerDid)
+	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if err := remoteDIDDocument.VerifyEIDASCertificate(s.TrustPool); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-	if err := remoteDIDDocument.Verify([]byte(req.SecretValue), req.SecretHash); err != nil {
+	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
@@ -95,7 +106,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if req.FromPeerDid == localPeer {
+	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("shipping a contract PDF to the same peer is not allowed"))
 	}
 
@@ -160,13 +171,72 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		syncSignature = verified
 	}
 
+	// Counterparty Power of Attorney (ADR-31, UC-14): the peer ships the
+	// credential behind each signature it applied, and this instance verifies it
+	// against the contract the same ship carried — issuer trusted for `peer` and
+	// entitled to the organization, not revoked, held by the signatory recorded
+	// for that party. Present-but-unverifiable evidence refuses the exchange like
+	// any other trust-gate denial; absent evidence does not, so a peer that
+	// retains none still federates and the compliance viewer keeps reporting a
+	// party that signed without one.
+	shipped := trustgate.ShippedSignatures{
+		ResolveKey: func(methodID string) (*ecdsa.PublicKey, error) {
+			return remoteDIDDocument.AssertionKey(methodID)
+		},
+		VerifyVC: provenance.VerifyDataIntegrityProof,
+	}
+	if err := s.PoAGate.Check(req.FromPeerDid, req.ContractIri, shipped, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
+		var gateErr *trustgate.GateError
+		if errors.As(err, &gateErr) {
+			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {
+				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
+			}
+		}
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: peer %s shipped a Power of Attorney that does not verify: %w", req.FromPeerDid, err))
+	}
+
+	// Semantic bundle (ADR-8): the shipped contract's dcs:effectiveShapes pin was
+	// written from the SENDER's hub, so the shape libraries it names travel with
+	// the ship. Settled here as a pure read — a pin that resolves neither from
+	// this hub nor from the ship refuses the exchange rather than storing a copy
+	// no workflow transition can evaluate — and written only once the rest of
+	// the exchange has been accepted, so a refusal further down leaves nothing
+	// behind.
+	pinnedShapes := semantichub.DBPinnedShapes{DB: s.DB}
+	installShapes, err := trustgate.PlanPinnedShapes(ctx, pinnedShapes, req.FromPeerDid, payload, req.PinnedShapes)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: the shapes contract %s is pinned to cannot be assembled on this instance: %w", req.ContractIri, err))
+	}
+
 	// The sender's declared contract state is informational except for
 	// REVOKED: the authenticated counterparty revoking its own signature
 	// voids the agreement, so the receiver must adopt it (DCS-NFR-BR-06) —
 	// no other peer-declared state ever overrides the local workflow.
 	adoptRevoked := req.ContractState != nil && *req.ContractState == contractstate.Revoked.String()
 
-	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, IPFSClient: s.IPFSClient}
+	// Adopt the shipped contract CEK (DCS-NFR-SEC-14): unwrap it with the own
+	// HSM, re-wrap it to the own keyAgreement key, persist — then the PDF below
+	// is stored under exactly this CEK. Runs only after every rejection gate,
+	// so no key material is persisted for a refused ship. Adoption is
+	// idempotent (an existing live CEK wins) and a missing wrapped_cek falls
+	// back to creating an own CEK on store.
+	if req.WrappedCek != nil {
+		wrapped, err := trustgate.EnvelopeWrappedCEK(req.WrappedCek)
+		if err != nil {
+			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
+		}
+		if err := s.Artifacts.AdoptPeerCEK(ctx, artifactstore.ContractScope(req.ContractIri), wrapped); err != nil {
+			if artifactstore.IsShredded(err) {
+				return nil, contractworkflowengine.MakeBadRequest(
+					fmt.Errorf("post_pdf rejected: contract %s was erased on this instance (key shredded): %w", req.ContractIri, err))
+			}
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+	}
+
+	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, Artifacts: s.Artifacts}
 	if err := receiver.Handle(ctx, command.PeerPdfReceiveCmd{
 		ContractIRI:  req.ContractIri,
 		Counterparty: req.FromPeerDid,
@@ -175,6 +245,10 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		Pdf:          req.Pdf,
 		AdoptRevoked: adoptRevoked,
 	}); err != nil {
+		if artifactstore.IsShredded(err) {
+			return nil, contractworkflowengine.MakeBadRequest(
+				fmt.Errorf("post_pdf rejected: contract %s was erased on this instance (key shredded): %w", req.ContractIri, err))
+		}
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
@@ -192,7 +266,72 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		}
 	}
 
+	// Last write of the exchange: nothing after it can refuse the ship and
+	// strand the imported rows. A failure here errors the ship, and the peer's
+	// retry carries the identical bundle, so the install is reached again.
+	if err := trustgate.InstallPinnedShapes(ctx, pinnedShapes, installShapes); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(
+			fmt.Errorf("install the shapes contract %s is pinned to: %w", req.ContractIri, err))
+	}
+
 	return &dcstodcs.DCSToDCSContractPdfResponse{FromPeerDid: localPeer}, nil
+}
+
+// Erase shreds this instance's wrapped CEKs for a contract on request of the
+// authenticated counterparty (DCS-NFR-COMP-03, DCS-NFR-SEC-13): the peer
+// completed an archive deletion and erasure of a federated contract requires
+// key destruction on BOTH instances. The requester passes the same did:web
+// challenge-response as post_pdf and must be a party of the contract; the
+// shred marks every CEK record of the contract scope destroyed and leaves a
+// KEY_SHREDDED audit event naming the peer as actor. Idempotent: a repeated
+// request against an already-shredded contract just confirms again.
+func (s *dcsToDcssrvc) Erase(ctx context.Context, req *dcstodcs.DCSToDCSContractEraseRequest) (res *dcstodcs.DCSToDCSContractEraseResponse, err error) {
+	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New("requesting a contract erasure from the same peer is not allowed"))
+	}
+
+	if err := eraseForPeer(ctx, s.Shredder, s.Parties, req.FromPeerDid, req.ContractIri); err != nil {
+		return nil, err
+	}
+	return &dcstodcs.DCSToDCSContractEraseResponse{FromPeerDid: localPeer}, nil
+}
+
+// eraseForPeer authorizes and executes a peer-requested shred: only a party
+// of the contract may have its keys destroyed on the counterparty's request.
+func eraseForPeer(ctx context.Context, shredder trustgate.ScopeShredder, parties trustgate.ContractParties, peerDID, contractIRI string) error {
+	contractParties, err := parties.Parties(ctx, contractIRI)
+	if err != nil {
+		return contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("erase rejected: could not resolve parties of contract %s: %w", contractIRI, err))
+	}
+	isParty := false
+	for _, party := range contractParties {
+		if party == peerDID {
+			isParty = true
+			break
+		}
+	}
+	if !isParty {
+		return contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("erase rejected: peer %s is not a party of contract %s", peerDID, contractIRI))
+	}
+
+	if _, err := shredder.Shred(ctx, contractIRI, peerDID, fmt.Sprintf("erasure requested by peer %s", peerDID)); err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	return nil
 }
 
 // verifyShippedJades verifies a signature ship's JAdES (DCS-FR-SM-02): the
@@ -206,9 +345,13 @@ func verifyShippedJades(jadesSignature, contractIRI, fromPeerDID string, pdfPayl
 	if err != nil {
 		return nil, err
 	}
-	peerKey := remoteDIDDocument.PublicKey()
-	if peerKey == nil || leafKey.X.Cmp(peerKey.X) != 0 || leafKey.Y.Cmp(peerKey.Y) != 0 {
-		return nil, fmt.Errorf("JAdES x5c leaf key does not match peer %s's did:web key", fromPeerDID)
+	// The JAdES header names no key, only its x5c chain, so the leaf key itself
+	// has to be one the peer publishes as able to make assertions — signing a
+	// contract is one. A key merely present in the document is not: the same
+	// document publishes the peer's key-agreement key.
+	if !remoteDIDDocument.PublishesKeyFor(identity.PurposeAssertion, leafKey) {
+		return nil, fmt.Errorf("JAdES x5c leaf key is not published by peer %s as an %s key",
+			fromPeerDID, identity.PurposeAssertion)
 	}
 
 	// The payload is self-describing ({dcs:contractDid, dcs:contractVersion,

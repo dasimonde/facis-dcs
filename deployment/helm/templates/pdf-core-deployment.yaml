@@ -22,44 +22,6 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      initContainers:
-        # Block startup until the hsm-provision post-install hook has published
-        # the C2PA x5chain cert secret. pdf-core embeds this cert in the COSE
-        # protected header, so it must never start without it — but the env
-        # secretKeyRef alone CreateContainerConfigError/BackOff crash-looped the
-        # pod while it raced the hook, and under runner load that churn closed
-        # peer browser sessions mid-negotiation. Waiting here (like the backend's
-        # wait-for-hsm-token) turns the race into a clean Init wait. Uses the
-        # backend image for a shell; the cert is read via an optional volume.
-        - name: wait-for-x5chain
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /bin/sh
-            - -c
-            - |
-              until [ -s {{ include "digital-contracting-service.pdfCoreX5ChainPath" . }} ]; do
-                echo "Waiting for C2PA x5chain cert secret..."
-                sleep 3
-              done
-              echo "C2PA x5chain cert is ready."
-          {{- with .Values.pdfCore.resources }}
-          # A pod's effective limit is max(sum of containers, max of init
-          # containers), so an unlimited init container makes the whole pod count
-          # as the LimitRange default — enough on a namespace with a low
-          # limits.cpu quota to exhaust it and stop the release scheduling.
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          volumeMounts:
-            {{- if .Values.pkcs11.provisioning.publishSecrets }}
-            - name: x5chain-cert
-              mountPath: /x5chain
-            {{- else }}
-            - name: hsm-token
-              mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
-              readOnly: true
-            {{- end }}
       containers:
         - name: pdf-core
           image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}"
@@ -73,36 +35,11 @@ spec:
               value: {{ printf "0.0.0.0:%v" .Values.pdfCore.service.port | quote }}
             - name: DCS_PDF_CORE_ONTOLOGY_BASE_URL
               value: {{ .Values.pdfCore.ontologyBaseURL | default (include "digital-contracting-service.pdfCoreURL" .) | quote }}
-            # pdf-core holds no key material: it prepares the COSE Sig_structures,
-            # the DCS backend signs them with the PKCS#11 dcs-c2pa key, and pdf-core
-            # embeds the returned signatures (DCS-IR-HI-01). It embeds this x5chain
-            # (public cert) in the COSE protected header. optional so the pod
-            # schedules; the wait-for-x5chain initContainer guarantees the secret
-            # exists before this container starts, so the ref always resolves.
-            {{- if .Values.pkcs11.provisioning.publishSecrets }}
-            - name: DCS_PDF_CORE_C2PA_X5CHAIN_PEM
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "digital-contracting-service.pdfCoreX5ChainSecretName" . }}
-                  key: {{ include "digital-contracting-service.pdfCoreX5ChainSecretKey" . | quote }}
-                  optional: true
-            {{- else }}
-            # No Secret to read when the provisioning hook may not touch the API;
-            # the cert is taken from the token volume it wrote instead.
-            - name: DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE
-              value: {{ include "digital-contracting-service.pdfCoreX5ChainPath" . | quote }}
-            {{- end }}
-          {{- if not .Values.pkcs11.provisioning.publishSecrets }}
-          # The env var above names a path, so this container — not just the
-          # initContainer that waits for the file — has to be able to read it.
-          # Without this mount pdf-core starts and serves /swagger.json, so it
-          # goes READY, and only fails once a request actually needs the
-          # x5chain: it dies mid-request and the caller sees a bare EOF.
-          volumeMounts:
-            - name: hsm-token
-              mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
-              readOnly: true
-          {{- end }}
+            # pdf-core holds no key material and no certificate: it prepares the
+            # COSE Sig_structures, the DCS backend signs them with the PKCS#11
+            # dcs-c2pa key (DCS-IR-HI-01) and sends the matching certificate
+            # chain on every request in the X-DCS-C2PA-X5Chain header, and
+            # pdf-core embeds the returned signatures and that chain.
           {{- with .Values.pdfCore.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -119,29 +56,4 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
-      {{- if not .Values.pkcs11.provisioning.publishSecrets }}
-      {{- if not (has "ReadWriteMany" (.Values.pkcs11.provisioning.persistence.accessModes | default (list "ReadWriteOnce"))) }}
-      # A ReadWriteOnce token volume admits several pods only when they share a
-      # node, and this pod co-mounts it with the backend to read the x5chain.
-      affinity:
-        podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  {{- include "digital-contracting-service.selectorLabels" . | nindent 18 }}
-                  app.kubernetes.io/component: backend
-              topologyKey: kubernetes.io/hostname
-      {{- end }}
-      {{- end }}
-      volumes:
-        {{- if .Values.pkcs11.provisioning.publishSecrets }}
-        - name: x5chain-cert
-          secret:
-            secretName: {{ include "digital-contracting-service.pdfCoreX5ChainSecretName" . }}
-            optional: true
-        {{- else }}
-        - name: hsm-token
-          persistentVolumeClaim:
-            claimName: {{ include "digital-contracting-service.fullname" . }}-hsm-token
-        {{- end }}
 {{- end }}

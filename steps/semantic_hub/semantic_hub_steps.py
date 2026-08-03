@@ -13,12 +13,13 @@ from behave import given, then, when
 from steps.support.api_client import (
     contract_retrieve_by_id_url,
     get_with_headers,
+    hub_shapes_anchors,
+    pac_audit_timeline,
     post_json,
     template_create_url,
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
-from steps.support.services.orce_audit_control_service import OrceAuditControlService
 from steps.support.services.template_service import TemplateService
 
 
@@ -254,10 +255,9 @@ def step_then_contract_anchored(context, name):
         f"Expected @context to carry a hub-served versioned context URL, got: {raw_context}"
     )
     # The shapes pin rides on sh:shapesGraph (ADR-8).
-    shapes_ref = contract_data.get("sh:shapesGraph") or {}
-    shapes_anchor = shapes_ref.get("@id") if isinstance(shapes_ref, dict) else shapes_ref
-    assert shapes_anchor and "/semantic/shapes/" in shapes_anchor, (
-        f"Expected a hub-served sh:shapesGraph anchor, got: {shapes_ref}"
+    shapes_anchors = hub_shapes_anchors(contract_data)
+    assert shapes_anchors, (
+        f"Expected a hub-served sh:shapesGraph anchor, got: {contract_data.get('sh:shapesGraph')}"
     )
     context.hub_anchor_url = anchor
 
@@ -421,14 +421,14 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
-    body = OrceAuditControlService.evidence_groups(context, "contracts")
-    resource = next((r for r in body if r.get("did") == did), None)
-    assert resource is not None, (
+    timeline = pac_audit_timeline(context.requests_response)
+    entries = [entry for entry in timeline if entry.get("did") == did]
+    assert entries, (
         f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-        f"got DIDs: {[r.get('did') for r in body]}"
+        f"got DIDs: {sorted({str(entry.get('did')) for entry in timeline})}"
     )
     severities = []
-    for entry in resource.get("audit_trail") or []:
+    for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
             continue
         event_data = entry.get("event_data")

@@ -27,8 +27,21 @@ type ContractDeployment struct {
 	DispatchError   *string    `db:"dispatch_error"`
 }
 
-// ContractKPI is a single KPI value reported via the deployment callback for
-// an ACTIVE contract (DCS-FR-CWE-09, DCS-FR-CWE-31).
+// KPI verdicts a Contract Target System may report (ADR-33). The target
+// executes and observes the contract, so it classifies; a report that carries
+// no verdict is recorded as KPIVerdictNotEvaluated, which is neither a
+// violation nor compliance.
+const (
+	KPIVerdictSatisfied    = "satisfied"
+	KPIVerdictViolated     = "violated"
+	KPIVerdictNotEvaluated = "not_evaluated"
+)
+
+// ContractKPI is a single KPI report received via the deployment callback for
+// an ACTIVE contract: what the target system observed (Metric/Value) and what
+// it concluded (Verdict) about the ODRL rule RuleID names
+// (DCS-FR-CWE-09, DCS-FR-CWE-31, ADR-33). RuleID is nil when the report named
+// no rule.
 type ContractKPI struct {
 	ID            int64     `db:"id"`
 	DID           string    `db:"did"`
@@ -36,7 +49,8 @@ type ContractKPI struct {
 	Metric        string    `db:"metric"`
 	Value         string    `db:"value"`
 	ObservedAt    time.Time `db:"observed_at"`
-	Violation     bool      `db:"violation"`
+	Verdict       string    `db:"verdict"`
+	RuleID        *string   `db:"rule_id"`
 }
 
 // ContractTarget is one configured Contract Target System deployments may be

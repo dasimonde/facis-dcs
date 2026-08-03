@@ -81,8 +81,16 @@ func BuildJWT(signer Signer, params Params) (string, error) {
 		"nonce":         nonce,
 		"dcql_query":    dcql,
 		"client_metadata": map[string]any{
+			// Both SD-JWT VC format identifiers are advertised: a wallet holding
+			// credentials stamped with the pre-rename one — still what most
+			// deployed issuers emit — otherwise reads this verifier as unable to
+			// consume anything it has.
 			"vp_formats_supported": map[string]any{
 				"dc+sd-jwt": map[string]any{
+					"sd-jwt_alg_values": []string{"ES256"},
+					"kb-jwt_alg_values": []string{"ES256"},
+				},
+				"vc+sd-jwt": map[string]any{
 					"sd-jwt_alg_values": []string{"ES256"},
 					"kb-jwt_alg_values": []string{"ES256"},
 				},

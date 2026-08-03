@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,9 +79,19 @@ type httpError struct {
 	status  int
 	name    string
 	message string
+	// digests are merged into the error body when the refusal is a verification
+	// verdict, so a caller sees the evidence the refusal rests on rather than a
+	// message it can only quote.
+	digests verifyDigests
 }
 
 func (e *httpError) Error() string { return e.message }
+
+// withDigests attaches the digests a verification verdict was reached on.
+func (e *httpError) withDigests(d verifyDigests) *httpError {
+	e.digests = d
+	return e
+}
 
 func prettyLog(m map[string]interface{}) {
 	b, err := json.MarshalIndent(m, "", "  ")
@@ -106,6 +119,18 @@ func writeError(w http.ResponseWriter, err error) {
 		"temporary": false,
 		"timeout":   false,
 		"fault":     false,
+	}
+	for key, digest := range map[string]string{
+		"jsonld_hash":          he.digests.JSONLDHash,
+		"base_pdf_hash":        he.digests.BasePDFHash,
+		"stored_base_pdf_hash": he.digests.StoredBasePDFHash,
+	} {
+		// A digest that could not be computed is left out entirely: an empty
+		// string under a hash key reads as "the hash is blank", which is a claim
+		// about the content rather than about the check.
+		if digest != "" {
+			body[key] = digest
+		}
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(he.status)
@@ -173,11 +198,42 @@ func (s *service) version(w http.ResponseWriter, _ *http.Request) {
 // every dcs.lifecycle assertion the render writes.
 const lifecycleAuthorityHeader = "X-DCS-Lifecycle-Authority"
 
-// renderContext carries the request's signer and asserting authority into the
-// compiler.
-func renderContext(r *http.Request, signer compiler.Signer) context.Context {
+// signingChainHeader carries the RFC 9360 x5chain the caller signs under,
+// base64-encoded PEM (leaf first). pdf-core stores no chain of its own: it
+// already holds no private key, and holding the certificate that names one was
+// the last piece of signing material left behind — the piece that made a shared
+// pdf-core sign one instance's documents under another's identity.
+const signingChainHeader = "X-DCS-C2PA-X5Chain"
+
+// callerSigningChain decodes the chain the request signs under. Absence is a
+// refusal, not a fallback: a default chain is exactly how manifests came to be
+// signed under an identity nobody named.
+func callerSigningChain(r *http.Request) ([][]byte, error) {
+	encoded := strings.TrimSpace(r.Header.Get(signingChainHeader))
+	if encoded == "" {
+		return nil, errBadRequest(fmt.Errorf("%s is required: pdf-core signs under the caller's x5chain and holds none of its own", signingChainHeader))
+	}
+	pemBytes, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, errBadRequest(fmt.Errorf("%s must be base64-encoded PEM: %w", signingChainHeader, err))
+	}
+	chain, err := compiler.ParseSigningChainPEM(pemBytes)
+	if err != nil {
+		return nil, errBadRequest(fmt.Errorf("%s: %w", signingChainHeader, err))
+	}
+	return chain, nil
+}
+
+// renderContext carries the request's signer, asserting authority and signing
+// chain into the compiler.
+func renderContext(r *http.Request, signer compiler.Signer) (context.Context, error) {
+	chain, err := callerSigningChain(r)
+	if err != nil {
+		return nil, err
+	}
 	ctx := compiler.WithSigner(r.Context(), signer)
-	return compiler.WithLifecycleAuthority(ctx, strings.TrimSpace(r.Header.Get(lifecycleAuthorityHeader)))
+	ctx = compiler.WithLifecycleAuthority(ctx, strings.TrimSpace(r.Header.Get(lifecycleAuthorityHeader)))
+	return compiler.WithSigningChain(ctx, chain), nil
 }
 
 func (s *service) render(w http.ResponseWriter, r *http.Request) {
@@ -200,9 +256,14 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signer := compiler.NewCapturingSigner()
+	renderCtx, err := renderContext(r, signer)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	// Pass the verbatim raw payload: CompilePDF canonicalizes internally for the
 	// render model + graph hash, but embeds these exact bytes as the attachment.
-	pdf, err := compiler.CompilePDF(renderContext(r, signer), raw, compiler.CanonicalCompiledAt)
+	pdf, err := compiler.CompilePDF(renderCtx, raw, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -210,21 +271,131 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 	writePrepared(w, pdf, signer.Captured())
 }
 
+// verifyDigests are the SHA-256 digests (hex, the digest every other DCS
+// component records) that the /verify match verdict is reached on. They are the
+// evidence for the verdict rather than a restatement of it: on the reproduction
+// check BasePDFHash and StoredBasePDFHash are equal exactly when the submitted
+// document re-renders to its stored bytes.
+//
+// Both PDF digests are taken over compiler.ZeroCOSESignatures output, the same
+// normalization the comparison itself uses. A fresh compile produces a fresh
+// randomized ECDSA COSE claim signature, so digesting the raw bytes would report
+// two different hashes for a document the verdict calls intact.
+//
+// Absent digests are omitted rather than sent empty — an empty hash field states
+// something about the content, not about the check.
+type verifyDigests struct {
+	// JSONLDHash is the SHA-256 of the machine-readable payload embedded in the
+	// submitted PDF — the latest one on an amended document, i.e. the payload
+	// that governs its current visible state.
+	JSONLDHash string `json:"jsonld_hash,omitempty"`
+	// BasePDFHash is the SHA-256 of the deterministic re-render produced from
+	// JSONLDHash's payload: a bare recompile for a plain document, the replay of
+	// the last amendment hop for an incrementally updated one.
+	BasePDFHash string `json:"base_pdf_hash,omitempty"`
+	// StoredBasePDFHash is the SHA-256 of the stored bytes that re-render was
+	// compared against — the leading span of the submitted PDF it must reproduce,
+	// excluding the append-only PAdES signature layers that legitimately follow.
+	StoredBasePDFHash string `json:"stored_base_pdf_hash,omitempty"`
+}
+
+// reproductionDigests digests the two sides of the reproduction check plus the
+// payload it was driven from. reproduced may be nil when the check failed before
+// producing one, and payload nil when none could be extracted; the corresponding
+// digests are then left unset rather than reporting the digest of nothing.
+func reproductionDigests(payload, stored, reproduced []byte) verifyDigests {
+	var d verifyDigests
+	if payload != nil {
+		d.JSONLDHash = sha256Hex(payload)
+	}
+	if reproduced == nil {
+		return d
+	}
+	fresh := compiler.ZeroCOSESignatures(reproduced)
+	storedBase := compiler.ZeroCOSESignatures(stored)
+	if len(storedBase) > len(fresh) {
+		storedBase = storedBase[:len(fresh)]
+	}
+	d.BasePDFHash = sha256Hex(fresh)
+	d.StoredBasePDFHash = sha256Hex(storedBase)
+	return d
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 // verifyResponse is the JSON body returned by POST /verify.
 type verifyResponse struct {
+	verifyDigests
 	Match bool `json:"match"`
-	// C2PASignatureValid reports that the manifest chain verified and the
-	// document reproduces its embedded payload. On a PAdES-signed contract the
-	// last manifest's whole-file hard binding does NOT cover the appended
-	// signature revisions — the signature is applied after the manifest so that
-	// it commits to the provenance (ADR-26) — so PAdESSigned states how far the
-	// binding reaches rather than leaving a consumer to assume it covers
-	// everything.
+	// C2PASignatureValid is the outcome of compiler.VerifyC2PAClaimSignatures:
+	// every manifest's COSE_Sign1 claim signature verified against its own
+	// x5chain leaf and every assertion the signed claim commits to still hashes
+	// to the recorded value. C2PASignatureError carries the reason it did not, so
+	// a consumer reports the finding rather than a bare false.
+	//
+	// On a PAdES-signed contract the last manifest's whole-file hard binding does
+	// NOT cover the appended signature revisions — the signature is applied after
+	// the manifest so that it commits to the provenance (ADR-26) — so PAdESSigned
+	// states how far the binding reaches rather than leaving a consumer to assume
+	// it covers everything.
 	C2PASignatureValid bool   `json:"c2pa_signature_valid"`
+	C2PASignatureError string `json:"c2pa_signature_error,omitempty"`
 	PAdESSigned        bool   `json:"pades_signed"`
 	VCBytes            string `json:"vc_bytes,omitempty"` // base64-encoded VC JSON
-	VCProofValid       bool   `json:"vc_proof_valid"`
-	Artifact           string `json:"artifact"` // base64-encoded verification-witness PDF
+	// VCPresent says only that the PDF carries a lifecycle-credential attachment,
+	// which is the whole of what pdf-core can say about it: verifying the
+	// credential's proof means resolving its issuer to a key it publishes for
+	// assertions, and pdf-core holds no key material and resolves no DID. The
+	// caller gets VCBytes and verifies them against the issuer itself.
+	VCPresent bool   `json:"vc_present"`
+	Artifact  string `json:"artifact"` // base64-encoded verification-witness PDF
+	// Signers names the certificate each manifest was signed under, in chain
+	// order. Match says the stored bytes reproduce from their embedded payloads
+	// under the certificates the artifact itself carries — self-consistency, which
+	// is silent about whose certificates those are. Signers answers the second
+	// question: each entry reports whether it is the chain the caller named, so a
+	// verdict is "reproduces, signed by us" or "reproduces, signed by someone
+	// else" rather than an unqualified match. A federated contract legitimately
+	// carries the peer's leaf on the hops the peer wrote, so a foreign signer is
+	// reported, not refused — deciding which peers are trusted is the caller's.
+	Signers []manifestSigner `json:"signers"`
+}
+
+// manifestSigner identifies the leaf one manifest's claim signature was made
+// under. The leaf is fingerprinted rather than inlined: a caller comparing
+// identities needs to tell them apart, not to re-parse the certificate.
+type manifestSigner struct {
+	Manifest   string `json:"manifest"`
+	Subject    string `json:"subject"`
+	LeafSHA256 string `json:"leaf_sha256"`
+	// Expected is true when this manifest was signed under the chain the request
+	// supplied — for a DCS verifying its own work, its own leaf.
+	Expected bool `json:"expected"`
+}
+
+// describeSigners fingerprints the leaf behind every manifest and marks the ones
+// signed under expectedLeaf.
+func describeSigners(pdf []byte, expectedLeaf []byte) ([]manifestSigner, error) {
+	found, err := compiler.ManifestSigners(pdf)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]manifestSigner, 0, len(found))
+	for _, signer := range found {
+		entry := manifestSigner{
+			Manifest:   signer.Manifest,
+			LeafSHA256: sha256Hex(signer.LeafDER),
+			Expected:   bytes.Equal(signer.LeafDER, expectedLeaf),
+		}
+		if leaf, parseErr := x509.ParseCertificate(signer.LeafDER); parseErr == nil {
+			entry.Subject = leaf.Subject.String()
+		}
+		out = append(out, entry)
+	}
+	return out, nil
 }
 
 // renderReanchor appends a provenance-only C2PA manifest binding the submitted
@@ -242,7 +413,12 @@ func (s *service) renderReanchor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signer := compiler.NewCapturingSigner()
-	updated, err := compiler.ReanchorProvenance(renderContext(r, signer), raw,
+	renderCtx, err := renderContext(r, signer)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	updated, err := compiler.ReanchorProvenance(renderCtx, raw,
 		strings.TrimSpace(r.URL.Query().Get("manifest_url")), compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
@@ -261,19 +437,36 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(err))
 		return
 	}
+	// The caller's own chain, for the two things a verify does under its own
+	// identity: witnessing the result, and naming the signer it expected. The
+	// replay below signs under the chain each stored manifest carries instead —
+	// those are two different questions and pdf-core answers both.
+	callerChain, err := callerSigningChain(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 
 	var payload []byte
+	var digests verifyDigests
 
 	if _, ok := compiler.SplitAtIncrementalUpdate(raw); ok {
-		if err := compiler.VerifyIncrementalUpdate(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw); err != nil {
-			writeError(w, errConflict(err))
+		reproduced, chainErr := compiler.VerifyIncrementalUpdate(
+			compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw)
+		// The payload is read whatever the chain verdict, so a rejected document
+		// still names which machine-readable content was on the table. A payload
+		// that cannot be read is reported only when the chain itself held —
+		// otherwise the chain failure is the finding, and stays the status.
+		payload, err = compiler.ExtractLatestEmbeddedJSONLD(raw)
+		if chainErr != nil {
+			writeError(w, errConflict(chainErr).withDigests(reproductionDigests(payload, raw, reproduced)))
 			return
 		}
-		payload, err = compiler.ExtractLatestEmbeddedJSONLD(raw)
 		if err != nil {
 			writeError(w, errBadRequest(err))
 			return
 		}
+		digests = reproductionDigests(payload, raw, reproduced)
 	} else {
 		payload, err = compiler.ExtractEmbeddedJSONLD(raw)
 		if err != nil {
@@ -290,12 +483,20 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, errBadRequest(fmt.Errorf("extract lifecycle authority: %w", err)))
 			return
 		}
-		verifyCtx := compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority)
-		recompiled, err := compiler.CompilePDF(verifyCtx, payload, compiledAt)
+		chain, err := compiler.ExtractSigningChain(raw)
 		if err != nil {
-			writeError(w, errUnprocessableEntity(err))
+			writeError(w, errBadRequest(fmt.Errorf("extract signing chain: %w", err)))
 			return
 		}
+		verifyCtx := compiler.WithSigningChain(
+			compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority),
+			chain)
+		recompiled, err := compiler.CompilePDF(verifyCtx, payload, compiledAt)
+		if err != nil {
+			writeError(w, errUnprocessableEntity(err).withDigests(verifyDigests{JSONLDHash: sha256Hex(payload)}))
+			return
+		}
+		digests = reproductionDigests(payload, raw, recompiled)
 		// The compiled base must reproduce the leading bytes of the submitted
 		// PDF. A PAdES signature (and the signing evidence embedded before it)
 		// is an append-only incremental update written after the base's %%EOF —
@@ -303,7 +504,7 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		// /ByteRange — so the base is a byte-prefix of a signed PDF rather than
 		// byte-equal to it (DCS-OR-C2PA-010).
 		if !bytes.HasPrefix(compiler.ZeroCOSESignatures(raw), compiler.ZeroCOSESignatures(recompiled)) {
-			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")))
+			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")).withDigests(digests))
 			return
 		}
 		// An unsigned base must be byte-EQUAL to its deterministic recompile. The
@@ -312,30 +513,50 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		// (handled by the branch above via its marker). Trailing content on an
 		// otherwise-unsigned PDF is an offline amendment made outside /update —
 		// reject it (DCS-OR-C2PA-002 tamper-evidence).
+		//
+		// The digests agree here — the divergence is in the trailing bytes, not in
+		// the base the digests cover — so they are reported as the record of what
+		// was checked, and the message names what actually failed.
 		if !compiler.IsPAdESSigned(raw) &&
 			len(compiler.ZeroCOSESignatures(raw)) != len(compiler.ZeroCOSESignatures(recompiled)) {
-			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")))
+			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")).withDigests(digests))
 			return
 		}
 	}
 
-	// Extract VC attachment if present — returned to the caller so it can
-	// perform status-list checks without parsing PDF bytes itself.
+	// Extract VC attachment if present — returned to the caller so it can verify
+	// its proof and check the status list without parsing PDF bytes itself.
 	vcBytes, vcFound, _ := compiler.ExtractEmbeddedVC(raw)
-	vcProofValid := vcFound && len(vcBytes) > 0 && isVCProofStructurallyValid(vcBytes)
 
-	// Append a verification witness and embed the resulting PDF as artifact.
-	witness, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw, payload)
+	c2paSignatureError := ""
+	if err := compiler.VerifyC2PAClaimSignatures(raw); err != nil {
+		c2paSignatureError = err.Error()
+	}
+
+	// Append a verification witness and embed the resulting PDF as artifact. The
+	// witness is this verifier's own assertion about the document, so it is signed
+	// under the caller's chain rather than the artifact's.
+	witnessCtx := compiler.WithSigningChain(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), callerChain)
+	witness, err := compiler.AppendVerificationWitness(witnessCtx, raw, payload)
 	if err != nil {
 		writeError(w, errBadRequest(fmt.Errorf("append verification witness: %w", err)))
 		return
 	}
 
+	signers, err := describeSigners(raw, callerChain[0])
+	if err != nil {
+		writeError(w, errBadRequest(fmt.Errorf("identify manifest signers: %w", err)))
+		return
+	}
+
 	resp := verifyResponse{
+		verifyDigests:      digests,
 		Match:              true,
-		C2PASignatureValid: true,
+		Signers:            signers,
+		C2PASignatureValid: c2paSignatureError == "",
+		C2PASignatureError: c2paSignatureError,
 		PAdESSigned:        compiler.IsPAdESSigned(raw),
-		VCProofValid:       vcProofValid,
+		VCPresent:          vcFound && len(vcBytes) > 0,
 		Artifact:           base64.StdEncoding.EncodeToString(witness),
 	}
 	if vcFound && len(vcBytes) > 0 {
@@ -373,7 +594,13 @@ func (s *service) verifyContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(fmt.Errorf("extract lifecycle timestamp: %w", err)))
 		return
 	}
-	recompiled, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), payload, compiledAt)
+	chain, err := callerSigningChain(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	recompiled, err := compiler.CompilePDF(
+		compiler.WithSigningChain(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), chain), payload, compiledAt)
 	if err != nil {
 		writeError(w, errUnprocessableEntity(err))
 		return
@@ -390,15 +617,59 @@ func (s *service) verifyContent(w http.ResponseWriter, r *http.Request) {
 	}{Match: mismatch == "", Mismatch: mismatch})
 }
 
-// isVCProofStructurallyValid returns true when the VC JSON contains a
-// recognisable proof field, without performing cryptographic verification.
-func isVCProofStructurallyValid(vcBytes []byte) bool {
-	var vc map[string]json.RawMessage
-	if err := json.Unmarshal(vcBytes, &vc); err != nil {
-		return false
+// verifyContentMatch compares a submitted PDF's visible page content against a
+// REFERENCE PDF's, resolving the LAST definition of every object on both sides.
+// Neither side is re-rendered — the reference is the exact document the caller
+// committed to — so this is free of the render determinism /verify/content
+// depends on, and it answers a different question: not "does this PDF render its
+// own embedded payload" (an attacker who supersedes both the pages and the
+// attachment passes that) but "does this PDF still render the document we
+// prepared". An appended revision that supersedes a page content stream diverges
+// here; append-only signature, C2PA, evidence and timestamp layers do not.
+func (s *service) verifyContentMatch(w http.ResponseWriter, r *http.Request) {
+	ct := r.Header.Get("Content-Type")
+	if err := checkMediaType(ct, "multipart/form-data"); err != nil {
+		writeError(w, err)
+		return
 	}
-	_, ok := vc["proof"]
-	return ok
+	defer r.Body.Close()
+
+	_, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		writeError(w, errBadRequest(fmt.Errorf("invalid multipart content type: %w", err)))
+		return
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		writeError(w, errBadRequest(errors.New("multipart boundary missing from Content-Type")))
+		return
+	}
+	parts, err := readMultipartParts(r.Body, boundary)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	submitted, ok := parts["pdf"]
+	if !ok || len(submitted) == 0 {
+		writeError(w, errBadRequest(errors.New("pdf field required")))
+		return
+	}
+	reference, ok := parts["reference"]
+	if !ok || len(reference) == 0 {
+		writeError(w, errBadRequest(errors.New("reference field required")))
+		return
+	}
+
+	var mismatch string
+	if err := compiler.MatchPageContent(submitted, reference); err != nil {
+		mismatch = err.Error()
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(struct {
+		Match    bool   `json:"match"`
+		Mismatch string `json:"mismatch,omitempty"`
+	}{Match: mismatch == "", Mismatch: mismatch})
 }
 
 func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
@@ -455,8 +726,13 @@ func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
 	manifestURL := strings.TrimSpace(string(parts["manifest_url"]))
 
 	signer := compiler.NewCapturingSigner()
+	renderCtx, err := renderContext(r, signer)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	// Verbatim: the amended attachment is embedded exactly as submitted.
-	updated, err := compiler.UpdatePDFWithOptions(renderContext(r, signer), oldPDF, newPayload, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
+	updated, err := compiler.UpdatePDFWithOptions(renderCtx, oldPDF, newPayload, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
 	if err != nil {
 		if errors.Is(err, compiler.ErrNoChanges) {
 			writeError(w, errConflict(err))
@@ -630,7 +906,13 @@ func (s *service) claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	referencePDF, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), payloadBytes, compiler.CanonicalCompiledAt)
+	chain, err := callerSigningChain(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	matchCtx := compiler.WithSigningChain(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), chain)
+	referencePDF, err := compiler.CompilePDF(matchCtx, payloadBytes, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -639,7 +921,7 @@ func (s *service) claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errConflict(err))
 		return
 	}
-	result, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), referencePDF, payloadBytes)
+	result, err := compiler.AppendVerificationWitness(matchCtx, referencePDF, payloadBytes)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -722,11 +1004,6 @@ func (s *service) ontologyContext(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(ontologyContext)
 }
 
-func (s *service) ontologyOwl(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/turtle; charset=utf-8")
-	_, _ = w.Write(ontologyOWL)
-}
-
 // readMultipartParts reads all parts from a multipart body into a map keyed by form field name.
 func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, error) {
 	parts := make(map[string][]byte)
@@ -741,7 +1018,7 @@ func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, err
 		}
 		name := part.FormName()
 		var limit int64 = 8 << 20
-		if name == "pdf" {
+		if name == "pdf" || name == "reference" {
 			limit = 32 << 20
 		}
 		data, err := io.ReadAll(io.LimitReader(part, limit))

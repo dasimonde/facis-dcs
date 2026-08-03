@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"testing"
 )
 
@@ -39,7 +38,7 @@ func renderedText(t *testing.T, pdf []byte) []byte {
 }
 
 func TestContractRendersFilledContractFieldValue(t *testing.T) {
-	pdf, err := CompilePDF(WithSigner(context.Background(), NewCapturingSigner()), []byte(filledContractPayload), CanonicalCompiledAt)
+	pdf, err := CompilePDF(WithSigner(testChainContext(), NewCapturingSigner()), []byte(filledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("filled contract must compile: %v", err)
 	}

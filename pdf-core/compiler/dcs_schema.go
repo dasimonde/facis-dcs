@@ -17,8 +17,8 @@ type ContractTemplate struct {
 	ContractFields    []ContractField    `json:"contractFields,omitempty"`
 }
 
-// ContractField is one fillable declaration. Value is raw so a
-// bare scalar, a JSON number, or a typed {"@value":…} literal all decode).
+// ContractField is one fillable declaration. Value is raw so a bare scalar,
+// a JSON number, or a typed {"@value":…} literal all decode.
 type ContractField struct {
 	ID    string          `json:"@id,omitempty"`
 	Value json.RawMessage `json:"value,omitempty"`

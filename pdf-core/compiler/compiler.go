@@ -107,26 +107,17 @@ func extractJSONLDStream(pdf []byte, lastOccurrence bool) ([]byte, error) {
 		return nil, fmt.Errorf("embedded JSON-LD object id invalid: %w", err)
 	}
 
-	objMarker := []byte(fmt.Sprintf("%d 0 obj", objID))
-	var objPos int
+	var streamStart, streamEnd int
+	var ok bool
 	if lastOccurrence {
-		objPos = bytes.LastIndex(pdf, objMarker)
+		streamStart, streamEnd, ok = lastObjectStreamData(pdf, objID)
 	} else {
-		objPos = bytes.Index(pdf, objMarker)
+		streamStart, streamEnd, ok = firstObjectStreamData(pdf, objID)
 	}
-	if objPos < 0 {
-		return nil, fmt.Errorf("embedded JSON-LD object not found")
+	if !ok {
+		return nil, fmt.Errorf("embedded JSON-LD stream not found in object %d", objID)
 	}
-	streamStart := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
-		return nil, fmt.Errorf("embedded JSON-LD stream start not found")
-	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return nil, fmt.Errorf("embedded JSON-LD stream end not found")
-	}
-	return append([]byte(nil), pdf[streamStart:streamStart+streamEnd]...), nil
+	return append([]byte(nil), pdf[streamStart:streamEnd]...), nil
 }
 
 func AppendVerificationWitness(ctx context.Context, pdf []byte, payload []byte) ([]byte, error) {
@@ -150,7 +141,9 @@ func AppendVerificationWitness(ctx context.Context, pdf []byte, payload []byte) 
 	exclusions := []c2paExclusion{}
 	var candidate []byte
 	for iteration := 0; iteration < 6; iteration++ {
-		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, witnessManifestLabel(hardBindingHash), "", hashHex, hardBindingHash, exclusions, CanonicalCompiledAt, "")
+		// A verification witness names no contract, so it carries no lifecycle
+		// assertion at all — the status is unreachable, not merely unset.
+		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, witnessManifestLabel(hardBindingHash), "", hashHex, lifecycleStatusAmended, hardBindingHash, exclusions, CanonicalCompiledAt, "")
 		if err != nil {
 			return nil, err
 		}
@@ -264,18 +257,9 @@ func extractEmbeddedStreamByFileSpecName(pdf []byte, fileName string) ([]byte, e
 	if err != nil {
 		return nil, fmt.Errorf("embedded stream object id invalid for %s: %w", fileName, err)
 	}
-	objPos := findLastObjectHeaderOffset(pdf, objID)
-	if objPos < 0 {
-		return nil, fmt.Errorf("embedded stream object %d not found for %s", objID, fileName)
+	streamStart, streamEnd, ok := lastObjectStreamData(pdf, objID)
+	if !ok {
+		return nil, fmt.Errorf("embedded stream not found in object %d for %s", objID, fileName)
 	}
-	streamStart := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
-		return nil, fmt.Errorf("embedded stream start not found for %s", fileName)
-	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return nil, fmt.Errorf("embedded stream end not found for %s", fileName)
-	}
-	return append([]byte(nil), pdf[streamStart:streamStart+streamEnd]...), nil
+	return append([]byte(nil), pdf[streamStart:streamEnd]...), nil
 }

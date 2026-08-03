@@ -538,6 +538,9 @@ export function useClauseTextChips(
         const highlightClass =
           h && matchHighlight(seg.conditionId, seg.parameterName, h) ? ` ${CHIP_HIGHLIGHT_CLASS}` : ''
         span.className = baseClass + highlightClass
+        // The owning asset instance's accent marks the chip, matching its row.
+        const accent = conditions.find((c) => c.conditionId === seg.conditionId)?.accentColor
+        if (accent) span.style.borderLeft = `3px solid ${accent}`
         el.appendChild(span)
       }
     }

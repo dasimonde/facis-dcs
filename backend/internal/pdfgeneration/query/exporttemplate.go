@@ -11,7 +11,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	tpldb "digital-contracting-service/internal/templaterepository/db"
@@ -22,12 +22,12 @@ type ExportTemplatePdfQry struct {
 }
 
 type ExportTemplatePdfHandler struct {
-	DB         *sqlx.DB
-	TRepo      tpldb.ContractTemplateRepo
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
-	VCIssuer   provenance.VCIssuer
-	IssuerDID  string
+	DB        *sqlx.DB
+	TRepo     tpldb.ContractTemplateRepo
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
+	VCIssuer  provenance.VCIssuer
+	IssuerDID string
 }
 
 func (h *ExportTemplatePdfHandler) Handle(ctx context.Context, qry ExportTemplatePdfQry) (io.ReadCloser, error) {
@@ -75,22 +75,22 @@ func (h *ExportTemplatePdfHandler) Handle(ctx context.Context, qry ExportTemplat
 	}
 
 	if pdfState.IPFSCID != "" && pdfState.C2PAState == currentC2PAState && pdfState.PayloadHash == currentPayloadHash {
-		r, err := h.IPFSClient.FetchFile(pdfState.IPFSCID)
-		if err != nil || len(r.Data) == 0 {
+		pdf, err := h.Artifacts.Get(ctx, artifactstore.TemplateScope(qry.DID), pdfState.IPFSCID)
+		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch cached PDF from IPFS %s: %w", pdfState.IPFSCID, err)
 		}
-		log.Printf("pdfgeneration: ExportTemplatePdf %s state matches — returning cached PDF (%d bytes)", qry.DID, len(r.Data))
-		return io.NopCloser(bytes.NewReader(r.Data)), nil
+		log.Printf("pdfgeneration: ExportTemplatePdf %s state matches — returning cached PDF (%d bytes)", qry.DID, len(pdf))
+		return io.NopCloser(bytes.NewReader(pdf)), nil
 	}
 
 	if pdfState.IPFSCID != "" {
 		log.Printf("pdfgeneration: ExportTemplatePdf %s state/payload changed (state %q→%q, payloadHash %q→%q); appending", qry.DID, pdfState.C2PAState, currentC2PAState, pdfState.PayloadHash, currentPayloadHash)
-		r, err := h.IPFSClient.FetchFile(pdfState.IPFSCID)
-		if err != nil || len(r.Data) == 0 {
+		pdf, err := h.Artifacts.Get(ctx, artifactstore.TemplateScope(qry.DID), pdfState.IPFSCID)
+		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch PDF from IPFS %s for update: %w", pdfState.IPFSCID, err)
 		}
-		pdfBytes, err := appendAndCache(ctx, tx, qry.DID, tpl.State, jsonldBytes, r.Data,
-			h.IPFSClient, h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
+		pdfBytes, err := appendAndCache(ctx, tx, qry.DID, tpl.State, jsonldBytes, pdf,
+			h.Artifacts, artifactstore.TemplateScope(qry.DID), h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
 		if err != nil {
 			return nil, fmt.Errorf("append C2PA assertion for template %s: %w", qry.DID, err)
 		}
@@ -106,7 +106,7 @@ func (h *ExportTemplatePdfHandler) Handle(ctx context.Context, qry ExportTemplat
 	}
 
 	pdfBytes, err = appendAndCache(ctx, tx, qry.DID, tpl.State, jsonldBytes, pdfBytes,
-		h.IPFSClient, h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
+		h.Artifacts, artifactstore.TemplateScope(qry.DID), h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
 	if err != nil {
 		return nil, fmt.Errorf("append and cache template PDF for %s: %w", qry.DID, err)
 	}

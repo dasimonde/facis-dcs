@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"regexp"
 	"testing"
 )
@@ -15,7 +14,7 @@ import (
 // any of its parts" — which is how every signed artifact failed conformance,
 // unnoticed because only the two-instance vertical runs veraPDF on a signed PDF.
 func TestSigningEvidenceListedInCatalogAF(t *testing.T) {
-	ctx := WithSigner(context.Background(), NewCapturingSigner())
+	ctx := WithSigner(testChainContext(), NewCapturingSigner())
 	fresh, err := CompilePDF(ctx, []byte(filledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)
@@ -26,15 +25,11 @@ func TestSigningEvidenceListedInCatalogAF(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	off := findLastObjectHeaderOffset(embedded, 1)
-	if off < 0 {
+	start, end, ok := lastObjectBody(embedded, 1)
+	if !ok {
 		t.Fatal("no superseded catalog (obj 1) after embedding signing evidence")
 	}
-	end := bytes.Index(embedded[off:], []byte("\nendobj"))
-	if end < 0 {
-		t.Fatal("superseded catalog has no endobj")
-	}
-	cat := embedded[off : off+end]
+	cat := embedded[start:end]
 
 	m := regexp.MustCompile(`/AF \[([^\]]*)\]`).FindSubmatch(cat)
 	if m == nil {
@@ -55,7 +50,7 @@ func TestSigningEvidenceListedInCatalogAF(t *testing.T) {
 // breaking the reader: the evidence must remain retrievable from the bytes a
 // PAdES signature covers.
 func TestSigningEvidenceStillExtractableAfterAssociation(t *testing.T) {
-	ctx := WithSigner(context.Background(), NewCapturingSigner())
+	ctx := WithSigner(testChainContext(), NewCapturingSigner())
 	fresh, err := CompilePDF(ctx, []byte(filledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)

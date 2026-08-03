@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { templateStory, toBannerActions } from '@core/workflow-story'
@@ -8,10 +8,11 @@ import TemplateEditors from '@template-repository/components/TemplateEditors.vue
 import TemplateTypeSelect from '@template-repository/components/TemplateTypeSelect.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { TemplateState } from '@/types/contract-template-state'
+import { reportActionError } from '@/utils/report-action-error'
 
 const router = useRouter()
 const route = useRoute()
@@ -70,7 +71,7 @@ watch(
           })
         })
         .catch((error: unknown) => {
-          console.error('Failed to load template for editing', error)
+          reportActionError(error, 'Load template')
         })
     } else {
       draftStore.reset()
@@ -83,8 +84,26 @@ watch(
 
 const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
+const detailsValidationAttempted = ref(false)
+const nameError = computed(() =>
+  detailsValidationAttempted.value && !draftStore.name.trim() ? 'Global Name is required.' : null,
+)
+const descriptionError = computed(() =>
+  detailsValidationAttempted.value && !draftStore.description.trim() ? 'Base Description is required.' : null,
+)
+
+const validateDetails = async (): Promise<boolean> => {
+  detailsValidationAttempted.value = true
+  if (!nameError.value && !descriptionError.value) return true
+  templateEditorUiStore.setActiveTab('details')
+  await nextTick()
+  const testId = nameError.value ? 'template-global-name' : 'template-base-description'
+  document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus()
+  return false
+}
 
 const submit = async () => {
+  if (!(await validateDetails())) return
   isSubmitting.value = true
   submitError.value = null
   try {
@@ -109,7 +128,7 @@ const submit = async () => {
     }
     await router.push({ name: ROUTES.TEMPLATES.LIST })
   } catch (error) {
-    console.error('Submission failed', error)
+    reportActionError(error, isEditMode.value ? 'Update template' : 'Create template')
     submitError.value = error instanceof Error ? error.message : String(error)
   } finally {
     isSubmitting.value = false
@@ -128,7 +147,11 @@ const submit = async () => {
       </div>
     </div>
     <template v-else>
-      <TemplateEditors :title="title">
+      <TemplateEditors
+        :title="title"
+        :name-error="nameError ?? undefined"
+        :description-error="descriptionError ?? undefined"
+      >
         <template #before-tabs>
           <WorkflowStageBanner
             v-if="isEditMode && state"

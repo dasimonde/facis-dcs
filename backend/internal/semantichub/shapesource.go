@@ -2,6 +2,7 @@ package semantichub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"digital-contracting-service/internal/base/validation"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/tggo/goRDFlib/shacl"
 )
 
 // HubShapeSource is the Semantic Hub-backed enforcement source; it
@@ -23,18 +25,10 @@ type HubShapeSource struct {
 // which-version-is-active lookups stay live queries.
 var immutableContent sync.Map
 
-// ActiveShapes returns the canonical contract shapes concatenated with the
-// clause catalog's active version into one shapes graph.
-func (h HubShapeSource) ActiveShapes(ctx context.Context) (string, int, error) {
-	content, version, err := h.active(ctx, ShapesName, "shapes")
-	if err != nil {
-		return "", 0, err
-	}
-	merged, err := h.withClauseCatalog(ctx, content)
-	if err != nil {
-		return "", 0, err
-	}
-	return merged, version, nil
+// CanonicalShapesName is the hub entry the canonical DCS envelope shapes
+// live under — resolved for every document, whatever it declares.
+func (h HubShapeSource) CanonicalShapesName() string {
+	return ShapesName
 }
 
 func (h HubShapeSource) ActiveProfile(ctx context.Context) (string, int, error) {
@@ -51,15 +45,43 @@ func (h HubShapeSource) ActiveDomainOntology(ctx context.Context) (string, int, 
 	return h.active(ctx, SLAOntologyName, "ontology")
 }
 
-// ShapesAt returns exactly the canonical SHACL shapes at a specific version.
-// Mixing an immutable canonical version with today's active libraries would
-// silently change old artifacts after an activation or rollback.
-func (h HubShapeSource) ShapesAt(ctx context.Context, version int) (string, error) {
-	content, err := h.versionContent(ctx, ShapesName, "shapes", version)
+// ShapesAt returns one shapes graph a document declares in sh:shapesGraph:
+// the hub entry called name at the pinned version, or its active version
+// when version is 0. Only the canonical entry carries the clause catalog
+// with it (the catalog constrains the DCS envelope's own vocabulary — the
+// odrl: rules in dcs:policies and the typed clauses in the document
+// structure — so it is not an opt-in library); a registered library resolves
+// to exactly its own content.
+func (h HubShapeSource) ShapesAt(ctx context.Context, name string, version int) (string, int, error) {
+	content, resolved, err := h.shapesEntry(ctx, name, version)
 	if err != nil {
-		return "", fmt.Errorf("semantic hub: pinned shapes v%d: %w", version, err)
+		return "", 0, err
 	}
-	return content, nil
+	if name != ShapesName {
+		return content, resolved, nil
+	}
+	catalog, _, err := h.active(ctx, ClauseCatalogName, "shapes")
+	if err != nil {
+		return "", 0, fmt.Errorf("clause catalog: %w", err)
+	}
+	// Each document carries its own @prefix headers, so the concatenation
+	// parses as one Turtle graph.
+	return content + "\n\n" + catalog, resolved, nil
+}
+
+func (h HubShapeSource) shapesEntry(ctx context.Context, name string, version int) (string, int, error) {
+	if version <= 0 {
+		content, active, err := h.active(ctx, name, "shapes")
+		if err != nil {
+			return "", 0, fmt.Errorf("semantic hub: shapes %s: %w", name, err)
+		}
+		return content, active, nil
+	}
+	content, err := h.versionContent(ctx, name, "shapes", version)
+	if err != nil {
+		return "", 0, fmt.Errorf("semantic hub: shapes %s v%d: %w", name, version, err)
+	}
+	return content, version, nil
 }
 
 func (h HubShapeSource) ShapesBundleAt(ctx context.Context, refs []validation.VersionedShapeRef) (string, error) {
@@ -68,13 +90,47 @@ func (h HubShapeSource) ShapesBundleAt(ctx context.Context, refs []validation.Ve
 	}
 	parts := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		content, err := h.versionContent(ctx, ref.Name, "shapes", ref.Version)
+		content, err := pinnedShapesContent(ctx, h, ref)
 		if err != nil {
 			return "", fmt.Errorf("semantic hub: effective shapes %s v%d: %w", ref.Name, ref.Version, err)
 		}
 		parts = append(parts, content)
 	}
 	return strings.Join(parts, "\n\n"), nil
+}
+
+// shapesReader is the two stored-row reads pinned-bundle resolution makes.
+type shapesReader interface {
+	versionContent(ctx context.Context, name, kind string, version int) (string, error)
+	active(ctx context.Context, name, kind string) (string, int, error)
+}
+
+// pinnedShapesContent resolves one entry of a document's pinned bundle
+// (ADR-8).
+//
+// An envelope entry is always THIS instance's own graph, and a peer-written row
+// is unreachable from an envelope name. Its version number means something only
+// within one deployment — each seeds its own genesis — so a number this hub
+// never assigned resolves to the active envelope graph rather than failing: the
+// alternative is that two deployments built from different images can never
+// evaluate each other's contracts at all.
+//
+// A library is the authoring instance's own vocabulary, so it resolves from
+// this hub's entries where it published one and otherwise from the peer
+// namespace the ship carrying the document installed it into.
+func pinnedShapesContent(ctx context.Context, hub shapesReader, ref validation.VersionedShapeRef) (string, error) {
+	content, err := hub.versionContent(ctx, ref.Name, ShapesKind, ref.Version)
+	if err == nil {
+		return content, nil
+	}
+	if !errors.Is(err, ErrSchemaNotFound) {
+		return "", err
+	}
+	if IsEnvelopeShapes(ref.Name) {
+		content, _, err := hub.active(ctx, ref.Name, ShapesKind)
+		return content, err
+	}
+	return hub.versionContent(ctx, ref.Name, PeerShapesKind, ref.Version)
 }
 
 func (h HubShapeSource) ProfileAt(ctx context.Context, version int) (string, error) {
@@ -101,42 +157,71 @@ func (h HubShapeSource) ContextAt(ctx context.Context, version int) (string, err
 	return content, nil
 }
 
-// withClauseCatalog appends the clause catalog's active shapes and every
-// other ACTIVE registered shape library to a canonical shapes document.
-// Each document declares its own @prefix headers, so the concatenation
-// parses as one Turtle graph. Registered libraries are arbitrary SHACL
-// uploaded through the hub — they target their own classes, and the
-// validation pass dereferences contract-field references so the libraries
-// see plain instance data.
-func (h HubShapeSource) withClauseCatalog(ctx context.Context, canonicalShapesTTL string) (string, error) {
-	catalog, _, err := h.active(ctx, ClauseCatalogName, "shapes")
-	if err != nil {
-		return "", fmt.Errorf("clause catalog: %w", err)
-	}
-	libraries, err := h.activeShapeLibraries(ctx)
-	if err != nil {
-		return "", err
-	}
-	merged := canonicalShapesTTL + "\n\n" + catalog
-	for _, library := range libraries {
-		merged += "\n\n" + library
-	}
-	return merged, nil
+// ShapeLibrary identifies a registered SHACL library version: what a
+// document declaring that library names in sh:shapesGraph.
+type ShapeLibrary struct {
+	Name    string
+	Version int
 }
 
-// activeShapeLibraries returns the content of every ACTIVE kind="shapes"
-// schema other than the canonical shapes and the clause catalog, in stable
-// name order.
-func (h HubShapeSource) activeShapeLibraries(ctx context.Context) ([]string, error) {
-	var libraries []string
-	err := h.DB.SelectContext(ctx, &libraries, `
-        SELECT content FROM semantic_schemas
+// libraryTargetClasses caches (name, version) → the classes that library
+// version targets. Hub versions are immutable rows, so entries never need
+// invalidation — and a registered library can be megabytes of Turtle (an
+// imported Gaia-X entry), which is parsed once here rather than on every
+// activation refresh.
+var libraryTargetClasses sync.Map
+
+// ActiveShapeLibraryClasses indexes every class targeted by an ACTIVE
+// registered shapes library — every kind="shapes" entry other than the
+// canonical DCS envelope (the canonical shapes and the clause catalog) — to
+// the library version that governs it. Document production reads this index
+// to declare, in a document's own sh:shapesGraph, the libraries its data
+// objects are modelled against: validation then honours the declaration, so
+// no document is ever validated against a library it does not name.
+func ActiveShapeLibraryClasses(ctx context.Context, db *sqlx.DB) (map[string]ShapeLibrary, error) {
+	var libraries []Schema
+	err := db.SelectContext(ctx, &libraries, `
+        SELECT name, version, content FROM semantic_schemas
         WHERE kind = 'shapes' AND active AND name NOT IN ($1, $2)
         ORDER BY name`, ShapesName, ClauseCatalogName)
 	if err != nil {
 		return nil, fmt.Errorf("semantic hub: active shape libraries: %w", err)
 	}
-	return libraries, nil
+	index := map[string]ShapeLibrary{}
+	for _, library := range libraries {
+		classes, err := targetClassesOf(library)
+		if err != nil {
+			return nil, err
+		}
+		for _, class := range classes {
+			// First library in name order wins a contested class, matching
+			// the deterministic order the query imposes.
+			if _, taken := index[class]; !taken {
+				index[class] = ShapeLibrary{Name: library.Name, Version: library.Version}
+			}
+		}
+	}
+	return index, nil
+}
+
+func targetClassesOf(library Schema) ([]string, error) {
+	key := fmt.Sprintf("%s\x00%d", library.Name, library.Version)
+	if cached, ok := libraryTargetClasses.Load(key); ok {
+		return cached.([]string), nil
+	}
+	graph, err := shacl.LoadTurtleString(library.Content, "urn:dcs:hub:shapes:"+library.Name)
+	if err != nil {
+		return nil, fmt.Errorf("semantic hub: parse shapes library %s v%d: %w", library.Name, library.Version, err)
+	}
+	targetClass := shacl.IRI(shacl.SH + "targetClass")
+	var classes []string
+	for _, triple := range graph.All(nil, &targetClass, nil) {
+		if iri := triple.Object.Value(); iri != "" {
+			classes = append(classes, iri)
+		}
+	}
+	libraryTargetClasses.Store(key, classes)
+	return classes, nil
 }
 
 // active resolves the entry's active version, then reads that version's

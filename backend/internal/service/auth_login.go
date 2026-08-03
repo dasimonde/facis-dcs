@@ -223,17 +223,17 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 		vpToken = *p.VpToken
 	}
 
-	queryID, err := credentialQueryIDFromDCQL(s.dcqlQuery)
+	queryIDs, err := credentialQueryIDsFromDCQL(s.dcqlQuery)
 	if err != nil {
 		return nil, goa.PermanentError("bad_request", "invalid dcql_query: %v", err)
 	}
 
-	presentation, err := extractSinglePresentation(vpToken, queryID)
+	presentation, err := extractSinglePresentation(vpToken, queryIDs...)
 	if err != nil {
 		return nil, goa.PermanentError("bad_request", "invalid vp_token: %v", err)
 	}
 
-	verified, err := oid4vp.NewVerifier(s.trust).Verify(presentation, oid4vp.PresentationContext{
+	verified, err := oid4vp.NewVerifier(s.trust, oid4vp.PurposeLogin).Verify(presentation, oid4vp.PresentationContext{
 		Nonce:    attempt.Nonce,
 		ClientID: s.oid4vpClientID,
 	})
@@ -295,40 +295,50 @@ func pointerString(v *string) string {
 	return *v
 }
 
-func credentialQueryIDFromDCQL(dcqlQuery any) (string, error) {
+// credentialQueryIDsFromDCQL returns every credential query id the request
+// offered the wallet. A query asks for one credential under more than one
+// format identifier, and the wallet answers under the id of whichever it
+// matched, so the answer is looked for under all of them.
+func credentialQueryIDsFromDCQL(dcqlQuery any) ([]string, error) {
 	query, ok := dcqlQuery.(map[string]any)
 	if !ok {
-		return "", fmt.Errorf("dcql query must be a JSON object")
+		return nil, fmt.Errorf("dcql query must be a JSON object")
 	}
 
 	rawCredentials, ok := query["credentials"]
 	if !ok {
-		return "", fmt.Errorf("missing credentials")
+		return nil, fmt.Errorf("missing credentials")
 	}
 
 	credentials, ok := rawCredentials.([]any)
 	if !ok || len(credentials) == 0 {
-		return "", fmt.Errorf("credentials must be a non-empty array")
+		return nil, fmt.Errorf("credentials must be a non-empty array")
 	}
 
-	first, ok := credentials[0].(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("credentials[0] must be an object")
+	ids := make([]string, 0, len(credentials))
+	for i, raw := range credentials {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("credentials[%d] must be an object", i)
+		}
+		id, _ := entry["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, fmt.Errorf("credentials[%d].id is required", i)
+		}
+		ids = append(ids, id)
 	}
 
-	id, _ := first["id"].(string)
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return "", fmt.Errorf("credentials[0].id is required")
-	}
-
-	return id, nil
+	return ids, nil
 }
 
-func extractSinglePresentation(rawVPToken, queryID string) (string, error) {
+func extractSinglePresentation(rawVPToken string, queryIDs ...string) (string, error) {
 	rawVPToken = strings.TrimSpace(rawVPToken)
 	if rawVPToken == "" {
 		return "", fmt.Errorf("vp_token is required")
+	}
+	if len(queryIDs) == 0 {
+		return "", fmt.Errorf("no credential query id to read the vp_token under")
 	}
 
 	var tokenByQuery map[string]json.RawMessage
@@ -336,26 +346,30 @@ func extractSinglePresentation(rawVPToken, queryID string) (string, error) {
 		return "", fmt.Errorf("vp_token must be a JSON object")
 	}
 
-	rawPresentations, ok := tokenByQuery[queryID]
-	if !ok {
-		return "", fmt.Errorf("missing vp_token entry for query id %q", queryID)
+	for _, queryID := range queryIDs {
+		rawPresentations, ok := tokenByQuery[queryID]
+		if !ok {
+			continue
+		}
+
+		var presentations []string
+		if err := json.Unmarshal(rawPresentations, &presentations); err != nil {
+			return "", fmt.Errorf("vp_token[%q] must be an array of strings", queryID)
+		}
+
+		if len(presentations) != 1 {
+			return "", fmt.Errorf("vp_token[%q] must contain exactly one presentation", queryID)
+		}
+
+		presentation := strings.TrimSpace(presentations[0])
+		if presentation == "" {
+			return "", fmt.Errorf("vp_token[%q][0] must be a non-empty string", queryID)
+		}
+
+		return presentation, nil
 	}
 
-	var presentations []string
-	if err := json.Unmarshal(rawPresentations, &presentations); err != nil {
-		return "", fmt.Errorf("vp_token[%q] must be an array of strings", queryID)
-	}
-
-	if len(presentations) != 1 {
-		return "", fmt.Errorf("vp_token[%q] must contain exactly one presentation", queryID)
-	}
-
-	presentation := strings.TrimSpace(presentations[0])
-	if presentation == "" {
-		return "", fmt.Errorf("vp_token[%q][0] must be a non-empty string", queryID)
-	}
-
-	return presentation, nil
+	return "", fmt.Errorf("missing vp_token entry for query ids %v", queryIDs)
 }
 
 func (s *authSvc) LoginStatus(ctx context.Context, p *genauth.PresentationStatePayload) (*genauth.PresentationStatusResult, error) {

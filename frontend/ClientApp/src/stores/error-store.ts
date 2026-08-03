@@ -18,11 +18,21 @@ export const useErrorStore = defineStore('error', () => {
     errors.value.push({ id, type, message })
 
     setTimeout(() => remove(id), duration)
+    return id
   }
 
   function remove(id: number) {
     errors.value = errors.value.filter((err) => err.id !== id)
   }
 
-  return { errors, add, remove }
+  function addContext(id: number, context: string) {
+    const error = errors.value.find((candidate) => candidate.id === id)
+    if (!error) return false
+    if (!error.message.startsWith(`${context}:`)) {
+      error.message = `${context}: ${error.message}`
+    }
+    return true
+  }
+
+  return { errors, add, remove, addContext }
 })

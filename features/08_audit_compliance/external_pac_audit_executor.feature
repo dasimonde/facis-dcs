@@ -15,6 +15,18 @@ Feature: Configurable external PAC audit executor
     Then the PAC audit request is rejected before execution
     And the ORCE audit executor has observed no request
 
+  @REQ-external-pac-audit-executor-AC2 @DCS-IR-SI-02 @DCS-IR-CI-07 @DCS-NFR-SEC-12
+  Scenario: The bundled ORCE flow and a configuration-only replacement implement the same contract
+    Given the reference ORCE audit executor is reachable and its observations are reset
+    When a valid versioned audit request is posted directly to the bundled ORCE reference flow
+    Then the ORCE response satisfies the versioned audit executor contract
+    And the ORCE response identifies executor "facis-orce-reference"
+    Given the ORCE audit executor observations are reset
+    When the Auditor requests an executor-backed "contracts" audit without a resource DID
+    Then the PAC audit request is accepted with executor "customer-compatible-audit"
+    And the ORCE audit executor has observed exactly one request
+    And the observed request was handled by the compatible endpoint "/customer-audit/run"
+
   @REQ-external-pac-audit-executor-AC3 @DCS-IR-PACM-01 @DCS-FR-CSA-19
   Scenario: DCS dispatches one correlated evidence-bearing job for every audit scope
     Given contract "External Executor Evidence Contract" is submitted, reviewed, approved, and signed via the standard workflow

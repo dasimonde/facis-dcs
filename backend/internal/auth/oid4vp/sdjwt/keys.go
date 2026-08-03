@@ -3,6 +3,7 @@ package sdjwt
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// minRSAKeyBits is the smallest RSA issuer key accepted from an x5c leaf.
+const minRSAKeyBits = 2048
 
 // JWK is an EC P-256 public key used for SD-JWT verification.
 type JWK struct {
@@ -34,6 +38,12 @@ type TrustConfig interface {
 	IssuerTrusted(iss string) bool
 	VCTAllowed(vct string) bool
 	IssuerJWKS(iss string) (json.RawMessage, error)
+	// IssuerUsesX5C reports whether this issuer publishes its key through a
+	// certificate chain. It decides which resolution branch may run, so the
+	// CONFIGURATION picks the path and not the credential: a credential that
+	// arrives with an x5c header for an issuer configured to publish a JWKS is
+	// presenting a key from somewhere the operator never trusted.
+	IssuerUsesX5C(iss string) (bool, error)
 	// X5CTrustRoots returns the trust anchors an x5c-bearing credential's
 	// certificate chain must verify against, or nil if none are configured —
 	// in which case an x5c-bearing credential must be refused outright.
@@ -47,9 +57,14 @@ type TrustConfig interface {
 // Trust and key material are resolved inside the JWT keyfunc so verification never proceeds
 // with an untrusted or unknown issuer key. Resolution order:
 //
-//  1. header.jwk — embedded JWK matched against the issuer entry in trust configuration.
-//  2. header.x5c — rejected until chain validation lands with the trust migration.
-//  3. header.kid — lookup in the issuer JWKS bundled in trust configuration.
+// The issuer's CONFIGURED mechanism selects the branch. Letting the credential
+// choose — x5c header present, therefore validate a chain — would mean an
+// attacker holding any certificate under any configured anchor could present it
+// for an issuer whose keys are published as a JWKS, and be believed.
+//
+//  1. issuer publishes via x5c — the chain in the header, verified to the anchors.
+//  2. otherwise — header.jwk matched against the issuer's resolved JWKS, or
+//     header.kid looked up in it.
 func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("trust config is not configured")
@@ -68,6 +83,23 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 		return nil, fmt.Errorf("issuer %q is not trusted", iss)
 	}
 
+	usesX5C, err := cfg.IssuerUsesX5C(iss)
+	if err != nil {
+		return nil, err
+	}
+
+	if usesX5C {
+		rawX5C, ok := token.Header["x5c"]
+		if !ok {
+			return nil, fmt.Errorf("issuer %q publishes its key through a certificate chain, but the credential carries no x5c header", iss)
+		}
+		return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots(), iss)
+	}
+
+	if _, ok := token.Header["x5c"]; ok {
+		return nil, fmt.Errorf("credential for issuer %q carries an x5c header, but that issuer publishes its key another way; the chain proves nothing about it", iss)
+	}
+
 	jwksRaw, err := cfg.IssuerJWKS(iss)
 	if err != nil {
 		return nil, err
@@ -77,25 +109,26 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 		return verificationKeyFromHeaderJWK(jwksRaw, rawJWK)
 	}
 
-	if _, ok := token.Header["x5c"]; ok {
-		return verificationKeyFromX5C(token.Header["x5c"], cfg.X5CTrustRoots())
-	}
-
-	return verificationKeyFromTrustedJWKS(jwksRaw, token)
+	return verificationKeyFromTrustedJWKS(jwksRaw, token, iss)
 }
 
-// ResolveIssuerVerificationKeyForPID resolves the issuer key for PID credentials signed with x5c.
-func ResolveIssuerVerificationKeyForPID(cfg TrustConfig, token *jwt.Token) (any, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("trust config is not configured")
-	}
+// ResolveIssuerVerificationKeyForPID resolved a PID issuer's key from the
+// credential's own certificate chain without ever asking whether that issuer was
+// trusted — no iss, no trust lookup, no purpose. Any certificate under any
+// configured anchor could therefore sign a PID for any issuer, which is the
+// relying-party-attests-to-itself hazard the purpose split exists to prevent.
+//
+// PID now resolves through ResolveIssuerVerificationKey like everything else, so
+// it inherits the trust and purpose checks instead of bypassing them.
 
-	rawX5C, ok := token.Header["x5c"]
-	if !ok {
-		return nil, fmt.Errorf("pid credential jwt requires x5c")
-	}
-
-	return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots())
+// VerificationKeyFromX5C resolves a verification key from a JWS x5c header for
+// a caller outside this package. A status list is signed by the same issuer as
+// the credential whose status it carries, so it is verified the same way and
+// under the same anchors — including the leaf-identifies-issuer binding, without
+// which any certificate under any configured anchor could sign any issuer's
+// status list.
+func VerificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, error) {
+	return verificationKeyFromX5C(raw, roots, iss)
 }
 
 // verificationKeyFromX5C parses the full x5c chain (leaf first, per RFC 7517
@@ -105,7 +138,7 @@ func ResolveIssuerVerificationKeyForPID(cfg TrustConfig, token *jwt.Token) (any,
 // nothing about WHO the leaf belongs to without a trust anchor to verify
 // against; trusting an unverified chain would let anyone mint their own
 // key+cert and self-certify as any issuer.
-func verificationKeyFromX5C(raw any, roots *x509.CertPool) (any, error) {
+func verificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, error) {
 	if roots == nil {
 		return nil, fmt.Errorf("no x5c trust anchors are configured")
 	}
@@ -146,14 +179,42 @@ func verificationKeyFromX5C(raw any, roots *x509.CertPool) (any, error) {
 		return nil, fmt.Errorf("x5c certificate chain does not verify against configured trust anchors: %w", err)
 	}
 
+	// A chain proves the anchor vouched for this certificate. It does NOT say
+	// the certificate belongs to the issuer the credential names — without this
+	// check any certificate under any configured anchor, including a TLS server
+	// certificate, signs credentials asserting any issuer identity.
+	binding, err := leafIdentifiesIssuer(leaf, iss)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := leafMayAttest(leaf, binding); err != nil {
+		return nil, err
+	}
+
+	return leafVerificationKey(leaf)
+}
+
+// leafVerificationKey returns the leaf's public key, refusing key types and
+// sizes no issuer should be signing credentials with. Real PID and QTSP issuer
+// certificates are routinely RSA or a curve above P-256, so the accepted set is
+// what JWS can verify at an adequate strength rather than the single curve this
+// deployment's own issuer happens to use.
+func leafVerificationKey(leaf *x509.Certificate) (any, error) {
 	switch pk := leaf.PublicKey.(type) {
 	case *ecdsa.PublicKey:
-		if pk.Curve != elliptic.P256() {
-			return nil, fmt.Errorf("x5c leaf certificate is not P-256")
+		switch pk.Curve {
+		case elliptic.P256(), elliptic.P384(), elliptic.P521():
+			return pk, nil
+		}
+		return nil, fmt.Errorf("x5c leaf certificate uses unsupported curve %q", pk.Curve.Params().Name)
+	case *rsa.PublicKey:
+		if pk.N.BitLen() < minRSAKeyBits {
+			return nil, fmt.Errorf("x5c leaf certificate rsa key is %d bits, below the %d-bit minimum", pk.N.BitLen(), minRSAKeyBits)
 		}
 		return pk, nil
 	default:
-		return nil, fmt.Errorf("x5c leaf certificate public key is not ECDSA")
+		return nil, fmt.Errorf("x5c leaf certificate public key type %T cannot verify a JWS", leaf.PublicKey)
 	}
 }
 
@@ -171,7 +232,7 @@ func verificationKeyFromHeaderJWK(jwksRaw json.RawMessage, rawJWK any) (any, err
 	return ecPublicKey(headerKey.X, headerKey.Y)
 }
 
-func verificationKeyFromTrustedJWKS(jwksRaw json.RawMessage, token *jwt.Token) (any, error) {
+func verificationKeyFromTrustedJWKS(jwksRaw json.RawMessage, token *jwt.Token, iss string) (any, error) {
 	var doc jwksDocument
 	err := json.Unmarshal(jwksRaw, &doc)
 
@@ -189,12 +250,45 @@ func verificationKeyFromTrustedJWKS(jwksRaw json.RawMessage, token *jwt.Token) (
 	}
 
 	for _, key := range doc.Keys {
-		if key.Kid == kid {
+		if kidNamesKey(key.Kid, kid, iss) {
 			return trustedECKey(key)
 		}
 	}
 
 	return nil, fmt.Errorf("no matching issuer jwk for kid %q", kid)
+}
+
+// kidNamesKey reports whether a credential's kid names the key a JWKS entry
+// carries.
+//
+// A DID document publishes two names for one key: the verification method's DID
+// URL (did:web:host#dev-key-1) and the JWK's own kid inside it (dev-key-1) —
+// this repository's gendid writes both. An issuer may sign under either, so
+// comparing the strings alone leaves the issuer and the verifier looking each
+// other up by different names. A DID URL therefore also matches the bare
+// fragment it ends in.
+//
+// A DID URL only names a key of the document it points at, so its base must be
+// the issuer whose keys were resolved. Matching on the fragment alone would let
+// a credential cite another controller's document and still be verified here.
+func kidNamesKey(jwkKid, credentialKid, iss string) bool {
+	if jwkKid == credentialKid {
+		return true
+	}
+	fragmentOf := func(didURL string) string {
+		base, fragment, found := strings.Cut(didURL, "#")
+		if !found || fragment == "" || base != iss {
+			return ""
+		}
+		return fragment
+	}
+	switch {
+	case strings.Contains(jwkKid, "#") && !strings.Contains(credentialKid, "#"):
+		return credentialKid != "" && fragmentOf(jwkKid) == credentialKid
+	case strings.Contains(credentialKid, "#") && !strings.Contains(jwkKid, "#"):
+		return jwkKid != "" && fragmentOf(credentialKid) == jwkKid
+	}
+	return false
 }
 
 func trustedECKey(key JWK) (any, error) {
@@ -292,6 +386,38 @@ func JWKFromDIDJWK(did string) (JWK, error) {
 	}
 
 	return ecP256PublicKeyFromMap(payload)
+}
+
+// HolderSubject returns the identifier of the holder a credential is bound to.
+//
+// SD-JWT VC makes `sub` OPTIONAL and its value arbitrary — the holder binding
+// is `cnf`. A credential that names no subject is therefore identified by the
+// did:jwk of its binding key, one that names a did:jwk must name that same key,
+// and any other identifier is the issuer's to choose.
+func HolderSubject(claims jwt.MapClaims) (string, error) {
+	cnfJWK, err := CNFJWKFromClaims(claims)
+	if err != nil {
+		return "", err
+	}
+
+	sub, _ := claims["sub"].(string)
+	sub = strings.TrimSpace(sub)
+
+	if sub == "" {
+		bindingDID, err := DIDJWKFromPublicJWK(cnfJWK)
+		if err != nil {
+			return "", fmt.Errorf("credential cnf.jwk: %w", err)
+		}
+		return bindingDID, nil
+	}
+
+	if strings.HasPrefix(sub, "did:jwk:") {
+		if err := HolderSubjectMatches(sub, cnfJWK); err != nil {
+			return "", err
+		}
+	}
+
+	return sub, nil
 }
 
 // HolderSubjectMatches reports whether credential sub and cnf.jwk identify the same holder key.
@@ -392,4 +518,95 @@ func decodeCoordinate(value string) (*big.Int, error) {
 	}
 
 	return new(big.Int).SetBytes(raw), nil
+}
+
+// issuerBinding is how a leaf certificate was tied to the issuer identifier it
+// speaks for.
+type issuerBinding int
+
+const (
+	bindingNone issuerBinding = iota
+	// bindingURI: a SAN URI holding the issuer identifier verbatim.
+	bindingURI
+	// bindingDNS: a SAN DNS name matching the identifier's authority. This is
+	// the only binding an ordinary TLS certificate for the issuer's host also
+	// satisfies.
+	bindingDNS
+	// bindingCN: a subject common name equal to the issuer identifier.
+	bindingCN
+)
+
+// leafIdentifiesIssuer requires the certificate to carry the issuer identity it
+// is being used to speak for, as a SAN URI, a SAN DNS name matching the
+// identifier's authority, or failing both an exactly matching subject CN, and
+// reports which of those established it.
+func leafIdentifiesIssuer(leaf *x509.Certificate, iss string) (issuerBinding, error) {
+	iss = strings.TrimSpace(iss)
+	if iss == "" {
+		return bindingNone, fmt.Errorf("x5c leaf cannot be bound to an empty issuer")
+	}
+
+	for _, uri := range leaf.URIs {
+		if uri.String() == iss {
+			return bindingURI, nil
+		}
+	}
+
+	authority := issuerAuthority(iss)
+	if authority != "" {
+		for _, name := range leaf.DNSNames {
+			if strings.EqualFold(name, authority) {
+				return bindingDNS, nil
+			}
+		}
+	}
+
+	if leaf.Subject.CommonName == iss {
+		return bindingCN, nil
+	}
+
+	return bindingNone, fmt.Errorf("x5c leaf certificate (subject %q, dns %v, uris %v) does not identify issuer %q",
+		leaf.Subject.CommonName, leaf.DNSNames, leaf.URIs, iss)
+}
+
+// leafMayAttest refuses a certificate whose own extensions say it was issued
+// for something other than signing.
+//
+// The chain is verified with ExtKeyUsageAny, so nothing else looks at usage.
+// The hazard is an anchor that also issues TLS certificates: a server
+// certificate for the issuer's own host satisfies the DNS-name binding, and
+// nothing else would tell it apart from a credential signer. So TLS-only
+// extended key usage is refused for exactly that binding. A certificate that
+// names the issuer identifier itself — a SAN URI or a matching CN — is not a
+// server certificate for that host regardless of its EKUs, and many real issuer
+// certificates come out of web PKI carrying serverAuth and clientAuth.
+func leafMayAttest(leaf *x509.Certificate, binding issuerBinding) error {
+	if leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		return fmt.Errorf("x5c leaf certificate does not permit digital signatures")
+	}
+
+	if binding != bindingDNS || len(leaf.ExtKeyUsage) == 0 {
+		return nil
+	}
+
+	for _, usage := range leaf.ExtKeyUsage {
+		if usage != x509.ExtKeyUsageServerAuth && usage != x509.ExtKeyUsageClientAuth {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("x5c leaf certificate is a TLS certificate (extended key usage %v) identified only by a dns name, which does not distinguish it from a server certificate for the issuer's host", leaf.ExtKeyUsage)
+}
+
+// issuerAuthority is the host an issuer identifier belongs to, for both the
+// https:// and did:web forms a deployment may use.
+func issuerAuthority(iss string) string {
+	if rest, ok := strings.CutPrefix(iss, "did:web:"); ok {
+		authority := strings.Split(rest, ":")[0]
+		return strings.ReplaceAll(authority, "%3A", ":")
+	}
+	if rest, ok := strings.CutPrefix(iss, "https://"); ok {
+		return strings.Split(rest, "/")[0]
+	}
+	return ""
 }

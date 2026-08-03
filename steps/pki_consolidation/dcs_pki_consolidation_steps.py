@@ -47,11 +47,14 @@ def step_then_did_jwk_is_ec_p256(context):
     assert verification_methods, (
         f"DID document has no verificationMethod entries: {body}"
     )
-    jwk = verification_methods[0].get("publicKeyJwk") or {}
-    assert jwk.get("kty") == "EC", (
-        "Expected the DID key's publicKeyJwk.kty to be 'EC' (hsm.PublicJWK for the "
-        f"HSM-backed dcs-did key, ECDSA P-256), got: {jwk}"
-    )
+    # Every published key, not just the first: no consumer resolves by position,
+    # so an RSA key anywhere in the document is an RSA key in use somewhere.
+    for method in verification_methods:
+        jwk = method.get("publicKeyJwk") or {}
+        assert jwk.get("kty") == "EC", (
+            f"Expected {method.get('id')!r}'s publicKeyJwk.kty to be 'EC' (hsm.PublicJWK "
+            f"for the HSM-backed keys, ECDSA P-256), got: {jwk}"
+        )
     assert jwk.get("crv") == "P-256", (
         f"Expected the DID key's publicKeyJwk.crv to be 'P-256', got: {jwk}"
     )
@@ -220,12 +223,13 @@ def step_then_both_instances_publish_ec_p256(context):
         assert verification_methods, (
             f"instance {label}'s DID document has no verificationMethod entries"
         )
-        jwk = verification_methods[0].get("publicKeyJwk") or {}
-        assert jwk.get("kty") == "EC" and jwk.get("crv") == "P-256", (
-            f"Expected instance {label}'s DID key to be ECDSA P-256 (this is a "
-            "breaking change: both instances must switch to the HSM-backed ECDSA DID "
-            f"signer simultaneously), got kty={jwk.get('kty')!r} crv={jwk.get('crv')!r}"
-        )
+        for method in verification_methods:
+            jwk = method.get("publicKeyJwk") or {}
+            assert jwk.get("kty") == "EC" and jwk.get("crv") == "P-256", (
+                f"Expected instance {label}'s key {method.get('id')!r} to be ECDSA P-256 (this "
+                "is a breaking change: both instances must switch to the HSM-backed ECDSA DID "
+                f"signer simultaneously), got kty={jwk.get('kty')!r} crv={jwk.get('crv')!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

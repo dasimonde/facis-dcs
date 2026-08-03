@@ -35,10 +35,10 @@ from dcs_wallet.keys import (
     public_key_material,
     write_text,
 )
-from dcs_wallet.status_list import DEFAULT_SERVICE_BASE, DEFAULT_TENANT, build_credential_status
+from dcs_wallet.status_list import build_credential_status, fixture_index
 
 DEFAULT_CREDENTIALS_DIR = WALLET_ROOT / "credentials"
-PID_VCT = "urn:eudi:pid:de:1"
+PID_VCT = "urn:dcs:pid:demo:v1"
 CREDENTIAL_IAT = 1719129600
 CREDENTIAL_EXP = 2145916800
 
@@ -48,9 +48,9 @@ def issue_pid_credential_from_claims(
     *,
     wallet_private_jwk: dict[str, Any],
     issuer_private_jwk: dict[str, Any],
+    status_index: int,
     issuer_did: str = DEFAULT_ISSUER_DID,
-    statuslist_service_base: str = DEFAULT_SERVICE_BASE,
-    statuslist_tenant: str = DEFAULT_TENANT,
+    issuer_base: str | None = None,
 ) -> str:
     """Self-sign a PID SD-JWT VC: every claim in `claims` (given_name,
     family_name, birthdate, address, ...) is individually selectively
@@ -73,10 +73,7 @@ def issue_pid_credential_from_claims(
         "iat": CREDENTIAL_IAT,
         "exp": CREDENTIAL_EXP,
         "cnf": {"jwk": cnf_jwk(holder_public)},
-        "status": build_credential_status(
-            sub=subject_did, organization=given_name, roles=[family_name],
-            service_base=statuslist_service_base, tenant=statuslist_tenant,
-        ),
+        "status": build_credential_status(index=status_index, issuer_base=issuer_base),
     }
     return sign_credential_sd_jwt(
         visible_claims=visible_claims,
@@ -100,6 +97,7 @@ def issue_pid_credentials(
     credential_names: list[str] | None = None,
     issuer_private_jwk: dict[str, Any] | None = None,
     issuer_did: str = DEFAULT_ISSUER_DID,
+    issuer_base: str | None = None,
 ) -> list[Path]:
     del wallet_public_jwk  # kept for call-site compatibility; derived from wallet_private_jwk
 
@@ -122,13 +120,15 @@ def issue_pid_credentials(
         claims = payload.get("claims")
         if not isinstance(claims, dict):
             raise ValueError(f"{template_path} requires a claims object")
+        stem = _template_stem(template_path)
         jwt_value = issue_pid_credential_from_claims(
             claims,
             wallet_private_jwk=wallet_private_jwk,
             issuer_private_jwk=issuer_private_jwk,
+            status_index=fixture_index(f"{stem}.pid"),
             issuer_did=issuer_did,
+            issuer_base=issuer_base,
         )
-        stem = _template_stem(template_path)
         out_path = credentials_dir / f"{stem}.pid.jwt"
         write_text(out_path, jwt_value)
         output_paths.append(out_path)
@@ -141,6 +141,10 @@ def main() -> int:
     parser.add_argument("--credential", action="append", help="base credential stem to issue, e.g. johndoe")
     parser.add_argument("--issuer-did", default=DEFAULT_ISSUER_DID)
     parser.add_argument("--keys-dir", type=Path, default=WALLET_ROOT / "keys")
+    parser.add_argument(
+        "--issuer-base",
+        help="ORCE issuer base URL serving /status-list/1 (default: ISSUER_BASE_URL or the dev NodePort)",
+    )
     args = parser.parse_args()
 
     wallet_private_jwk = private_key_material(load_json(args.keys_dir / "wallet.jwk"))
@@ -152,6 +156,7 @@ def main() -> int:
         credential_names=args.credential,
         issuer_private_jwk=issuer_private_jwk,
         issuer_did=args.issuer_did,
+        issuer_base=args.issuer_base,
     ):
         print(f"issued: {path}")
     return 0

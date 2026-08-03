@@ -43,7 +43,7 @@ func NewEventType(s string) (EventType, error) {
 	return ts, nil
 }
 
-// IsValid checks if the EventType is a valid role
+// IsValid reports whether the value is one of the declared EventType values.
 func (s EventType) IsValid() bool {
 	upper := EventType(strings.ToUpper(string(s)))
 	return validStates[upper]

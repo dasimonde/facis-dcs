@@ -31,10 +31,19 @@ Embedded blank nodes are rejected: every node is addressable, so clause
 prose, ODRL operands, and KPI observations can name any part of the graph
 by IRI.
 
-**Validation against arbitrary libraries.** A SHACL library registered in
-the hub (kind `shapes`) joins the active validation graph next to the
-canonical shapes and the clause catalog (`HubShapeSource.withClauseCatalog`).
-The gate validates a **field-materialized copy** of the document
+**Validation against arbitrary libraries — by declaration.** A document is
+validated against the shapes graphs it declares in its own `sh:shapesGraph`
+and nothing else (ADR-8): the canonical shapes (which carry the clause
+catalog, the DCS envelope's own vocabulary) plus one anchor per registered
+library its data objects are modelled against. Production writes those
+anchors: `SetShapeLibraryAnchors` installs the hub's class → active-library
+index on every activation, and normalization declares the library governing
+each class the document's data asserts. A library nobody declared cannot
+change a verdict — otherwise validation depends on hub state the document
+never named, the same contract validates differently on two deployments, and
+re-validating a signed contract can fail against shapes that did not exist
+when it was signed. A declared graph the hub cannot serve fails the document
+closed. The gate validates a **field-materialized copy** of the document
 (`materializeContractDataFields`): a reference to a filled field is
 dereferenced to its `dcs:value`, so a vanilla library — written against
 plain instance data, knowing nothing of the field indirection — constrains
@@ -65,6 +74,15 @@ both the canonical shapes and every registered library.
   (`sh:node`) subform authoring and per-leaf negotiability selection are
   follow-up editor work — the document model and validation gate already
   accept the graphs such an editor will produce.
-- Peer-side verification (`VerifyAgainstOriginatorHub`) validates against
-  the originator hub's served shapes; a hub serves its registered libraries
-  merged, so both sides evaluate the same graph.
+- Peer-side verification is NOT performed. A received document's SHACL
+  conformance is not re-checked against the originator's hub on ingestion:
+  `PostPdf` authenticates the peer, runs the federation trust gate, matches
+  the PDF against its payload, checks the JAdES signature and the
+  counterparty PoA, and stores. A `VerifyAgainstOriginatorHub` helper was
+  written for this and called from nowhere; it has been deleted rather than
+  left looking like a mechanism. Wiring it needs something that does not
+  exist yet — the originator's public hub origin, threaded through the peer
+  request — so it is open work, not a detail. What holds today is that both
+  sides pin the same anchors (ADR-8): the anchors travel with the document,
+  so the same graphs are nameable on both sides even though only the
+  originator evaluates them.

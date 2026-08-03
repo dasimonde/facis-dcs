@@ -13,7 +13,7 @@ import TaskListSearch from './TaskListSearch.vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
 import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
-import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
+import type { ContractTemplateApprovalTask } from '@/models/contract-template/contract-template-approval-task'
 
 type ApprovalTask = ContractTemplateApprovalTask | ContractApprovalTask
 
@@ -92,9 +92,11 @@ const resolveViewRouteName = (task: ApprovalTask) => {
   }
 }
 
-const applySearchResult = (searchResult: ApprovalTask[]) => {
-  isSearchActive.value = searchResult.length !== props.tasks.length
-  searchedTasks.value = searchResult
+const applySearchResult = (searchResult: ApprovalTask[] | null) => {
+  isSearchActive.value = !!searchResult
+  if (searchResult) {
+    searchedTasks.value = searchResult
+  }
 }
 
 onUnmounted(() => stateFilterStore.reset())

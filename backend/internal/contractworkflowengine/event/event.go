@@ -441,6 +441,30 @@ func (e DeleteArchivedEvent) GetDID() string {
 	return e.DID
 }
 
+// KeyShreddedEvent records the destruction of a contract's wrapped
+// content-encryption keys (DCS-NFR-SEC-13, DCS-NFR-COMP-03). ShreddedBy is a
+// local participant on the archive-deletion path or the requesting peer's DID
+// on the federation erase path. The event carries no contract content.
+type KeyShreddedEvent struct {
+	DID          string    `json:"did"`
+	ScopeKind    string    `json:"scope_kind"`
+	ScopeID      string    `json:"scope_id"`
+	ShreddedBy   string    `json:"shredded_by"`
+	Reason       string    `json:"reason"`
+	RowsShredded int64     `json:"rows_shredded"`
+	OccurredAt   time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e KeyShreddedEvent) EventType() string {
+	return eventtype.KeyShredded.String()
+}
+
+// GetDID implements [event.Event].
+func (e KeyShreddedEvent) GetDID() string {
+	return e.DID
+}
+
 // AnnotateArchivedEvent is emitted when an archive entry's summary/tags
 // annotation is set (DCS-FR-CSA-11).
 type AnnotateArchivedEvent struct {
@@ -513,6 +537,27 @@ func (e NegotiationEvent) GetDID() string {
 	return e.DID
 }
 
+// AcceptOfferEvent is emitted when the counterparty accepts an inbound offer
+// as-is (no redline), which mints its negotiation task for the round.
+type AcceptOfferEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	AcceptedBy      string             `json:"accepted_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e AcceptOfferEvent) EventType() string {
+	return eventtype.AcceptOffer.String()
+}
+
+// GetDID implements the Event interface.
+func (e AcceptOfferEvent) GetDID() string {
+	return e.DID
+}
+
 // AcceptNegotiationEvent is emitted when a template is verified.
 type AcceptNegotiationEvent struct {
 	DID             string             `json:"did"`
@@ -551,6 +596,34 @@ func (e RejectNegotiationEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e RejectNegotiationEvent) GetDID() string {
+	return e.DID
+}
+
+// NegotiationChangeSupersededEvent records the change requests whose content
+// the fold of a round dropped. Each entry names one accepted request, the
+// later accepted request that overwrote it, and the fields that did not reach
+// the merged version. Emitted alongside IncreaseContractVersionEvent, whose
+// OldContractVersion is the round these requests belonged to; the requests
+// themselves stay readable in full on the contract, so the trail shows both
+// that a redline was accepted and that the contract does not carry it.
+type NegotiationChangeSupersededEvent struct {
+	DID             string                       `json:"did"`
+	HolderDID       string                       `json:"holder_did"`
+	ContractVersion int                          `json:"contract_version"`
+	MergedVersion   int                          `json:"merged_contract_version"`
+	Superseded      []db.NegotiationSupersession `json:"superseded"`
+	SubmittedBy     string                       `json:"submitted_by"`
+	OccurredAt      time.Time                    `json:"occurred_at"`
+	UserRoles       userrole.UserRoles           `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e NegotiationChangeSupersededEvent) EventType() string {
+	return eventtype.NegotiationChangeSuperseded.String()
+}
+
+// GetDID implements the Event interface.
+func (e NegotiationChangeSupersededEvent) GetDID() string {
 	return e.DID
 }
 

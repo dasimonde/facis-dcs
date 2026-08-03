@@ -6,6 +6,7 @@ import {
   type OdrlConstraintNode,
   type OdrlLogicalConstraint,
 } from '@/models/dcs-jsonld'
+import { XSD_DURATION } from '@/models/xsd-order'
 
 /**
  * The editor's recursive model of an ODRL constraint (ODRL IM §2.5/§2.6). A
@@ -35,6 +36,15 @@ export interface AtomicDraft {
   rightSource: string
   value: string
   values: OperandDraftValue[]
+  /** '' = the unit is the fixed IRI in `unit`; otherwise a field @id whose value
+   *  — the unit the boundary is measured in — is agreed during negotiation, the
+   *  way `rightSource` makes the boundary itself negotiable. A field fills with
+   *  a value option's notation ("EUR"), not its concept IRI, so a negotiated
+   *  unit and a fixed one are never the same unit to the audit. */
+  unitSource: string
+  /** '' = no unit; otherwise the IRI of the unit the boundary is measured in
+   *  (odrl:unit, e.g. a currency concept). Unused when `unitSource` is set. */
+  unit: string
 }
 
 export interface GroupDraft {
@@ -50,17 +60,37 @@ export function isGroupDraft(node: ConstraintNodeDraft): node is GroupDraft {
 }
 
 export function newAtomic(leftOperand: string, operator: string): AtomicDraft {
-  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '', values: [] }
+  return {
+    kind: 'atomic',
+    leftOperand,
+    operator,
+    rightSource: '',
+    value: '',
+    values: [],
+    unitSource: '',
+    unit: '',
+  }
 }
 
 export function newGroup(): GroupDraft {
   return { kind: 'group', combine: 'and', children: [] }
 }
 
-function typed(value: string): JsonLdTypedValue {
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return { '@value': value, '@type': 'xsd:dateTime' }
-  const isNumber = value !== '' && !Number.isNaN(Number(value))
-  return { '@value': value, '@type': isNumber ? 'xsd:decimal' : 'xsd:string' }
+/** The XSD datatype a typed-in boundary literal carries, so a target system
+ *  evaluating the constraint can tell a duration from a label and an integral
+ *  count from a decimal amount. */
+function literalDatatype(value: string): string {
+  if (/^-?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return 'xsd:dateTime'
+  if (/^-?\d{4}-\d{2}-\d{2}$/.test(value)) return 'xsd:date'
+  if (XSD_DURATION.test(value)) return 'xsd:duration'
+  if (value !== '' && !Number.isNaN(Number(value))) {
+    return /^[+-]?\d+$/.test(value) ? 'xsd:integer' : 'xsd:decimal'
+  }
+  return 'xsd:string'
+}
+
+export function typed(value: string): JsonLdTypedValue {
+  return { '@value': value, '@type': literalDatatype(value) }
 }
 
 function isSetOperator(operator: string): boolean {
@@ -102,6 +132,8 @@ function buildAtomic(atomic: AtomicDraft): OdrlConstraint {
   }
   const right = atomic.rightSource ? { '@id': atomic.rightSource } : fixedRightOperand(atomic)
   if (right !== undefined) constraint['odrl:rightOperand'] = right
+  const unit = atomic.unitSource || atomic.unit.trim()
+  if (unit) constraint['odrl:unit'] = { '@id': unit }
   return constraint
 }
 
@@ -149,32 +181,31 @@ function operandLabel(value: OperandDraftValue): string {
   return '@id' in value ? value['@id'] : String(value['@value'])
 }
 
-function readAtomic(constraint: OdrlConstraint): AtomicDraft {
-  const right = constraint['odrl:rightOperand']
-  if (right && '@id' in right) {
-    return {
-      kind: 'atomic',
-      leftOperand: constraint['odrl:leftOperand']['@id'],
-      operator: constraint['odrl:operator']['@id'],
-      rightSource: right['@id'],
-      value: '',
-      values: [],
-    }
-  }
-  const values = Array.isArray(right) ? right.map((item) => ({ ...item })) : []
-  const value = values.length
-    ? values.map(operandLabel).join(', ')
-    : right && '@value' in right
-      ? String(right['@value'])
-      : ''
-  return {
-    kind: 'atomic',
+// A negotiated boundary and a fixed concept boundary both serialize as
+// {"@id": …}, and so do a negotiated and a fixed odrl:unit. Only the declared
+// field list separates them, so reading a constraint back needs it — without
+// it every concept IRI reads as a field reference and reload rewrites the
+// contract.
+function readAtomic(constraint: OdrlConstraint, fields: ReadonlySet<string>): AtomicDraft {
+  const declaredUnit = constraint['odrl:unit']?.['@id'] ?? ''
+  const unitSource = fields.has(declaredUnit) ? declaredUnit : ''
+  const head = {
+    kind: 'atomic' as const,
     leftOperand: constraint['odrl:leftOperand']['@id'],
     operator: constraint['odrl:operator']['@id'],
-    rightSource: '',
-    value,
-    values: values.length ? values : right && '@value' in right ? [{ ...right }] : [],
+    unitSource,
+    unit: unitSource ? '' : declaredUnit,
   }
+  const right = constraint['odrl:rightOperand']
+  if (right && !Array.isArray(right) && '@id' in right && fields.has(right['@id'])) {
+    return { ...head, rightSource: right['@id'], value: '', values: [] }
+  }
+  const values: OperandDraftValue[] = Array.isArray(right)
+    ? right.map((item) => ({ ...item }))
+    : right
+      ? [{ ...right }]
+      : []
+  return { ...head, rightSource: '', value: values.map(operandLabel).join(', '), values }
 }
 
 function logicalList(node: OdrlLogicalConstraint, op: ConstraintCombinator): OdrlConstraintNode[] | undefined {
@@ -190,19 +221,21 @@ function logicalList(node: OdrlLogicalConstraint, op: ConstraintCombinator): Odr
   }
 }
 
-function parseNode(node: OdrlConstraintNode): ConstraintNodeDraft | undefined {
-  if (isAtomicConstraint(node)) return readAtomic(node)
-  return parseLogical(node)
+function parseNode(node: OdrlConstraintNode, fields: ReadonlySet<string>): ConstraintNodeDraft | undefined {
+  if (isAtomicConstraint(node)) return readAtomic(node, fields)
+  return parseLogical(node, fields)
 }
 
-function parseLogical(node: OdrlLogicalConstraint): GroupDraft | undefined {
+function parseLogical(node: OdrlLogicalConstraint, fields: ReadonlySet<string>): GroupDraft | undefined {
   for (const { op } of CONSTRAINT_COMBINATORS) {
     const list = logicalList(node, op)
     if (list) {
       return {
         kind: 'group',
         combine: op,
-        children: list.map(parseNode).filter((n): n is ConstraintNodeDraft => n !== undefined),
+        children: list
+          .map((child) => parseNode(child, fields))
+          .filter((n): n is ConstraintNodeDraft => n !== undefined),
       }
     }
   }
@@ -211,16 +244,19 @@ function parseLogical(node: OdrlLogicalConstraint): GroupDraft | undefined {
 
 /** Reads a rule's (or duty's) odrl:constraint back into the editor's root
  *  group: a single LogicalConstraint surfaces its combinator and subtree; a
- *  plain list is an ALL conjunction whose members may themselves be logical. */
-export function parseConstraintTree(nodes: OdrlConstraintNode[]): GroupDraft {
+ *  plain list is an ALL conjunction whose members may themselves be logical.
+ *  `declaredFields` are the @ids of the contract fields in scope — what a
+ *  reference to a negotiated boundary or unit may name. */
+export function parseConstraintTree(nodes: OdrlConstraintNode[], declaredFields: readonly string[]): GroupDraft {
+  const fields = new Set(declaredFields)
   const [first] = nodes
   if (nodes.length === 1 && first && !isAtomicConstraint(first)) {
-    const group = parseLogical(first)
+    const group = parseLogical(first, fields)
     if (group) return group
   }
   return {
     kind: 'group',
     combine: 'and',
-    children: nodes.map(parseNode).filter((n): n is ConstraintNodeDraft => n !== undefined),
+    children: nodes.map((node) => parseNode(node, fields)).filter((n): n is ConstraintNodeDraft => n !== undefined),
   }
 }

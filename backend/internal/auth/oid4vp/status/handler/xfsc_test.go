@@ -41,7 +41,7 @@ func makeXFSCUnsignedBody(bitstring []byte) []byte {
 	return body
 }
 
-func TestXFSC_Check_TriesSignedBeforePrefetchedUnsigned(t *testing.T) {
+func TestXFSC_Check_RefusesAnUnsignedListEvenWhenPrefetched(t *testing.T) {
 	var signedRequests atomic.Int32
 	unsignedBody := makeXFSCUnsignedBody(make([]byte, 16))
 
@@ -56,10 +56,7 @@ func TestXFSC_Check_TriesSignedBeforePrefetchedUnsigned(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	fetcher := &fetch.Client{HTTPClient: &http.Client{Transport: localRoundTripper{base: srv.URL}}}
-	xfscHandler := &handler.XFSC{
-		Fetcher:               fetcher,
-		AllowUnsignedFallback: true,
-	}
+	xfscHandler := &handler.XFSC{Fetcher: fetcher}
 
 	result, err := xfscHandler.Check(context.Background(), status.VerifiedCredential{}, status.Reference{
 		Mechanism: status.MechanismXFSC,
@@ -70,9 +67,12 @@ func TestXFSC_Check_TriesSignedBeforePrefetchedUnsigned(t *testing.T) {
 			Body:        unsignedBody,
 		},
 	})
-	require.NoError(t, err)
-	assert.Equal(t, status.StateValid, result.State)
-	assert.Equal(t, int32(1), signedRequests.Load(), "XFSC must attempt signed retrieval before using prefetched unsigned response")
+	// An unsigned list states a revocation status nobody vouched for, and
+	// anyone who can answer the URL can write it. Having one already in hand is
+	// not a reason to believe it.
+	require.Error(t, err, "an unsigned status list must never decide a credential's validity")
+	assert.NotEqual(t, status.StateValid, result.State)
+	assert.Equal(t, int32(1), signedRequests.Load(), "XFSC must still attempt signed retrieval")
 }
 
 type localRoundTripper struct {

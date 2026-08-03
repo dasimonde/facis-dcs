@@ -81,8 +81,16 @@ class OrceAuditControlService:
         cls.request(context, "/reset", {"channel": channel})
 
     @classmethod
-    def set_mode(cls, context, channel: str, mode: str) -> None:
-        cls.request(context, "/mode", {"channel": channel, "mode": mode})
+    def set_mode(cls, context, channel: str, mode: str, gate: str | None = None) -> None:
+        """Set the mode the executor answers with. A gate name scopes the mode
+        to that gate alone and leaves the channel-wide mode in place, so a
+        scenario whose transition dispatches one gate synchronously and a
+        second one asynchronously does not have to switch modes between them.
+        """
+        payload = {"channel": channel, "mode": mode}
+        if gate:
+            payload["gate"] = gate
+        cls.request(context, "/mode", payload)
 
     @classmethod
     def observations(cls, context, channel: str) -> list[dict]:
@@ -94,21 +102,23 @@ class OrceAuditControlService:
         return observations
 
     @classmethod
-    def evidence_groups(cls, context, evidence_scope: str, channel: str = "audit") -> list[dict]:
-        """Return the DCS-procured timeline groups sent to the executor.
-
-        POST /pac/audit returns the external executor result. The audit trail
-        used as input remains observable at the ORCE test seam and must not be
-        inferred from that result response.
-        """
+    def evidence_groups(
+        cls, context, evidence_scope: str, channel: str = "audit"
+    ) -> list[dict]:
+        """Return the DCS-procured timeline groups sent to the executor."""
         observations = cls.observations(context, channel)
         assert observations, f"Expected an ORCE {channel} observation"
         observation = observations[-1]
-        request = observation.get("request", observation) if isinstance(observation, dict) else {}
+        request = (
+            observation.get("request", observation)
+            if isinstance(observation, dict)
+            else {}
+        )
         evidence = request.get("evidence") or {}
         groups = evidence.get(evidence_scope) or []
         assert isinstance(groups, list), (
-            f"Expected {evidence_scope!r} evidence groups in the ORCE request, got {groups!r}"
+            f"Expected {evidence_scope!r} evidence groups in the ORCE request, "
+            f"got {groups!r}"
         )
         return [group for group in groups if isinstance(group, dict)]
 

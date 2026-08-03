@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/piprate/json-gold/ld"
@@ -18,7 +19,7 @@ const (
 // declares; the historical default applies until the hub anchors are
 // installed.
 func dcsNamespace() string {
-	if iri, ok := canonicalOntologyIRIs["dcs"]; ok && iri != "" {
+	if iri, ok := currentCanonicalOntologyIRIs()["dcs"]; ok && iri != "" {
 		return iri
 	}
 	return defaultDCSOntologyIRI
@@ -220,6 +221,7 @@ func auditExpandedODRLPolicies(ctx context.Context, root map[string]any, rules [
 		return nil, nil
 	}
 	fieldIndex := expandedODRLFieldIndex(root)
+	applyDeclaredUnits(fieldIndex, rules)
 	findings := []PolicyFinding{}
 	for _, rule := range rules {
 		ruleFindings, err := auditExpandedODRLRule(ctx, root, rule, fieldIndex)
@@ -239,12 +241,8 @@ func auditExpandedODRLRule(ctx context.Context, _ map[string]any, rule map[strin
 	policyType := expandedTypeLocalName(rule)
 	isProhibition := policyType == "Prohibition"
 	isPermission := policyType == "Permission"
-	severity := "error"
-	if isPermission {
-		severity = "info"
-	}
 
-	findings, err := auditConstraintBearingNode(ctx, ruleID, rule, fieldIndex, isProhibition, isPermission, severity)
+	findings, err := auditConstraintBearingNode(ctx, ruleID, rule, fieldIndex, isProhibition, isPermission)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +262,7 @@ func auditExpandedODRLRule(ctx context.Context, _ map[string]any, rule map[strin
 // data-field constraint fails the node. isProhibition/isPermission set the
 // violation semantics (a prohibition is violated when satisfied; an obligation
 // when not); a duty is audited as an obligation.
-func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[string]any, fieldIndex map[string]odrlFieldInfo, isProhibition, isPermission bool, severity string) ([]PolicyFinding, error) {
+func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[string]any, fieldIndex map[string]odrlFieldInfo, isProhibition, isPermission bool) ([]PolicyFinding, error) {
 	findings := []PolicyFinding{}
 	for _, rawConstraint := range expandedValues(node, odrlIRI+"constraint") {
 		constraint, ok := rawConstraint.(map[string]any)
@@ -272,26 +270,39 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 			continue
 		}
 
-		// A logical constraint (odrl:and/or/xone/andSequence) is a tree of
-		// nested constraints — evaluate it recursively rather than as an atomic
-		// leaf. When its outcome depends on use-time context it is deferred.
-		if logicalOp, _, isLogical := constraintLogical(constraint); isLogical {
+		// A logical constraint (odrl:and/or/xone) is a tree of nested
+		// constraints — evaluate it recursively rather than as an atomic leaf.
+		// When its outcome depends on use-time context it is deferred.
+		// odrl:andSequence additionally requires an order this audit cannot
+		// observe, so it is audited separately and never called satisfied.
+		if logicalOp, children, isLogical := constraintLogical(constraint); isLogical {
+			if logicalOp == odrlAndSequence {
+				finding, err := auditOrderedConjunction(ctx, ruleID, children, fieldIndex, isProhibition, isPermission)
+				if err != nil {
+					return nil, err
+				}
+				findings = append(findings, finding)
+				continue
+			}
 			satisfied, resolvable, err := evaluateConstraintNode(ctx, constraint, fieldIndex)
 			if err != nil {
 				return nil, fmt.Errorf("evaluate ODRL policy %q logical constraint: %w", ruleID, err)
 			}
 			if !resolvable {
-				findings = append(findings, contractFinding(ruleID, ruleID, "info", fmt.Sprintf("ODRL policy %q %s-constraint is enforced at use-time", ruleID, logicalOp), odrlIRI+logicalOp, ""))
+				findings = append(findings, contractFinding(ruleID, ruleID, SeverityDeferred, fmt.Sprintf("ODRL policy %q %s-constraint is enforced at use-time", ruleID, logicalOp), odrlIRI+logicalOp, ""))
 				continue
 			}
 			violated := (isProhibition && satisfied) || (!isProhibition && !isPermission && !satisfied)
-			sev := "info"
-			msg := fmt.Sprintf("ODRL policy %q logical (%s) constraint satisfied", ruleID, logicalOp)
-			if violated {
-				sev = severity
-				msg = fmt.Sprintf("ODRL policy %q logical (%s) constraint violated", ruleID, logicalOp)
+			switch {
+			case violated:
+				findings = append(findings, contractFinding(ruleID, ruleID, SeverityError, fmt.Sprintf("ODRL policy %q logical (%s) constraint violated", ruleID, logicalOp), odrlIRI+logicalOp, ""))
+			case satisfied:
+				findings = append(findings, contractFinding(ruleID, ruleID, SeveritySatisfied, fmt.Sprintf("ODRL policy %q logical (%s) constraint satisfied", ruleID, logicalOp), odrlIRI+logicalOp, ""))
+			case isPermission:
+				findings = append(findings, contractFinding(ruleID, ruleID, SeverityDeferred, fmt.Sprintf("ODRL policy %q logical (%s) constraint does not hold, so the permission is not exercisable", ruleID, logicalOp), odrlIRI+logicalOp, ""))
+			default:
+				findings = append(findings, contractFinding(ruleID, ruleID, SeveritySatisfied, fmt.Sprintf("ODRL policy %q is not triggered: its logical (%s) constraint does not hold", ruleID, logicalOp), odrlIRI+logicalOp, ""))
 			}
-			findings = append(findings, contractFinding(ruleID, ruleID, sev, msg, odrlIRI+logicalOp, ""))
 			continue
 		}
 
@@ -313,11 +324,33 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 		}
 		rightOperand := resolveRightOperand(constraint, operator, fieldIndex)
 
+		// odrl:unit denominates the boundary, but a dcs:ContractField carries a
+		// bare value with no unit of its own, so nothing here can confirm the
+		// two quantities are commensurable. Record the gap rather than let the
+		// unit imply a check that does not happen.
+		//
+		// Only an unagreed negotiated unit is a warning: the author can close it
+		// by agreeing the value, and ValidateContractClosed refuses to seal
+		// until they do. That a compared value carries no unit of its own is a
+		// property of every ContractField, not of this contract, so it is
+		// deferred — a warning there makes the workflow gate REVIEW every
+		// contract that denominates a boundary at all, which is every correct
+		// use of odrl:unit.
+		if unit := resolveConstraintUnit(constraint, fieldIndex); unit.token != "" {
+			unitSeverity := SeverityDeferred
+			if unit.fieldID != "" && !unit.agreed {
+				unitSeverity = SeverityWarning
+			}
+			findings = append(findings, contractFinding(ruleID, ruleID, unitSeverity,
+				unitUncheckedMessage(ruleID, unit), operandID, odrlIRI+"unit"))
+		}
+
 		// ODRL context operands (spatial, dateTime, purpose, …) are evaluated
 		// at use-time by the execution environment against the access context
-		// it reports; the contract audit only records that they apply.
+		// it reports; the contract audit only records that they apply, and
+		// ADR-33 puts the verdict with the target system that observes them.
 		if isODRLContextOperand(operandID) {
-			finding := contractFinding(ruleID, ruleID, "info", fmt.Sprintf("ODRL policy %q constraint on %s is enforced at use-time", ruleID, shaclLocalName(operandID)), operandID, "")
+			finding := contractFinding(ruleID, ruleID, SeverityDeferred, fmt.Sprintf("ODRL policy %q constraint on %s is enforced at use-time", ruleID, shaclLocalName(operandID)), operandID, "")
 			applyODRLPolicyDetails(&finding, operandID, operator, nil, false, rightOperand)
 			findings = append(findings, finding)
 			continue
@@ -325,21 +358,29 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 
 		fieldInfo, ok := fieldIndex[operandID]
 		if !ok {
-			finding := contractFinding(ruleID, ruleID, "error", fmt.Sprintf("ODRL policy %q references nonexistent contract field %q", ruleID, operandID), operandID, "dcs:ContractField")
+			finding := contractFinding(ruleID, ruleID, SeverityError, fmt.Sprintf("ODRL policy %q references nonexistent contract field %q", ruleID, operandID), operandID, "dcs:ContractField")
 			applyODRLPolicyDetails(&finding, operandID, operator, nil, false, rightOperand)
 			findings = append(findings, finding)
+			continue
+		}
+		if len(fieldInfo.units) > 1 {
+			findings = append(findings, contractFinding(ruleID, ruleID, SeverityError,
+				fmt.Sprintf("ODRL policy %q is not evaluated: field %q is bounded in more than one unit (%s), and this audit has no conversion between them", ruleID, operandID, strings.Join(localNames(fieldInfo.units), ", ")),
+				operandID, odrlIRI+"unit"))
 			continue
 		}
 		actualValue, hasValue := fieldInfo.value, fieldInfo.hasValue
 
 		if !hasValue {
 			if isProhibition || isPermission {
-				finding := contractFinding(ruleID, ruleID, "info", fmt.Sprintf("ODRL policy %q: value not present", ruleID), operandID, "")
+				// Nothing to compare the boundary against, so this audit reaches
+				// no verdict on whether the rule is triggered.
+				finding := contractFinding(ruleID, ruleID, SeverityDeferred, fmt.Sprintf("ODRL policy %q: value not present", ruleID), operandID, "")
 				applyODRLPolicyDetails(&finding, operandID, operator, nil, false, rightOperand)
 				findings = append(findings, finding)
 				continue
 			}
-			finding := contractFinding(ruleID, ruleID, severity, fmt.Sprintf("ODRL policy %q: required value not provided", ruleID), operandID, "")
+			finding := contractFinding(ruleID, ruleID, SeverityError, fmt.Sprintf("ODRL policy %q: required value not provided", ruleID), operandID, "")
 			applyODRLPolicyDetails(&finding, operandID, operator, nil, false, rightOperand)
 			findings = append(findings, finding)
 			continue
@@ -350,17 +391,173 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 			return nil, fmt.Errorf("evaluate ODRL policy %q: %w", ruleID, err)
 		}
 		violated := (isProhibition && satisfied) || (!isProhibition && !isPermission && !satisfied)
-		if violated {
-			finding := contractFinding(ruleID, ruleID, severity, fmt.Sprintf("ODRL policy %q violated: value %v does not satisfy %s", ruleID, actualValue, operator), operandID, "")
-			applyODRLPolicyDetails(&finding, operandID, operator, actualValue, true, rightOperand)
-			findings = append(findings, finding)
-			continue
+		var finding PolicyFinding
+		switch {
+		case violated:
+			finding = contractFinding(ruleID, ruleID, SeverityError, fmt.Sprintf("ODRL policy %q violated: value %v does not satisfy %s", ruleID, actualValue, operator), operandID, "")
+		case satisfied:
+			finding = contractFinding(ruleID, ruleID, SeveritySatisfied, fmt.Sprintf("ODRL policy %q satisfied", ruleID), operandID, "")
+		case isPermission:
+			finding = contractFinding(ruleID, ruleID, SeverityDeferred, fmt.Sprintf("ODRL policy %q constraint does not hold, so the permission is not exercisable", ruleID), operandID, "")
+		default:
+			finding = contractFinding(ruleID, ruleID, SeveritySatisfied, fmt.Sprintf("ODRL policy %q is not triggered: value %v does not satisfy %s", ruleID, actualValue, operator), operandID, "")
 		}
-		finding := contractFinding(ruleID, ruleID, "info", fmt.Sprintf("ODRL policy %q satisfied", ruleID), operandID, "")
 		applyODRLPolicyDetails(&finding, operandID, operator, actualValue, true, rightOperand)
 		findings = append(findings, finding)
 	}
 	return findings, nil
+}
+
+// auditOrderedConjunction audits an odrl:andSequence (ODRL IM §2.6): its
+// operands must all be satisfied, and satisfied in the order declared. A
+// contract document records no order of events, so the ordering half is not
+// checkable here and the sequence is never reported as satisfied. An operand
+// that definitely fails is still decisive: no ordering rescues it.
+func auditOrderedConjunction(ctx context.Context, ruleID string, children []map[string]any, fieldIndex map[string]odrlFieldInfo, isProhibition, isPermission bool) (PolicyFinding, error) {
+	for _, child := range children {
+		satisfied, resolvable, err := evaluateConstraintNode(ctx, child, fieldIndex)
+		if err != nil {
+			return PolicyFinding{}, fmt.Errorf("evaluate ODRL policy %q andSequence constraint: %w", ruleID, err)
+		}
+		if !resolvable || satisfied {
+			continue
+		}
+		if isPermission {
+			return contractFinding(ruleID, ruleID, SeverityDeferred,
+				fmt.Sprintf("ODRL policy %q ordered (andSequence) constraint does not hold: an operand is not satisfied, so the permission is not exercisable", ruleID),
+				odrlIRI+odrlAndSequence, ""), nil
+		}
+		if isProhibition {
+			return contractFinding(ruleID, ruleID, SeveritySatisfied,
+				fmt.Sprintf("ODRL policy %q is not triggered: an operand of its ordered (andSequence) constraint is not satisfied", ruleID),
+				odrlIRI+odrlAndSequence, ""), nil
+		}
+		return contractFinding(ruleID, ruleID, SeverityError,
+			fmt.Sprintf("ODRL policy %q ordered (andSequence) constraint violated: an operand is not satisfied, so no ordering of the operands satisfies it", ruleID),
+			odrlIRI+odrlAndSequence, ""), nil
+	}
+	return contractFinding(ruleID, ruleID, SeverityWarning,
+		fmt.Sprintf("ODRL policy %q ordered (andSequence) constraint is not evaluated: its operands are checked individually, but the order they must hold in is not, so this audit reaches no verdict on it", ruleID),
+		odrlIRI+odrlAndSequence, ""), nil
+}
+
+// applyDeclaredUnits records, per contract field, the distinct odrl:unit IRIs
+// the document's constraints denominate that field's boundaries in. A field
+// bounded in two units at once cannot be compared against either boundary.
+func applyDeclaredUnits(fieldIndex map[string]odrlFieldInfo, rules []map[string]any) {
+	var walkConstraint func(constraint map[string]any)
+	walkConstraint = func(constraint map[string]any) {
+		if _, children, isLogical := constraintLogical(constraint); isLogical {
+			for _, child := range children {
+				walkConstraint(child)
+			}
+			return
+		}
+		unit := resolveConstraintUnit(constraint, fieldIndex)
+		if unit.token == "" {
+			return
+		}
+		leftOperand, ok := expandedFirst(constraint, odrlIRI+"leftOperand")
+		if !ok {
+			return
+		}
+		operandID, _ := leftOperand["@id"].(string)
+		info, known := fieldIndex[operandID]
+		if !known || slices.Contains(info.units, unit.token) {
+			return
+		}
+		info.units = append(info.units, unit.token)
+		fieldIndex[operandID] = info
+	}
+	var walkNode func(node map[string]any)
+	walkNode = func(node map[string]any) {
+		for _, raw := range expandedValues(node, odrlIRI+"constraint") {
+			if constraint, ok := raw.(map[string]any); ok {
+				walkConstraint(constraint)
+			}
+		}
+		for _, duty := range expandedNodes(node, odrlIRI+"duty") {
+			walkNode(duty)
+		}
+		for _, consequence := range expandedNodes(node, odrlIRI+"consequence") {
+			walkNode(consequence)
+		}
+	}
+	for _, rule := range rules {
+		walkNode(rule)
+	}
+}
+
+// odrlUnit is a constraint's resolved odrl:unit.
+type odrlUnit struct {
+	// token identifies the unit for the "are these the same unit?" test: the
+	// declared IRI of a fixed unit, the agreed value of a negotiated one, and
+	// the field @id while that field is unfilled — so constraints naming the
+	// same unagreed field stay one unit, whichever unit it turns out to be.
+	//
+	// A dcs:ContractField holds a literal, so a negotiated unit's agreed value
+	// is a notation ("EUR"), never the concept IRI a fixed unit names. The two
+	// therefore never compare equal, and must not: mapping one to the other
+	// would be guessing which scheme the notation came from.
+	token string
+	// fieldID is the contract field a negotiated unit names, empty for a fixed
+	// unit; label is that field's label and agreed reports whether it is filled.
+	fieldID string
+	label   string
+	agreed  bool
+}
+
+// resolveConstraintUnit returns the unit a constraint denominates its boundary
+// in (ODRL IM §2.5), zero when it declares none. A unit naming a declared
+// contract field is negotiated — the parties agree it the way they agree a
+// right-operand boundary — and resolves to that field's filled value, mirroring
+// resolveRightOperand.
+func resolveConstraintUnit(constraint map[string]any, fieldIndex map[string]odrlFieldInfo) odrlUnit {
+	for _, raw := range expandedValues(constraint, odrlIRI+"unit") {
+		id := expandedID(raw)
+		if id == "" {
+			if literal, ok := expandedLiteral(raw).(string); ok && literal != "" {
+				return odrlUnit{token: literal}
+			}
+			continue
+		}
+		info, negotiated := fieldIndex[id]
+		if !negotiated {
+			return odrlUnit{token: id}
+		}
+		if info.hasValue {
+			return odrlUnit{token: fmt.Sprint(info.value), fieldID: id, label: info.label, agreed: true}
+		}
+		return odrlUnit{token: id, fieldID: id, label: info.label}
+	}
+	return odrlUnit{}
+}
+
+// unitUncheckedMessage states what the audit did not check about a boundary's
+// unit. A dcs:ContractField carries a bare value with no unit of its own, so a
+// declared unit is never compared against anything. A negotiated unit adds a
+// second gap while unagreed — nothing yet says what the boundary is in — which
+// ValidateContractClosed refuses to seal, so the audit states it and moves on.
+func unitUncheckedMessage(ruleID string, unit odrlUnit) string {
+	if unit.fieldID == "" {
+		return fmt.Sprintf("ODRL policy %q denominates its boundary in %s, but the compared value declares no unit, so this audit does not verify the two are the same quantity", ruleID, shaclLocalName(unit.token))
+	}
+	name := unit.label
+	if name == "" {
+		name = shaclLocalName(unit.fieldID)
+	}
+	if !unit.agreed {
+		return fmt.Sprintf("ODRL policy %q denominates its boundary in the negotiated unit %q, which has no agreed value, so this audit cannot tell what the boundary is measured in", ruleID, name)
+	}
+	return fmt.Sprintf("ODRL policy %q denominates its boundary in the negotiated unit %q, agreed as %s, but the compared value declares no unit, so this audit does not verify the two are the same quantity", ruleID, name, unit.token)
+}
+
+func localNames(iris []string) []string {
+	names := make([]string, 0, len(iris))
+	for _, iri := range iris {
+		names = append(names, shaclLocalName(iri))
+	}
+	return names
 }
 
 // auditExpandedODRLDutyNodes audits a permission's duties (ODRL IM §2.5). Each
@@ -374,10 +571,10 @@ func auditExpandedODRLDutyNodes(ctx context.Context, ownerID string, duties []ma
 		if dutyID == "" {
 			dutyID = ownerID
 		}
-		findings = append(findings, contractFinding(ownerID, ownerID, "info",
+		findings = append(findings, contractFinding(ownerID, ownerID, SeverityDeferred,
 			fmt.Sprintf("ODRL policy %q duty (%s) is fulfilled at use-time", ownerID, dutyActionLabel(duty)), odrlIRI+"duty", ""))
 
-		constraintFindings, err := auditConstraintBearingNode(ctx, dutyID, duty, fieldIndex, false, false, "error")
+		constraintFindings, err := auditConstraintBearingNode(ctx, dutyID, duty, fieldIndex, false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -511,9 +708,13 @@ func mapAny(values []any, fn func(any) any) []any {
 	return out
 }
 
+// odrlAndSequence is the ODRL ordered conjunction: its operands must all be
+// satisfied, and satisfied in the order the list declares.
+const odrlAndSequence = "andSequence"
+
 // odrlLogicalOperators are the ODRL LogicalConstraint operators (IM §2.6):
 // each takes a list of operand constraints, atomic or logical (recursive).
-var odrlLogicalOperators = []string{"and", "or", "xone", "andSequence"}
+var odrlLogicalOperators = []string{"and", "or", "xone", odrlAndSequence}
 
 // constraintLogical reports whether a constraint node is a LogicalConstraint,
 // returning its operator local name and child constraint nodes. The children
@@ -577,7 +778,17 @@ func evaluateConstraintNode(ctx context.Context, node map[string]any, fieldIndex
 				}
 			}
 			return satisfiedCount == 1, true, nil
-		default: // and, andSequence
+		case odrlAndSequence:
+			// Ordered conjunction: a failing operand is decisive under any
+			// order, but operands that all hold say nothing about the order
+			// they hold in, which nothing here observes — so no verdict.
+			for _, r := range results {
+				if !r {
+					return false, true, nil
+				}
+			}
+			return false, false, nil
+		default: // and
 			for _, r := range results {
 				if !r {
 					return false, true, nil
@@ -603,6 +814,9 @@ func evaluateConstraintNode(ctx context.Context, node map[string]any, fieldIndex
 	info, ok := fieldIndex[operandID]
 	if !ok || !info.hasValue {
 		return false, false, nil // no value yet — deferred
+	}
+	if len(info.units) > 1 {
+		return false, false, nil // bounded in two units at once — not comparable
 	}
 	satisfied, err = evaluateODRLConstraintOPA(ctx, operator, info.value, resolveRightOperand(node, operator, fieldIndex))
 	return satisfied, true, err

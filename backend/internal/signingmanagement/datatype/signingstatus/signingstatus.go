@@ -28,7 +28,7 @@ func NewSigningStatus(s string) (SigningStatus, error) {
 	return ts, nil
 }
 
-// IsValid checks if the SigningStatus is a valid role
+// IsValid reports whether the value is one of the declared SigningStatus values.
 func (s SigningStatus) IsValid() bool {
 	upper := SigningStatus(strings.ToUpper(string(s)))
 	return validValues[upper]

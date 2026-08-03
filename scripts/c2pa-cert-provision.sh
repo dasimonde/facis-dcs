@@ -9,7 +9,14 @@
 # it stays a stable trust anchor across runs; the leaf is re-issued every run so
 # it always matches the current token key (surviving key rotation).
 #
-# Usage: c2pa-cert-provision.sh <token-dir> <token-label> <pin> <x5chain-out> [module-path]
+# The same chain publishes the key that signs this deployment's status list
+# (ADR-34). A verifier holds a status list to the same binding as a credential —
+# the leaf must NAME the issuer the token claims to come from — so the leaf
+# carries the identifiers this deployment answers to as subjectAltName entries.
+# Without them a correctly-signed list is refused as coming from an unidentified
+# issuer, which reads to a caller exactly like a revoked contract.
+#
+# Usage: c2pa-cert-provision.sh <token-dir> <token-label> <pin> <x5chain-out> [module-path] [crl-url] [issuer-url] [issuer-did]
 set -euo pipefail
 
 TOKEN_DIR="$1"
@@ -18,6 +25,10 @@ PIN="$3"
 X5CHAIN_OUT="$4"
 MODULE="${5:-/usr/lib/softhsm/libsofthsm2.so}"
 CRL_URL="${6:-http://localhost:8991/crl/dcs-c2pa.crl}"
+# The origin this deployment's status list is served under — the `iss` its token
+# names — and this deployment's did:web identifier.
+ISSUER_URL="${7:-}"
+ISSUER_DID="${8:-}"
 
 KEY_LABEL="${KEY_LABEL:-dcs-c2pa}"
 CA_CN="DCS Dev C2PA CA"
@@ -59,6 +70,24 @@ fi
 openssl ecparam -name prime256v1 -genkey -noout -out "$workdir/tmp-leaf.key"
 openssl req -new -key "$workdir/tmp-leaf.key" -subj "/O=$CERT_ORG/CN=$LEAF_CN" -out "$workdir/leaf.csr"
 
+# One SAN entry per identifier a verifier may hold this deployment to: the
+# status list's `iss` (an https/http origin), the did:web identifier its
+# credentials name as issuer, and the bare hostname for verifiers that match on
+# DNS alone. leafIdentifiesIssuer (backend/internal/auth/oid4vp/sdjwt/keys.go)
+# accepts any one of the three.
+SAN=""
+if [ -n "$ISSUER_URL" ]; then
+  SAN="URI:$ISSUER_URL"
+  hostname="${ISSUER_URL#*://}"
+  hostname="${hostname%%/*}"
+  hostname="${hostname%%:*}"
+  SAN="$SAN,DNS:$hostname"
+fi
+if [ -n "$ISSUER_DID" ]; then
+  [ -n "$SAN" ] && SAN="$SAN,"
+  SAN="${SAN}URI:$ISSUER_DID"
+fi
+
 cat > "$workdir/leaf.ext" <<EOF
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature
@@ -67,6 +96,9 @@ subjectKeyIdentifier=hash
 authorityKeyIdentifier=keyid,issuer
 crlDistributionPoints=URI:$CRL_URL
 EOF
+if [ -n "$SAN" ]; then
+  echo "subjectAltName=$SAN" >> "$workdir/leaf.ext"
+fi
 
 openssl x509 -req \
   -in "$workdir/leaf.csr" \
@@ -80,4 +112,4 @@ openssl x509 -req \
   -out "$workdir/leaf.crt"
 
 cat "$workdir/leaf.crt" "$CA_CRT" > "$X5CHAIN_OUT"
-echo "C2PA x5chain written to $X5CHAIN_OUT (leaf pubkey = token key '$KEY_LABEL')."
+echo "C2PA x5chain written to $X5CHAIN_OUT (leaf pubkey = token key '$KEY_LABEL', SAN: ${SAN:-none})."

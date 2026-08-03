@@ -14,6 +14,14 @@ Feature: Contract Creation
     And metadata is auto-filled
     And the creation is logged and traceable to the template version
 
+  @clean_db @REQ-contract-readonly-event-admin-diff-regressions-AC2 @DCS-FR-UC-09-2 @UC-09-02
+  Scenario: Successful contract creation records an effective audit timestamp
+    Given I am authenticated with roles: "Contract Creator"
+    And template "Audit Timestamp Template" is approved and available
+    When I create a contract from template "Audit Timestamp Template"
+    Then a draft contract is generated
+    And the CREATE_CONTRACT audit event for the created contract has a non-zero RFC3339 occurred_at timestamp
+
   @clean_db
   Scenario: Created contract renders in both machine-readable and human-readable views
     Given I am authenticated with roles: "Contract Creator"

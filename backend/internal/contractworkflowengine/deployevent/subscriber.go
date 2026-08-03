@@ -15,13 +15,26 @@ import (
 
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/command"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 )
 
 // Subscriber listens for signature-applied events and dispatches an
 // automatic deployment for the signed contract.
 type Subscriber struct {
-	Deployer *command.Deployer
+	Deployer ContractDeployer
+	Gate     *workflowgate.Coordinator
+	// LocalPeer is this instance's own did:web, passed on so the multi-signer
+	// gate reads the same on this path as on the manual endpoint: without it
+	// every declared field looks local, and a federated contract's counterparty
+	// slot is demanded from a database that will never hold it.
+	LocalPeer string
+}
+
+// ContractDeployer is the deployment implementation this subscriber shares with
+// the manual POST /contract/deploy endpoint (command.Deployer).
+type ContractDeployer interface {
+	Handle(ctx context.Context, cmd command.DeployCmd) (*command.DeployResult, error)
 }
 
 // Start registers the event handler with the NATS sub-client and begins
@@ -60,9 +73,20 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 	if envelope.DID == "" {
 		return nil
 	}
+	if s.Gate != nil {
+		if _, _, err := s.Gate.Execute(ctx, workflowgate.Input{
+			Gate: "deployment", ContractDID: envelope.DID,
+			Requester:    "system:auto-deploy",
+			Continuation: map[string]any{"requested_by": "system:auto-deploy"},
+		}); err != nil {
+			return err
+		}
+	}
+
 	_, err := s.Deployer.Handle(ctx, command.DeployCmd{
 		DID:         envelope.DID,
 		RequestedBy: "system:auto-deploy",
+		LocalPeer:   s.LocalPeer,
 	})
 	return err
 }

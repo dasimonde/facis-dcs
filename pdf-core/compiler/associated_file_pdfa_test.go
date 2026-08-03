@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"regexp"
 	"testing"
 )
@@ -13,7 +12,7 @@ import (
 // rejects it. Without the VC the catalog /AF lists two files (C2PA + JSON-LD);
 // with it, three.
 func TestVCAttachmentListedInCatalogAF(t *testing.T) {
-	ctx := WithSigner(context.Background(), NewCapturingSigner())
+	ctx := WithSigner(testChainContext(), NewCapturingSigner())
 	fresh, err := CompilePDF(ctx, []byte(filledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)
@@ -22,12 +21,11 @@ func TestVCAttachmentListedInCatalogAF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	off := findLastObjectHeaderOffset(upd, 1)
-	if off < 0 {
+	start, end, ok := lastObjectBody(upd, 1)
+	if !ok {
 		t.Fatal("superseded catalog (obj 1) not found in updated PDF")
 	}
-	end := bytes.Index(upd[off:], []byte("\nendobj"))
-	cat := upd[off : off+end]
+	cat := upd[start:end]
 	m := regexp.MustCompile(`/AF \[([^\]]*)\]`).FindSubmatch(cat)
 	if m == nil {
 		t.Fatal("no /AF array in the superseded catalog")

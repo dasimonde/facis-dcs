@@ -18,13 +18,22 @@ export function useDocumentExport() {
       const blob = await fetchBlob()
       downloadBlob(blob, filename)
     } catch (err: unknown) {
-      errorStore.add(`Export failed: ${await exportErrorMessage(err)}`)
+      const message = await exportErrorMessage(err)
+      errorStore.add(isErasedContentMessage(message) ? ERASED_CONTENT_MESSAGE : `Export failed: ${message}`)
     } finally {
       exporting.value = false
     }
   }
 
   return { download, exporting }
+}
+
+/** Shown when the server refuses because the contract's encryption keys were shredded (DCS-NFR-SEC-13). */
+export const ERASED_CONTENT_MESSAGE = 'Content erased — encryption keys destroyed'
+
+/** Matches the backend's ShreddedError message on export/verify responses. */
+export function isErasedContentMessage(message: string): boolean {
+  return /has been shredded|content is erased/i.test(message)
 }
 
 async function exportErrorMessage(err: unknown): Promise<string> {

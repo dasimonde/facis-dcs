@@ -2,11 +2,6 @@
 // strings, used as the EventType() of templaterepository/event structs.
 package eventtype
 
-import (
-	"fmt"
-	"strings"
-)
-
 type EventType string
 
 const (
@@ -26,37 +21,6 @@ const (
 	Publish      EventType = "PUBLISH_CONTRACT_TEMPLATE"
 )
 
-var validStates = map[EventType]bool{
-	Create:       true,
-	Submit:       true,
-	Approve:      true,
-	Reject:       true,
-	Verify:       true,
-	Update:       true,
-	RetrieveAll:  true,
-	RetrieveByID: true,
-	Search:       true,
-	Archive:      true,
-	Register:     true,
-	Audit:        true,
-	Publish:      true,
-}
-
-func NewEventType(s string) (EventType, error) {
-	ts := EventType(strings.ToUpper(s))
-	if !ts.IsValid() {
-		return "", fmt.Errorf("invalid event type: %s", s)
-	}
-	return ts, nil
-}
-
-// IsValid checks if the EventType is a valid role
-func (s EventType) IsValid() bool {
-	upper := EventType(strings.ToUpper(string(s)))
-	return validStates[upper]
-}
-
-// String returns the string representation of the EventType
 func (s EventType) String() string {
 	return string(s)
 }

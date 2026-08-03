@@ -84,18 +84,8 @@ func NewJSON(v any) (JSON, error) {
 
 	bytes, err := json.Marshal(v)
 	if err != nil {
-		// Rückgabe eines detaillierteren Fehlers, falls das Marshalling fehlschlägt
 		return nil, fmt.Errorf("failed to marshal value into JSON: %w", err)
 	}
 
 	return JSON(bytes), nil
-}
-
-// MustNewJSON creates a JSON type and panics if an error occurs
-func MustNewJSON(v any) JSON {
-	j, err := NewJSON(v)
-	if err != nil {
-		panic(err)
-	}
-	return j
 }

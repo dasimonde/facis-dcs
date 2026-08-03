@@ -137,7 +137,7 @@ defineExpose<DialogExpose>({ reveal })
       @close="onCancel"
     >
       <div class="modal-box flex w-full max-w-md flex-col items-center gap-4 text-center">
-        <h3 :id="dialogTitleId" class="text-lg font-bold">Sign with your EUDI Wallet</h3>
+        <h3 :id="dialogTitleId" class="text-lg font-bold">Sign with your wallet</h3>
 
         <div v-if="phase === 'starting'" class="flex flex-col items-center gap-3 py-4" role="status" aria-live="polite">
           <span class="loading loading-lg loading-spinner" aria-hidden="true" />

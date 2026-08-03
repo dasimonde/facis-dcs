@@ -49,7 +49,7 @@ const constraintLabel = computed(() => {
     >
       {{ label }}
     </span>
-    <span class="text-base-content/50">{{ param.isRequired ? 'required' : 'optional' }}</span>
-    <span v-if="constraintLabel" class="text-base-content/40">{{ constraintLabel }}</span>
+    <span class="text-base-content/80">{{ param.isRequired ? 'required' : 'optional' }}</span>
+    <span v-if="constraintLabel" class="text-base-content/70">{{ constraintLabel }}</span>
   </li>
 </template>

@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import DataObjectNode from '@template-repository/components/data-objects/DataObjectNode.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { loadShapeLibraries, type ShapeClass } from '@template-repository/utils/shape-library'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 /**

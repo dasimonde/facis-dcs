@@ -15,13 +15,6 @@ func TransactionTimeout() time.Duration {
 	return 1 * time.Minute
 }
 
-// SystemToken is the in-cluster service credential the background PDF
-// regenerator presents to the internal signing primitives (it runs on NATS
-// events with no user JWT). Empty when unset — no system caller is accepted.
-func SystemToken() string {
-	return os.Getenv("DCS_SYSTEM_TOKEN")
-}
-
 func HTTPClientTimeout() time.Duration {
 	return 1 * time.Minute
 }
@@ -82,6 +75,24 @@ func LoginLockoutDuration() time.Duration {
 // replication is deterministic within the test wait.
 func SyncFailCronJobTimeOut() time.Duration {
 	if v := os.Getenv("DCS_SYNC_FAIL_RETRY_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 5 * time.Minute
+}
+
+// PDFRegenerationRetryTimeOut is how often the background regenerator
+// re-attempts entities left without a stored PDF. Lifecycle events arrive over
+// NATS at-most-once and a regeneration that fails is not redelivered, so a
+// single transient pdf-core or IPFS failure otherwise leaves the artifact
+// missing permanently: the contract cannot be exported, and a cross-instance
+// contract cannot be shipped at all — the sync-fail scheduler keeps retrying a
+// ship that has nothing to send. This is that path's counterpart, so it shares
+// its cadence. DCS_PDF_REGENERATION_RETRY_INTERVAL (a Go duration, e.g. "10s")
+// overrides the default; BDD/e2e set it low.
+func PDFRegenerationRetryTimeOut() time.Duration {
+	if v := os.Getenv("DCS_PDF_REGENERATION_RETRY_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			return d
 		}

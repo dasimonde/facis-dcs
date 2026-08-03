@@ -2,16 +2,77 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 
 import jwt
 from jwt.algorithms import ECAlgorithm
 
 from dcs_wallet.credential import decode_jwt_payload, load_credential_sd_jwt
+from dcs_wallet.issuer import issue_access_credential
 from dcs_wallet.presentation import build_vp_token, load_jwk
+from dcs_wallet.status_list import FIXTURE_INDEX, RESERVED_INDEX, role_credential_index
 from dcs_wallet.sdjwt import KB_JWT_TYP, decode_disclosure, sd_hash, split_sd_jwt
 
 
 class PresentationTest(unittest.TestCase):
+    def _status_claim(self, presentation: str) -> dict:
+        issuer_jwt, _, _ = split_sd_jwt(presentation)
+        return decode_jwt_payload(issuer_jwt)["status"]["status_list"]
+
+    def _access_credential(self, *, organization: str, roles: list[str], nonce: str) -> str:
+        return issue_access_credential(
+            organization=organization,
+            roles=roles,
+            issuer_private=load_jwk("issuer-dev.jwk"),
+            wallet_private=load_jwk("wallet.jwk"),
+            status_index=role_credential_index(organization=organization, roles=roles),
+            nonce=nonce,
+        )
+
+    def test_access_credential_status_index_identifies_the_identity_not_the_ceremony(self) -> None:
+        first = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Signer"], nonce="ceremony-one"
+        )
+        second = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Signer"], nonce="ceremony-two"
+        )
+        self.assertEqual(self._status_claim(first)["idx"], self._status_claim(second)["idx"])
+
+    def test_a_different_identity_gets_a_different_bit(self) -> None:
+        signer = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Signer"], nonce="n"
+        )
+        approver = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Approver"], nonce="n"
+        )
+        other_org = self._access_credential(
+            organization="did:web:other:organization", roles=["Contract Signer"], nonce="n"
+        )
+        indices = {self._status_claim(c)["idx"] for c in (signer, approver, other_org)}
+        self.assertEqual(len(indices), 3)
+
+    def test_a_revoked_probe_organization_holds_a_reserved_bit(self) -> None:
+        # The scenario that revokes a login credential presents this
+        # organization; whatever roles it asks for, it must land on the bit
+        # reserved for it and on no other identity's.
+        organization = "BDD Revocation Probe Org"
+        for roles in (["Contract Signer"], ["Contract Manager", "Auditor"]):
+            self.assertEqual(
+                role_credential_index(organization=organization, roles=roles),
+                RESERVED_INDEX[organization],
+            )
+
+    def test_every_committed_credential_owns_its_own_bit(self) -> None:
+        self.assertEqual(len(set(FIXTURE_INDEX.values())), len(FIXTURE_INDEX))
+        credentials_dir = Path(__file__).resolve().parent.parent / "credentials"
+        for path in sorted(credentials_dir.glob("*.jwt")):
+            key = path.name.removesuffix(".jwt")
+            self.assertIn(key, FIXTURE_INDEX, f"{path.name} has no allocated status-list index")
+            issuer_jwt, _, _ = split_sd_jwt(path.read_text(encoding="utf-8").strip())
+            claim = decode_jwt_payload(issuer_jwt)["status"]["status_list"]
+            self.assertEqual(claim["idx"], FIXTURE_INDEX[key])
+            self.assertTrue(claim["uri"].endswith("/status-list/1"), claim["uri"])
+
     def test_generated_credential_contains_issuer_header_jwk_and_holder_cnf(self) -> None:
         issuer_jwt, _, _ = split_sd_jwt(load_credential_sd_jwt("johndoe"))
         header = jwt.get_unverified_header(issuer_jwt)

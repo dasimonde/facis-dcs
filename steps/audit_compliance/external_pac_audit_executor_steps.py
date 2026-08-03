@@ -17,7 +17,6 @@ from behave import given, then, when
 from steps.support.api_client import origin_url, pac_audit_url, pac_report_url
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
-from steps.support.services.orce_audit_control_service import OrceAuditControlService
 
 
 CONTRACT_VERSION = "facis-pac-audit-executor/v1"
@@ -27,6 +26,11 @@ REFERENCE_EXECUTOR = "facis-orce-reference"
 def _control_url(context) -> str:
     configured = os.getenv("BDD_ORCE_AUDIT_CONTROL_URL", "").strip()
     return configured.rstrip("/") if configured else f"{origin_url(context.base_url)}/orce/audit-executor/test"
+
+
+def _executor_url(context) -> str:
+    configured = os.getenv("BDD_ORCE_AUDIT_EXECUTOR_URL", "").strip()
+    return configured or f"{origin_url(context.base_url)}/orce/audit/run"
 
 
 def _control(context, path: str, payload: dict | None = None):
@@ -155,7 +159,9 @@ def step_direct_reference_request(context):
         "evidence": {"contracts": []},
     }
     context.orce_direct_request = request
-    context.requests_response = OrceAuditControlService.post_executor(context, request)
+    context.requests_response = requests.post(
+        _executor_url(context), json=request, timeout=context.http_timeout_seconds
+    )
 
 
 @then("the ORCE response satisfies the versioned audit executor contract")
@@ -338,7 +344,14 @@ def step_result_metadata(context):
     assert isinstance(findings, list), body
     for finding in findings:
         assert finding.get("rule_id"), finding
-        assert finding.get("result") in ("PASSED", "FAILED", "REVIEW"), finding
+        # NOT_EVALUATED is the fourth verdict (ADR-33): a rule carried into the
+        # audit that nobody reached a conclusion about.
+        assert finding.get("result") in (
+            "PASSED",
+            "FAILED",
+            "REVIEW",
+            "NOT_EVALUATED",
+        ), finding
         assert finding.get("reason") and finding.get("severity"), finding
         assert isinstance(finding.get("evidence_refs"), list), finding
     context.persisted_audit_id = body.get("audit_id")

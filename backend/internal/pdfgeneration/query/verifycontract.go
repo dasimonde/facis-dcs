@@ -10,7 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -21,12 +21,18 @@ type VerifyContractPdfQry struct {
 }
 
 type VerifyContractPdfHandler struct {
-	DB         *sqlx.DB
-	CRepo      cwedb.ContractRepo
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
-	VCIssuer   provenance.VCIssuer
-	IssuerDID  string
+	DB        *sqlx.DB
+	CRepo     cwedb.ContractRepo
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
+	VCIssuer  provenance.VCIssuer
+	IssuerDID string
+	// Credentials verifies the lifecycle credential embedded in the PDF against
+	// the key its issuer publishes for assertions.
+	Credentials *provenance.CredentialVerifier
+	// CredentialStatus resolves that credential's revocation entry against the
+	// signed status list it names.
+	CredentialStatus *provenance.CredentialStatusVerifier
 }
 
 func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContractPdfQry) (*pdfgen.PDFVerifyResult, error) {
@@ -88,11 +94,14 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 			}
 		}
 
-		r, err := h.IPFSClient.FetchFile(pdfState.IPFSCID)
-		if err != nil || len(r.Data) == 0 {
+		pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(qry.DID), pdfState.IPFSCID)
+		if artifactstore.IsTampered(err) {
+			return tamperedVerifyResult(currentC2PAState), nil
+		}
+		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch frozen signed contract PDF %s from IPFS for verify: %w", qry.DID, err)
 		}
-		return runVerify(ctx, r.Data, h.PDFCore, currentC2PAState)
+		return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
 	}
 
 	if pdfState.IPFSCID != "" && pdfState.C2PAState != currentC2PAState {
@@ -104,8 +113,11 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 			jsonldBytes = []byte(*contract.ContractData)
 		}
 
-		r, err := h.IPFSClient.FetchFile(pdfState.IPFSCID)
-		if err != nil || len(r.Data) == 0 {
+		pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(qry.DID), pdfState.IPFSCID)
+		if artifactstore.IsTampered(err) {
+			return tamperedVerifyResult(currentC2PAState), nil
+		}
+		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch cached contract PDF %s from IPFS for verify append: %w", qry.DID, err)
 		}
 
@@ -118,8 +130,8 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 			})
 		}
 
-		updatedPDF, err := appendAndCache(ctx, tx, qry.DID, contract.State, jsonldBytes, r.Data,
-			h.IPFSClient, h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
+		updatedPDF, err := appendAndCache(ctx, tx, qry.DID, contract.State, jsonldBytes, pdf,
+			h.Artifacts, artifactstore.ContractScope(qry.DID), h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
 		if err != nil {
 			return nil, fmt.Errorf("append contract C2PA assertion before verify for %s: %w", qry.DID, err)
 		}
@@ -127,17 +139,20 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 			return nil, fmt.Errorf("commit pre-verify append tx for contract %s: %w", qry.DID, err)
 		}
 
-		return runVerify(ctx, updatedPDF, h.PDFCore, currentC2PAState)
+		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
 	}
 
 	if latestCID == "" {
 		return nil, fmt.Errorf("no cached PDF for contract %s; call export first", qry.DID)
 	}
 
-	r, err := h.IPFSClient.FetchFile(latestCID)
-	if err != nil || len(r.Data) == 0 {
+	pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(qry.DID), latestCID)
+	if artifactstore.IsTampered(err) {
+		return tamperedVerifyResult(currentC2PAState), nil
+	}
+	if err != nil || len(pdf) == 0 {
 		return nil, fmt.Errorf("fetch contract PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
 
-	return runVerify(ctx, r.Data, h.PDFCore, currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
 }

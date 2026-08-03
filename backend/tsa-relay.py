@@ -6,9 +6,10 @@ backend/tsa-relay-test.sh for how those were generated under /tmp/local-tsa):
 
   * GET /tsa/:hash — backend's TSA_URL contract (backend/internal/base/tsa/
     tsa.go): builds an RFC3161 TSQ from the hash via openssl, returns a TSR.
-  * POST — pdf-core's PAdES TSA contract (DCS_PDF_CORE_TSA_URL): the request
-    body is a DER-encoded RFC3161 TimeStampReq (application/timestamp-query),
-    the response an application/timestamp-reply TSR (PAdES-B-T).
+  * POST — the standard RFC3161 contract external PAdES signers use (e.g.
+    pyhanko in the BDD signing harness): the request body is a DER-encoded
+    TimeStampReq (application/timestamp-query), the response an
+    application/timestamp-reply TSR (PAdES-B-T).
 
 Both avoid forwarding to a real https://freetsa.org/tsr.
 

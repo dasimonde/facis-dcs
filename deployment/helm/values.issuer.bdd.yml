@@ -1,0 +1,53 @@
+# The credential issuer for the kind BDD stack (tests/bdd Makefile,
+# tests/bdd/scripts/run_bdd_helm.sh). Layered on values.issuer-base.yml.
+#
+#   helm upgrade --install dcs-issuer deployment/helm/charts/orce \
+#     -f deployment/helm/values.issuer-base.yml \
+#     -f deployment/helm/values.issuer.bdd.yml
+#
+# Published at <origin>/issuer through the shared Traefik, the same shape
+# production is published under: the status list is
+# <origin>/issuer/status-list/1 and the DID is did:web:<host>:issuer. That is
+# the point of running it here — a signed status list behind a stripped path
+# prefix is exactly what broke in production, and it can only fail in CI if CI
+# serves the same shape.
+#
+# Both instances of the two-instance suite share this one issuer: it serves the
+# one status list every credential in the suite names, so a revocation is a
+# single bit both instances read, and both verify it against the same anchors.
+# Its own OpenID4VCI issuance (/offer) is trusted here too — trust.dev.json
+# grants did:web:localhost%3A18080:issuer login and peer, resolved from the
+# certificate chain it signs with — though the suite's own credentials are still
+# minted by testWallet rather than claimed from it.
+ingress:
+  enabled: true
+  className: traefik
+  # Traefik's counterpart to production's nginx rewrite-target: it strips
+  # /issuer before the request reaches Node-RED AND sets X-Forwarded-Prefix, so
+  # the flows rebuild the same public URL production's issuer does. Without the
+  # header the issuer would sign `sub` claims naming URLs the ingress does not
+  # route to it, and the verifier refuses a list whose sub is not the URI the
+  # credential names.
+  stripPrefix: /issuer
+  pathType: Prefix
+  hosts:
+    # One host rule on purpose. The served `sub` follows the Host header that
+    # arrived, and a credential names exactly one status list URI, so a second
+    # route to this release would be a second identity for the same list — and
+    # every credential reaching it by the other name would be refused. Both
+    # instances and the host-side test runner address it as this origin
+    # (BDD_PUBLIC_ORIGIN); the in-Pod sidecar forwards the same authority.
+    - host: localhost
+      path: /issuer
+
+extraEnv:
+  # Fallback for a proxy that routes the prefix but does not announce it.
+  # Traefik's stripPrefix does announce it; this keeps a direct in-cluster
+  # request (no ingress in front) from advertising URLs without the prefix.
+  - name: ISSUER_PATH_PREFIX
+    value: /issuer
+
+# Same reason as the dev stack: the anchors this suite verifies against are
+# committed, so the root cannot be one the issuer invents at boot.
+pkiRootCA:
+  devFixture: true

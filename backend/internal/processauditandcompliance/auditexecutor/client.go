@@ -45,7 +45,11 @@ type Executor struct {
 }
 
 type Finding struct {
-	RuleID       string   `json:"rule_id"`
+	RuleID string `json:"rule_id"`
+	// Result is the executor's verdict. NOT_EVALUATED is the fourth value
+	// ADR-33 requires: the rule was carried into the audit but nobody reached
+	// a verdict on it, which PASSED / FAILED / REVIEW cannot express without
+	// claiming a check that never ran.
 	Result       string   `json:"result"`
 	Reason       string   `json:"reason"`
 	Severity     string   `json:"severity,omitempty"`
@@ -181,7 +185,7 @@ func ValidateResponse(request Request, response Response) error {
 			return fmt.Errorf("audit executor finding %d is incomplete", index)
 		}
 		switch finding.Result {
-		case "PASSED", "FAILED", "REVIEW":
+		case "PASSED", "FAILED", "REVIEW", "NOT_EVALUATED":
 		default:
 			return fmt.Errorf("audit executor finding %d has invalid result", index)
 		}

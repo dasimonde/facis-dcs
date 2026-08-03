@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, useId, watch } from 'vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { ContractState } from '@/types/contract-state'
@@ -22,6 +22,9 @@ const targets = ref<ContractTarget[]>([])
 const selected = ref(props.contract.target_id ?? '')
 const saving = ref(false)
 const error = ref('')
+
+const selectedId = useId()
+const selectedLabelId = useId()
 
 // Terminal states aside, the designation stays editable while the contract is
 // not yet in force: a target can be corrected right up to signing, and after
@@ -47,7 +50,12 @@ const load = async () => {
   }
 }
 
-onMounted(load)
+// The registry read is scoped to the manager roles (design listContractTargets).
+// Every other role the contract routes admit reads the designation off the
+// contract itself, so fetching for them only paints a permission error.
+onMounted(() => {
+  if (editable.value) void load()
+})
 watch(
   () => props.contract.target_id,
   (id) => (selected.value = id ?? ''),
@@ -73,7 +81,7 @@ const designate = async () => {
 
 <template>
   <div data-testid="contract-target-picker" class="flex flex-col gap-2">
-    <h2 class="text-lg font-semibold">Deployment target</h2>
+    <h2 :id="selectedLabelId" class="text-lg font-semibold">Deployment target</h2>
     <p v-if="!contract.target_id" data-testid="contract-target-unset" class="text-sm opacity-70">
       No target system is set. The contract will not deploy when signing completes until one is chosen.
     </p>
@@ -83,7 +91,13 @@ const designate = async () => {
     </p>
 
     <div v-if="editable" class="flex flex-wrap items-center gap-2">
-      <select v-model="selected" data-testid="contract-target-select" class="select-bordered select select-sm">
+      <select
+        :id="selectedId"
+        v-model="selected"
+        data-testid="contract-target-select"
+        :aria-labelledby="selectedLabelId"
+        class="select-bordered select select-sm"
+      >
         <option value="">— none —</option>
         <option v-for="target in targets" :key="target.id" :value="target.id">{{ target.name }}</option>
       </select>

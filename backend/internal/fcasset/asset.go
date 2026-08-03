@@ -65,6 +65,20 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 			},
 		},
 		"id": input.SubjectIRI,
+		// The VerifiableCredential type is load-bearing twice over, so it stays
+		// even though BuildPayload attaches no proof. In the VC 2.0 context
+		// `issuer`, `validFrom` and `credentialSubject` are defined only inside
+		// that type's scoped @context — drop the type and JSON-LD expansion
+		// discards the whole credentialSubject, so FC ingests an empty node and
+		// publish still answers 200. FC then reifies each ingested triple with
+		// credentialSubject (see templatecatalogueintegration's sparql.go), which
+		// the read path joins on, so retrieval depends on FC having parsed this
+		// as a credential too.
+		//
+		// What is genuinely missing is the proof, not the type: this is an
+		// unsecured self-description and nothing downstream should treat its
+		// contents as attested. Signing it is the fix; untyping it only breaks
+		// the catalogue.
 		"type": []string{
 			"VerifiableCredential",
 			"dcs:ContractTemplate",

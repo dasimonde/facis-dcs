@@ -264,13 +264,16 @@ def _multibase_base58btc_decode(value: str) -> bytes:
     return b"\x00" * leading_zeros + body
 
 
-@then("the credential's proof verifies against the second verificationMethod key published in this instance's own did.json")
+@then("the credential's proof verifies against the key it names, which this instance publishes for assertions and not for authentication")
 def step_then_credential_proof_verifies(context):
     """Verifies the credential's ecdsa-rdfc-2019 DataIntegrityProof exactly
     like backend/internal/pdfgeneration/provenance/vc_verifier.go's
     VerifyDataIntegrityProof does (see module docstring for the full
-    algorithm) — against the EC public key from did.json's SECOND
-    verificationMethod's publicKeyJwk (not an x5c certificate)."""
+    algorithm) — against the EC public key of the method the PROOF names
+    (publicKeyJwk, not an x5c certificate). Which entry of verificationMethod
+    that happens to be is not asserted: the receiver resolves it by id within the
+    assertionMethod relationship (dcstodcs.trustgate), so position is exactly what
+    must not matter."""
     resp = _fetch_agreement_credential(context, context.base_url)
     assert resp.status_code == 200, (
         f"Expected GET /.well-known/dcs-agreement-credential.json to succeed, got "
@@ -291,16 +294,25 @@ def step_then_credential_proof_verifies(context):
     assert method_id, f"proof carries no verificationMethod, got: {proof}"
 
     did_document = _fetch_did_document(context, context.base_url)
-    methods = did_document.get("verificationMethod") or []
-    assert len(methods) >= 2, (
-        "Expected did.json to publish at least two verificationMethod entries — the first for "
-        "the eIDAS/JAdES signing key (identity.DIDDocument), a second dedicated to the agreement "
-        f"credential's VC key (ADR-19) — got {len(methods)}: {methods}"
+
+    def relationship_ids(relationship):
+        ids = []
+        for entry in did_document.get(relationship) or []:
+            entry_id = entry.get("id") if isinstance(entry, dict) else entry
+            if isinstance(entry_id, str):
+                ids.append(
+                    f"{did_document.get('id')}{entry_id}" if entry_id.startswith("#") else entry_id
+                )
+        return ids
+
+    assert method_id in relationship_ids("assertionMethod"), (
+        f"Expected proof.verificationMethod ({method_id!r}) to be published under "
+        f"assertionMethod — being present in did.json is not authorization to sign a "
+        f"credential — got: {did_document.get('assertionMethod')!r}"
     )
-    assert method_id == methods[1].get("id"), (
-        f"Expected proof.verificationMethod ({method_id!r}) to reference did.json's SECOND "
-        f"verificationMethod entry ({methods[1].get('id')!r}), not the first (reserved for the "
-        "eIDAS/JAdES signing key) — the agreement credential must carry its own dedicated key."
+    assert method_id not in relationship_ids("authentication"), (
+        f"The agreement credential must carry its OWN dedicated key (ADR-19), but "
+        f"{method_id!r} is also the key this instance authenticates itself to peers with."
     )
     vm = _find_verification_method(did_document, method_id)
     pub = _ec_public_key_from_jwk(vm)

@@ -1,0 +1,69 @@
+# The credential issuer, in the part that is the same in every stack (ADR-34).
+#
+# ALWAYS layer this file first; a stack file supplies only what its cluster
+# makes different (how the issuer is reached, and whether it is handed a root
+# CA instead of generating one):
+#
+#   helm upgrade --install dcs-issuer deployment/helm/charts/orce \
+#     -f deployment/helm/values.issuer-base.yml \
+#     -f deployment/helm/values.issuer.<stack>.yml
+#
+# It is a Helm release of its own, NOT a second aliased `orce` dependency of the
+# digital-contracting-service chart. Three reasons, and all three are also why
+# the identical arrangement can run in development, in CI and in production:
+#
+#   * The orce chart names every resource "<release>-orce". Two instances of it
+#     inside one release collide on the Deployment, Service, PVC and ConfigMaps.
+#     Separating them means renaming the chart's resources, which renames the
+#     DCS-side release's resources on the live clusters for the sake of a
+#     packaging convenience.
+#   * This release's volume holds its root CA and its status-list bits, and the
+#     DCS's trust anchors are assembled from what the issuer is serving. As a
+#     subchart it would share the DCS release's lifetime — and rebuilding that
+#     release deliberately deletes its volumes, so every rebuild would re-mint
+#     the issuer's root and invalidate every anchor bundle and every credential
+#     naming its status list.
+#   * An anchor can only be read out of an issuer that is already serving, so
+#     the issuer must be installed and ready BEFORE the DCS release. Two
+#     releases order naturally; a subchart cannot express it.
+#
+# Production already installs it this way (release dcs-issuer). Development and
+# CI now run the same chart, the same flow set and this same base — a stack that
+# differs from production cannot test production's behaviour.
+
+# The issuer flow set: did.json, /pki, OID4VCI (/offer, /token, /credential),
+# the signed status list, and the admin tab. It claims routes the DCS-side
+# `flows` set also claims, so a release serves one set, not both.
+flowsDir: flows-issuer
+
+# ADR-34 §1: the list has to stay adjustable, or a revocation test cannot tell a
+# set bit from a list it failed to load. POST /admin/credentials/<idx>/{revoke,
+# unrevoke} carries no authorization of its own, so a deployment that publishes
+# this issuer publishes those two endpoints with it and wants an auth proxy.
+adminFlows:
+  enabled: true
+
+# The RFC 3161 timestamp flow is in the DCS-side `flows` set; this release
+# serves no /tsa route, so provisioning its certificate would create a Secret, a
+# Job and a mount that nothing here reads.
+localTSA:
+  enabled: false
+
+# Chart flows are mounted as Node-RED's startup flows file (flowsFile), which
+# already suppresses the import hook. Off explicitly, so nothing reads as a
+# second way flows might reach this pod.
+flowImport:
+  enabled: false
+
+# The root CA, the issuer key and the status-list bits live here. Losing the
+# volume re-mints the root, and every verifier's anchor bundle then names a
+# certificate that no longer signs anything.
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 2Gi
+
+service:
+  type: ClusterIP
+  port: 1880

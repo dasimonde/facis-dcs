@@ -24,7 +24,10 @@ const policyBadgeClass = (audit: TemplateAuditItem) => {
   const severity = policyField(audit, 'severity').toLowerCase()
   if (severity === 'error') return 'badge-error'
   if (severity === 'warning') return 'badge-warning'
-  return 'badge-info'
+  // 'satisfied' is a verdict this audit reached; 'deferred' is the absence of
+  // one (ADR-33), so it does not share the passing badge.
+  if (severity === 'satisfied') return 'badge-success'
+  return 'badge-ghost'
 }
 </script>
 
@@ -68,11 +71,11 @@ const policyBadgeClass = (audit: TemplateAuditItem) => {
           <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
           <div>
             Transition:
-            <span class="badge badge-soft badge-xs badge-secondary">
+            <span class="badge badge-soft badge-xs badge-secondary" aria-label="From state">
               {{ toProperCase(audit.event_data.previous_state) }}
             </span>
-            →
-            <span class="badge badge-soft badge-xs badge-secondary">
+            <span aria-hidden="true">→</span>
+            <span class="badge badge-soft badge-xs badge-secondary" aria-label="To state">
               {{ toProperCase(audit.event_data.new_state) }}
             </span>
           </div>

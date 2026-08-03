@@ -16,12 +16,14 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/tsa"
+	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -29,6 +31,7 @@ import (
 type OutboxProcessor struct {
 	DB           *sqlx.DB
 	IPFSClient   *ipfs.APIClient
+	Artifacts    *artifactstore.Store
 	TSAClient    *tsa.APIClient
 	ARepo        db.AuditTrailRepository
 	CEPPubClient *CloudEventPubClient
@@ -249,12 +252,16 @@ func (j OutboxProcessor) anchorBatch(ctx context.Context, events []datatype.Outb
 		LeafCIDs:   leafCIDs,
 		CreatedAt:  time.Now().UTC(),
 	}
-	stored, err := j.IPFSClient.CreateFile(ctx, checkpoint)
+	checkpointRaw, err := json.Marshal(checkpoint)
+	if err != nil {
+		return fmt.Errorf("could not encode checkpoint: %w", err)
+	}
+	checkpointCID, err := j.Artifacts.Put(ctx, j.Artifacts.InstanceScope(), checkpointRaw)
 	if err != nil {
 		return fmt.Errorf("could not store checkpoint: %w", err)
 	}
-	if _, err := j.IPFSClient.FetchFile(stored.Identifier.Value); err != nil {
-		return fmt.Errorf("checkpoint CID %s not resolvable after store: %w", stored.Identifier.Value, err)
+	if _, err := j.IPFSClient.FetchFile(checkpointCID); err != nil {
+		return fmt.Errorf("checkpoint CID %s not resolvable after store: %w", checkpointCID, err)
 	}
 
 	// The root is immutable, so a TSA that is slow or down must not hold up the
@@ -267,7 +274,7 @@ func (j OutboxProcessor) anchorBatch(ctx context.Context, events []datatype.Outb
 		tsaSignature = &signature
 	}
 
-	seq, err := j.ARepo.AppendCheckpoint(ctx, tx, stored.Identifier.Value, root, prevRoot, len(leafHashes), tsaSignature)
+	seq, err := j.ARepo.AppendCheckpoint(ctx, tx, checkpointCID, root, prevRoot, len(leafHashes), tsaSignature)
 	if err != nil {
 		return fmt.Errorf("could not append checkpoint: %w", err)
 	}
@@ -442,23 +449,69 @@ func (j OutboxProcessor) recordAnchorFailure(ctx context.Context, event datatype
 		event.ID, event.Component, event.EventType, cause)
 }
 
+// erasureRecordEventTypes are the events that document a contract's erasure
+// (DCS-NFR-SEC-13: logged destruction). Their bodies must stay readable after
+// the contract's CEK is shredded, so they are encrypted under the
+// non-shreddable instance scope even though they carry the contract's DID.
+var erasureRecordEventTypes = map[string]bool{
+	cweeventtype.KeyShredded.String():    true,
+	cweeventtype.DeleteArchived.String(): true,
+}
+
+// scopeForEvent maps an event to the CEK scope its audit-entry body is
+// encrypted under: the contract's scope for contract-bound components, the
+// template's for template-bound ones, and the non-shreddable instance scope
+// for everything without a resource attribution — plus the erasure records
+// themselves, which must outlive the shredding they document.
+func (j OutboxProcessor) scopeForEvent(event datatype.OutboxEvent) artifactstore.Scope {
+	if !isResourceDID(event.DID) || erasureRecordEventTypes[event.EventType] {
+		return j.Artifacts.InstanceScope()
+	}
+	switch event.Component {
+	case componenttype.ContractWorkflowEngine.String(),
+		componenttype.SignatureManagement.String(),
+		componenttype.ContractStorageArchive.String():
+		return artifactstore.ContractScope(*event.DID)
+	case componenttype.ContractTemplateRepo.String(),
+		componenttype.TemplateCatalogueIntegration.String():
+		return artifactstore.TemplateScope(*event.DID)
+	default:
+		return j.Artifacts.InstanceScope()
+	}
+}
+
 // writeEntry stores one audit entry and returns its CID and leaf hash. The leaf
 // hash is taken over the exact bytes stored, so an auditor can refetch the entry
-// and recompute its membership in the checkpoint.
+// and recompute its membership in the checkpoint. The header stays plaintext;
+// event_data is encrypted under the event's CEK scope before storage, so a later
+// shred erases the body without moving a single stored byte — the chain and the
+// checkpoint proofs keep verifying.
 func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEvent, predCID *string) (anchoredEntry, error) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
 		return anchoredEntry{}, fmt.Errorf("could not draw a blinding nonce for event %d: %w", event.ID, err)
 	}
 
+	scope := j.scopeForEvent(event)
+	body, err := j.Artifacts.Encrypt(ctx, scope, event.EventData)
+	if err != nil {
+		return anchoredEntry{}, fmt.Errorf("could not encrypt the body of event %d: %w", event.ID, err)
+	}
+	encryptedBody, err := json.Marshal(body)
+	if err != nil {
+		return anchoredEntry{}, fmt.Errorf("could not encode the body of event %d: %w", event.ID, err)
+	}
+
 	entry := datatype.AuditLogEntry{
 		ID:            event.ID,
 		Component:     event.Component,
 		EventType:     event.EventType,
-		EventData:     event.EventData,
+		EventData:     encryptedBody,
 		DID:           event.DID,
 		CreatedAt:     event.CreatedAt,
 		ResLogPredCID: predCID,
+		CEKScopeKind:  string(scope.Kind),
+		CEKScopeID:    scope.ID,
 		Nonce:         hex.EncodeToString(nonce),
 	}
 	raw, err := json.Marshal(entry)

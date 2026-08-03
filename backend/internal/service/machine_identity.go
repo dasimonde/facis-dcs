@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"digital-contracting-service/internal/middleware"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 // MachineCredentialIssuer provisions the OAuth2 clients machine callers
@@ -237,11 +239,33 @@ func (s *contractWorkflowEnginesrvc) RotateMachineIdentitySecret(ctx context.Con
 	}, nil
 }
 
+// issuedTargetCredential is what one call to the target credential endpoint
+// produced, and what has to be undone if the transaction it belongs to does not
+// commit.
+type issuedTargetCredential struct {
+	clientID string
+	secret   string
+	issuedAt time.Time
+	// clientCreated marks a client this call provisioned. A rotation reuses the
+	// one the target already has, so only a first issue leaves anything behind
+	// when the write that accounts for it fails.
+	clientCreated bool
+}
+
 // RotateContractTargetSecret issues the credential a target authenticates its
 // deployment callbacks with, creating the OAuth2 client on first use.
 func (s *contractWorkflowEnginesrvc) RotateContractTargetSecret(ctx context.Context, req *contractworkflowengine.ContractTargetRotateRequest) (res *contractworkflowengine.MachineCredential, err error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
+
+	// A target's callbacks are attributed to this deployment: it dispatched the
+	// contract and the target acts on its behalf, which is the same attribution
+	// the declaratively seeded targets carry. Resolved before anything is
+	// provisioned, so an unreadable DID cannot leave a client behind.
+	participantDID, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not read this deployment's DID to attribute the target's callbacks to: %w", err))
+	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -249,47 +273,96 @@ func (s *contractWorkflowEnginesrvc) RotateContractTargetSecret(ctx context.Cont
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	target, err := s.TargetRepo.ReadTarget(ctx, tx, req.ID)
+	issued, err := s.issueTargetCredential(ctx, tx, req.ID, participantDID)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if target == nil {
-		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no target system %s", req.ID))
-	}
-
-	var (
-		clientID string
-		secret   string
-	)
-	if target.OAuthClientID == nil || strings.TrimSpace(*target.OAuthClientID) == "" {
-		clientID = "dcs-target-" + target.ID
-		issued, err := s.HydraAdmin.CreateMachineClient(ctx, clientID, target.Name)
-		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not provision the OAuth2 client: %w", err))
-		}
-		secret = issued.Secret
-	} else {
-		clientID = strings.TrimSpace(*target.OAuthClientID)
-		secret, err = s.HydraAdmin.RotateMachineClientSecret(ctx, clientID)
-		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not rotate the secret: %w", err))
-		}
-	}
-
-	issuedAt := time.Now().UTC()
-	if err := s.TargetRepo.SetCredential(ctx, tx, target.ID, clientID, issuedAt); err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
+		s.discardUnaccountedClient(ctx, issued)
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
 	return &contractworkflowengine.MachineCredential{
-		ClientID:     clientID,
-		ClientSecret: secret,
+		ClientID:     issued.clientID,
+		ClientSecret: issued.secret,
 		TokenURL:     ptr(s.machineTokenURL()),
-		IssuedAt:     ptr(issuedAt.Format(time.RFC3339)),
+		IssuedAt:     ptr(issued.issuedAt.Format(time.RFC3339)),
 	}, nil
+}
+
+// issueTargetCredential provisions or rotates the target's OAuth2 client and
+// writes, in the caller's transaction, both halves that make it usable: the
+// client id on the target row the callback is checked against, and the machine
+// identity row the middleware resolves that client's roles from.
+//
+// Writing only the first is what made an API-issued credential authenticate and
+// then be refused at the scope gate, leaving the deployment unacknowledged and
+// the contract in SIGNED forever.
+func (s *contractWorkflowEnginesrvc) issueTargetCredential(ctx context.Context, tx *sqlx.Tx, targetID, participantDID string) (issued *issuedTargetCredential, err error) {
+	target, err := s.TargetRepo.ReadTarget(ctx, tx, targetID)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if target == nil {
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no target system %s", targetID))
+	}
+
+	credential := &issuedTargetCredential{issuedAt: time.Now().UTC()}
+	defer func() {
+		if err != nil {
+			s.discardUnaccountedClient(ctx, credential)
+		}
+	}()
+
+	if target.OAuthClientID == nil || strings.TrimSpace(*target.OAuthClientID) == "" {
+		// Derived from the target id rather than drawn fresh: the client a
+		// target authenticates as stays the same across rotations, so a
+		// rotation refreshes one registry row instead of stranding the
+		// previous one still granting scope to a retired client.
+		credential.clientID = "dcs-target-" + target.ID
+		created, err := s.HydraAdmin.CreateMachineClient(ctx, credential.clientID, target.Name)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not provision the OAuth2 client: %w", err))
+		}
+		credential.secret = created.Secret
+		credential.clientCreated = true
+	} else {
+		credential.clientID = strings.TrimSpace(*target.OAuthClientID)
+		secret, err := s.HydraAdmin.RotateMachineClientSecret(ctx, credential.clientID)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not rotate the secret: %w", err))
+		}
+		credential.secret = secret
+	}
+
+	identity, err := machineidentity.ContractTargetCredential{
+		ClientID:       credential.clientID,
+		TargetName:     target.Name,
+		ParticipantDID: participantDID,
+		IssuedBy:       middleware.GetParticipantID(ctx),
+		IssuedAt:       credential.issuedAt,
+	}.Identity()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if err := s.MachineIdentities.UpsertTx(ctx, tx, identity); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not register the target as a machine caller: %w", err))
+	}
+	if err := s.TargetRepo.SetCredential(ctx, tx, target.ID, credential.clientID, credential.issuedAt); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	return credential, nil
+}
+
+// discardUnaccountedClient removes a client this call provisioned but could not
+// record, so no credential exists that the registry does not account for.
+func (s *contractWorkflowEnginesrvc) discardUnaccountedClient(ctx context.Context, issued *issuedTargetCredential) {
+	if issued == nil || !issued.clientCreated {
+		return
+	}
+	if err := s.HydraAdmin.DeleteMachineClient(ctx, issued.clientID); err != nil {
+		log.Printf("could not remove the OAuth2 client %s of a target credential that was not recorded: %v", issued.clientID, err)
+	}
 }
 
 // machineTokenURL is where an integrator presents the credential. It is handed

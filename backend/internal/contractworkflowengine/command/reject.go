@@ -91,6 +91,15 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
+	// REJECTED is the one state from which the creator may submit a new contract
+	// document (submit.go's canSubmitUpdatedContractData), so an approver
+	// rejecting is this instance taking back the agreement it settled on closing
+	// the negotiation round — otherwise the resubmission it invites is refused
+	// as a rewrite of a version this instance still stands behind.
+	if err := withdrawOwnSettlement(ctx, tx, h.SRepo, localPeer, cmd.DID); err != nil {
+		return err
+	}
+
 	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update current state: %w", err)

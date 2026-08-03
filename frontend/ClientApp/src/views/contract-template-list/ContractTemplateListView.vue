@@ -3,7 +3,7 @@ import { useTemplatePermissions } from '@template-repository/composables/useTemp
 import TemplateList from '@/components/lists/template/TemplateList.vue'
 import { ROUTES } from '@/router/router'
 
-const { isCreator } = useTemplatePermissions()
+const { isCreator, isManager } = useTemplatePermissions()
 </script>
 
 <template>
@@ -14,7 +14,7 @@ const { isCreator } = useTemplatePermissions()
       </h2>
 
       <RouterLink
-        v-if="isCreator"
+        v-if="isCreator || isManager"
         v-slot="{ route }"
         :to="{ name: ROUTES.TEMPLATES.NEW }"
         class="btn gap-2 self-end btn-primary"

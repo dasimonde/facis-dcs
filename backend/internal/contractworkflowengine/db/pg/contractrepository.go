@@ -12,6 +12,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
@@ -23,12 +24,12 @@ func (r *PostgresContractRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.
 
 	statement := `
         INSERT INTO contracts (
-            did, origin, created_by, state, name,
+            did, origin, created_at, created_by, state, name,
             description, contract_data, template_did, template_version, responsible
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `
 	_, err := tx.ExecContext(ctx, statement,
-		data.DID, data.Origin, data.CreatedBy, data.State, data.Name,
+		data.DID, data.Origin, data.CreatedAt, data.CreatedBy, data.State, data.Name,
 		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible)
 	return err
 }
@@ -432,6 +433,53 @@ func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, di
 		return nil, err
 	}
 	return &state, nil
+}
+
+func (r *PostgresContractRepo) CountSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) (int, error) {
+	var count int
+	err := tx.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM contract_signatures WHERE contract_did = $1 AND status = 'SIGNED'`, did)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error) {
+	var dids []string
+	// The superseded arm hashes contract_data exactly as the regenerator and the
+	// ship gate hash it in Go: the jsonb column rendered to its text form, then
+	// SHA-256, then hex. A contract with no data hashes the empty string on both
+	// sides. Should the two ever disagree, the sweep over-selects and
+	// appendC2PA — which recomputes the hash itself and short-circuits when
+	// nothing changed — declines the work for the cost of two reads; it can
+	// never re-render a document that is already current.
+	//
+	// COALESCE on the exclude list: an empty Go slice binds as SQL NULL, and
+	// "did <> ALL (NULL)" is NULL — which would filter out every row and stall
+	// the sweep.
+	err := tx.SelectContext(ctx, &dids,
+		`SELECT c.did FROM contracts c
+		 WHERE (
+		         (c.pdf_ipfs_cid IS NULL OR c.pdf_ipfs_cid = '')
+		      OR (
+		             COALESCE(c.pdf_c2pa_state, '') IN ('', 'draft')
+		         AND COALESCE(c.pdf_payload_hash, '') <> ''
+		         AND c.pdf_payload_hash <> encode(
+		                 sha256(convert_to(COALESCE(c.contract_data::text, ''), 'UTF8')), 'hex')
+		         )
+		       )
+		   AND NOT EXISTS (
+		       SELECT 1 FROM contract_signatures s
+		        WHERE s.contract_did = c.did AND s.status = 'SIGNED')
+		   AND c.did <> ALL (COALESCE($2::text[], '{}'))
+		 ORDER BY c.created_at, c.did
+		 LIMIT $1`, limit, pq.Array(excludeDIDs),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return dids, nil
 }
 
 func (r *PostgresContractRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data db.ContractPDFState) error {

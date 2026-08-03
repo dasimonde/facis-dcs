@@ -1,0 +1,62 @@
+@prefix dcs:  <https://w3id.org/facis/dcs/ontology/v1#> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix slah: <https://w3id.org/facis/sla/hosting/v1#> .
+
+# The flat domain fields of the hosting SLA that belong to no asset — the
+# commercial and measurement terms. Published at runtime as a hub
+# kind="ontology" entry (name="facis-sla-hosting"), beside the kind="shapes"
+# entry that carries the asset classes: the picker sources standalone fields
+# only from ontologies and assets only from shapes graphs
+# (frontend/.../ontology-domain-fields.ts loadHub).
+#
+# A dcs:ValueConstraint naming an odrl:odrlLeftOperand also feeds the
+# constraint editor's value picker for that ODRL context operand, which is how
+# a boundary is PICKED rather than typed.
+
+<https://w3id.org/facis/sla/hosting/v1> a owl:Ontology ;
+  rdfs:label "FACIS Managed Hosting SLA Domain Fields"@en ;
+  rdfs:comment "Commercial and measurement terms of a managed hosting SLA."@en ;
+  rdfs:seeAlso <https://w3id.org/facis/dcs/ontology/v1> .
+
+slah:ServiceCreditTerm a rdfs:Class ; rdfs:label "Service Credit Term"@en .
+slah:BillingTerm a rdfs:Class ; rdfs:label "Billing Term"@en .
+
+slah:constraint-billing-period a dcs:ValueConstraint ;
+  dcs:format "controlled-vocabulary" ;
+  dcs:odrlLeftOperand odrl:timeInterval ;
+  dcs:allowedValue "P1M", "P3M", "P1Y" ;
+  rdfs:label "Billing Period Constraint"@en .
+
+slah:constraint-measurement-window a dcs:ValueConstraint ;
+  dcs:format "controlled-vocabulary" ;
+  dcs:odrlLeftOperand odrl:timeInterval ;
+  dcs:allowedValue "P1M", "P3M" ;
+  rdfs:label "Measurement Window Constraint"@en .
+
+slah:constraint-service-credit-rate a dcs:ValueConstraint ;
+  dcs:format "percentage" ;
+  dcs:minInclusive 0 ;
+  dcs:maxInclusive 100 ;
+  rdfs:label "Service Credit Rate Constraint"@en .
+
+slah:field-service-billingPeriod a dcs:DomainField, owl:DatatypeProperty ;
+  rdfs:label "Billing Period"@en ;
+  rdfs:domain slah:BillingTerm ;
+  rdfs:range xsd:string ;
+  dcs:hasValueConstraint slah:constraint-billing-period .
+
+slah:field-service-measurementWindow a dcs:DomainField, owl:DatatypeProperty ;
+  rdfs:label "Measurement Window"@en ;
+  rdfs:domain dcs:SLO ;
+  rdfs:range xsd:string ;
+  dcs:hasValueConstraint slah:constraint-measurement-window .
+
+slah:field-service-serviceCreditRate a dcs:DomainField, owl:DatatypeProperty ;
+  rdfs:label "Service Credit Rate"@en ;
+  rdfs:domain slah:ServiceCreditTerm ;
+  rdfs:range xsd:decimal ;
+  dcs:hasValueConstraint slah:constraint-service-credit-rate .

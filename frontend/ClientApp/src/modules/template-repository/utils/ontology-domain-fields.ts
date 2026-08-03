@@ -1,4 +1,6 @@
 import { Parser, type Quad } from 'n3'
+import { shallowReactive } from 'vue'
+import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
 import type {
   DomainFieldDefinition,
   SemanticParameterType,
@@ -21,7 +23,6 @@ const RDF_NIL = `${RDF}nil`
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#'
 const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class'
 const SKOS = 'http://www.w3.org/2004/02/skos/core#'
-const XSD = 'http://www.w3.org/2001/XMLSchema#'
 const DCS = 'https://w3id.org/facis/dcs/ontology/v1#'
 const SH = 'http://www.w3.org/ns/shacl#'
 
@@ -78,6 +79,9 @@ export class OntologyGraph {
 interface SchemaListEntry {
   name: string
   kind: string
+  active_version?: number
+  latest_version?: number
+  updated_at?: string
 }
 
 // Raw fetch, deliberately not the app's http client: this module loads at
@@ -195,16 +199,19 @@ function parseClassLabels(graph: OntologyGraph): ReadonlyMap<string, string> {
   return labels
 }
 
-/** Maps a field's rdfs:range xsd datatype to the builder's parameter type. */
-function parameterTypeForRange(rangeIRI: string): SemanticParameterType {
-  switch (rangeIRI) {
-    case `${XSD}decimal`:
+/** Maps a field's declared datatype to the builder's parameter type — which
+ *  input widget the field gets. The widget vocabulary has no duration and no
+ *  instant, so it is NOT the field's datatype: that is carried separately (see
+ *  DomainFieldDefinition.datatype) and must never be re-derived from here. */
+function parameterTypeForDatatype(datatype?: XsdDatatype): SemanticParameterType {
+  switch (datatype) {
+    case 'xsd:decimal':
       return 'decimal'
-    case `${XSD}integer`:
+    case 'xsd:integer':
       return 'integer'
-    case `${XSD}boolean`:
+    case 'xsd:boolean':
       return 'boolean'
-    case `${XSD}date`:
+    case 'xsd:date':
       return 'date'
     default:
       return 'string'
@@ -246,12 +253,19 @@ function parseOntologyDomainFields(
       const valueConstraintRef = graph.first(subject, `${DCS}hasValueConstraint`)
       const valueConstraint = valueConstraintRef ? cloneConstraint(constraints.get(valueConstraintRef)) : undefined
       const domain = graph.first(subject, `${RDFS}domain`) || undefined
+      // An rdfs:range naming a class (an object-valued field) yields no
+      // datatype; an XSD range DCS cannot order throws out of here rather
+      // than degrading to xsd:string.
+      const datatype = compactXsdDatatype(range)
       // A field is an enum when its constraint enumerates allowed values.
-      const type: SemanticParameterType = valueConstraint?.allowedValues?.length ? 'enum' : parameterTypeForRange(range)
+      const type: SemanticParameterType = valueConstraint?.allowedValues?.length
+        ? 'enum'
+        : parameterTypeForDatatype(datatype)
       return {
         ontologyId: subject,
         parameterName: parameterNameFor(subject),
         type,
+        datatype,
         label,
         domain,
         domainLabel: domain ? classLabels.get(domain) : undefined,
@@ -262,7 +276,7 @@ function parseOntologyDomainFields(
 }
 
 /** Reads an RDF collection (rdf:first/rdf:rest) into its member IRIs/literals. */
-function readRdfList(graph: OntologyGraph, head: string): string[] {
+export function readRdfList(graph: OntologyGraph, head: string): string[] {
   const members: string[] = []
   let node = head
   const guard = new Set<string>()
@@ -303,11 +317,13 @@ function buildPropertyField(graph: OntologyGraph, propShape: string, path: strin
   const hasConstraint = allowedValues.length > 0 || pattern !== undefined || min !== undefined || max !== undefined
   // A property with no sh:datatype and no enum is object-valued (sh:class /
   // sh:node) — filled with a reference/identifier, carried as a string.
-  const type: SemanticParameterType = allowedValues.length ? 'enum' : parameterTypeForRange(datatype)
+  const compactDatatype = compactXsdDatatype(datatype)
+  const type: SemanticParameterType = allowedValues.length ? 'enum' : parameterTypeForDatatype(compactDatatype)
   return {
     ontologyId: path,
     parameterName: parameterNameFor(path),
     type,
+    datatype: compactDatatype,
     label,
     valueConstraint: hasConstraint
       ? {
@@ -362,6 +378,7 @@ async function loadHub(): Promise<{
   constraints: SemanticValueConstraint[]
 }> {
   const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  hubFingerprint = fingerprintOf(inventory)
   const loadedSources = await Promise.all(
     inventory
       .filter((entry) => entry.kind === 'ontology' || entry.kind === 'shapes')
@@ -409,7 +426,84 @@ async function loadHub(): Promise<{
   }
 }
 
-const hub = await loadHub()
-export const ONTOLOGY_DOMAIN_FIELDS: readonly DomainFieldDefinition[] = hub.fields
-export const ONTOLOGY_ASSETS: readonly HubAsset[] = hub.assets
-export const ONTOLOGY_VALUE_CONSTRAINTS: readonly SemanticValueConstraint[] = hub.constraints
+let hubFingerprint = ''
+
+function fingerprintOf(inventory: SchemaListEntry[]): string {
+  return inventory
+    .map((e) => `${e.name}|${e.kind}|${e.active_version ?? ''}|${e.latest_version ?? ''}|${e.updated_at ?? ''}`)
+    .sort()
+    .join(';')
+}
+
+type HubVocabulary = Awaited<ReturnType<typeof loadHub>>
+
+// Registered libraries can be megabytes of Turtle (the Gaia-X development
+// shapes are ~2.4 MB), and this module re-parses them on every full page
+// load — so the parsed vocabulary rides sessionStorage, keyed by the hub
+// inventory fingerprint. A quota failure just means parsing again next load.
+const HUB_CACHE_KEY = 'dcs.hub.vocabulary.v1'
+
+function readHubCache(fingerprint: string): HubVocabulary | null {
+  try {
+    const raw = sessionStorage.getItem(HUB_CACHE_KEY)
+    if (!raw) return null
+    const cached = JSON.parse(raw) as { fingerprint: string; hub: HubVocabulary }
+    return cached.fingerprint === fingerprint ? cached.hub : null
+  } catch {
+    return null
+  }
+}
+
+function writeHubCache(fingerprint: string, vocabulary: HubVocabulary): void {
+  try {
+    sessionStorage.setItem(HUB_CACHE_KEY, JSON.stringify({ fingerprint, hub: vocabulary }))
+  } catch {
+    // Storage quota or unavailable storage — the in-memory copy still serves
+    // this page view.
+  }
+}
+
+async function loadHubCached(): Promise<HubVocabulary> {
+  const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const fingerprint = fingerprintOf(inventory)
+  const cached = readHubCache(fingerprint)
+  if (cached) {
+    hubFingerprint = fingerprint
+    return cached
+  }
+  const fresh = await loadHub()
+  writeHubCache(hubFingerprint, fresh)
+  return fresh
+}
+
+const hub = await loadHubCached()
+const reactiveFields = shallowReactive<DomainFieldDefinition[]>(hub.fields)
+const reactiveAssets = shallowReactive<HubAsset[]>(hub.assets)
+const reactiveConstraints = shallowReactive<SemanticValueConstraint[]>(hub.constraints)
+
+export const ONTOLOGY_DOMAIN_FIELDS: readonly DomainFieldDefinition[] = reactiveFields
+export const ONTOLOGY_ASSETS: readonly HubAsset[] = reactiveAssets
+export const ONTOLOGY_VALUE_CONSTRAINTS: readonly SemanticValueConstraint[] = reactiveConstraints
+
+let refreshInFlight: Promise<void> | null = null
+
+/**
+ * Re-reads the Semantic Hub and updates the exported pickable vocabulary in
+ * place — a schema registered after app startup becomes pickable without a
+ * page reload. Cheap when nothing changed: the schema inventory is
+ * fingerprinted and schema contents are only refetched on a change.
+ */
+export function refreshOntologyDomainFields(): Promise<void> {
+  refreshInFlight ??= (async () => {
+    const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+    if (fingerprintOf(inventory) === hubFingerprint) return
+    const fresh = await loadHub()
+    writeHubCache(hubFingerprint, fresh)
+    reactiveFields.splice(0, reactiveFields.length, ...fresh.fields)
+    reactiveAssets.splice(0, reactiveAssets.length, ...fresh.assets)
+    reactiveConstraints.splice(0, reactiveConstraints.length, ...fresh.constraints)
+  })().finally(() => {
+    refreshInFlight = null
+  })
+  return refreshInFlight
+}

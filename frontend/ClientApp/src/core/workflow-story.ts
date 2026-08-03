@@ -1,3 +1,4 @@
+import { ExtrinsicLifecycle } from '@/types/extrinsic-lifecycle'
 import type { ContractState } from '@/types/contract-state'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { TemplateType } from '@/types/template-type'
@@ -111,7 +112,7 @@ export function templateStory(
       return story(
         'DELETED',
         'This template was deleted',
-        'Deleted — it is no longer part of the working repository. Its history remains in the tamper-proof audit trail.',
+        'Deleted — it is no longer part of the working repository. Its history remains in the tamper-evident audit trail.',
       )
     case 'REGISTERED':
       return story(
@@ -153,7 +154,10 @@ const CONTRACT_STEPS: StoryStep[] = [
   { key: 'ACTIVE', label: 'Active' },
 ]
 
-export function contractStory(state: ContractState | null | undefined): WorkflowStory {
+export function contractStory(
+  state: ContractState | null | undefined,
+  opts?: { extrinsicLifecycle?: string | null },
+): WorkflowStory {
   const story = (
     currentKey: string,
     headline: string,
@@ -210,10 +214,21 @@ export function contractStory(state: ContractState | null | undefined): Workflow
         [{ label: 'Open Signing', routeName: 'signing.list' }],
       )
     case 'SIGNED':
+      // SIGNED is reached on the FIRST signature, so it says nothing about the
+      // counterparty. Whether the agreement is executed is the backend's
+      // extrinsic lifecycle, which checks every declared signature field
+      // (ADR-13, DCS-FR-SM-10). Without that signal, say only what is certain.
+      if (opts?.extrinsicLifecycle === ExtrinsicLifecycle.executed) {
+        return story(
+          'SIGNED',
+          'This contract is signed',
+          'All signatures are applied — the contract is executed. It is archived with its signature evidence and C2PA-provenanced PDF.',
+        )
+      }
       return story(
         'SIGNED',
         'This contract is signed',
-        'All signatures are applied — the contract is executed. It is archived with its signature evidence and C2PA-provenanced PDF.',
+        'Your signature is applied and archived with its signature evidence and C2PA-provenanced PDF. The contract becomes executed once every declared signatory has signed.',
       )
     case 'ACTIVE':
       return story(
@@ -249,7 +264,7 @@ export function contractStory(state: ContractState | null | undefined): Workflow
       return story(
         'EXPIRED',
         'This contract has expired',
-        'It reached the end of its agreed term. It remains archived with its complete, tamper-proof audit trail.',
+        'It reached the end of its agreed term. It remains archived with its complete, tamper-evident audit trail.',
       )
     default:
       return story(

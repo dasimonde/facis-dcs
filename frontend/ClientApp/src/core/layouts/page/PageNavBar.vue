@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { usePageStore } from '@core/store/page'
-import AuthButton from '@/components/AuthButton.vue'
+import AuthButton from '@/components/auth/AuthButton.vue'
 import PermissionList from '@/components/PermissionList.vue'
 
 const pageStore = usePageStore()

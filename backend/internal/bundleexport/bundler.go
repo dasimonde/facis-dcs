@@ -47,11 +47,11 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/base/ipfs"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
 	contractquery "digital-contracting-service/internal/contractworkflowengine/query/contract"
@@ -92,15 +92,15 @@ type SignatureLoader interface {
 // own peer DID, feeding the same party read-scoping rule direct retrieval
 // uses when filtering related/ family members.
 type Bundler struct {
-	DB         *sqlx.DB
-	CRepo      cwedb.ContractRepo
-	TRepo      tpldb.ContractTemplateRepo
-	SignRepo   SignatureLoader
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
-	VCIssuer   provenance.VCIssuer
-	IssuerDID  string
-	LocalPeer  string
+	DB        *sqlx.DB
+	CRepo     cwedb.ContractRepo
+	TRepo     tpldb.ContractTemplateRepo
+	SignRepo  SignatureLoader
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
+	VCIssuer  provenance.VCIssuer
+	IssuerDID string
+	LocalPeer string
 }
 
 // ExportContext carries the caller identity used for the FR-CSA-18 audit
@@ -430,12 +430,12 @@ func isNotFoundRefusal(err error, did string) bool {
 // export path.
 func (b *Bundler) fetchContractPDF(ctx context.Context, did string) ([]byte, error) {
 	handler := pdfquery.ExportContractPdfHandler{
-		DB:         b.DB,
-		CRepo:      b.CRepo,
-		IPFSClient: b.IPFSClient,
-		PDFCore:    b.PDFCore,
-		VCIssuer:   b.VCIssuer,
-		IssuerDID:  b.IssuerDID,
+		DB:        b.DB,
+		CRepo:     b.CRepo,
+		Artifacts: b.Artifacts,
+		PDFCore:   b.PDFCore,
+		VCIssuer:  b.VCIssuer,
+		IssuerDID: b.IssuerDID,
 	}
 	reader, err := handler.Handle(ctx, pdfquery.ExportContractPdfQry{DID: did})
 	if err != nil {
@@ -485,12 +485,12 @@ func (b *Bundler) ExportTemplate(ctx context.Context, did string) (io.ReadCloser
 
 func (b *Bundler) fetchTemplatePDF(ctx context.Context, did string) ([]byte, error) {
 	handler := pdfquery.ExportTemplatePdfHandler{
-		DB:         b.DB,
-		TRepo:      b.TRepo,
-		IPFSClient: b.IPFSClient,
-		PDFCore:    b.PDFCore,
-		VCIssuer:   b.VCIssuer,
-		IssuerDID:  b.IssuerDID,
+		DB:        b.DB,
+		TRepo:     b.TRepo,
+		Artifacts: b.Artifacts,
+		PDFCore:   b.PDFCore,
+		VCIssuer:  b.VCIssuer,
+		IssuerDID: b.IssuerDID,
 	}
 	reader, err := handler.Handle(ctx, pdfquery.ExportTemplatePdfQry{DID: did})
 	if err != nil {

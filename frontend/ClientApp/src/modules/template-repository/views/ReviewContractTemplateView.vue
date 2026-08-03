@@ -8,14 +8,15 @@ import CopyTemplateButton from '@template-repository/components/CopyTemplateButt
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import TemplateManagerActions from '@/components/template/TemplateManagerActions.vue'
 import VerificationFindingsDialog from '@/components/VerificationFindingsDialog.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useNavStore } from '@/stores/nav-store'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import { reportActionError } from '@/utils/report-action-error'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const router = useRouter()
 const route = useRoute()
@@ -66,45 +67,34 @@ watch(
         })
       })
       .catch((error: unknown) => {
-        console.error('Failed to load template for editing', error)
+        reportActionError(error, 'Load template review')
       })
   },
   { immediate: true },
 )
 
 const isSubmitting = ref(false)
-const comment = ref<string>('')
-
-const forwardToApproval = async () => {
+const forwardToApproval = async (comment: string) => {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for submission')
+    reportActionError(new Error('The current template version is unavailable.'), 'Forward template')
     return
   }
   try {
-    const commentResult = await commentDialog.value?.reveal({
-      message: 'Add comment?',
-      editor: { requiredText: false },
-    })
-    if (commentResult?.isCanceled) {
-      return
-    } else if (commentResult?.data) {
-      comment.value = commentResult.data
-    }
     isSubmitting.value = true
 
     await contractTemplateService.submit({
       did,
       updated_at: updatedAt,
-      comments: comment.value ? [comment.value] : [],
+      comments: comment ? [comment] : [],
       forward_to: 'APPROVAL',
       approver: '',
       reviewers: [],
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Submission failed', error)
+    reportActionError(error, 'Forward template')
   } finally {
     isSubmitting.value = false
   }
@@ -114,10 +104,11 @@ const returnToDraft = async () => {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for rejection')
+    reportActionError(new Error('The current template version is unavailable.'), 'Return template to draft')
     return
   }
   try {
+    let comment = ''
     const commentResult = await commentDialog.value?.reveal({
       message: 'Add comment?',
       editor: { requiredText: false },
@@ -125,20 +116,20 @@ const returnToDraft = async () => {
     if (commentResult?.isCanceled) {
       return
     } else if (commentResult?.data) {
-      comment.value = commentResult.data
+      comment = commentResult.data
     }
     isSubmitting.value = true
     await contractTemplateService.submit({
       did,
       updated_at: updatedAt,
-      comments: comment.value ? [comment.value] : [],
+      comments: comment ? [comment] : [],
       forward_to: 'DRAFT',
       approver: '',
       reviewers: [],
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Rejection failed', error)
+    reportActionError(error, 'Return template to draft')
   } finally {
     isSubmitting.value = false
   }
@@ -176,11 +167,7 @@ const exportPDF = async () => {
         <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
         <CopyTemplateButton :disabled="!isCreator && !isManager" class="btn flex-1 btn-primary" />
-        <!-- Verify / Return to draft / request changes -->
-        <VerificationFindingsDialog
-          class="btn flex-1 btn-primary"
-          :disabled="(!isReviewer && !isManager) || isSubmitting"
-        />
+        <!-- Return to draft / request changes -->
         <button
           class="btn flex-1 btn-primary"
           :disabled="(!isReviewer && !isManager) || isSubmitting"
@@ -190,14 +177,11 @@ const exportPDF = async () => {
           Reject
         </button>
         <!-- Complete review (verify then forward to approval) -->
-        <button
+        <VerificationFindingsDialog
           class="btn flex-1 btn-primary"
           :disabled="(!isReviewer && !isManager) || isSubmitting"
-          @click="forwardToApproval"
-        >
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Approve
-        </button>
+          @confirm="forwardToApproval"
+        />
         <TemplateManagerActions
           v-if="contractTemplate && isManager"
           :template="contractTemplate"

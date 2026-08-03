@@ -3,6 +3,7 @@ import { getConfig } from '@/config'
 import { authenticationService } from '@/services/authentication-service'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useErrorStore } from '@/stores/error-store'
+import { bindReportedHttpError } from '@/utils/report-action-error'
 
 const http = axios.create({
   baseURL: getConfig().API_BASE_URL,
@@ -27,8 +28,13 @@ http.interceptors.response.use(
         }
       }
     }
-    const message = axios.isAxiosError(err) ? (err.response?.data?.message ?? err.message) : err.message
-    errorStore.add(String(message))
+    // Callers render the rejected error's own message, so the server's
+    // message replaces Axios's "Request failed with status code N".
+    if (axios.isAxiosError(err) && typeof err.response?.data?.message === 'string') {
+      err.message = err.response.data.message
+    }
+    const messageId = errorStore.add(err.message)
+    bindReportedHttpError(err, messageId)
     return Promise.reject(err)
   },
 )

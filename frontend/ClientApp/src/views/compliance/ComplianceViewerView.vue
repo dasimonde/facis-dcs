@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useId } from 'vue'
+import { computed, onMounted, ref, useId, useTemplateRef } from 'vue'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import {
   type SignatureAuditEntry,
   type SignatureComplianceResult,
@@ -11,6 +12,15 @@ import {
 } from '@/services/signature-management-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob } from '@/utils/download-blob'
+import { claimReportedHttpError } from '@/utils/report-action-error'
+import {
+  dssIndicator,
+  findingIndicator,
+  findingsVerdict,
+  signatureLevelBadgeClass as levelBadgeClass,
+  signatureLevelLabel,
+  signatureStatusIndicator,
+} from '@/utils/signature-verdict'
 
 // The Signature Compliance Viewer (DCS-FR-SM-05/-07/-08, DCS-FR-SM-18/-21/-26):
 // a tabbed dashboard over the signed contracts an Auditor / Compliance Officer /
@@ -30,6 +40,7 @@ const canAudit = computed(
 
 const contracts = ref<SignatureContract[]>([])
 const loadingContracts = ref(false)
+const contractsLoaded = ref(false)
 const error = ref<string | null>(null)
 
 const search = ref('')
@@ -43,10 +54,22 @@ const activeTab = ref<Tab>('validation')
 
 const view = ref<SignatureViewResult | null>(null)
 const loadingView = ref(false)
+const viewLoaded = ref(false)
 const validateResult = ref<SignatureValidateResult | null>(null)
 const complianceResult = ref<SignatureComplianceResult | null>(null)
 const auditEntries = ref<SignatureAuditEntry[] | null>(null)
 const busy = ref(false)
+const pendingRevocations = ref(new Set<string>())
+const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
+let viewRequestSequence = 0
+const canExport = computed(
+  () =>
+    selected.value !== null &&
+    viewLoaded.value &&
+    view.value !== null &&
+    !loadingView.value &&
+    pendingRevocations.value.size === 0,
+)
 
 const statuses = computed(() => {
   const set = new Set<string>()
@@ -69,7 +92,9 @@ onMounted(async () => {
   loadingContracts.value = true
   try {
     contracts.value = await signatureManagementService.retrieveContracts()
-  } catch {
+    contractsLoaded.value = true
+  } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = 'Failed to load contracts.'
   } finally {
     loadingContracts.value = false
@@ -77,19 +102,27 @@ onMounted(async () => {
 })
 
 async function selectContract(contract: SignatureContract) {
+  const requestSequence = ++viewRequestSequence
   selected.value = contract
+  error.value = null
   activeTab.value = 'validation'
   view.value = null
+  viewLoaded.value = false
   validateResult.value = null
   complianceResult.value = null
   auditEntries.value = null
   loadingView.value = true
   try {
-    view.value = await signatureManagementService.getSignatureView(contract.did)
+    const loadedView = await signatureManagementService.getSignatureView(contract.did)
+    if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
+    view.value = loadedView
+    viewLoaded.value = true
   } catch (e: unknown) {
+    claimReportedHttpError(e)
+    if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
     error.value = `Failed to load signature data: ${e instanceof Error ? e.message : String(e)}`
   } finally {
-    loadingView.value = false
+    if (requestSequence === viewRequestSequence) loadingView.value = false
   }
 }
 
@@ -100,6 +133,7 @@ async function runValidate() {
   try {
     validateResult.value = await signatureManagementService.validateSignature(selected.value.did)
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = `Validation failed: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = false
@@ -113,6 +147,7 @@ async function runCompliance() {
   try {
     complianceResult.value = await signatureManagementService.complianceCheck(selected.value.did)
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = `Compliance check failed: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = false
@@ -121,16 +156,47 @@ async function runCompliance() {
 
 async function revoke(sig: SignatureViewItem) {
   if (!selected.value) return
-  busy.value = true
+  const contractDid = selected.value.did
+  const key = `${contractDid}:${sig.signer_did}`
+  if (pendingRevocations.value.has(key)) return
+  const result = await confirmationModal.value?.reveal({
+    message: `Revoke the signature by ${sig.signer_did}? This action is recorded in the audit trail.`,
+    editor: { requiredText: true, placeholder: 'Reason for revocation' },
+  })
+  const reason = result?.data?.trim()
+  if (!result || result.isCanceled || !reason) return
+  pendingRevocations.value = new Set(pendingRevocations.value).add(key)
   error.value = null
   try {
-    await signatureManagementService.revokeSignature(selected.value.did, sig.signer_did)
-    view.value = await signatureManagementService.getSignatureView(selected.value.did)
+    await signatureManagementService.revokeSignature(contractDid, sig.signer_did, reason)
+    if (selected.value?.did !== contractDid) return
+
+    const requestSequence = ++viewRequestSequence
+    view.value = null
+    viewLoaded.value = false
+    loadingView.value = true
+    try {
+      const refreshedView = await signatureManagementService.getSignatureView(contractDid)
+      if (requestSequence !== viewRequestSequence || selected.value?.did !== contractDid) return
+      view.value = refreshedView
+      viewLoaded.value = true
+    } finally {
+      if (requestSequence === viewRequestSequence) loadingView.value = false
+    }
   } catch (e: unknown) {
-    error.value = `Revocation failed: ${e instanceof Error ? e.message : String(e)}`
+    claimReportedHttpError(e)
+    if (selected.value?.did === contractDid) {
+      error.value = `Revocation failed: ${e instanceof Error ? e.message : String(e)}`
+    }
   } finally {
-    busy.value = false
+    const next = new Set(pendingRevocations.value)
+    next.delete(key)
+    pendingRevocations.value = next
   }
+}
+
+function revocationPending(sig: SignatureViewItem): boolean {
+  return selected.value ? pendingRevocations.value.has(`${selected.value.did}:${sig.signer_did}`) : false
 }
 
 async function loadAudit() {
@@ -140,6 +206,7 @@ async function loadAudit() {
   try {
     auditEntries.value = await signatureManagementService.getAudit(selected.value.did)
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = `Failed to load audit report: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = false
@@ -147,35 +214,6 @@ async function loadAudit() {
 }
 
 // --- Pass/fail derivation -------------------------------------------------
-
-interface Indicator {
-  label: string
-  cls: string
-}
-
-function dssIndicator(indication: string | undefined): Indicator {
-  switch ((indication ?? '').toUpperCase()) {
-    case 'TOTAL-PASSED':
-      return { label: 'PASSED', cls: 'badge-success' }
-    case 'INDETERMINATE':
-      return { label: 'INDETERMINATE', cls: 'badge-warning' }
-    case 'TOTAL-FAILED':
-      return { label: 'FAILED', cls: 'badge-error' }
-    default:
-      return { label: indication ?? 'Unknown', cls: 'badge-ghost' }
-  }
-}
-
-const FAILURE_KEYWORDS =
-  /(mismatch|drift detected|does not match|failed|could not|missing|no longer|power of attorney)/i
-
-function isFailureFinding(finding: string): boolean {
-  return FAILURE_KEYWORDS.test(finding)
-}
-
-function findingIndicator(finding: string): Indicator {
-  return isFailureFinding(finding) ? { label: 'FAIL', cls: 'badge-error' } : { label: 'PASS', cls: 'badge-success' }
-}
 
 // Prefer the freshest structured DSS report: the one just returned by the
 // Validate action, else the one loaded with the signature view.
@@ -185,22 +223,28 @@ const activeDss = computed(() => validateResult.value?.dss ?? view.value?.dss ??
 // action's result once it has run, else those loaded with the view.
 const integrityFindings = computed(() => validateResult.value?.findings ?? view.value?.integrity_findings ?? [])
 
-const integrityIntact = computed(() => {
-  const findings = integrityFindings.value
-  return findings.length > 0 && !findings.some(isFailureFinding)
+// "Intact" is a positive claim about every finding in the set, so an
+// undetermined one (a revocation state the status service could not answer)
+// withholds it exactly as a failure does.
+const integrityVerdict = computed(() => findingsVerdict(integrityFindings.value))
+
+const integritySummary = computed(() => {
+  switch (integrityVerdict.value) {
+    case 'pass':
+      return { label: 'Intact', cls: 'badge-success' }
+    case 'indeterminate':
+      return { label: 'Not determined', cls: 'badge-warning' }
+    default:
+      return { label: 'Issues found', cls: 'badge-error' }
+  }
 })
 
-function statusIndicator(status: string): Indicator {
-  return status.toUpperCase() === 'REVOKED'
-    ? { label: 'REVOKED', cls: 'badge-error' }
-    : { label: 'ACTIVE', cls: 'badge-success' }
+function statusIndicator(status: string) {
+  return signatureStatusIndicator(status)
 }
 
-// DCS-FR-SM-21: the signature level (SES/AES/QES) the signature actually
-// ACHIEVED — recorded from what DSS validated at submit (ADR-20), never
-// re-derived here.
 function signatureLevel(sig: SignatureViewItem): string {
-  return (sig.credential_type || 'AES').toUpperCase()
+  return signatureLevelLabel(sig.credential_type)
 }
 
 function requiredLevel(sig: SignatureViewItem): string {
@@ -216,17 +260,6 @@ function levelMeetsRequirement(sig: SignatureViewItem): boolean {
   const achieved = LEVEL_RANK[signatureLevel(sig)] ?? 0
   const required = LEVEL_RANK[requiredLevel(sig)] ?? 1
   return achieved >= required
-}
-
-function levelBadgeClass(level: string): string {
-  switch (level) {
-    case 'QES':
-      return 'badge-secondary'
-    case 'AES':
-      return 'badge-info'
-    default:
-      return 'badge-ghost'
-  }
 }
 
 // --- Report export --------------------------------------------------------
@@ -337,11 +370,11 @@ function exportPdf() {
   </div>
 
   <div class="p-4">
-    <div v-if="error" class="mb-4 alert alert-error">{{ error }}</div>
+    <div v-if="error" class="mb-4 alert alert-error" role="alert">{{ error }}</div>
 
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <div class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
       <!-- Contract list: filter/search signed contracts by compliance status -->
-      <div class="lg:col-span-1">
+      <div class="min-w-0 lg:col-span-1">
         <div class="mb-2 flex flex-col gap-2">
           <input
             :id="searchId"
@@ -362,20 +395,25 @@ function exportPdf() {
           </select>
         </div>
 
-        <div v-if="loadingContracts" class="text-base-content/60">Loading contracts…</div>
-        <div v-else-if="filteredContracts.length === 0" class="text-base-content/60">No contracts match.</div>
-        <ul v-else class="menu w-full rounded-box bg-base-200 p-1">
-          <li v-for="contract in filteredContracts" :key="contract.did">
+        <div v-if="loadingContracts" class="text-base-content/70" role="status">Loading contracts…</div>
+        <div v-else-if="contractsLoaded && contracts.length === 0" class="text-base-content/70" role="status">
+          No signed contracts are available.
+        </div>
+        <div v-else-if="contractsLoaded && filteredContracts.length === 0" class="text-base-content/70" role="status">
+          No contracts match the current filters.
+        </div>
+        <ul v-else class="menu w-full min-w-0 overflow-x-hidden rounded-box bg-base-200 p-1">
+          <li v-for="contract in filteredContracts" :key="contract.did" class="max-w-full min-w-0 overflow-hidden">
             <button
               type="button"
               :class="{ active: selected?.did === contract.did }"
-              class="flex flex-col items-start gap-0"
+              class="flex w-full max-w-full min-w-0 flex-col items-start gap-0 overflow-hidden"
               @click="selectContract(contract)"
             >
-              <span class="font-medium">{{ contract.name ?? contract.did }}</span>
-              <span class="flex items-center gap-2">
-                <span class="badge badge-ghost badge-xs">{{ contract.state }}</span>
-                <span class="truncate font-mono text-[10px] opacity-70">{{ contract.did }}</span>
+              <span class="max-w-full truncate font-medium">{{ contract.name ?? contract.did }}</span>
+              <span class="flex w-full min-w-0 items-center gap-2 overflow-hidden">
+                <span class="badge shrink-0 badge-ghost badge-xs">{{ contract.state }}</span>
+                <span class="w-0 flex-1 truncate font-mono text-[10px] opacity-70">{{ contract.did }}</span>
               </span>
             </button>
           </li>
@@ -383,7 +421,7 @@ function exportPdf() {
       </div>
 
       <!-- Tabbed dashboard for the selected contract -->
-      <div class="lg:col-span-2">
+      <div class="min-w-0 lg:col-span-2">
         <div v-if="!selected" class="text-base-content/70">Select a contract to inspect its signatures.</div>
         <div v-else>
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -421,15 +459,19 @@ function exportPdf() {
                 Audit Reports
               </button>
             </div>
-            <div class="flex gap-2">
-              <button class="btn btn-outline btn-sm" @click="exportJson">Export JSON</button>
-              <button class="btn btn-outline btn-sm" @click="exportPdf">Export PDF</button>
+            <div class="flex shrink-0 flex-nowrap gap-2">
+              <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportJson">
+                Export JSON
+              </button>
+              <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportPdf">
+                Export PDF
+              </button>
             </div>
           </div>
 
-          <div v-if="loadingView" class="text-base-content/60">Loading signature data…</div>
+          <div v-if="loadingView" class="text-base-content/60" role="status">Loading signature data…</div>
 
-          <template v-else>
+          <template v-else-if="viewLoaded && view">
             <!-- Validation tab: trust anchors, crypto integrity, timestamps -->
             <div v-if="activeTab === 'validation'" class="space-y-4">
               <div class="flex items-center gap-2">
@@ -472,12 +514,8 @@ function exportPdf() {
               <div>
                 <div class="mb-1 flex items-center gap-2">
                   <h3 class="font-semibold">Cryptographic Integrity</h3>
-                  <span
-                    v-if="integrityFindings.length"
-                    class="badge"
-                    :class="integrityIntact ? 'badge-success' : 'badge-error'"
-                  >
-                    {{ integrityIntact ? 'Intact' : 'Issues found' }}
+                  <span v-if="integrityFindings.length" class="badge" :class="integritySummary.cls">
+                    {{ integritySummary.label }}
                   </span>
                 </div>
                 <ul v-if="integrityFindings.length" class="space-y-1 text-sm">
@@ -515,10 +553,10 @@ function exportPdf() {
                     <td>
                       <button
                         class="btn btn-outline btn-xs btn-error"
-                        :disabled="!canManage || busy || sig.status.toUpperCase() === 'REVOKED'"
+                        :disabled="!canManage || revocationPending(sig) || sig.status.toUpperCase() === 'REVOKED'"
                         @click="revoke(sig)"
                       >
-                        Revoke
+                        {{ revocationPending(sig) ? 'Revoking…' : 'Revoke' }}
                       </button>
                     </td>
                   </tr>
@@ -658,4 +696,5 @@ function exportPdf() {
       </div>
     </div>
   </div>
+  <ConfirmationModal ref="confirmation-modal" />
 </template>

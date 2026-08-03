@@ -145,17 +145,17 @@ func (s *authSvc) PidPresentationCallback(ctx context.Context, p *genauth.Presen
 		vpToken = *p.VpToken
 	}
 
-	queryID, err := credentialQueryIDFromDCQL(s.pidDCQLQuery)
+	queryIDs, err := credentialQueryIDsFromDCQL(s.pidDCQLQuery)
 	if err != nil {
 		return goa.PermanentError("bad_request", "invalid pid dcql_query: %v", err)
 	}
 
-	presentation, err := extractSinglePresentation(vpToken, queryID)
+	presentation, err := extractSinglePresentation(vpToken, queryIDs...)
 	if err != nil {
 		return goa.PermanentError("bad_request", "invalid vp_token: %v", err)
 	}
 
-	verified, err := oid4vp.NewVerifier(s.trust).VerifyPID(presentation, oid4vp.PresentationContext{
+	verified, err := oid4vp.NewVerifier(s.trust, oid4vp.PurposePID).VerifyPID(presentation, oid4vp.PresentationContext{
 		Nonce:    attempt.Nonce,
 		ClientID: s.oid4vpClientID,
 	})

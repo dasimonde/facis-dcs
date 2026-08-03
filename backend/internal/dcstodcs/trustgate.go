@@ -13,8 +13,8 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/federation"
-	"digital-contracting-service/internal/base/hsm"
 	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/base/safehttp"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	qry "digital-contracting-service/internal/processauditandcompliance/query"
 )
@@ -38,6 +38,10 @@ type GateFailureKind int
 const (
 	AgreementFailure GateFailureKind = iota
 	PolicyFailure
+	// PoAFailure is a counterparty whose shipped Power-of-Attorney evidence
+	// does not verify (ADR-31). Inbound only, and terminal: the peer must ship
+	// evidence that verifies, which no retry of the same ship will produce.
+	PoAFailure
 )
 
 // GateError is returned by TrustGate.Check on any rejection, naming which of
@@ -56,9 +60,9 @@ func (e *GateError) Unwrap() error { return e.Err }
 // pdpTimeout bounds every HTTP call the trust gate makes (policy-endpoint
 // consult and agreement-credential/did.json fetch): http.DefaultClient has no
 // timeout, so a policy endpoint or peer that accepts the connection and then
-// never responds (ADR-19 AC10's "silent" fail-closed simulation, or a
-// genuinely wedged peer) would otherwise hang the ship/receive attempt
-// indefinitely instead of denying — fail-closed requires eventually failing.
+// never responds — a silently wedged policy endpoint, or a wedged peer —
+// would otherwise hang the ship/receive attempt indefinitely instead of
+// denying, and ADR-19's fail-closed gate requires eventually failing.
 const pdpTimeout = 10 * time.Second
 
 // TrustGate implements ADR-19's federation trust gate — the third and final
@@ -95,45 +99,25 @@ func (g *TrustGate) Check(ctx context.Context, peerDID string, direction Directi
 	return nil
 }
 
-// vcVerificationMethodID returns the id of the verification method a peer's
-// agreement credential must be self-signed with — did.json publishes it
-// under the same key label (hsm.KeyLabelVC()) this instance's own gendid
-// uses, found by id suffix rather than a fixed array position so a did.json
-// that adds or reorders verification methods doesn't silently pick the
-// wrong key.
-func vcVerificationMethodID(did string) string {
-	return did + "#" + hsm.KeyLabelVC()
-}
-
 // verifyAgreementCredential fetches the peer's agreement credential, checks
-// its signature against the dedicated VC verificationMethod in the peer's
-// own did.json, confirms the credential is self-signed by that same peer
-// (its issuer resolves to the same hostname the credential was fetched
-// from), and compares its termsOfUse.hash against this instance's own
-// embedded federation rules hash.
+// its signature against the verification method its own proof names — which the
+// peer must publish as an assertionMethod — confirms the credential is
+// self-signed by that same peer (its issuer resolves to the same hostname the
+// credential was fetched from), and compares its termsOfUse.hash against this
+// instance's own embedded federation rules hash.
 func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, error) {
 	peerDIDDocument, err := identity.FetchDIDDocument(peerDID)
 	if err != nil {
 		return nil, fmt.Errorf("agreement credential: fetch peer did.json: %w", err)
 	}
-	peerDocID, err := peerDIDDocument.GetID()
-	if err != nil {
-		return nil, fmt.Errorf("agreement credential: peer did.json: %w", err)
-	}
-	wantVCMethodID := vcVerificationMethodID(peerDocID)
-	var vcMethod *identity.VerificationMethod
-	for i := range peerDIDDocument.VerificationMethod {
-		if peerDIDDocument.VerificationMethod[i].ID == wantVCMethodID {
-			vcMethod = &peerDIDDocument.VerificationMethod[i]
-			break
-		}
-	}
-	if vcMethod == nil {
-		return nil, fmt.Errorf("agreement credential: peer did.json publishes no %q verificationMethod", wantVCMethodID)
-	}
-	vcPub, err := vcMethod.PublicKeyJWK.ECPublicKey()
-	if err != nil {
-		return nil, fmt.Errorf("agreement credential: peer VC verificationMethod key: %w", err)
+	// Resolution returns whatever the URL served; nothing in the fetch itself
+	// binds that document to the identifier that was asked for. Everything after
+	// this point is derived from the document's own id — which verification
+	// method may assert, whose keys they are — so a document declaring itself to
+	// be somebody else would have those checks run against that other identity
+	// while this instance believes it is talking to peerDID.
+	if err := requireDocumentIsFor(peerDIDDocument, peerDID); err != nil {
+		return nil, fmt.Errorf("agreement credential: %w", err)
 	}
 
 	credential, err := fetchAgreementCredential(peerDID)
@@ -145,6 +129,7 @@ func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, 
 		Issuer json.RawMessage `json:"issuer"`
 		Proof  struct {
 			VerificationMethod string `json:"verificationMethod"`
+			ProofPurpose       string `json:"proofPurpose"`
 		} `json:"proof"`
 		TermsOfUse json.RawMessage `json:"termsOfUse"`
 	}
@@ -181,9 +166,23 @@ func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, 
 		return nil, fmt.Errorf("agreement credential: issuer %q resolves to %q, not the peer's own %q",
 			issuer, issuerTarget, peerTarget)
 	}
-	if parsed.Proof.VerificationMethod != vcMethod.ID {
-		return nil, fmt.Errorf("agreement credential: proof.verificationMethod %q does not reference the peer's dedicated VC key %q",
-			parsed.Proof.VerificationMethod, vcMethod.ID)
+	// A credential is an assertion, so its proof must have been made for that
+	// purpose; a proof made to authenticate or to agree a key establishes no
+	// claim (W3C VC Data Integrity §2.1). proofPurpose is mandatory there, so an
+	// omitted one is a malformed proof, not a permissive default — and the
+	// authorization test below is meaningless without knowing which relationship
+	// to test the key against.
+	if purpose := strings.TrimSpace(parsed.Proof.ProofPurpose); purpose != string(identity.PurposeAssertion) {
+		return nil, fmt.Errorf("agreement credential: proof.proofPurpose is %q, not %q",
+			purpose, identity.PurposeAssertion)
+	}
+	// The key comes from the credential's own proof, not from this instance's
+	// key label: `#dcs-vc` is what OUR gendid names its credential key, and a
+	// peer publishing `#key-2` signs an equally valid credential. What the peer
+	// must state is that the named key may assert — DIDDocument.AssertionKey.
+	vcPub, err := peerDIDDocument.AssertionKey(parsed.Proof.VerificationMethod)
+	if err != nil {
+		return nil, fmt.Errorf("agreement credential: proof.verificationMethod %q: %w", parsed.Proof.VerificationMethod, err)
 	}
 	if err := provenance.VerifyDataIntegrityProof(credential, vcPub); err != nil {
 		return nil, fmt.Errorf("agreement credential: signature does not verify: %w", err)
@@ -196,6 +195,14 @@ func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, 
 	if rulesHash != federation.Hash() {
 		return nil, fmt.Errorf("agreement credential: federation rules hash %q does not match this instance's own embedded hash %q",
 			rulesHash, federation.Hash())
+	}
+
+	// Last, because the checks above establish whose credential this is and what
+	// it agrees to, and this one establishes only that it is still current. Until
+	// it was here the gate accepted a credential of any age, so a peer removed
+	// from the federation kept a layer-3a credential that passed forever.
+	if err := requireCredentialInForce(credential, time.Now()); err != nil {
+		return nil, fmt.Errorf("agreement credential: %w", err)
 	}
 
 	return credential, nil
@@ -255,9 +262,8 @@ func RecordDenialIncident(ctx context.Context, db *sqlx.DB, contractDID string, 
 // (contract DID, peer DID, direction) was already recorded — a terminal
 // policy-endpoint denial
 // (PolicyFailure) can be reached more than once for the same underlying
-// interaction (ADR-19 AC10: Offer and PDF_REGENERATED both firing a ship
-// attempt for the same offer, milliseconds apart), and only the first must
-// raise an incident.
+// interaction (Offer and PDF_REGENERATED both firing a ship attempt for the
+// same offer, milliseconds apart), and only the first must raise an incident.
 func RecordDenialIncidentTxDeduped(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, contractDID string, direction Direction, gateErr *GateError) error {
 	reporter := qry.TrustGateDenialReporter{DB: db}
 	return reporter.HandleTxDeduped(ctx, tx, denialQry(contractDID, direction, gateErr))
@@ -287,9 +293,9 @@ func fetchAgreementCredential(peerDID string) (json.RawMessage, error) {
 		return nil, err
 	}
 	var lastErr error
-	for _, scheme := range []string{"https", "http"} {
+	for _, scheme := range identity.DIDWebSchemes(host) {
 		url := identity.DIDWebBaseURL(scheme, host, segments) + "/.well-known/dcs-agreement-credential.json"
-		body, err := fetchAgreementCredentialFromURL(url)
+		body, err := fetchAgreementCredentialFromURL(host, url)
 		if err == nil {
 			return body, nil
 		}
@@ -308,13 +314,32 @@ func didWebTarget(did string) (string, error) {
 	return identity.DIDWebBaseURL("https", host, segments), nil
 }
 
-// agreementCredentialFetchClient bounds the peer fetch the same way
-// TrustGate.httpClient bounds the policy-endpoint POST (pdpTimeout) — an
-// unresponsive peer must fail this out, not hang it.
-var agreementCredentialFetchClient = &http.Client{Timeout: pdpTimeout}
+// The two clients the agreement-credential fetch uses. Its URL is built from a
+// peer identifier this instance did not choose, so it is the same server-side
+// request primitive the did.json fetch beside it is: safehttp refuses redirects
+// (a peer must serve its credential at the address its identifier names, not
+// point at one) and refuses to dial addresses no published peer lives on. The
+// timeout matches the policy-endpoint POST (pdpTimeout) — an unresponsive peer
+// must fail this out, not hang it.
+var (
+	agreementFetchClientStrict   = safehttp.Client(pdpTimeout, safehttp.Policy{})
+	agreementFetchClientLoopback = safehttp.Client(pdpTimeout, safehttp.Policy{AllowLoopback: true})
+)
 
-func fetchAgreementCredentialFromURL(url string) (json.RawMessage, error) {
-	resp, err := agreementCredentialFetchClient.Get(url)
+// agreementFetchClient picks between them by re-reading the decision
+// identity.DIDWebSchemes has already made for this host: it offers a second,
+// plaintext scheme exactly for the loopback and explicitly named insecure hosts
+// the dev and CI stacks resolve over http. Reading that back keeps one rule
+// instead of a second one here that can drift away from it.
+func agreementFetchClient(host string) *http.Client {
+	if len(identity.DIDWebSchemes(host)) > 1 {
+		return agreementFetchClientLoopback
+	}
+	return agreementFetchClientStrict
+}
+
+func fetchAgreementCredentialFromURL(host, url string) (json.RawMessage, error) {
+	resp, err := agreementFetchClient(host).Get(url)
 	if err != nil {
 		return nil, err
 	}

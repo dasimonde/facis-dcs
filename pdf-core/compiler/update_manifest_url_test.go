@@ -87,7 +87,7 @@ func TestUpdatePDFWithManifestURLEmbedsXMPProvenance(t *testing.T) {
 		t.Errorf("dcs.remote_manifests assertion does not contain the manifest URL %q", manifestURL)
 	}
 
-	if err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
 		t.Fatalf("VerifyIncrementalUpdate must still pass with the XMP provenance link embedded: %v", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestUpdatePDFWithoutManifestURLHasNoProvenanceLink(t *testing.T) {
 	if bytes.Contains(store, []byte("remote_manifests")) {
 		t.Error("manifest store must not contain remote_manifests when no manifest URL is supplied")
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
 		t.Fatalf("VerifyIncrementalUpdate (no manifest url): %v", err)
 	}
 }

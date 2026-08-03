@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { refreshOntologyDomainFields } from '@template-repository/utils/ontology-domain-fields'
 import PublishEntryForm from '@semantic-hub/components/PublishEntryForm.vue'
 import RegisterVersionForm from '@semantic-hub/components/RegisterVersionForm.vue'
 import {
@@ -96,6 +97,8 @@ async function afterMutation() {
   // A clause-catalog change must reach the template builder's palette
   // without a reload (ADR-10).
   if (selected.value?.name === 'clause-catalog') void clauseCatalog.refresh()
+  // Same for the builder's hub-derived object vocabulary.
+  refreshOntologyDomainFields().catch(() => undefined)
 }
 
 const activeBadge = computed(() => (v: SemanticSchemaItem) => v.active)

@@ -168,13 +168,25 @@ def step_then_specific_discrepancies_identified(context):
     # c2pa_manifest_found=true even though match=false — distinguishing it
     # from other failure classes (manifest missing entirely, transport
     # error) where c2pa_manifest_found is false.
+    #
+    # Since artifacts are encrypted at rest, the CID-swap seam plants bytes the
+    # instance never sealed, so verify cannot open them to look for a manifest
+    # at all. That is itself a named class — `discrepancy`
+    # ("artifact_not_authentic") — and it is a STRONGER statement than a hash
+    # mismatch: the stored bytes are provably not the ones this instance wrote.
+    # Either named class satisfies "the specific discrepancies are identified";
+    # an undifferentiated failure does not.
     result = _verify_result(context)
     assert result.get("match") is False
-    assert result.get("c2pa_manifest_found") is True, (
+    discrepancy = result.get("discrepancy")
+    assert result.get("c2pa_manifest_found") is True or discrepancy in (
+        "content_hash_mismatch",
+        "artifact_not_authentic",
+    ), (
         f"Expected the verify response to identify the SPECIFIC discrepancy "
-        f"class (c2pa_manifest_found=true: manifest present, content hash "
-        f"comparison failed) rather than a generic/undifferentiated failure, "
-        f"got: {result}"
+        f"class (c2pa_manifest_found=true for a content hash mismatch, or "
+        f"discrepancy naming the failure class) rather than a generic/"
+        f"undifferentiated failure, got: {result}"
     )
 
 

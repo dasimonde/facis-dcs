@@ -2,14 +2,6 @@ package ptr
 
 import "strconv"
 
-// Deref returns the pointer value or def when p is nil.
-func Deref[T any](p *T, def T) T {
-	if p == nil {
-		return def
-	}
-	return *p
-}
-
 // Ref returns a pointer to v.
 func Ref[T any](v T) *T {
 	return &v
@@ -55,26 +47,4 @@ func IntFromMap(m map[string]interface{}, key string) int {
 	default:
 		return 0
 	}
-}
-
-// StringSliceFromMap returns a string slice by key or empty slice.
-func StringSliceFromMap(m map[string]interface{}, key string) []string {
-	if m == nil {
-		return []string{}
-	}
-	v, ok := m[key]
-	if !ok || v == nil {
-		return []string{}
-	}
-	arr, ok := v.([]interface{})
-	if !ok {
-		return []string{}
-	}
-	out := make([]string, 0, len(arr))
-	for _, item := range arr {
-		if s, ok := item.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
 }

@@ -22,6 +22,7 @@ func evaluateODRLConstraint(operator string, actualValue any, rightOperand any) 
 	op := compactTerm(operator)
 	actualValue = compactJSONLDValue(actualValue)
 	rightOperand = compactJSONLDValue(rightOperand)
+	actualValue, rightOperand = orderableODRLOperands(actualValue, rightOperand)
 	switch op {
 	case "eq", "isA":
 		return odrlValuesEqual(actualValue, rightOperand)
@@ -184,6 +185,42 @@ func toTime(value any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// TestOPADurationConstraintsOrderByMagnitude pins the verdicts themselves
+// (the parity gate only proves the two evaluators agree): an xsd:duration
+// boundary orders by magnitude. Byte order puts "PT6H" after "PT24H", so a
+// lexical comparison reports a six-hour window as breaching a 24-hour bound —
+// an answer, and the wrong one.
+func TestOPADurationConstraintsOrderByMagnitude(t *testing.T) {
+	cases := []struct {
+		operator string
+		actual   string
+		right    string
+		want     bool
+	}{
+		{"lteq", "PT6H", "PT24H", true},
+		{"gt", "PT6H", "PT24H", false},
+		{"lteq", "P5D", "P14D", true},
+		{"lteq", "P30D", "P14D", false},
+		{"lteq", "P14D", "P14D", true},
+		{"lt", "P1W", "P14D", true},
+		{"eq", "PT24H", "P1D", true},
+		{"gteq", "P1Y", "P1M", true},
+		// A month is 28 to 31 days: "P1M" against "P30D" has no defined order,
+		// and an undecidable boundary is not a satisfied one.
+		{"lteq", "P1M", "P30D", false},
+		{"gteq", "P1M", "P30D", false},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s/%s/%s", tc.operator, tc.actual, tc.right), func(t *testing.T) {
+			got, err := evaluateODRLConstraintOPA(context.Background(), tc.operator,
+				map[string]any{"@value": tc.actual, "@type": "xsd:duration"},
+				map[string]any{"@value": tc.right, "@type": "xsd:duration"})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // TestOPAConstraintParityWithHandRolled is the ADR-11 parity gate: the OPA
 // ODRL evaluation must return the identical verdict to the hand-rolled
 // evaluateODRLConstraint for every operator/value combination, including the
@@ -233,6 +270,18 @@ func TestOPAConstraintParityWithHandRolled(t *testing.T) {
 		{"gt", "2025-05-11T00:00:00Z", "2025-05-10T23:59:59Z"},
 		{"lteq", "2025-05-10T10:00:00", float64(500)}, // dateTime vs number -> false
 		{"eq", "2025-05-10", "2025-05-10"},            // string equality unaffected
+		// xsd:duration ordering (the SLA profile's "elapsed time <= P14D"):
+		// magnitude, never lexical — "PT6H" sorts after "PT24H" by bytes.
+		{"lteq", "PT6H", "PT24H"},
+		{"gt", "PT6H", "PT24H"},
+		{"lteq", "P5D", "P14D"},
+		{"lteq", "P30D", "P14D"},
+		{"lteq", "P14D", "P14D"},
+		{"lt", "P1W", "P14D"},
+		{"eq", "PT24H", "P1D"},
+		{"lteq", "P1M", "P1Y"},
+		{"lteq", "P1M", "P30D"},     // month vs days: no defined order -> false
+		{"lteq", "P5D", float64(1)}, // duration vs number -> false
 		// isAnyOf / isNoneOf (upper/trim-normalised membership)
 		{"isAnyOf", "DEU", []any{"DEU", "AUT", "CHE"}},
 		{"isAnyOf", "deu", []any{"DEU", "AUT", "CHE"}},

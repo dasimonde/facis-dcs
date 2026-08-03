@@ -91,7 +91,7 @@ func TestVerifyReproducesAReanchoredDocument(t *testing.T) {
 		t.Fatalf("ReanchorProvenance: %v", err)
 	}
 
-	if err := VerifyIncrementalUpdate(testSigningContext(), reanchored); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), reanchored); err != nil {
 		t.Fatalf("verify must reproduce the re-anchor: %v", err)
 	}
 }
@@ -117,7 +117,7 @@ func TestVerifyDistinguishesAVCUpdateFromAReanchor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdatePDFWithVC: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), withVC); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), withVC); err != nil {
 		t.Fatalf("a VC-only update must still reproduce: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestVerifyDistinguishesAVCUpdateFromAReanchor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReanchorProvenance: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), reanchored); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), reanchored); err != nil {
 		t.Fatalf("a re-anchor after a VC update must reproduce: %v", err)
 	}
 }

@@ -1,5 +1,33 @@
 # ADR-11: OPA/Rego as the ODRL evaluation engine, replacing the hand-rolled operator switch
 
+## Status (verified 2026-07-30) — read this before the sections below
+
+This ADR is **implemented**. OPA is the production evaluator: `opaodrl.go`
+embeds Rego and runs `rego.PreparedEvalQuery`; `odrlexpanded.go` and `kpi.go`
+call it; `evaluateODRLConstraint` survives only in `opaodrl_test.go` as the
+parity oracle. The sections below were written before the work landed and
+still read as prospective. Four statements in them are now wrong and are
+corrected here rather than by rewriting the record:
+
+1. **"Own a minimal Go ODRL→Rego compiler"** overstates what shipped. There is
+   no compiler: one *static* Rego module answers a single-constraint boolean,
+   one constraint at a time. No contract policy is ever compiled to Rego.
+   Every deontic decision — prohibition-violated-when-satisfied, `and`/`or`/
+   `xone`, `andSequence`, duty recursion, context-operand deferral — is Go in
+   `base/validation/odrlexpanded.go`.
+2. **The pre-signatory call chain named in Context is not the chain that
+   runs.** The blocking gates (`approve.go`, `signingmanagement/command/apply.go`)
+   call `ValidateContractPolicySatisfaction`, which evaluates the embedded ODRL
+   directly. It does not call `AuditContractContent`; that function's only
+   non-test caller is the read-only audit-trail query. There is likewise no
+   `/contract/verify` flow — the endpoint referenced in Context does not exist.
+3. **The state of the world is `dcs:value`, not `dcs:parameterValue`.**
+   Production reads `dcs:value` throughout (`odrlexpanded.go`,
+   `contractclosedness.go`). `dcs:parameterValue` survives only as a mapping in
+   the served JSON-LD context and has no production reader.
+4. **The import path is `github.com/open-policy-agent/opa/v1/rego`**, not
+   `opa/rego`.
+
 ## Context
 
 ADR-6 established the *shape* of policy in this system — real ODRL emitted as
@@ -114,7 +142,11 @@ The evaluator's "state of the world" is:
 Both feed the same OPA query; only the source of the value differs — matching
 the SRS's two enforcement moments over one policy set.
 
-## Verification gate (mandatory, before wiring in — prospective)
+## Verification gate — met; OPA is wired in
+
+*(Written prospectively. The gate was met and OPA is the production evaluator;
+the parity oracle it describes lives in `opaodrl_test.go`. Retained as the
+record of what was required, not as an open item.)*
 
 Mirroring ADR-9's goRDFlib gate, OPA is not wired into enforcement until:
 
@@ -137,10 +169,13 @@ Mirroring ADR-9's goRDFlib gate, OPA is not wired into enforcement until:
 If the gate cannot be met, the hand-rolled evaluator remains and this ADR is
 revised — the gate is the trigger to switch, not an assumption that it works.
 
-## Integration (planned)
+## Integration — done
 
-- New dependency `github.com/open-policy-agent/opa/rego`, pinned by version in
-  `go.mod`; upgrades re-run the parity gate.
+*(Written prospectively; the work below has shipped. See Status above for the
+four points where this section's wording no longer matches the code.)*
+
+- New dependency `github.com/open-policy-agent/opa/v1/rego`, pinned by version
+  in `go.mod`; upgrades re-run the parity gate.
 - `evaluateODRLConstraint` and its expanded/compact call sites
   (`odrlexpanded.go` `auditExpandedODRLRule`, `kpi.go` `EvaluateKPIViolation`)
   are replaced by an OPA query built from the compiled Rego for the contract's
@@ -173,3 +208,42 @@ revised — the gate is the trigger to switch, not an assumption that it works.
 - The value-inlining unification (`dcs:parameterValue` on the field) is a
   prerequisite that stands independently of the engine: it is the clean
   "state of the world" both this OPA path and the prior evaluator read.
+
+## Extension (2026-07-29): issuer trust authorization
+
+The same engine now decides issuer trust (ADR-31). `IssuerTrusted` and
+`IssuerMayAttest` evaluate `internal/auth/oid4vp/policy/trust.rego` instead of
+the `if` statements that used to hold those rules.
+
+**The line: discovery and verification stay in Go, authorization is policy.**
+Chain validation to a trust anchor, the leaf identifying its issuer, signature
+and holder binding, revocation, and mechanism dispatch are typed, tested Go —
+OPA has crypto builtins, but reimplementing those rules in a policy language
+would trade tests for configurability nobody asked for. What moved is the part a
+deployment actually changes: which issuers it trusts, for what, and on whose
+behalf.
+
+Three properties this buys:
+
+- The rules are auditable as data. "Which issuers may grant a session here" is a
+  file an operator reads, not control flow they infer.
+- A denial explains itself. The policy emits `reasons`, surfaced in the error a
+  caller reports; the previous booleans said only "no".
+- Adding a distinction no longer means adding an enum value. The overloaded
+  `peer` purpose — one grant meaning both "may authorize a signature here" and
+  "may attest a counterparty's authority" — is separable by writing two rules
+  rather than by changing the trust schema and every consumer of it.
+
+The trust document travels as evaluation **input**, not as a bound data
+document. Bound data is a snapshot taken at first evaluation, so a configuration
+changed afterwards would go on being judged against what it said at startup,
+and nothing would report the difference.
+
+`OID4VP_TRUST_POLICY_PATH` replaces the embedded policy for a deployment whose
+authorization rules differ. A policy that cannot be loaded or evaluated
+**denies** — treating a broken policy as permissive would turn a configuration
+mistake into silent trust.
+
+The policy has tests of its own (`policy/trust_test.rego`). They run under
+`opa test backend/internal/auth/oid4vp/policy` and, so they cannot rot quietly,
+inside `go test` as well, which means CI runs them with no new tooling.

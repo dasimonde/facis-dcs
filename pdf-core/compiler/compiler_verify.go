@@ -1,60 +1,22 @@
 package compiler
 
-import (
-	"bytes"
-	"fmt"
-)
+import "fmt"
 
 // ExtractPageContentByteRanges returns the [start, end) byte ranges of every
-// page content stream in pdfBytes, in document order. A stream is identified as
-// a page content stream if its data contains a BT (begin-text) operator — the
-// operator that bounds all human-visible text rendering in PDF. Streams that
-// do not contain BT (embedded files, ICC profiles, font programs, XRef streams)
-// are excluded.
+// page content stream in pdf, in document order. Pages are reached through the
+// page tree and each stream's extent comes from its own /Length, so contract
+// text — which reaches the content stream verbatim — can neither pass itself off
+// as a page nor truncate one by writing "endstream" into a clause.
 func ExtractPageContentByteRanges(pdf []byte) ([][2]int, error) {
-	var ranges [][2]int
-	search := pdf
-	pos := 0
-	for {
-		streamMarker := []byte("stream\n")
-		streamIdx := bytes.Index(search, streamMarker)
-		if streamIdx < 0 {
-			break
-		}
-		streamDataStart := pos + streamIdx + len(streamMarker)
-
-		endMarker := []byte("\nendstream")
-		endIdx := bytes.Index(search[streamIdx+len(streamMarker):], endMarker)
-		if endIdx < 0 {
-			break
-		}
-		streamDataEnd := streamDataStart + endIdx
-
-		streamData := search[streamIdx+len(streamMarker) : streamIdx+len(streamMarker)+endIdx]
-		if bytes.Contains(streamData, []byte("BT")) && !isC2PAManifestDict(search, streamIdx) {
-			ranges = append(ranges, [2]int{streamDataStart, streamDataEnd})
-		}
-
-		advance := streamIdx + len(streamMarker) + endIdx + len(endMarker)
-		pos += advance
-		search = search[advance:]
+	streams, err := pageContentStreamRanges(pdf)
+	if err != nil {
+		return nil, err
+	}
+	ranges := make([][2]int, 0, len(streams))
+	for _, s := range streams {
+		ranges = append(ranges, [2]int{s.start, s.end})
 	}
 	return ranges, nil
-}
-
-// isC2PAManifestDict reports whether the object dictionary immediately
-// preceding the stream keyword at streamIdx declares the stream as the
-// embedded C2PA manifest (/Subtype /application#2Fc2pa). The manifest's
-// binary JUMBF payload can incidentally contain the bytes "BT", which would
-// otherwise misclassify the manifest stream as page content and make it
-// "overlap" its own exclusion window exactly (seen as an intermittent
-// compiler-invariant panic in /sign under real load).
-func isC2PAManifestDict(search []byte, streamIdx int) bool {
-	dictStart := 0
-	if objIdx := bytes.LastIndex(search[:streamIdx], []byte(" obj")); objIdx >= 0 {
-		dictStart = objIdx
-	}
-	return bytes.Contains(search[dictStart:streamIdx], []byte("/Subtype /application#2Fc2pa"))
 }
 
 // rangesOverlap reports whether the half-open intervals [aStart, aEnd) and

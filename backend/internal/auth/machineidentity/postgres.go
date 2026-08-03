@@ -96,6 +96,13 @@ func (r *PostgresRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *PostgresRepo) DeleteByClientIDTx(ctx context.Context, tx *sqlx.Tx, clientID string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM machine_identities WHERE oauth_client_id = $1`, clientID); err != nil {
+		return fmt.Errorf("withdraw the authority of machine client %q: %w", clientID, err)
+	}
+	return nil
+}
+
 func (r *PostgresRepo) TouchSecretIssuedAt(ctx context.Context, id string, at time.Time) error {
 	const statement = `UPDATE machine_identities SET secret_issued_at = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`
 	if _, err := r.DB.ExecContext(ctx, statement, id, at); err != nil {
@@ -104,23 +111,43 @@ func (r *PostgresRepo) TouchSecretIssuedAt(ctx context.Context, id string, at ti
 	return nil
 }
 
+// execer is the write surface shared by the connection pool and a transaction,
+// so one statement serves both instead of two that have to agree.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
 // Upsert keys on oauth_client_id: a seeded identity is identified by the client
 // it authenticates as, and re-seeding must not duplicate it. Roles and the
 // attributed DID are refreshed so the declared configuration stays the source
 // of truth for seeded entries.
 func (r *PostgresRepo) Upsert(ctx context.Context, data Identity) error {
+	return upsert(ctx, r.DB, data)
+}
+
+// UpsertTx registers an identity inside the caller's transaction, so it commits
+// with whatever else had to be true for the credential to be usable.
+func (r *PostgresRepo) UpsertTx(ctx context.Context, tx *sqlx.Tx, data Identity) error {
+	return upsert(ctx, tx, data)
+}
+
+func upsert(ctx context.Context, ex execer, data Identity) error {
+	// secret_issued_at is coalesced rather than assigned: a seed carries no
+	// secret (the client's comes from the same deployment configuration) and
+	// must not erase the issue date of a credential handed out since.
 	const statement = `
         INSERT INTO machine_identities
-            (name, oauth_client_id, participant_did, roles, description, enabled, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (name, oauth_client_id, participant_did, roles, description, enabled, created_by, secret_issued_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (oauth_client_id) DO UPDATE
         SET participant_did = EXCLUDED.participant_did,
             roles = EXCLUDED.roles,
+            secret_issued_at = COALESCE(EXCLUDED.secret_issued_at, machine_identities.secret_issued_at),
             updated_at = CURRENT_TIMESTAMP
     `
-	if _, err := r.DB.ExecContext(ctx, statement,
+	if _, err := ex.ExecContext(ctx, statement,
 		data.Name, data.OAuthClientID, data.ParticipantDID, data.RolesJSON,
-		data.Description, data.Enabled, data.CreatedBy,
+		data.Description, data.Enabled, data.CreatedBy, data.SecretIssuedAt,
 	); err != nil {
 		return fmt.Errorf("seed machine identity %q: %w", data.Name, err)
 	}

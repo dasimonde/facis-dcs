@@ -50,8 +50,11 @@ func TestW3CBitstring_Check_Ed25519Signature2020(t *testing.T) {
 		Trust:   trust,
 	}
 
+	// The reference names the list by the URI the fixture identifies itself with,
+	// which is what the handler binds against; rewriteHostTransport is what sends
+	// the fetch to the httptest server instead.
 	result, err := bitstringHandler.Check(context.Background(), status.VerifiedCredential{}, status.Reference{
-		URI:       srv.URL,
+		URI:       "http://localhost:7996/jGidIZFO8f6ey8wZ7Bn8",
 		Index:     1,
 		Purpose:   "revocation",
 		Mechanism: status.MechanismW3CBitstring,

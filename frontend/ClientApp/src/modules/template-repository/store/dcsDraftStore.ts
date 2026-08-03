@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { TemplateType } from '@template-repository/models/contract-template'
-import { ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
+import { ONTOLOGY_ASSETS, ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
 import { DCS_ODRL_PROFILE_IRI, DEFAULT_FIELD_CONSTRAINT_ACTION } from '@template-repository/utils/sla-ontology-catalog'
 import { applyInlineSemanticValues } from '@contract-workflow-engine/utils/semantic-condition-values'
 import {
@@ -22,14 +22,15 @@ import {
   type JsonLdTypedValue,
   type OdrlConstraint,
   type OdrlConstraintNode,
+  type OdrlDuty,
   type OdrlRule,
   type OdrlSet,
   typedFieldFill,
   type XsdDatatype,
 } from '@/models/dcs-jsonld'
-import type { SemanticConditionValue } from '@/models/contract-data'
-import type { ContractTemplate } from '@/models/contract-template'
-import type { ContractTemplateResponsible } from '@/models/contract-template-responsible'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
+import type { ContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type {
   ContractTemplateCreateRequest,
   ContractTemplateUpdateManageRequest,
@@ -38,6 +39,7 @@ import type {
 import type { DcsOperator } from '@/models/semantic/facis-dcs-semantic'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type {
+  DomainFieldDefinition,
   MetaData,
   SemanticCondition,
   SemanticConditionParameter,
@@ -83,8 +85,6 @@ export const useDcsDraftStore = defineStore(storeId, {
       return [
         { id: objectIri('party', 'assigner', documentId), label: 'My organization' },
         { id: objectIri('party', 'assignee', documentId), label: 'The counterparty' },
-        { id: objectIri('party', 'provider', documentId), label: 'Provider' },
-        { id: objectIri('party', 'customer', documentId), label: 'Customer' },
       ]
     },
     /** The contract/asset IRI an ODRL rule targets. */
@@ -291,12 +291,23 @@ export const useDcsDraftStore = defineStore(storeId, {
       return id
     },
     /** Sets a fixed literal on a domain-object property, serialized as a
-     *  typed {@value} literal of the property's datatype. */
-    setDataObjectLiteral(objectId: string, path: string, value: string, datatype: XsdDatatype): void {
+     *  typed {@value} literal of the property's datatype (a compact xsd
+     *  term, or an external library's exact datatype IRI). xsd:string emits
+     *  the bare form — RDF 1.1's simple literal — so strict term-comparing
+     *  validators match it against a library's plain sh:in members. */
+    setDataObjectLiteral(objectId: string, path: string, value: string, datatype: string): void {
       const object = this.contractData.find((entry) => entry['@id'] === objectId)
       if (!object) return
       if (value === '') delete object[path]
-      else object[path] = typedFieldFill(value, datatype)
+      else object[path] = datatype === 'xsd:string' ? value : typedFieldFill(value, datatype)
+    },
+    /** Sets a fixed IRI value on a domain-object property (an sh:nodeKind
+     *  sh:IRI leaf naming an external resource). */
+    setDataObjectIri(objectId: string, path: string, iri: string): void {
+      const object = this.contractData.find((entry) => entry['@id'] === objectId)
+      if (!object) return
+      if (iri === '') delete object[path]
+      else object[path] = { '@id': iri }
     },
     /**
      * Makes a domain-object leaf negotiable: declares a dcs:ContractField
@@ -309,6 +320,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       label: string,
       datatype: XsdDatatype,
       required: boolean,
+      allowedValues?: readonly string[],
     ): string {
       const object = this.contractData.find((entry) => entry['@id'] === objectId)
       if (!object) return ''
@@ -320,6 +332,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         'dcs:label': label,
         'dcs:datatype': datatype,
         'dcs:required': required,
+        ...(allowedValues?.length ? { 'dcs:valueConstraint': { allowedValues } } : {}),
       })
       object[path] = { '@id': fieldId }
       return fieldId
@@ -432,15 +445,34 @@ export const useDcsDraftStore = defineStore(storeId, {
     addClauseWithMeaning(payload: {
       title: string
       content: DcsContentSegment[]
-      fields: { id: string; parameterName: string; domainFieldIri: string }[]
+      fields: { id: string; parameterName: string; domainFieldIri: string; label?: string }[]
+      /** Declared assets: each becomes a typed dcs:contractData object whose
+       *  properties reference the declared fields — the ODRL target names
+       *  the object, never a pseudo-field (ADR-23). */
+      assets?: { id: string; classIri: string; properties: { fieldId: string; path: string }[] }[]
       rule: OdrlRule | null
     }): void {
       const blockId = this.addClause({ title: payload.title, content: payload.content })
+      // A field brought in with a declared asset is described by that class's
+      // property shape, not by a flat ontology domain field.
+      const assetClassByFieldId = new Map<string, string>()
+      for (const asset of payload.assets ?? []) {
+        for (const property of asset.properties) assetClassByFieldId.set(property.fieldId, asset.classIri)
+      }
       for (const f of payload.fields) {
-        this.contractFields.push(contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri))
+        this.contractFields.push(
+          contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri, f.label, assetClassByFieldId.get(f.id)),
+        )
+      }
+      for (const asset of payload.assets ?? []) {
+        this.contractData.push({
+          '@id': asset.id,
+          '@type': asset.classIri,
+          ...Object.fromEntries(asset.properties.map((p) => [p.path, { '@id': p.fieldId }])),
+        })
       }
       if (payload.rule) {
-        this.policies.push({ ...payload.rule, 'dcs:prose': { '@id': blockId } })
+        this.policies.push(bindRuleProse(payload.rule, blockId))
       }
     },
     addClause(payload: { title?: string; content: DcsContentSegment[] }): string {
@@ -589,11 +621,6 @@ export function flattenPolicySet(policies: OdrlSet | OdrlRule[] | undefined): Od
   ]
 }
 
-export function blockIdFromIri(iri: string): string {
-  const local = iri.includes('#') ? iri.slice(iri.lastIndexOf('#') + 1) : iri.slice(UUID_URN_PREFIX.length)
-  return decodeURIComponent(local.replace(/^block-/, ''))
-}
-
 // ---- Document assembly (trivial — blocks/layout already in JSON-LD) ----
 
 interface CanonicalDocumentInput {
@@ -677,6 +704,12 @@ function canonicalizeLayout(layout: DcsLayoutNode[]): DcsLayoutNode[] {
 
 export interface ContractDocumentInput {
   documentId: string
+  /**
+   * The document as the server handed it out. The editor rebuilds the contract
+   * from its own state, so anything it does not model is absent from what it
+   * rebuilds — the server-owned fields are carried over from here.
+   */
+  storedDocument?: DcsContractData
   name?: string
   description?: string
   blocks: DcsBlock[]
@@ -689,11 +722,27 @@ export interface ContractDocumentInput {
   derivedFromTemplate?: DcsContractData['derivedFromTemplate']
 }
 
+/**
+ * Fields of a contract document the server owns and the client only carries.
+ * The editor cannot reproduce them, so rebuilding the document from editor
+ * state drops them — and posting that back discards data the server put there:
+ * the party nodes a signature is attributed to (with the signatory and Power of
+ * Attorney already recorded on them), the signature fields naming those
+ * parties, and the shapes graph the document is pinned to.
+ */
 export function buildContractDocument(input: ContractDocumentInput): DcsContractData {
-  return assembleCanonicalDocument({
-    ...input,
+  const { storedDocument, ...editorState } = input
+  const document = assembleCanonicalDocument({
+    ...editorState,
     documentType: 'dcs:Contract',
   }) as DcsContractData
+  if (!storedDocument) return document
+  if (storedDocument['dcs:parties'] !== undefined) document['dcs:parties'] = storedDocument['dcs:parties']
+  if (storedDocument['dcs:signatureFields'] !== undefined) {
+    document['dcs:signatureFields'] = storedDocument['dcs:signatureFields']
+  }
+  if (storedDocument['sh:shapesGraph'] !== undefined) document['sh:shapesGraph'] = storedDocument['sh:shapesGraph']
+  return document
 }
 
 export function getSemanticConditionsFromTemplateData(td: DcsDocumentData | undefined): SemanticCondition[] {
@@ -817,6 +866,24 @@ function rewriteContractDataObject(
   return rewritten
 }
 
+/** Binds a rule and every duty nested in it — the duties themselves and their
+ *  consequences, each an odrl:Duty — to the clause block the rule was authored
+ *  in. The nested nodes are fragments of the same clause, so they are backed by
+ *  the same prose; a duty carrying none is refused by the hub shapes at submit. */
+function bindRuleProse(rule: OdrlRule, blockId: string): OdrlRule {
+  const bound: OdrlRule = { ...rule, 'dcs:prose': { '@id': blockId } }
+  if (bound['odrl:duty']) bound['odrl:duty'] = bound['odrl:duty'].map((duty) => bindDutyProse(duty, blockId))
+  return bound
+}
+
+function bindDutyProse(duty: OdrlDuty, blockId: string): OdrlDuty {
+  const bound: OdrlDuty = { ...duty, 'dcs:prose': { '@id': blockId } }
+  if (bound['odrl:consequence']) {
+    bound['odrl:consequence'] = bound['odrl:consequence'].map((consequence) => bindDutyProse(consequence, blockId))
+  }
+  return bound
+}
+
 /** Rewrites a rule's own @id plus every component-owned @id it references (prose, constraint operands, nested duties). */
 function remapRuleIds(rule: OdrlRule, idMap: Map<string, string>): OdrlRule {
   const next: OdrlRule = { ...rule }
@@ -831,12 +898,10 @@ function remapRuleIds(rule: OdrlRule, idMap: Map<string, string>): OdrlRule {
   return next
 }
 
-function remapDutyIds(
-  duty: import('@/models/dcs-jsonld').OdrlDuty,
-  idMap: Map<string, string>,
-): import('@/models/dcs-jsonld').OdrlDuty {
+function remapDutyIds(duty: OdrlDuty, idMap: Map<string, string>): OdrlDuty {
   const next = { ...duty }
   if (next['@id']) next['@id'] = idMap.get(next['@id']) ?? next['@id']
+  if (next['dcs:prose']) next['dcs:prose'] = { '@id': idMap.get(next['dcs:prose']['@id']) ?? next['dcs:prose']['@id'] }
   if (next['odrl:constraint']) {
     next['odrl:constraint'] = next['odrl:constraint'].map((node) => remapConstraintIds(node, idMap))
   }
@@ -854,6 +919,10 @@ function remapConstraintIds(node: OdrlConstraintNode, idMap: Map<string, string>
     if (right && !Array.isArray(right) && typeof right === 'object' && '@id' in right) {
       next['odrl:rightOperand'] = mapRef(right)
     }
+    // A unit may name a contract field too (a negotiated unit); one naming a
+    // fixed concept is not in the map and passes through.
+    const unit = node['odrl:unit']
+    if (unit) next['odrl:unit'] = mapRef(unit)
     return next
   }
   const next = { ...node }
@@ -1099,6 +1168,11 @@ function xsdToParamType(
     case 'xsd:date':
     case 'xsd:dateTime':
       return 'date'
+    // A duration is typed as free text (an ISO-8601 token, "P14D"), but the
+    // field keeps its declared xsd:duration — the parameter type only picks
+    // the input widget, and PARAM_TYPE_TO_XSD is never applied to a field
+    // that already declares its own datatype.
+    case 'xsd:duration':
     case 'xsd:string':
       return hasOptions ? 'enum' : 'string'
   }
@@ -1128,14 +1202,38 @@ function semanticParamToContractField(
   }
 }
 
+/** The hub definition a picked field derives from: a flat ontology domain
+ *  field, or — when the field came in with a declared asset — the property
+ *  shape the asset's class declares for that path, so the shape's datatype
+ *  (sh:datatype) and value constraints (sh:in, sh:minInclusive/sh:maxInclusive,
+ *  sh:pattern) reach the emitted field. */
+function hubFieldDefinition(domainFieldIri: string, classIri?: string): DomainFieldDefinition | undefined {
+  const owner = classIri ? ONTOLOGY_ASSETS.find((asset) => asset.id === classIri) : undefined
+  return (
+    owner?.properties.find((property) => property.ontologyId === domainFieldIri) ??
+    ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === domainFieldIri) ??
+    ONTOLOGY_ASSETS.flatMap((asset) => asset.properties).find((property) => property.ontologyId === domainFieldIri)
+  )
+}
+
 /** Builds a ContractField for a clause-editor field binding. */
-function contractFieldFromDomainField(id: string, parameterName: string, domainFieldIri: string): DcsContractField {
-  const domainField = ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === domainFieldIri)
+function contractFieldFromDomainField(
+  id: string,
+  parameterName: string,
+  domainFieldIri: string,
+  label?: string,
+  classIri?: string,
+): DcsContractField {
+  const domainField = hubFieldDefinition(domainFieldIri, classIri)
   return {
     '@id': id,
     '@type': 'dcs:ContractField',
-    'dcs:label': domainField?.label ?? parameterName,
-    'dcs:datatype': PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
+    'dcs:label': label ?? domainField?.label ?? parameterName,
+    // The hub's declared datatype wins: the parameter type is the input
+    // widget, whose vocabulary has no duration and no instant, so deriving
+    // the datatype from it silently rewrites an imported xsd:duration field
+    // to xsd:string and every boundary over it then compares bytes.
+    'dcs:datatype': domainField?.datatype ?? PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
     'dcs:shape': { '@id': domainFieldIri },
     'dcs:required': true,
     ...(domainField?.valueConstraint
@@ -1259,22 +1357,17 @@ function contractFieldsToSemanticConditions(
       if (!isStandardOdrlOperator(operate)) continue
       const rightOperand = constraint['odrl:rightOperand']
       // A right operand may be a bare literal (95), a typed value ({@value}), a
-      // field reference ({@id} — a negotiated boundary, not a fixed target), or
-      // a list. Only an OBJECT can be probed with `in`; guarding it keeps a
-      // primitive operand from throwing and blanking the whole clause render.
-      const isReference =
-        typeof rightOperand === 'object' &&
-        rightOperand !== null &&
-        !Array.isArray(rightOperand) &&
-        '@id' in rightOperand
-      const targets =
-        rightOperand === undefined || isReference
-          ? []
-          : Array.isArray(rightOperand)
-            ? rightOperand.map(jsonLdValue)
-            : [jsonLdValue(rightOperand)]
+      // field reference ({@id} — a negotiated boundary whose bound is whatever
+      // that field ends up holding), or a list of those. Only an OBJECT can be
+      // probed with `in`; guarding it keeps a primitive operand from throwing
+      // and blanking the whole clause render.
+      const operands = rightOperand === undefined ? [] : Array.isArray(rightOperand) ? rightOperand : [rightOperand]
+      const isReference = (operand: (typeof operands)[number]): operand is JsonLdReference =>
+        typeof operand === 'object' && operand !== null && '@id' in operand
+      const targets = operands.filter((operand) => !isReference(operand)).map(jsonLdValue)
+      const targetRefs = operands.filter(isReference).map((operand) => operand['@id'])
       const fieldId = constraint['odrl:leftOperand']['@id']
-      operatorsByField.set(fieldId, [...(operatorsByField.get(fieldId) ?? []), { operate, targets }])
+      operatorsByField.set(fieldId, [...(operatorsByField.get(fieldId) ?? []), { operate, targets, targetRefs }])
     }
   }
 
@@ -1378,9 +1471,12 @@ function jsonLdValue(value: JsonLdTypedValue | JsonLdReference): unknown {
       return Number(value['@value'])
     case 'xsd:boolean':
       return value['@value'] === 'true'
-    case 'xsd:string':
-    case 'xsd:date':
-    case 'xsd:dateTime':
+    // Every other datatype keeps its lexical form. The switch used to list
+    // the cases it knew and fall off the end for the rest, which turned an
+    // xsd:duration boundary into `undefined` — the bound vanished and the
+    // constraint reported "Expected <= undefined" against every value.
+    // compareXsdValues orders the lexical form inside its own value space.
+    default:
       return value['@value']
   }
 }

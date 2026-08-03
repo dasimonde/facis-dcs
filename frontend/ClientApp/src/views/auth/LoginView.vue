@@ -14,12 +14,15 @@ import {
 import { isLoginPollError, isLoginStatusResponse, LOGIN_POLL_ERROR } from '@/models/responses/auth-response'
 import { ROUTES } from '@/router/router'
 import { authenticationService } from '@/services/authentication-service'
+import { useErrorStore } from '@/stores/error-store'
 
 const route = useRoute()
 const router = useRouter()
 const presentationUrl = ref('')
 const copyHint = ref('')
 const qrCodeDataUrl = useQRCode(computed(() => presentationUrl.value || ''))
+
+const errorStore = useErrorStore()
 
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -200,6 +203,7 @@ async function pollLoginOnce(state: string, generation: number): Promise<'contin
     stopPolling()
     clearOid4vpBrowserSession()
     console.error('OpenID4VP login failed:', status.error_message ?? status.status)
+    errorStore.add(status.error_message ?? status.status)
     return 'done'
   }
   return 'continue'
@@ -344,6 +348,9 @@ async function copyPresentationUrl() {
           Keep this tab open — the QR / link refreshes automatically before it expires (about every 5 minutes). You will
           be redirected after the wallet presents credentials.
         </p>
+        <RouterLink :to="{ name: ROUTES.AUTH.PID_VERIFY }" class="link text-xs opacity-70">
+          Check your PID credential without signing in
+        </RouterLink>
       </div>
     </div>
     <div v-else class="flex flex-col items-center gap-3">

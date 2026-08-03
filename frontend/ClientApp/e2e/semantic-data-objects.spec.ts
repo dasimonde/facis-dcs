@@ -21,11 +21,16 @@ const LEGAL_SHAPES_TTL = `
 ex:LegalPersonShape a sh:NodeShape ;
     sh:targetClass ex:LegalPerson ;
     sh:property [ sh:path ex:registrationNumber ; sh:datatype xsd:string ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path ex:legalForm ; sh:in ( "GmbH" "AG" "SE" ) ; sh:maxCount 1 ] ;
+    sh:property [ sh:path ex:website ; sh:nodeKind sh:IRI ; sh:maxCount 1 ] ;
     sh:property [ sh:path ex:legalAddress ; sh:class ex:Address ; sh:minCount 1 ; sh:maxCount 1 ] .
 
 ex:AddressShape a sh:NodeShape ;
     sh:targetClass ex:Address ;
     sh:property [ sh:path ex:countryName ; sh:datatype xsd:string ; sh:minCount 1 ; sh:maxCount 1 ] .
+
+ex:MarkerShape a sh:NodeShape ;
+    sh:targetClass ex:Marker .
 `
 
 interface AuthoredDocument {
@@ -78,12 +83,19 @@ test('a LegalPerson data object is clicked into a template and filled in the con
 
     await page.getByRole('tab', { name: 'Data', exact: true }).click()
     const editor = page.getByTestId('data-objects-editor')
-    await editor.getByTestId('data-object-class').selectOption(`${LEGAL_VOCAB}LegalPerson`)
+    const classPicker = editor.getByTestId('data-object-class')
+    // A marker shape (targetClass, zero property shapes) stays pickable — other
+    // shapes reference such classes via sh:node.
+    await expect(classPicker.locator(`option[value="${LEGAL_VOCAB}Marker"]`)).toBeAttached()
+    await classPicker.selectOption(`${LEGAL_VOCAB}LegalPerson`)
     await editor.getByTestId('add-data-object').click()
 
     const person = editor.getByTestId('data-object-LegalPerson')
     await expect(person).toBeVisible()
     await person.getByTestId('literal-registrationNumber').fill('HRB 4711')
+    // sh:in renders a select; sh:nodeKind sh:IRI takes an external IRI.
+    await person.getByTestId('literal-legalForm').selectOption('GmbH')
+    await person.getByTestId('iri-website').fill('https://musterfirma.example.org/')
     await person.getByTestId('add-nested-legalAddress').click()
 
     const address = person.getByTestId('data-object-Address')
@@ -105,9 +117,12 @@ test('a LegalPerson data object is clicked into a template and filled in the con
     const addressNode = objectOfType(doc, `${LEGAL_VOCAB}Address`)
     expect(personNode, 'the LegalPerson is in the document graph').toBeTruthy()
     expect(addressNode, 'the nested Address is in the document graph').toBeTruthy()
-    expect(personNode![`${LEGAL_VOCAB}registrationNumber`], 'the fixed literal is typed').toEqual({
-      '@value': 'HRB 4711',
-      '@type': 'xsd:string',
+    // xsd:string emits RDF 1.1's simple-literal form so external validators
+    // term-match it against plain sh:in members.
+    expect(personNode![`${LEGAL_VOCAB}registrationNumber`], 'the fixed string literal is bare').toBe('HRB 4711')
+    expect(personNode![`${LEGAL_VOCAB}legalForm`], 'the sh:in choice is a bare string').toBe('GmbH')
+    expect(personNode![`${LEGAL_VOCAB}website`], 'the IRI leaf names the external resource').toEqual({
+      '@id': 'https://musterfirma.example.org/',
     })
     expect(personNode![`${LEGAL_VOCAB}legalAddress`], 'the parent references its nested object by @id').toEqual({
       '@id': addressNode!['@id'],

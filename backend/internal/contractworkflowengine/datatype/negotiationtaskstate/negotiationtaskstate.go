@@ -31,7 +31,7 @@ func NewNegotiationTaskState(s string) (NegotiationTaskState, error) {
 	return ts, nil
 }
 
-// IsValid checks if the NegotiationTaskState is a valid role
+// IsValid reports whether the value is one of the declared NegotiationTaskState values.
 func (s NegotiationTaskState) IsValid() bool {
 	upper := NegotiationTaskState(strings.ToUpper(string(s)))
 	return validStates[upper]

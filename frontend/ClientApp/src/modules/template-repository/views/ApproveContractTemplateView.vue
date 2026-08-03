@@ -8,13 +8,14 @@ import CopyTemplateButton from '@template-repository/components/CopyTemplateButt
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import TemplateManagerActions from '@/components/template/TemplateManagerActions.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useNavStore } from '@/stores/nav-store'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import { reportActionError } from '@/utils/report-action-error'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const router = useRouter()
 const route = useRoute()
@@ -65,7 +66,7 @@ watch(
         })
       })
       .catch((error: unknown) => {
-        console.error('Failed to load template for editing', error)
+        reportActionError(error, 'Load template approval')
       })
   },
   { immediate: true },
@@ -78,7 +79,7 @@ async function approve() {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for approval')
+    reportActionError(new Error('The current template version is unavailable.'), 'Approve template')
     return
   }
   try {
@@ -99,7 +100,7 @@ async function approve() {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Approval failed', error)
+    reportActionError(error, 'Approve template')
   } finally {
     isSubmitting.value = false
   }
@@ -109,7 +110,7 @@ async function resubmit() {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for reopen reviews')
+    reportActionError(new Error('The current template version is unavailable.'), 'Resubmit template')
     return
   }
   try {
@@ -130,7 +131,7 @@ async function resubmit() {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Resubmission failed', error)
+    reportActionError(error, 'Resubmit template')
   } finally {
     isSubmitting.value = false
   }
@@ -140,7 +141,7 @@ async function reject() {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for rejection')
+    reportActionError(new Error('The current template version is unavailable.'), 'Reject template')
     return
   }
   const decisionNoteResult = await decisionNoteDialog.value?.reveal({
@@ -153,7 +154,7 @@ async function reject() {
     decisionNote.value = decisionNoteResult.data
   }
   if (!decisionNote.value?.trim()) {
-    console.error('Reason is required for rejection')
+    reportActionError(new Error('A reason is required.'), 'Reject template')
     return
   }
   isSubmitting.value = true
@@ -165,7 +166,7 @@ async function reject() {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Rejection failed', error)
+    reportActionError(error, 'Reject template')
   } finally {
     isSubmitting.value = false
   }

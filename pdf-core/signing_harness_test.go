@@ -76,9 +76,15 @@ func setupTestSigning() error {
 	if err := os.WriteFile(chainPath, append(certPEM(der), certPEM(caDER)...), 0o644); err != nil {
 		return err
 	}
-	_ = os.Setenv("DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE", chainPath)
+	// pdf-core reads no chain from its environment: the suite sends this one on
+	// every request, as the DCS backend sends its own.
+	testMainX5ChainPEM = append(certPEM(der), certPEM(caDER)...)
 	return nil
 }
+
+// testMainX5ChainPEM is the chain the suite signs under, sent on every request
+// that renders a manifest.
+var testMainX5ChainPEM []byte
 
 // signSigStructure signs one COSE Sig_structure with the test key, as the DCS
 // backend signs a prepare step's captured Sig_structures before /c2pa/embed.

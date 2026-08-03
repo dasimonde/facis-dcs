@@ -37,11 +37,26 @@ type Signer interface {
 	CreateCredential(ctx context.Context, unsignedVC json.RawMessage) (json.RawMessage, error)
 }
 
+const (
+	// AgreementCredentialLifetime is how long an issued credential stays in
+	// force. It is the window within which an instance removed from the
+	// federation still presents a credential that verifies, so it is a day
+	// rather than the process lifetime it used to be.
+	AgreementCredentialLifetime = 24 * time.Hour
+
+	// MaxAgreementCredentialLifetime is the longest window a PEER's credential
+	// may claim. A validUntil far enough out is a credential that never expires,
+	// which is the state requiring a validUntil at all exists to end; a peer on
+	// another release cycle gets room beyond our own day either way.
+	MaxAgreementCredentialLifetime = 7 * 24 * time.Hour
+)
+
 // BuildAgreementCredential builds and signs this instance's self-signed
 // federation agreement credential (ADR-19): a W3C Verifiable Credential
-// whose issuer is the instance's own DID and whose termsOfUse names the
-// embedded federation rules by policyId (rulesURL) and hash (Hash()).
-func BuildAgreementCredential(ctx context.Context, signer Signer, issuerDID, rulesURL string) (json.RawMessage, error) {
+// whose issuer is the instance's own DID, whose termsOfUse names the
+// embedded federation rules by policyId (rulesURL) and hash (Hash()), and
+// which is in force from validFrom for AgreementCredentialLifetime.
+func BuildAgreementCredential(ctx context.Context, signer Signer, issuerDID, rulesURL string, validFrom time.Time) (json.RawMessage, error) {
 	if signer == nil {
 		return nil, fmt.Errorf("federation: no VC signer configured")
 	}
@@ -54,15 +69,17 @@ func BuildAgreementCredential(ctx context.Context, signer Signer, issuerDID, rul
 		return nil, fmt.Errorf("federation: federation rules policy URL is required")
 	}
 
+	validFrom = validFrom.UTC().Truncate(time.Second)
 	unsigned := map[string]interface{}{
 		"@context": []interface{}{
 			"https://www.w3.org/ns/credentials/v2",
 			dataIntegrityContext,
 			dcsVocabulary,
 		},
-		"type":      []string{"VerifiableCredential", "FederationAgreementCredential"},
-		"issuer":    issuerDID,
-		"validFrom": time.Now().UTC().Format(time.RFC3339),
+		"type":       []string{"VerifiableCredential", "FederationAgreementCredential"},
+		"issuer":     issuerDID,
+		"validFrom":  validFrom.Format(time.RFC3339),
+		"validUntil": validFrom.Add(AgreementCredentialLifetime).Format(time.RFC3339),
 		"credentialSubject": map[string]interface{}{
 			"id": issuerDID,
 		},

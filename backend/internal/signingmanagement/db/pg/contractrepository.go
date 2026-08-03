@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 
 	"digital-contracting-service/internal/base/datatype"
@@ -19,8 +19,8 @@ import (
 )
 
 type PostgresContractRepo struct {
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
 }
 
 // ReadDataByDID reads the contract regardless of lifecycle state — like
@@ -249,11 +249,7 @@ func (r *PostgresContractRepo) FetchContractPDFBytes(ctx context.Context, tx *sq
 	if cidStr == "" {
 		return nil, nil
 	}
-	result, err := r.IPFSClient.FetchFile(cidStr)
-	if err != nil {
-		return nil, err
-	}
-	return result.Data, nil
+	return r.Artifacts.Get(ctx, artifactstore.ContractScope(did), cidStr)
 }
 
 func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error) {
@@ -294,7 +290,13 @@ func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx
 	}
 
 	pdfBytes, fetchErr := r.FetchContractPDFBytes(ctx, tx, did)
-	if fetchErr != nil {
+	if artifactstore.IsTampered(fetchErr) {
+		// The embedded signing evidence lives inside the stored PDF, so bytes
+		// that fail authenticated decryption invalidate the evidence itself —
+		// report that, not a fetch problem.
+		findings = append(findings,
+			"Embedded signing evidence is invalid: the stored contract PDF failed authenticated decryption, so it was altered or substituted at rest")
+	} else if fetchErr != nil {
 		findings = append(findings, fmt.Sprintf("Could not fetch contract PDF for integrity check: %v", fetchErr))
 	} else if len(pdfBytes) == 0 {
 		findings = append(findings, "No contract PDF available for MR/HR integrity check")

@@ -44,3 +44,10 @@ kept as a second, parallel signal.
 - Every C2PA-affecting mutation (embedded or remote) must land **before**
   PAdES signing, never after — see ADR-3's ordering rule, which this
   transport inherits.
+  **(Amended by [ADR-26](adr-26-provenance-reanchored-after-signing.md)
+  (2026-07-27): "never after" no longer holds. The lifecycle manifest still
+  lands before signing, but a provenance-only C2PA update manifest is
+  appended after it, re-anchoring the hard binding over the signed bytes via
+  a PDF incremental update that does not touch the signature's
+  `/ByteRange`. ADR-26 carries the DSS validation measured before and after
+  the re-anchor. See ADR-3's corresponding amendment.)**

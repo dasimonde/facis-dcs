@@ -4,9 +4,16 @@
     "https://w3id.org/security/suites/jws-2020/v1"
   ],
   "assertionMethod": [
+    "did:web:localhost%3A8992#dev-key-1",
+    "did:web:localhost%3A8992#dcs-vc"
+  ],
+  "authentication": [
     "did:web:localhost%3A8992#dev-key-1"
   ],
   "id": "did:web:localhost%3A8992",
+  "keyAgreement": [
+    "did:web:localhost%3A8992#dcs-ecdh"
+  ],
   "services": [
     {
       "id": "did:web:localhost%3A8992#dcs",
@@ -25,9 +32,38 @@
         "kty": "EC",
         "x": "VMCLWPHo_NTIDOisihQCngVu6ddUCSOoEXNgHKdVtZc",
         "x5c": [
-          "MIIBrTCCAVOgAwIBAgIIGMM9qj+lSIMwCgYIKoZIzj0EAwIwODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkyMB4XDTI2MDcxODAwMjExOFoXDTI4MDcxODAxMjExOFowODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkyMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVMCLWPHo/NTIDOisihQCngVu6ddUCSOoEXNgHKdVtZd235nZr1+TwoqUhKNHMTiVaA14KreAAxAIAQTWleTEF6NHMEUwDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAUBgNVHREEDTALgglsb2NhbGhvc3QwCgYIKoZIzj0EAwIDSAAwRQIgUD0jWW+zEK6mdtG/yQsOSXOf+dPLZkcET1Qe/R6HfuACIQDuAV9BPfohHfzbHoEqSvgWzA26iLIkQvtMcegwzoQAQg=="
+          "MIIBrDCCAVOgAwIBAgIIGMbkTfLiH2EwCgYIKoZIzj0EAwIwODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkyMB4XDTI2MDcyOTIxNDg0NVoXDTI4MDcyOTIyNDg0NVowODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkyMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVMCLWPHo/NTIDOisihQCngVu6ddUCSOoEXNgHKdVtZd235nZr1+TwoqUhKNHMTiVaA14KreAAxAIAQTWleTEF6NHMEUwDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAUBgNVHREEDTALgglsb2NhbGhvc3QwCgYIKoZIzj0EAwIDRwAwRAIgNfn3RiE/V2EspcJ9g1FTOkUk4gxgf1GwD42aFcHPyrkCIAO1i7TrUjmK7GqZyNB6kpmCjNP1hYuV1RJ9XfIoav2r"
         ],
         "y": "dt-Z2a9fk8KKlISjRzE4lWgNeCq3gAMQCAEE1pXkxBc"
+      },
+      "type": "JsonWebKey2020"
+    },
+    {
+      "controller": "did:web:localhost%3A8992",
+      "id": "did:web:localhost%3A8992#dcs-vc",
+      "publicKeyJwk": {
+        "alg": "ES256",
+        "crv": "P-256",
+        "kid": "dcs-vc",
+        "kty": "EC",
+        "x": "DCcIGhXx5y2JL0w38fCX5-mqBc-Qnl9vduKTRiaf2v0",
+        "x5c": [
+          "MIIBrTCCAVOgAwIBAgIIGMbkTfMJk/YwCgYIKoZIzj0EAwIwODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkyMB4XDTI2MDcyOTIxNDg0NVoXDTI4MDcyOTIyNDg0NVowODELMAkGA1UEBhMCREUxEDAOBgNVBAoTB0RDUyBEZXYxFzAVBgNVBAMTDmxvY2FsaG9zdDo4OTkyMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDCcIGhXx5y2JL0w38fCX5+mqBc+Qnl9vduKTRiaf2v3RUkyhE1I+TjnxvU29GuJi8PQ9/c0YoKU8eFGEl3BDwqNHMEUwDgYDVR0PAQH/BAQDAgeAMA8GA1UdJQQIMAYGBFUdJQAwDAYDVR0TAQH/BAIwADAUBgNVHREEDTALgglsb2NhbGhvc3QwCgYIKoZIzj0EAwIDSAAwRQIgZLGTjS/nnHeHeiwC+MGHnFvFic+Fx/8N5a3JPIBcMj0CIQDa78Sjyx+2huyQSR/b3KN9HvYki+cxuxYn8aEVizSsaQ=="
+        ],
+        "y": "0VJMoRNSPk458b1NvRriYvD0Pf3NGKClPHhRhJdwQ8I"
+      },
+      "type": "JsonWebKey2020"
+    },
+    {
+      "controller": "did:web:localhost%3A8992",
+      "id": "did:web:localhost%3A8992#dcs-ecdh",
+      "publicKeyJwk": {
+        "crv": "P-256",
+        "kid": "dcs-ecdh",
+        "kty": "EC",
+        "use": "enc",
+        "x": "wigZdx432oOJqs-2-cMFDyjNuQviGJlnvF8TclEC_EU",
+        "y": "VpQ7En9d6TIs4OzznyzgQwjiOGLiJx9Smd0RtPuVJds"
       },
       "type": "JsonWebKey2020"
     }

@@ -109,6 +109,26 @@ func TestContractDataRejectsUnresolvedReference(t *testing.T) {
 	require.ErrorContains(t, err, "urn:uuid:object-nowhere")
 }
 
+// An sh:nodeKind sh:IRI leaf holds an absolute IRI naming a resource outside
+// the document (a Gaia-X provider, a vocabulary individual) — no declaration
+// inside the document backs it.
+func TestContractDataAcceptsExternalResourceIRI(t *testing.T) {
+	data := nestedDomainContract(t)
+	object := data["dcs:contractData"].([]any)[0].(map[string]any)
+	object["ex:registrationIssuer"] = map[string]any{"@id": "https://registry.example.org/issuers/42"}
+	object["ex:providedBy"] = map[string]any{"@id": "did:web:provider.example.org"}
+	require.NoError(t, normalizeNested(t, data))
+}
+
+func TestContractDataRejectsUnresolvedDocumentScopedReference(t *testing.T) {
+	data := nestedDomainContract(t)
+	data["@id"] = "did:web:example.org:contracts:1"
+	object := data["dcs:contractData"].([]any)[0].(map[string]any)
+	object["ex:legalAddress"] = map[string]any{"@id": "did:web:example.org:contracts:1#object-gone"}
+	err := normalizeNested(t, data)
+	require.ErrorContains(t, err, "#object-gone")
+}
+
 func TestContractDataRejectsEmbeddedBlankObject(t *testing.T) {
 	data := nestedDomainContract(t)
 	object := data["dcs:contractData"].([]any)[0].(map[string]any)

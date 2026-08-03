@@ -1,0 +1,21 @@
+{{- if and .Values.ingress.enabled .Values.ingress.stripPrefix }}
+{{/*
+Traefik's equivalent of the nginx rewrite-target + x-forwarded-prefix pair the
+production issuer ingress uses: the release is reached at <origin>/issuer/... ,
+Node-RED serves /status-list/1 , and the flows rebuild the public URL from the
+X-Forwarded-Prefix this middleware sets. Without the header the issuer would
+advertise and sign `sub` claims for URLs the ingress does not route to it, and
+the verifier refuses a list whose sub is not the URI the credential names.
+*/}}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-orce-strip-prefix
+  labels:
+    app.kubernetes.io/name: orce
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  stripPrefix:
+    prefixes:
+      - {{ .Values.ingress.stripPrefix | quote }}
+{{- end }}

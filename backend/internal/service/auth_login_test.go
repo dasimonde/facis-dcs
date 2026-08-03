@@ -33,14 +33,29 @@ func TestExtractSinglePresentationRejectsNonObject(t *testing.T) {
 	}
 }
 
-func TestCredentialQueryIDFromDCQL(t *testing.T) {
-	id, err := credentialQueryIDFromDCQL(map[string]any{
-		"credentials": []any{map[string]any{"id": "query-1"}},
+func TestCredentialQueryIDsFromDCQL(t *testing.T) {
+	ids, err := credentialQueryIDsFromDCQL(map[string]any{
+		"credentials": []any{
+			map[string]any{"id": "query-1"},
+			map[string]any{"id": "query-2"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if id != "query-1" {
-		t.Fatalf("unexpected query id: %s", id)
+	if len(ids) != 2 || ids[0] != "query-1" || ids[1] != "query-2" {
+		t.Fatalf("unexpected query ids: %v", ids)
+	}
+}
+
+// A wallet answers under the id of whichever alternative query it matched, so
+// the answer must be found under any of them, not only the first.
+func TestExtractSinglePresentationFindsAnAlternativeQueryID(t *testing.T) {
+	vp, err := extractSinglePresentation(`{"dcs_poa_credential_vc_sd_jwt":["a~b~c"]}`, "dcs_poa_credential", "dcs_poa_credential_vc_sd_jwt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if vp != "a~b~c" {
+		t.Fatalf("unexpected vp: %q", vp)
 	}
 }

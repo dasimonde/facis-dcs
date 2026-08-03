@@ -18,6 +18,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"digital-contracting-service/internal/pdfgeneration/statuspublication"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -85,18 +86,22 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 
+	occurredAt := time.Now().UTC()
 	evt := contractevents.TerminateEvent{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
 		TerminatedBy:    cmd.TerminatedBy,
 		Reason:          cmd.Reason,
-		OccurredAt:      time.Now().UTC(),
+		OccurredAt:      occurredAt,
 		HolderDID:       cmd.HolderDID,
 		UserRoles:       cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)
+	}
+	if err := statuspublication.EnqueueTx(ctx, tx, cmd.DID, contractstate.Terminated.String(), cmd.Reason, occurredAt); err != nil {
+		return err
 	}
 
 	return tx.Commit()

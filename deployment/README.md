@@ -9,7 +9,7 @@ An automated orchestration workspace that deploys a [Digital Contracting Service
 ## Overview
 
 The Digital Contracting Service (DCS) provides an open-source platform for creating, signing, and managing contracts digitally.
-Integrated with the European Digital Identity Wallet (EUDI), it guarantees that all digital transactions are secure, legally binding, and interoperable.
+It is designed for integration with the European Digital Identity Wallet (EUDI) ecosystem and targets eIDAS 2.0 Advanced Electronic Signatures. It is not certified, has not been conformance-tested against a production wallet or a qualified trust service provider, and claims no legal effect for the signatures it produces.
 
 Key components:
 - **Multi-Contract Signing** — multi-party contract execution within a single workflow
@@ -67,8 +67,8 @@ What this command does:
 1. Runs Helm dependency update and upgrade using `deployment/helm/values.dev.yml`
 2. Creates `backend/.env` from `backend/.env.dev1` if missing
 3. Provisions a local SoftHSM2 token with the five DCS keys and issues the
-   C2PA/PAdES x5chains for pdf-core (`scripts/hsm-provision.sh`,
-   `scripts/c2pa-cert-provision.sh`)
+   C2PA/PAdES x5chains the backend signs and publishes under
+   (`scripts/hsm-provision.sh`, `scripts/c2pa-cert-provision.sh`)
 4. Starts frontend Vite dev server
 5. Starts backend with air hot reload
 
@@ -292,10 +292,8 @@ than passing silently.
   namespace`.
 - **Restricted RBAC.** If the installer may not create `roles`/`rolebindings`,
   set `pkcs11.provisioning.publishSecrets=false`. The provisioning hook then
-  writes `did.json` and the x5chain to the shared token volume instead of
-  publishing Secrets, and needs no API access at all. In that mode pdf-core is
-  pinned to the backend's node to co-mount a `ReadWriteOnce` volume; declare
-  `persistence.accessModes: ["ReadWriteMany"]` to lift the pinning. The ORCE TSA
+  writes `did.json` to the shared token volume instead of publishing a Secret,
+  and needs no API access at all. The ORCE TSA
   hook still publishes its own Secret, so also set
   `orce.localTSA.autoProvision=false` and pre-create that Secret — its key and
   certificate are self-signed and depend on nothing in-cluster.
@@ -325,7 +323,232 @@ script will attempt a fresh install that collides with the existing objects.
 Either let `helm upgrade --install` adopt them deliberately, or uninstall and
 reinstall in a maintenance window. Plan this rather than discovering it.
 
+## Credential issuers
+
+A `dcs` release contains no credential issuer. The two credentials a signatory
+presents — the Power of Attorney that authorizes them to sign for their
+organization, and the person identification credential (PID) that says who they
+are — come from OID4VCI issuers deployed as **separate Helm releases** of the
+`orce` subchart, each with its own volume, its own key and its own DID. The
+chart ships example values for all three:
+
+| Release | Values files | Issues | Installed |
+|---|---|---|---|
+| `dcs-issuer` | `values.issuer-base.yml` + `values.issuer.yml` | Power of Attorney (`urn:dcs:poa:v1`) | beside the first DCS instance, under its hostname |
+| `dcs-issuer` | `values.issuer-base.yml` + `values.issuer2.yml` | the same, for the second instance | beside the second DCS instance, in its namespace |
+| `dcs-issuer` | `values.issuer-base.yml` + `values.issuer.dev.yml` | the same, for `dev-stack.sh` | by `dev-stack.sh`, on a NodePort |
+| `dcs-issuer` | `values.issuer-base.yml` + `values.issuer.bdd.yml` | the same, for the kind BDD stack | by `tests/bdd` `kind_deploy` |
+| `dcs-pid-issuer` | `values.pid-issuer.yml` | demo PID (`urn:dcs:pid:demo:v1`) | **once** for the whole deployment |
+
+`values.issuer-base.yml` is the half that is the same everywhere — the flow set,
+the `/admin` endpoint, the volume — and is always layered first; the second file
+says only how that cluster reaches the issuer. Development, CI and production
+therefore install the same chart under the same release name with the same base,
+which is the point: a stack that differs from production cannot test it.
+
+`flowsDir` selects which flow set a release runs (`flows-issuer` /
+`flows-pid-issuer`, both under `charts/orce/`); a release serves one set, not
+both, because they claim overlapping routes.
+
+### The status list
+
+Each issuer serves and signs the status list its own credentials name (ADR-34):
+`<issuer base>/status-list/1`, ES256 over `typ: statuslist+jwt`, `iss` its base
+URL, and its `x5c` chain in the header. `<issuer base>/admin` revokes and
+un-revokes an index, which is what makes a revocation testable — with no
+unsigned fallback, a set bit and a list that failed to load both refuse the
+credential, and only one of them proves anything.
+
+Two properties decide whether a verifier can use it, and both fail silently:
+
+- The served token's `sub` must equal the URI the credential names. The issuer
+  builds it from the request's `Host` and `X-Forwarded-Prefix`, so an ingress
+  that routes `/issuer` without announcing the prefix produces a `sub` no
+  credential mentions, and every credential naming that list is refused unread.
+- The leaf must NAME the issuer — a chain proves the anchor vouched for the
+  certificate, not whose it is. The public URL is only knowable from a request,
+  so the leaf is minted on the first one that arrives and re-minted whenever the
+  URL changes. Nothing mints one at boot: a SAN-less leaf chains perfectly and
+  verifies nowhere.
+
+### Anchors: production collects them, dev and CI are handed them
+
+A production issuer generates its root on its own volume, so its fingerprint
+cannot be known before it has booted. `tmp/redeploy/build-x5c-anchors.py` reads
+each root back out of the `x5c` header of the list its issuer is actually
+serving, refuses anything that is not a self-signed CA, and de-duplicates by
+fingerprint. Re-run it after anything that re-mints a root — a wiped volume, a
+fresh install — or verification fails closed against a certificate that no
+longer signs anything.
+
+Development and CI cannot work that way: both stacks are rebuilt from nothing,
+and the backend reads its anchors before any issuer has booted. So the
+relationship is inverted. `scripts/orce-dev-root-ca.py` mints one root ONCE, into
+`deployment/helm/charts/orce/pki-dev/` and into the committed bundle
+`backend/config/oid4vp/x5c-trust-anchors.dev.pem`; the issuer is handed that root
+(`pkiRootCA.devFixture: true`) instead of generating one. Nothing runs at stack
+start, so no version-controlled file is rewritten by bringing a stack up, and
+every run anchors the same fingerprint. Its private half is in the repository,
+which is why the backend refuses the bundle unless `DCS_ALLOW_DEV_TRUST` says
+this is a development stack.
+
+What does run at stack start is a check, not a rebuild: `make -C testWallet
+check-status-list` (dev-stack.sh, and `tests/bdd/scripts/check_status_list.py` in
+CI) fetches the served list and refuses to continue unless its chain ends at a
+root the committed bundle holds — compared by SHA-256, never by subject — and its
+leaf names the issuer. Without that check the mismatch first appears as a refused
+login with the list unread, which is indistinguishable from a revoked credential.
+
+### Why the PID issuer is its own release, and only one of them
+
+A PID attests who a natural person is, and the value of that attestation is
+that somebody other than the relying party makes it. A DCS that issued the
+identity credential it later accepts as proof of its signatory has attested
+nothing. So the PID issuer is a third party to *every* DCS instance: never part
+of a `dcs` release, and installed once for the whole demo the way a national or
+QTSP issuer exists once for many relying parties. Each DCS trusts it for `pid`
+and for nothing else — an identity document must not grant access.
+
+The Power of Attorney issuer is the opposite case: it speaks *for* one
+organization about who may sign on its behalf, so each instance runs its own.
+
+The demo PID issuer proofs nobody. Its credential is not an EUDI PID and must
+not be presented as one.
+
+### What you must supply
+
+The repo gives you the shape of an issuer, never an identity:
+
+- **Your own hostnames.** Every host in the example values is a placeholder
+  (`dcs.example.org`, `dcs-b.example.org`, `pid.example.org`), as are the
+  ingress class and the empty `tls` list. A credential issuer is published under
+  the hostname of the DCS instance it serves, so its DID resolves as
+  `did:web:<host>:issuer`.
+- **Your own keys and DIDs.** Each issuer generates its root CA and signing key
+  into its own volume on first boot and publishes them under its path prefix at
+  `pki/root-ca.pem`, `pki/jwks.json` and `.well-known/did.json`. No key material
+  is in this repository, and a clone is therefore not deployable as-is.
+- **Your own trust document per DCS instance** (below). Nothing derives it
+  automatically: it names issuers by identifier, which only exist once the
+  issuers are running.
+
+### Order and commands
+
+Issuers first — the trust document a `dcs` release mounts quotes each issuer's
+published identifier and key, which do not exist until the issuer has booted.
+
+```bash
+# 1. the issuer beside each DCS instance (in that instance's namespace/cluster)
+helm install dcs-issuer ./deployment/helm/charts/orce \
+  -n <namespace> \
+  -f ./deployment/helm/values.issuer-base.yml \
+  -f ./deployment/helm/values.issuer.yml
+
+# 2. the PID issuer — once, wherever it is convenient to publish it
+helm install dcs-pid-issuer ./deployment/helm/charts/orce \
+  -n <namespace> -f ./deployment/helm/values.pid-issuer.yml
+
+# 3. read back what they published (per issuer)
+curl https://<host>/issuer/.well-known/did.json
+curl https://<host>/issuer/pki/jwks.json
+curl https://<host>/issuer/pki/root-ca.pem
+curl https://<pid-host>/pid-issuer/pki/root-ca.pem
+
+# 4. the status list, through the URL a credential will name. This request is
+#    also what mints the leaf for that URL, so do it before collecting anchors.
+#    Check `sub` is the URL you asked for and the leaf's SAN carries `iss`:
+curl -H 'Accept: application/statuslist+jwt' https://<host>/issuer/status-list/1
+```
+
+Collect the root CA of **every** issuer this instance verifies — its own login
+issuer as well as the PID issuer — into one PEM bundle. Both sign with a chain:
+the PID's is on the credential, the login issuer's is on the status list a login
+credential names, and a status list is only believed if it is signed and that
+signature verifies.
+
+Identify these roots by fingerprint, never by subject. Each issuer generates its
+own and they all carry `CN = FACIS Demo Root CA` while holding different keys,
+so a bundle assembled by name anchors one issuer and silently refuses the rest —
+with every log line naming the same CA.
+
+```bash
+openssl x509 -in <each root> -noout -fingerprint -sha256 -subject
+```
+
+Then write each DCS instance's trust document, create it as a ConfigMap, and
+only afterwards install or upgrade the `dcs` release pointing at it:
+
+```bash
+kubectl create configmap dcs-oid4vp-trust -n <namespace> --from-file=trust.json=<your file>
+```
+
+```yaml
+oid4vp:
+  trust:
+    existingConfigMap: dcs-oid4vp-trust
+    # every x5c chain — the PID credential's and the login issuer's status list —
+    # is verified against this bundle; mount it via the chart's
+    # `volumes`/`volumeMounts` values and point here
+    x5cAnchorsPath: /etc/dcs/oid4vp-x5c/root-ca.pem
+```
+
+### The trust document
+
+Trust is granted per purpose (ADR-31): `login` may grant a session here, `peer`
+lets a credential be verified in a signing ceremony, `pid` may attest a natural
+person. An issuer is listed under the identifier it puts in its credentials'
+`iss`, which for both issuer flows is their `did:web:` identifier.
+
+Every issuer here declares `mechanism: x5c`, and both of them sign that way: the
+chain is on the credential, verified against the bundle above, and the leaf
+carries the issuer's DID as a URI SAN so it can only speak for that issuer. This
+is the same chain to the same anchor that the issuer's status list is signed
+with, which is the point — a credential believed by certificate whose revocation
+status is believed by a bundled key has no relationship between the two, and the
+status list is where that relationship matters most (ADR-34).
+
+The mechanism is authoritative, not the credential: a credential arriving with a
+chain from an issuer configured as `jwks` or `did:web` is refused, and so is one
+arriving without a chain from an issuer configured as `x5c`. So this is not a
+free choice per issuer — it has to match how the issuer signs.
+
+The status list needs no entry of its own. Its `iss` is the issuer's base URL
+rather than its DID, but an `x5c`-signed list resolves through the chain and the
+anchors, never through this document.
+
+```json
+{
+  "vcts": ["urn:dcs:poa:v1", "urn:dcs:pid:demo:v1"],
+  "peer_dynamic": false,
+  "issuers": {
+    "did:web:dcs.example.org:issuer": {
+      "purposes": ["login", "peer"],
+      "organizations": ["did:web:dcs.example.org"],
+      "mechanism": "x5c"
+    },
+    "did:web:pid.example.org:pid-issuer": { "purposes": ["pid"], "mechanism": "x5c" }
+  }
+}
+```
+
+An instance grants `login`/`peer` to its **own** credential issuer: `peer` is
+what a signing ceremony checks the local signatory's Power of Attorney against,
+so granting it to another party's issuer would let that party authorize itself
+off a document it publishes about itself. Whether a counterparty is dealt with
+at all is the ADR-19 trust gate's decision, not a purpose granted here. The PID
+issuer appears in both instances' documents, with `pid` only.
+
+Leaving `existingConfigMap` unset makes the release fall back to the dev fixture
+baked into the image (`backend/config/oid4vp/trust.dev.json`), whose issuer keys
+are committed to this repository. The chart refuses to render in that case
+unless the release also declares `DCS_ALLOW_DEV_TRUST=true`, which belongs to a
+dev or CI stack only.
+
+---
+
 ## Production Deployment
+
+Backup and restore procedures — including how backup retention interacts with GDPR key-shredding erasure — are specified in the [backup integration guide](../docs/backup-integration-guide.md).
 
 ### Signing keys (PKCS#11) and the C2PA x5chain
 
@@ -333,9 +556,12 @@ Every DCS private key lives in a PKCS#11 token (DCS-IR-HI-01). For dev, staging
 and CI the chart co-deploys a SoftHSM2 software token and provisions it in-cluster
 (`pkcs11.provisioning.enabled=true`): a hook Job runs `scripts/hsm-provision.sh`
 (token + five ECDSA P-256 keys) and `scripts/c2pa-cert-provision.sh` (the C2PA
-x5chain bound to the `dcs-c2pa` key), publishing the x5chain as a Secret that
-pdf-core mounts. The backend waits for the token via an initContainer, then
-opens it using `PKCS11_MODULE_PATH` / `PKCS11_TOKEN_LABEL` / `PKCS11_PIN`.
+x5chain bound to the `dcs-c2pa` key), leaving the chain on the shared token
+volume. The backend waits for the token via an initContainer, then opens it
+using `PKCS11_MODULE_PATH` / `PKCS11_TOKEN_LABEL` / `PKCS11_PIN`, and reads the
+chain from `signing.issuerX5ChainPath`. pdf-core is configured with no signing
+material: the backend sends the chain with each render request in the
+`X-DCS-C2PA-X5Chain` header.
 
 SoftHSM2 is a software token and is NOT a production HSM. For production set
 `pkcs11.provisioning.enabled=false` and point `pkcs11` at a real external PKCS#11

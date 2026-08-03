@@ -33,9 +33,6 @@ var genesisProfile []byte
 //go:embed assets/facis-dcs-clause-catalog.ttl
 var genesisClauseCatalog []byte
 
-//go:embed assets/facis-dcs-ontology.ttl
-var genesisOntology []byte
-
 //go:embed assets/facis-sla-ontology.ttl
 var genesisSLAOntology []byte
 
@@ -47,15 +44,43 @@ var genesisODRLProfile []byte
 // independently-versioned kind="shapes" entry (Phase 3, ADR-10): typed
 // clause NodeShapes the template builder's palette (GET /semantic/clauses)
 // and contract validation (validateAgainstHubShapes) both read.
+//
+// The dcs: envelope vocabulary has no ontology entry. What constrains an
+// envelope term is ShapesName, the only graph documents are validated
+// against; there is no second, OWL-shaped declaration of those terms.
+// Both kind="ontology" entries below are parsed RDF configuration, not
+// axioms: SLAOntologyName is the dcs:DomainField index the field picker
+// and the audit's canonical-field check read, ODRLProfileName the operator
+// vocabulary the obligation editor reads.
 const (
 	ContextName       = "facis-dcs"
 	ShapesName        = "facis-dcs"
 	ProfileName       = "facis.sla.basic"
-	OntologyName      = "facis-dcs"
 	SLAOntologyName   = "facis-sla"
 	ODRLProfileName   = "dcs-odrl-profile"
 	ClauseCatalogName = "clause-catalog"
 )
+
+// ShapesKind is the kind every shapes graph THIS instance publishes carries.
+// PeerShapesKind is the separate namespace a graph shipped by a counterparty
+// is stored under (ADR-8). Nothing that answers "what does this instance
+// publish or enforce" — Seed's latest-version probe, ResolveEffectiveBundle,
+// ActiveShapeLibraryClasses, the /semantic/schema/* admin endpoints — reads
+// PeerShapesKind, so an inbound ship can neither write nor shadow an entry of
+// this instance's own.
+const (
+	ShapesKind     = "shapes"
+	PeerShapesKind = "peer-shapes"
+)
+
+// IsEnvelopeShapes reports whether a hub shapes entry is part of the DCS
+// envelope vocabulary: the canonical graph and the clause catalog that
+// constrains the envelope's own typed clauses. Every deployment seeds its own
+// (Seed), so these are this instance's invariants rather than evidence about a
+// contract, and they are resolved locally whatever a peer pins.
+func IsEnvelopeShapes(name string) bool {
+	return name == ShapesName || name == ClauseCatalogName
+}
 
 // Schema is one stored, versioned hub entry.
 type Schema struct {
@@ -69,15 +94,27 @@ type Schema struct {
 	CreatedAt string `db:"created_at"`
 }
 
+// EffectiveBundle is the active validation bundle a new artifact is pinned to.
+// Shapes holds the envelope graphs alone — what every DCS document is judged
+// against; Libraries holds the other active shapes entries, which an artifact
+// is pinned to only where it declares them in sh:shapesGraph (ADR-23).
 type EffectiveBundle struct {
 	ContextVersion int
 	ProfileVersion int
 	Shapes         []Schema
+	Libraries      []Schema
 }
 
 // ResolveEffectiveBundle selects the complete active validation bundle in a
 // deterministic order. The returned versions are immutable and can be pinned
 // into an artifact before the surrounding creation transaction commits.
+//
+// Envelope graphs and registered libraries are read separately because they are
+// pinned on different terms: an artifact is always judged against the envelope,
+// while a library governs it only where its own data declares that library.
+// Pinning every active library instead bound each contract to graphs it has no
+// relation to — including one another instance, or a concurrently running test,
+// had just published.
 func ResolveEffectiveBundle(ctx context.Context, tx *sqlx.Tx) (EffectiveBundle, error) {
 	var bundle EffectiveBundle
 	if err := tx.GetContext(ctx, &bundle.ContextVersion,
@@ -93,13 +130,21 @@ func ResolveEffectiveBundle(ctx context.Context, tx *sqlx.Tx) (EffectiveBundle, 
 	if err := tx.SelectContext(ctx, &bundle.Shapes, `
         SELECT name, version, kind, media_type, content, active, created_by, created_at::text
         FROM semantic_schemas
-        WHERE kind='shapes' AND active
-        ORDER BY CASE name WHEN $1 THEN 0 WHEN $2 THEN 1 ELSE 2 END, name`,
+        WHERE kind='shapes' AND active AND name IN ($1, $2)
+        ORDER BY CASE name WHEN $1 THEN 0 ELSE 1 END, name`,
 		ShapesName, ClauseCatalogName); err != nil {
 		return bundle, fmt.Errorf("semantic hub: active shapes bundle: %w", err)
 	}
 	if len(bundle.Shapes) == 0 || bundle.Shapes[0].Name != ShapesName {
 		return bundle, fmt.Errorf("semantic hub: canonical active shapes are unavailable")
+	}
+	if err := tx.SelectContext(ctx, &bundle.Libraries, `
+        SELECT name, version, kind, media_type, content, active, created_by, created_at::text
+        FROM semantic_schemas
+        WHERE kind='shapes' AND active AND name NOT IN ($1, $2)
+        ORDER BY name`,
+		ShapesName, ClauseCatalogName); err != nil {
+		return bundle, fmt.Errorf("semantic hub: active shape libraries: %w", err)
 	}
 	return bundle, nil
 }
@@ -107,30 +152,78 @@ func ResolveEffectiveBundle(ctx context.Context, tx *sqlx.Tx) (EffectiveBundle, 
 // ErrSchemaNotFound is returned when no matching schema (name/version) exists.
 var ErrSchemaNotFound = errors.New("semantic hub: schema not found")
 
+// ErrVersionTaken is returned when a register asks for an explicit version
+// this hub already holds. Hub versions are immutable, so an import that would
+// land on an occupied number is refused rather than silently renumbered — a
+// document pinning that number must resolve one graph, not two.
+var ErrVersionTaken = errors.New("semantic hub: version already registered")
+
 // Repo is the hub's Postgres access layer.
 type Repo struct{}
 
-// Register stores content as the next version of name and, when activate is
+// Register stores content as a version of (name, kind) and, when activate is
 // set, makes it the active version. Returns the assigned version.
-func (Repo) Register(ctx context.Context, tx *sqlx.Tx, name, kind, mediaType, content, createdBy string, activate bool) (int, error) {
-	var version int
-	// Explicit casts: $1/$2 appear both as inserted VALUES and inside the
-	// version subselect, and Postgres refuses to deduce one type for a
-	// parameter used in two positions (42P08) without them.
-	err := tx.QueryRowContext(ctx, `
+//
+// version 0 takes the next number after this hub's highest — the ordinary
+// local publish. A positive version stores the content at exactly that
+// number: how a shape library another instance published is installed here
+// under the number that instance assigned it, so a document pinning
+// ?version=N (ADR-8) resolves the same graph on both hubs.
+func (Repo) Register(ctx context.Context, tx *sqlx.Tx, name, kind, mediaType, content, createdBy string, version int, activate bool) (int, error) {
+	assigned, err := resolveVersion(ctx, tx, name, kind, version)
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx, `
         INSERT INTO semantic_schemas (name, version, kind, media_type, content, active, created_by)
-        VALUES ($1::varchar, COALESCE((SELECT MAX(version) FROM semantic_schemas WHERE name = $1::varchar AND kind = $2::varchar), 0) + 1, $2::varchar, $3, $4, FALSE, $5)
-        RETURNING version
-    `, name, kind, mediaType, content, createdBy).Scan(&version)
+        VALUES ($1, $2, $3, $4, $5, FALSE, $6)
+    `, name, assigned, kind, mediaType, content, createdBy)
 	if err != nil {
 		return 0, fmt.Errorf("semantic hub: register %s: %w", name, err)
 	}
 	if activate {
-		if err := activateVersion(ctx, tx, name, kind, version); err != nil {
+		if err := activateVersion(ctx, tx, name, kind, assigned); err != nil {
 			return 0, err
 		}
 	}
-	return version, nil
+	return assigned, nil
+}
+
+// rowQuerier is the single-row read resolveVersion needs from its
+// transaction.
+type rowQuerier interface {
+	GetContext(ctx context.Context, dest any, query string, args ...any) error
+}
+
+// resolveVersion decides the version a Register call lands at: the next one
+// after this hub's highest when requested is 0, or exactly requested when it
+// names a version this hub does not already hold.
+//
+// The (name, kind, version) primary key is the ultimate guard against two
+// concurrent registers picking the same number; the EXISTS check is what
+// turns an import onto an occupied version into a message naming the entry
+// rather than a constraint violation.
+func resolveVersion(ctx context.Context, q rowQuerier, name, kind string, requested int) (int, error) {
+	if requested < 0 {
+		return 0, fmt.Errorf("semantic hub: register %s/%s: version must not be negative, got %d", name, kind, requested)
+	}
+	if requested == 0 {
+		var highest int
+		if err := q.GetContext(ctx, &highest,
+			`SELECT COALESCE(MAX(version), 0) FROM semantic_schemas WHERE name = $1 AND kind = $2`, name, kind); err != nil {
+			return 0, fmt.Errorf("semantic hub: highest version of %s/%s: %w", name, kind, err)
+		}
+		return highest + 1, nil
+	}
+	var taken bool
+	if err := q.GetContext(ctx, &taken,
+		`SELECT EXISTS(SELECT 1 FROM semantic_schemas WHERE name = $1 AND kind = $2 AND version = $3)`, name, kind, requested); err != nil {
+		return 0, fmt.Errorf("semantic hub: look up %s/%s version %d: %w", name, kind, requested, err)
+	}
+	if taken {
+		return 0, fmt.Errorf("%w: %s/%s version %d", ErrVersionTaken, name, kind, requested)
+	}
+	return requested, nil
 }
 
 // Activate makes an existing version the active one (UC-02-08 rollback).
@@ -191,7 +284,9 @@ type ListEntry struct {
 }
 
 // List returns every distinct (name, kind) entry with its active/latest
-// version summary, ordered by kind then name.
+// version summary, ordered by kind then name. The peer namespace is left out:
+// the management surface publishes, activates and rolls back, and none of that
+// applies to a graph a counterparty shipped as evidence for its own contract.
 func (Repo) List(ctx context.Context, tx *sqlx.Tx) ([]ListEntry, error) {
 	var out []ListEntry
 	err := tx.SelectContext(ctx, &out, `
@@ -201,8 +296,9 @@ func (Repo) List(ctx context.Context, tx *sqlx.Tx) ([]ListEntry, error) {
                MAX(s.created_at)::text AS updated_at,
                (ARRAY_AGG(s.media_type ORDER BY s.version DESC))[1] AS media_type
         FROM semantic_schemas s
+        WHERE s.kind <> $1
         GROUP BY s.name, s.kind
-        ORDER BY s.kind, s.name`)
+        ORDER BY s.kind, s.name`, PeerShapesKind)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +340,6 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 		{ShapesName, "shapes", "text/turtle", genesisShapes},
 		{ProfileName, "profile", "application/yaml", genesisProfile},
 		{ClauseCatalogName, "shapes", "text/turtle", genesisClauseCatalog},
-		{OntologyName, "ontology", "text/turtle", genesisOntology},
 		{SLAOntologyName, "ontology", "text/turtle", genesisSLAOntology},
 		{ODRLProfileName, "ontology", "text/turtle", genesisODRLProfile},
 	}
@@ -264,7 +359,7 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 		case latest.Content == string(g.content):
 			continue
 		}
-		if _, err := (Repo{}).Register(ctx, tx, g.name, g.kind, g.mediaType, string(g.content), "system:genesis", true); err != nil {
+		if _, err := (Repo{}).Register(ctx, tx, g.name, g.kind, g.mediaType, string(g.content), "system:genesis", 0, true); err != nil {
 			return err
 		}
 	}
@@ -274,6 +369,10 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 // ActiveOntologyIRIs returns the prefix -> IRI map declared by the ACTIVE
 // context's @context object (only string-valued prefix entries). The
 // normalization layer enforces these on every produced document.
+//
+// Despite the name it reads the hub's kind="context" entry, not any ontology
+// asset: the served ontologies are never parsed here and nothing on this path
+// enforces them. Callers use it correctly; the name is the trap.
 func ActiveOntologyIRIs(ctx context.Context, db *sqlx.DB) (map[string]string, int, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {

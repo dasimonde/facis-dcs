@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/auth/oid4vp/status/codec"
 	"digital-contracting-service/internal/auth/oid4vp/status/envelope"
@@ -18,14 +19,13 @@ import (
 
 // XFSC verifies status lists from eclipse-xfsc/statuslist-service.
 //
-// Unsigned lists are served as application/json ({tenantId, listId, list}).
-// Signed lists are fetched with Content-Type: statuslist+jwt only (no Accept header).
-// When AllowUnsignedFallback is true, a failed signed fetch or verification falls back
-// to the unsigned JSON envelope (dev/BDD without crypto-provider signer).
+// A status list decides whether a credential is revoked, so it is only believed
+// when it is signed and that signature verifies. An unsigned list states a
+// revocation status nobody vouched for, and anyone who can answer the URL can
+// write it — so there is no configuration under which one is accepted.
 type XFSC struct {
-	Fetcher               *fetch.Client
-	Trust                 *status.TrustConfig
-	AllowUnsignedFallback bool
+	Fetcher *fetch.Client
+	Trust   *status.TrustConfig
 }
 
 func (h *XFSC) Mechanism() status.Mechanism {
@@ -42,40 +42,17 @@ func (h *XFSC) Check(
 		client = fetch.NewClient()
 	}
 
-	signedResp, signedErr := status.FetchStatusList(ctx, client, ref.URI, fetch.RequestOpts{
+	signedResp, err := status.FetchStatusList(ctx, client, ref.URI, fetch.RequestOpts{
 		ContentType: status.XFSCSignedContentType,
-	})
-	if signedErr == nil {
-		verified, err := h.verifyStatusListJWT(UnwrapStatusListJWTBody(signedResp.Body))
-		if err == nil {
-			return h.resultFromSignedClaims(ref, verified.Claims)
-		}
-		if !h.AllowUnsignedFallback {
-			return status.Result{}, status.ErrStatusSignature
-		}
-	} else if !h.AllowUnsignedFallback {
-		return status.Result{}, status.ErrStatusRetrieval
-	}
-
-	if !h.AllowUnsignedFallback {
-		return status.Result{}, status.ErrStatusSignature
-	}
-
-	if ref.Prefetched != nil && status.IsXFSCStatusListJSON(ref.Prefetched.Body) {
-		return h.resultFromUnsignedJSON(ref, ref.Prefetched.Body)
-	}
-
-	unsignedResp, err := status.FetchStatusList(ctx, client, ref.URI, fetch.RequestOpts{
-		ContentType: status.XFSCProbeContentType,
 	})
 	if err != nil {
 		return status.Result{}, status.ErrStatusRetrieval
 	}
-	if !status.IsXFSCStatusListJSON(unsignedResp.Body) {
-		return status.Result{}, status.ErrStatusListNotSecured
+	verified, err := h.verifyStatusListJWT(UnwrapStatusListJWTBody(signedResp.Body))
+	if err != nil {
+		return status.Result{}, status.ErrStatusSignature
 	}
-
-	return h.resultFromUnsignedJSON(ref, unsignedResp.Body)
+	return h.resultFromSignedClaims(ref, verified.Claims)
 }
 
 func (h *XFSC) resultFromSignedClaims(ref status.Reference, claims map[string]any) (status.Result, error) {
@@ -93,14 +70,6 @@ func (h *XFSC) resultFromSignedClaims(ref status.Reference, claims map[string]an
 		return status.Result{}, err
 	}
 
-	return h.mapBitstringResult(ref, bitstring, bits)
-}
-
-func (h *XFSC) resultFromUnsignedJSON(ref status.Reference, body []byte) (status.Result, error) {
-	bitstring, bits, err := decodeXFSCUnsignedJSON(body)
-	if err != nil {
-		return status.Result{}, err
-	}
 	return h.mapBitstringResult(ref, bitstring, bits)
 }
 
@@ -146,7 +115,22 @@ func (h *XFSC) verifyStatusListJWT(body []byte) (envelope.VerifiedJWT, error) {
 	if h.Trust == nil {
 		return envelope.VerifiedJWT{}, status.ErrStatusTrustNotConfigured
 	}
-	verified, err := envelope.VerifyES256JWT(body, func(issuer string, _ *jwt.Token) (*ecdsa.PublicKey, error) {
+	verified, err := envelope.VerifyES256JWT(body, func(issuer string, token *jwt.Token) (*ecdsa.PublicKey, error) {
+		// An issuer that publishes its key by certificate chain has no bundled
+		// JWKS to resolve, so its status list is verified from the chain the
+		// token itself carries — against the same anchors and the same
+		// leaf-identifies-issuer binding the credential is held to.
+		if raw, ok := token.Header["x5c"]; ok {
+			key, err := sdjwt.VerificationKeyFromX5C(raw, h.Trust.X5CRoots, issuer)
+			if err != nil {
+				return nil, err
+			}
+			ecKey, ok := key.(*ecdsa.PublicKey)
+			if !ok {
+				return nil, fmt.Errorf("status list x5c leaf key is %T, not ECDSA", key)
+			}
+			return ecKey, nil
+		}
 		return h.Trust.ResolveECDSAPublicKey(issuer)
 	})
 	if err != nil {
@@ -184,27 +168,4 @@ func decodeXFSCSignedClaims(claims map[string]any) ([]byte, uint, error) {
 		return nil, 0, status.ErrStatusDecompression
 	}
 	return bitstring, bits, nil
-}
-
-func decodeXFSCUnsignedJSON(body []byte) ([]byte, uint, error) {
-	var doc struct {
-		List string `json:"list"`
-	}
-	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, 0, status.ErrStatusDecoding
-	}
-	if strings.TrimSpace(doc.List) == "" {
-		return nil, 0, status.ErrStatusDecoding
-	}
-
-	compressed, err := codec.DecodeBase64Flexible(doc.List)
-	if err != nil {
-		return nil, 0, status.ErrStatusDecoding
-	}
-
-	bitstring, err := codec.GZIPDecompressLimited(compressed, 0)
-	if err != nil {
-		return nil, 0, status.ErrStatusDecompression
-	}
-	return bitstring, 1, nil
 }

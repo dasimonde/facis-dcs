@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -234,6 +235,85 @@ func normalizeTemporal(value any) any {
 	}
 }
 
+// xsdDurationPattern matches the xsd:duration lexical space (XSD 1.1 §3.3.6,
+// plus the ISO-8601 week designator). "at least one component" and "a T
+// section is non-empty" are checked in parseXSDDuration — RE2 has no
+// lookahead to state them here.
+var xsdDurationPattern = regexp.MustCompile(`^(-?)P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(?:\.\d+)?S)?)?$`)
+
+// xsdDurationMagnitude is a duration as XSD defines it: a month count and a
+// second count held apart, because a month is not a fixed number of seconds.
+type xsdDurationMagnitude struct {
+	months  float64
+	seconds float64
+}
+
+func parseXSDDuration(raw any) (xsdDurationMagnitude, bool) {
+	text, ok := raw.(string)
+	if !ok {
+		return xsdDurationMagnitude{}, false
+	}
+	trimmed := strings.TrimSpace(text)
+	groups := xsdDurationPattern.FindStringSubmatch(trimmed)
+	if groups == nil || strings.HasSuffix(trimmed, "T") {
+		return xsdDurationMagnitude{}, false
+	}
+	// group 6 is the whole T section, a delimiter rather than a component.
+	scales := map[int]xsdDurationMagnitude{
+		2: {months: 12},
+		3: {months: 1},
+		4: {seconds: 7 * 86400},
+		5: {seconds: 86400},
+		7: {seconds: 3600},
+		8: {seconds: 60},
+		9: {seconds: 1},
+	}
+	magnitude := xsdDurationMagnitude{}
+	components := 0
+	for group, scale := range scales {
+		if groups[group] == "" {
+			continue
+		}
+		amount, err := strconv.ParseFloat(strings.TrimRight(groups[group], "YMWDHS"), 64)
+		if err != nil {
+			return xsdDurationMagnitude{}, false
+		}
+		components++
+		magnitude.months += amount * scale.months
+		magnitude.seconds += amount * scale.seconds
+	}
+	if components == 0 {
+		return xsdDurationMagnitude{}, false
+	}
+	if groups[1] == "-" {
+		magnitude.months, magnitude.seconds = -magnitude.months, -magnitude.seconds
+	}
+	return magnitude, true
+}
+
+// orderableODRLOperands replaces a pair of xsd:duration literals with their
+// numeric magnitude so the engine's numeric rules order them, rather than
+// falling through to a verdict of "unsatisfied" for every duration boundary
+// the SLA profile states ("elapsed time <= P14D"). Only a commensurable pair
+// is substituted: a month is 28 to 31 days, so "P1M" against "P30D" has no
+// defined order and is left alone (unsatisfied, never silently decided).
+// Anything that is not a duration on both sides passes through untouched.
+func orderableODRLOperands(actual, rightOperand any) (any, any) {
+	left, leftOK := parseXSDDuration(actual)
+	right, rightOK := parseXSDDuration(rightOperand)
+	if !leftOK || !rightOK {
+		return actual, rightOperand
+	}
+	switch {
+	case left.months == 0 && right.months == 0:
+		return left.seconds, right.seconds
+	case left.seconds == 0 && right.seconds == 0:
+		return left.months, right.months
+	default:
+		return actual, rightOperand
+	}
+}
+
 // evaluateODRLConstraintOPA reports whether an actual value satisfies an ODRL
 // constraint operator against its right operand, evaluated on OPA. The
 // operator is reduced to its local name and the values compacted exactly as
@@ -243,10 +323,14 @@ func evaluateODRLConstraintOPA(ctx context.Context, operator string, actualValue
 	if err != nil {
 		return false, err
 	}
+	actual, right := orderableODRLOperands(
+		normalizeTemporal(compactJSONLDValue(actualValue)),
+		normalizeTemporal(compactJSONLDValue(rightOperand)),
+	)
 	input := map[string]any{
 		"operator": compactTerm(operator),
-		"actual":   normalizeTemporal(compactJSONLDValue(actualValue)),
-		"right":    normalizeTemporal(compactJSONLDValue(rightOperand)),
+		"actual":   actual,
+		"right":    right,
 	}
 	rs, err := query.Eval(ctx, rego.EvalInput(input))
 	if err != nil {

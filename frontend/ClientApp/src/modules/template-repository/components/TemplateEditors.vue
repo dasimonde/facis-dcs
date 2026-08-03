@@ -10,14 +10,17 @@ import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
 import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
 import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
-import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { useAuthStore } from '@/stores/auth-store'
 import AuditView from './AuditView.vue'
+import type { UserRole } from '@/types/user-role'
 
 withDefaults(
   defineProps<{
     title: string
+    nameError?: string
+    descriptionError?: string
   }>(),
   {},
 )
@@ -34,7 +37,13 @@ const tabs = computed(() => {
   })
 })
 const currentTabNumber = computed(() => 1 + tabs.value.map((tab) => tab.id).indexOf(activeTab.value))
-const { isManager } = useTemplatePermissions()
+// Matches the audit tab's own gate in templateEditorUiStore.availableTabs and
+// the roles design/template_repository.go audit() accepts.
+const isAuditingAuthorized = computed(
+  () =>
+    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => useAuthStore().user?.roles?.includes(role)) ??
+    false,
+)
 </script>
 
 <template>
@@ -74,7 +83,7 @@ const { isManager } = useTemplatePermissions()
                 </div>
                 <div v-if="state" class="badge badge-sm badge-secondary">{{ state }}</div>
               </h2>
-              <DetailsEditor />
+              <DetailsEditor :name-error="nameError" :description-error="descriptionError" />
             </div>
           </div>
         </div>
@@ -88,7 +97,7 @@ const { isManager } = useTemplatePermissions()
                 Clauses
               </h2>
               <ClauseEditor />
-              <div class="divider text-xs text-base-content/40">existing clauses</div>
+              <div class="divider text-xs text-base-content/70">existing clauses</div>
               <ClausesEditor />
             </div>
           </div>
@@ -144,7 +153,7 @@ const { isManager } = useTemplatePermissions()
           </div>
         </div>
 
-        <template v-if="isManager">
+        <template v-if="isAuditingAuthorized">
           <div v-show="activeTab === 'audit'">
             <div class="card border border-base-300 bg-base-100 shadow-sm">
               <div class="card-body">

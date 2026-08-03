@@ -7,7 +7,7 @@ import type { Contract } from '@/models/contract/contract'
 import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
 import type { ContractNegotiationTask } from '@/models/contract/contract-negotiation-task'
 import type { ContractReviewTask } from '@/models/contract/contract-review-task'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 export const useContractsStore = defineStore('contracts', () => {
   const contracts: Ref<Contract[]> = ref([])

@@ -107,6 +107,12 @@ type ContractTemplateRepo interface {
 	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractTemplateUpdateData) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplatePDFState, error)
+	// ReadDIDsMissingStoredPDF returns the DIDs of at most limit templates that
+	// have no PDF in the artifact store — the work list of the background
+	// regenerator's retry pass. Templates in excludeDIDs (attempts the caller
+	// has given up on) are left out, so a permanently unrenderable template
+	// cannot occupy the batch forever.
+	ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error)
 	UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data ContractTemplatePDFState) error
 	InsertProvenanceCredential(ctx context.Context, tx *sqlx.Tx, data TemplateProvenanceCredential) error
 	ReadProvenanceCredentials(ctx context.Context, tx *sqlx.Tx, did string) ([]TemplateProvenanceCredential, error)

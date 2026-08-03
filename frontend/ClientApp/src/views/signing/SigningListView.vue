@@ -6,6 +6,13 @@ import {
   signatureManagementService,
   type SignatureViewResult,
 } from '@/services/signature-management-service'
+import {
+  dssIndicator,
+  findingIndicator,
+  signatureLevelBadgeClass,
+  signatureLevelLabel,
+  signatureStatusIndicator,
+} from '@/utils/signature-verdict'
 
 // DCS-FR-SM-22: the signer dashboard lists pending (APPROVED), completed
 // (SIGNED/ACTIVE), and revoked (REVOKED) contracts. Each row expands into the
@@ -44,32 +51,10 @@ function signingStatus(state: string): Indicator {
   }
 }
 
+// This dashboard reads a signature record from the signer's side, where the
+// in-force state is the signature itself being SIGNED.
 function statusIndicator(status: string): Indicator {
-  return status.toUpperCase() === 'REVOKED'
-    ? { label: 'REVOKED', cls: 'badge-error' }
-    : { label: 'SIGNED', cls: 'badge-success' }
-}
-
-function dssIndicator(indication: string | undefined): Indicator {
-  switch ((indication ?? '').toUpperCase()) {
-    case 'TOTAL-PASSED':
-      return { label: 'PASSED', cls: 'badge-success' }
-    case 'INDETERMINATE':
-      return { label: 'INDETERMINATE', cls: 'badge-warning' }
-    case 'TOTAL-FAILED':
-      return { label: 'FAILED', cls: 'badge-error' }
-    default:
-      return { label: indication ?? 'Unknown', cls: 'badge-ghost' }
-  }
-}
-
-const FAILURE_KEYWORDS =
-  /(mismatch|drift detected|does not match|failed|could not|missing|no longer|power of attorney)/i
-
-function findingIndicator(finding: string): Indicator {
-  return FAILURE_KEYWORDS.test(finding)
-    ? { label: 'FAIL', cls: 'badge-error' }
-    : { label: 'PASS', cls: 'badge-success' }
+  return signatureStatusIndicator(status, 'SIGNED')
 }
 
 async function toggleDetails(did: string) {
@@ -175,8 +160,12 @@ onMounted(async () => {
                     class="flex flex-wrap items-center gap-x-4 gap-y-1 py-1"
                     data-testid="signature-entry"
                   >
-                    <span class="badge badge-sm badge-info" data-testid="signature-credential">
-                      {{ (sig.credential_type || 'AES').toUpperCase() }}
+                    <span
+                      class="badge badge-sm"
+                      :class="signatureLevelBadgeClass(signatureLevelLabel(sig.credential_type))"
+                      data-testid="signature-credential"
+                    >
+                      {{ signatureLevelLabel(sig.credential_type) }}
                     </span>
                     <span
                       class="badge badge-sm"

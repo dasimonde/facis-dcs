@@ -1,6 +1,12 @@
 # ADR-25: Contract target systems are a configured registry, and each contract designates its own
 
-Status: Accepted (2026-07-27).
+Status: Accepted (2026-07-27). The registry and the per-contract designation
+stand. How a registered target authenticates the acknowledgement it sends back
+has since changed: the `DEPLOYMENT_CALLBACK_SECRET` shared by every target when
+this was written is replaced, in
+[ADR-27](adr-27-machine-credentials-issued-not-configured.md), by an OAuth2
+client each target holds as its own registered machine identity. A target
+therefore carries an `oauth_client_id` alongside the endpoint described below.
 
 ## Context
 

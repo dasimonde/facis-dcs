@@ -8,7 +8,7 @@ import (
 	"io"
 
 	c2paservice "digital-contracting-service/gen/c2_pa_service"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -21,12 +21,12 @@ import (
 const c2paManifestMediaType = "application/c2pa"
 
 type c2paSrvc struct {
-	DB         *sqlx.DB
-	IPFSClient *ipfs.APIClient
-	CRepo      cwedb.ContractRepo
-	PDFCore    *pdfcore.Client
-	IssuerDID  string
-	VCIssuer   provenance.VCIssuer
+	DB        *sqlx.DB
+	Artifacts *artifactstore.Store
+	CRepo     cwedb.ContractRepo
+	PDFCore   *pdfcore.Client
+	IssuerDID string
+	VCIssuer  provenance.VCIssuer
 }
 
 // NewC2PAService wires the public C2PA manifest endpoint (DCS-OR-C2PA-008,
@@ -35,7 +35,7 @@ type c2paSrvc struct {
 // manifest store.
 func NewC2PAService(
 	db *sqlx.DB,
-	ipfsClient *ipfs.APIClient,
+	artifacts *artifactstore.Store,
 	cRepo cwedb.ContractRepo,
 	pdfCore *pdfcore.Client,
 	issuerDID string,
@@ -48,12 +48,12 @@ func NewC2PAService(
 		panic("PDFCore client is required")
 	}
 	return &c2paSrvc{
-		DB:         db,
-		IPFSClient: ipfsClient,
-		CRepo:      cRepo,
-		PDFCore:    pdfCore,
-		IssuerDID:  issuerDID,
-		VCIssuer:   vcIssuer,
+		DB:        db,
+		Artifacts: artifacts,
+		CRepo:     cRepo,
+		PDFCore:   pdfCore,
+		IssuerDID: issuerDID,
+		VCIssuer:  vcIssuer,
 	}
 }
 
@@ -64,15 +64,18 @@ func (s *c2paSrvc) GetManifest(ctx context.Context, p *c2paservice.GetManifestPa
 	// Fetch the current/cached PDF through the same export path
 	// export_contract_pdf uses, then extract its embedded C2PA manifest store.
 	exportHandler := pdfquery.ExportContractPdfHandler{
-		DB:         s.DB,
-		CRepo:      s.CRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:        s.DB,
+		CRepo:     s.CRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
 	}
 	pdfReader, err := exportHandler.Handle(ctx, pdfquery.ExportContractPdfQry{DID: p.ContractDid})
 	if err != nil {
+		if artifactstore.IsShredded(err) {
+			return nil, nil, c2paservice.MakeNotFound(err)
+		}
 		if isNotFoundErr(err) {
 			return nil, nil, c2paservice.MakeNotFound(err)
 		}

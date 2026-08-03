@@ -1,10 +1,20 @@
 {
   "vcts": [
     "urn:dcs:poa:v1",
-    "urn:eudi:pid:de:1"
+    "urn:dcs:pid:demo:v1"
   ],
+  "peer_dynamic": false,
   "issuers": {
     "did:web:dev.example:issuer:poa": {
+      "purposes": [
+        "login",
+        "peer",
+        "pid"
+      ],
+      "organizations": [
+        "*"
+      ],
+      "mechanism": "jwks",
       "jwks": {
         "keys": [
           {
@@ -17,6 +27,15 @@
       }
     },
     "did:web:dev2.example:issuer:poa": {
+      "purposes": [
+        "login",
+        "peer",
+        "pid"
+      ],
+      "organizations": [
+        "*"
+      ],
+      "mechanism": "jwks",
       "jwks": {
         "keys": [
           {
@@ -27,6 +46,32 @@
           }
         ]
       }
+    },
+    "did:web:dev.example:issuer:pid-x5c": {
+      "purposes": [
+        "pid"
+      ],
+      "mechanism": "x5c"
+    },
+    "did:web:localhost%3A30181": {
+      "purposes": [
+        "login",
+        "peer"
+      ],
+      "organizations": [
+        "*"
+      ],
+      "mechanism": "x5c"
+    },
+    "did:web:localhost%3A18080:issuer": {
+      "purposes": [
+        "login",
+        "peer"
+      ],
+      "organizations": [
+        "*"
+      ],
+      "mechanism": "x5c"
     }
   }
 }

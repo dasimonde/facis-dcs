@@ -1,7 +1,6 @@
 package sdjwt
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,7 +8,25 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// VerifyCredential validates the issuer JWT signature and returns merged disclosed claims.
+// clockSkewLeeway is the tolerance applied to the credential's own time claims.
+// Issuer, wallet and verifier clocks drift; keybinding.go allows the same for
+// the KB-JWT, and a credential minted seconds ago on a marginally fast clock is
+// not one that was issued in the future.
+const clockSkewLeeway = 5 * time.Minute
+
+// credentialSigningAlgs are the JWS algorithms an issuer may sign an SD-JWT VC
+// with. ES256 is what EUDI mandates and what this deployment's own issuer uses;
+// the others are here because real PID and QTSP issuer certificates are
+// frequently RSA or a larger curve. What the key is allowed to be is decided by
+// key resolution (keys.go), not by the algorithm name.
+var credentialSigningAlgs = []string{
+	"ES256", "ES384", "ES512",
+	"PS256", "PS384", "PS512",
+	"RS256", "RS384", "RS512",
+}
+
+// VerifyCredential validates the issuer JWT signature and returns the disclosed
+// claims, with `sub` normalized to the holder this credential is bound to.
 func VerifyCredential(token string, disclosures []string, cfg TrustConfig) (jwt.MapClaims, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("issuer trust is not configured")
@@ -21,66 +38,9 @@ func VerifyCredential(token string, disclosures []string, cfg TrustConfig) (jwt.
 		// bug at the issuer, not a rule to relax here.
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
-		jwt.WithValidMethods([]string{"ES256"}),
+		jwt.WithLeeway(clockSkewLeeway),
+		jwt.WithValidMethods(credentialSigningAlgs),
 	).Parse(token, func(t *jwt.Token) (any, error) {
-		return ResolveIssuerVerificationKey(cfg, t)
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("credential jwt: %w", err)
-	}
-
-	err = validateCredentialHeader(parsed)
-	if err != nil {
-		return nil, err
-	}
-
-	issuerClaims, ok := parsed.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, fmt.Errorf("credential jwt claims are invalid")
-	}
-
-	sub, _ := issuerClaims["sub"].(string)
-	if strings.TrimSpace(sub) == "" {
-		return nil, fmt.Errorf("credential jwt missing sub")
-	}
-
-	vct, _ := issuerClaims["vct"].(string)
-	if !cfg.VCTAllowed(strings.TrimSpace(vct)) {
-		return nil, fmt.Errorf("vct %q is not allowed", vct)
-	}
-
-	err = validateNotBeforeIfPresent(issuerClaims)
-	if err != nil {
-		return nil, err
-	}
-
-	err = VerifyDisclosures(issuerClaims, disclosures)
-	if err != nil {
-		return nil, err
-	}
-
-	return MergeDisclosedClaims(issuerClaims, disclosures)
-}
-
-// VerifyCredentialForPID validates PID issuer JWTs. The issuer key is taken from
-// header x5c when present, otherwise from the trust-listed issuer JWKS.
-func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig) (jwt.MapClaims, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("issuer trust is not configured")
-	}
-
-	parsed, err := jwt.NewParser(
-		// A credential with no exp never expires. Requiring the claim is what
-		// keeps a presentation bounded in time, so an issuer that omits it is a
-		// bug at the issuer, not a rule to relax here.
-		jwt.WithExpirationRequired(),
-		jwt.WithIssuedAt(),
-		jwt.WithValidMethods([]string{"ES256"}),
-	).Parse(token, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Header["x5c"]; ok {
-			return ResolveIssuerVerificationKeyForPID(cfg, t)
-		}
 		return ResolveIssuerVerificationKey(cfg, t)
 	})
 
@@ -101,16 +61,6 @@ func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig)
 	vct, _ := issuerClaims["vct"].(string)
 	if !cfg.VCTAllowed(strings.TrimSpace(vct)) {
 		return nil, fmt.Errorf("vct %q is not allowed", vct)
-	}
-
-	err = validateNotBeforeIfPresent(issuerClaims)
-	if err != nil {
-		return nil, err
-	}
-
-	err = VerifyDisclosures(issuerClaims, disclosures)
-	if err != nil {
-		return nil, err
 	}
 
 	merged, err := MergeDisclosedClaims(issuerClaims, disclosures)
@@ -118,52 +68,11 @@ func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig)
 		return nil, err
 	}
 
-	sub, _ := merged["sub"].(string)
-	sub = strings.TrimSpace(sub)
-	if sub == "" {
-		cnfJWK, cnfErr := CNFJWKFromClaims(merged)
-		if cnfErr != nil {
-			return nil, fmt.Errorf("credential missing sub")
-		}
-		sub, err = DIDJWKFromPublicJWK(cnfJWK)
-		if err != nil {
-			return nil, err
-		}
-		merged["sub"] = sub
+	sub, err := HolderSubject(merged)
+	if err != nil {
+		return nil, err
 	}
+	merged["sub"] = sub
 
 	return merged, nil
-}
-
-func validateNotBeforeIfPresent(claims jwt.MapClaims) error {
-	nbfVal, ok := claims["nbf"]
-	if !ok {
-		return nil
-	}
-
-	nbf, err := numericDate(nbfVal)
-	if err != nil {
-		return err
-	}
-
-	if time.Now().UTC().Before(nbf) {
-		return fmt.Errorf("token not yet valid")
-	}
-
-	return nil
-}
-
-func numericDate(v any) (time.Time, error) {
-	switch t := v.(type) {
-	case float64:
-		return time.Unix(int64(t), 0).UTC(), nil
-	case json.Number:
-		sec, err := t.Int64()
-		if err != nil {
-			return time.Time{}, err
-		}
-		return time.Unix(sec, 0).UTC(), nil
-	default:
-		return time.Time{}, fmt.Errorf("invalid numeric date")
-	}
 }

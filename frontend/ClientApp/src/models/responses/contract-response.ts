@@ -1,12 +1,12 @@
 import type { Contract, ContractChangeRequest, ContractDeploymentKpi, ExpirationPolicy } from '../contract/contract'
 import type { ContractApprovalTask } from '../contract/contract-approval-task'
+import type { ContractData } from '../contract/contract-data'
 import type { ContractEvent } from '../contract/contract-event'
 import type { ContractNegotiation } from '../contract/contract-negotiation'
 import type { ContractNegotiationTask } from '../contract/contract-negotiation-task'
 import type { ContractResponsible } from '../contract/contract-responsible'
 import type { ContractReviewTask } from '../contract/contract-review-task'
-import type { ContractData } from '../contract-data'
-import type { ContractTemplate } from '../contract-template'
+import type { ContractTemplate } from '../contract-template/contract-template'
 import type { ComponentType } from '@/types/component-type'
 import type { ContractEventType } from '@/types/contract-event-type'
 import type { ContractState } from '@/types/contract-state'
@@ -37,6 +37,12 @@ export interface ContractRetrieveByIdResponse {
   did: string
   contract_version: number
   state: ContractState
+  /**
+   * Peer-facing lifecycle inferred by the backend (ADR-13): one of
+   * ExtrinsicLifecycle, or a lowercased off-ramp state. Only 'executed' claims
+   * every declared signature is collected.
+   */
+  extrinsic_lifecycle?: string
   name?: string
   description?: string
   created_by: string
@@ -50,10 +56,8 @@ export interface ContractRetrieveByIdResponse {
   /** The data of that contract */
   contract_data: ContractData
   negotiations: ContractNegotiation[]
-  /** KPI values reported via deployment callback (DCS-FR-CWE-31, DCS-FR-CWE-09) */
+  /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
-  /** Metric names whose latest reported value violates its contractual SLA threshold */
-  kpi_violations?: string[]
 }
 
 export interface ContractDeployResponse {
@@ -90,6 +94,10 @@ interface ContractSearchResponseItem {
 
 export type ContractSearchResponse = ContractSearchResponseItem[]
 
+export interface ContractOfferAcceptResponse {
+  did: string
+}
+
 export interface ContractNegotiationResponse {
   did: string
 }
@@ -113,8 +121,15 @@ export interface ContractRejectResponse {
   did: string
 }
 
-export interface ContractStoreResponse {
+export interface ContractWithdrawResponse {
   did: string
+}
+
+export interface ContractRenewResponse {
+  /** The newly minted renewal contract. */
+  did: string
+  renews_did: string
+  renews_contract_version: number
 }
 
 export interface ContractTerminateResponse {

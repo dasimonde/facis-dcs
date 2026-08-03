@@ -13,7 +13,8 @@ import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useNavStore } from '@/stores/nav-store'
 import { TemplateState } from '@/types/contract-template-state'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import { reportActionError } from '@/utils/report-action-error'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const props = defineProps<{
   did: string
@@ -65,7 +66,7 @@ watch(
         })
       })
       .catch((error: unknown) => {
-        console.error('Failed to load template for editing', error)
+        reportActionError(error, 'Load template')
       })
   },
   { immediate: true },
@@ -73,7 +74,10 @@ watch(
 
 const submitTemplate = async () => {
   try {
-    if (!draftStore.did || !draftStore.updated_at) return
+    if (!draftStore.did || !draftStore.updated_at) {
+      reportActionError(new Error('The current template version is unavailable.'), 'Submit template')
+      return
+    }
     const response = await contractTemplateService.submit({
       did: draftStore.did,
       updated_at: draftStore.updated_at,
@@ -82,13 +86,16 @@ const submitTemplate = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (error) {
-    console.error('Template Submission failed', error)
+    reportActionError(error, 'Submit template')
   }
 }
 
 const submitRejectedTemplate = async () => {
   try {
-    if (!draftStore.did || !draftStore.updated_at) return
+    if (!draftStore.did || !draftStore.updated_at) {
+      reportActionError(new Error('The current template version is unavailable.'), 'Resubmit template')
+      return
+    }
     const response = await contractTemplateService.submit({
       did: draftStore.did,
       updated_at: draftStore.updated_at,
@@ -97,7 +104,7 @@ const submitRejectedTemplate = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (error) {
-    console.error('Template Submission failed', error)
+    reportActionError(error, 'Resubmit template')
   }
 }
 

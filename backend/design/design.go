@@ -2,7 +2,7 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
-	cors "goa.design/plugins/v3/cors/dsl" // Kein Punkt, sondern Alias 'cors'
+	cors "goa.design/plugins/v3/cors/dsl"
 )
 
 // JWTAuth defines the JWT-based security scheme backed by Hydra OIDC.
@@ -29,6 +29,7 @@ var JWTAuth = JWTSecurity("jwt", func() {
 	Scope("Sys. Auditor", "External integrity notary: reads the audit trail's tamper-evidence surface, nothing else (ADR-16)")
 	Scope("Compliance Officer", "Monitor compliance and report incidents")
 	Scope("Sys. Administrator", "Maintains Sys. configurations, permissions, and user access")
+	Scope("Integration Manager", "Manages third-party system integrations: the contract target registry and the machine identities external systems reach the API as (UC-11-01)")
 	Scope("Contract Target System", "External system that receives deployed contracts: acknowledges the deployments dispatched to it and reports their KPIs, nothing else (ADR-27)")
 })
 

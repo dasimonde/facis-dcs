@@ -1,5 +1,5 @@
 import { type DcsContractData, type DcsContractField, fieldFillScalar, typedFieldFill } from '@/models/dcs-jsonld'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 
 /**
  * Boundary between the editor's (blockId, conditionId, parameterName)

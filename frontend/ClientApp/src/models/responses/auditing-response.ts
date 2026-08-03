@@ -1,4 +1,4 @@
-export type AuditFindingCategory = 'violation' | 'inconsistency' | 'compliance_check'
+export type AuditFindingCategory = 'violation' | 'inconsistency' | 'compliance_check' | 'not_evaluated'
 
 export interface AuditFinding {
   id: number | string
@@ -18,7 +18,8 @@ export type AuditResponse = AuditFinding[]
 
 export interface PACAuditExecutorFinding {
   rule_id: string
-  result: 'PASSED' | 'FAILED' | 'REVIEW'
+  // NOT_EVALUATED is a verdict nobody reached, not a passing one (ADR-33).
+  result: 'PASSED' | 'FAILED' | 'REVIEW' | 'NOT_EVALUATED'
   reason: string
   severity?: string
   evidence_refs?: string[]
@@ -46,6 +47,7 @@ export interface AuditReportSummary {
   failed: number
   warnings: number
   needsReview: number
+  notEvaluated: number
 }
 
 export interface AuditReportResource {

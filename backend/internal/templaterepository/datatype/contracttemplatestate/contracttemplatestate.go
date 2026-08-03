@@ -47,7 +47,7 @@ func NewContractTemplateState(s string) (ContractTemplateState, error) {
 	return ts, nil
 }
 
-// IsValid checks if the ContractTemplateState is a valid role
+// IsValid reports whether the value is one of the declared ContractTemplateState values.
 func (s ContractTemplateState) IsValid() bool {
 	upper := ContractTemplateState(strings.ToUpper(string(s)))
 	return validState[upper]

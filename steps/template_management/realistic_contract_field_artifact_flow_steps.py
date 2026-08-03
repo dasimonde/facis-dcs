@@ -1,4 +1,24 @@
-"""Executable BDD flow for a realistic ContractField-based service agreement."""
+"""Executable BDD flow for a realistic ContractField-based service agreement.
+
+What validates the dcs:contractData graph below, and what does not.
+
+The domain types this fixture uses — dcs:ContractParties, dcs:ServiceDescription,
+dcs:PaymentTerms, dcs:ServiceLevel, dcs:Jurisdiction — are declared in no
+ontology and matched by no shape, and that is ADR-23's design rather than a
+gap: dcs:contractData is an arbitrary object graph, and a document is
+validated against the shapes graphs it declares in its own sh:shapesGraph.
+This fixture declares no domain library, so what the gate checks here is
+structure only: the graph is closed, every node is typed and addressable by
+@id, every reference resolves in-document, and each filled leaf matches its
+declared dcs:datatype.
+
+Nothing checks that a dcs:PaymentTerms node means payment terms. To get
+vocabulary-level validation, register a shapes library and let normalization
+anchor it — that is what features/fixtures/facis-sla-hosting-shapes.ttl does
+for the SLA federation pack. Do not read this flow as evidence that the
+demo's domain vocabulary is enforced; it is evidence that the envelope and
+the field bindings are.
+"""
 
 import json
 from pathlib import Path

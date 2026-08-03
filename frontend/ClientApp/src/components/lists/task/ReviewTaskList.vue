@@ -13,7 +13,7 @@ import TaskListSearch from './TaskListSearch.vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
 import type { ContractReviewTask } from '@/models/contract/contract-review-task'
-import type { ContractTemplateReviewTask } from '@/models/contract-template-review-task'
+import type { ContractTemplateReviewTask } from '@/models/contract-template/contract-template-review-task'
 
 type ReviewTask = ContractTemplateReviewTask | ContractReviewTask
 
@@ -92,9 +92,11 @@ const resolveViewRouteName = (task: ReviewTask) => {
   }
 }
 
-const applySearchResult = (searchResult: ReviewTask[]) => {
-  isSearchActive.value = searchResult.length !== props.tasks.length
-  searchedTasks.value = searchResult
+const applySearchResult = (searchResult: ReviewTask[] | null) => {
+  isSearchActive.value = !!searchResult
+  if (searchResult) {
+    searchedTasks.value = searchResult
+  }
 }
 
 onUnmounted(() => stateFilterStore.reset())

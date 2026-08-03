@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/identity"
+	dcstodcsdb "digital-contracting-service/internal/dcstodcs/db"
 
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
@@ -27,6 +29,12 @@ import (
 	"goa.design/clue/log"
 )
 
+// contractEraser triggers the erasure of a contract's content-encryption
+// keys: local shred plus the peer erase handshake (dcstodcs.ContractEraser).
+type contractEraser interface {
+	EraseContract(ctx context.Context, contractIRI, actor, reason string) error
+}
+
 // ContractStorageArchive service implementation.
 type contractStorageArchivesrvc struct {
 	DB            *sqlx.DB
@@ -34,11 +42,15 @@ type contractStorageArchivesrvc struct {
 	DIDDocument   identity.DIDDocument
 	ATrailReader  base.AuditTrailReader
 	SnapshotStore archiveSnapshotStore
+	Eraser        contractEraser
+	Keys          artifactstore.CEKRepository
+	ERepo         dcstodcsdb.EraseRepository
 	auth.JWTAuthenticator
 }
 
 // NewContractStorageArchive returns the ContractStorageArchive service implementation.
-func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, didDocument identity.DIDDocument, auditTrailReader base.AuditTrailReader, snapshotStore archiveSnapshotStore) contractstoragearchive.Service {
+func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, didDocument identity.DIDDocument, auditTrailReader base.AuditTrailReader, snapshotStore archiveSnapshotStore,
+	eraser contractEraser, keys artifactstore.CEKRepository, eraseRepo dcstodcsdb.EraseRepository) contractstoragearchive.Service {
 	return &contractStorageArchivesrvc{
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
@@ -46,6 +58,9 @@ func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo
 		DIDDocument:      didDocument,
 		ATrailReader:     auditTrailReader,
 		SnapshotStore:    snapshotStore,
+		Eraser:           eraser,
+		Keys:             keys,
+		ERepo:            eraseRepo,
 	}
 }
 
@@ -195,7 +210,77 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 
+	// Erasure (DCS-NFR-COMP-03): with the archive entries soft-deleted (so
+	// the integrity audit no longer covers them), the contract's wrapped CEKs
+	// are shredded — locally with a KEY_SHREDDED event, and via the peer
+	// erase handshake on every counterparty instance. The deletion
+	// justification is the recorded shred reason. An unreachable peer leaves
+	// a pending contract_erasures row for the retry scheduler.
+	if err := s.Eraser.EraseContract(ctx, p.Did, deletedBy, p.Justification); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+
 	return affected, nil
+}
+
+// ErasureStatus reports the contract's key-erasure state (DCS-NFR-COMP-03,
+// DCS-NFR-SEC-13): live or shredded locally (with the destruction record's
+// timestamp, actor, and reason) plus the per-peer erase-handshake state —
+// pending while a contract_erasures row awaits the peer's confirmation,
+// confirmed once the peer acknowledged shredding its own CEKs.
+func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contractstoragearchive.ErasureStatusPayload) (res *contractstoragearchive.ArchiveErasureStatusResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	records, err := s.Keys.List(ctx, artifactstore.ContractScope(p.Did))
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	response := &contractstoragearchive.ArchiveErasureStatusResponse{
+		Did:         p.Did,
+		LocalStatus: "live",
+		Peers:       []*contractstoragearchive.ArchiveErasurePeerStatus{},
+	}
+	// Shredding marks every record of the scope at once, so any shredded
+	// record means the scope is erased; the latest one is the destruction
+	// record surfaced to the caller.
+	for i := range records {
+		record := records[i]
+		if record.ShreddedAt == nil {
+			continue
+		}
+		response.LocalStatus = "shredded"
+		shreddedAt := record.ShreddedAt.UTC().Format(time.RFC3339)
+		response.ShreddedAt = &shreddedAt
+		response.ShreddedBy = record.ShreddedBy
+		response.ShredReason = record.ShredReason
+	}
+
+	requests, err := s.ERepo.ListByDID(ctx, p.Did)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	for _, request := range requests {
+		peer := &contractstoragearchive.ArchiveErasurePeerStatus{
+			PeerDid:     request.PeerDID,
+			Status:      "pending",
+			RequestedAt: request.RequestedAt.UTC().Format(time.RFC3339),
+			RetryCount:  request.RetryCount,
+		}
+		if request.ConfirmedAt != nil {
+			peer.Status = "confirmed"
+			confirmedAt := request.ConfirmedAt.UTC().Format(time.RFC3339)
+			peer.ConfirmedAt = &confirmedAt
+		}
+		if request.LastTriedAt != nil {
+			lastTriedAt := request.LastTriedAt.UTC().Format(time.RFC3339)
+			peer.LastTriedAt = &lastTriedAt
+		}
+		response.Peers = append(response.Peers, peer)
+	}
+
+	return response, nil
 }
 
 // archiveSnapshotStore is the slice of the IPFS client the delete path needs

@@ -149,3 +149,18 @@ Feature: Contract Negotiation
     Then get http 200:Success code
     And the negotiation draft for contract "Party Draft Contract" is empty
     And the contract "Party Draft Contract" has no recorded negotiation change requests
+
+  # Accepting an inbound offer as-is (POST /contract/accept-offer) is what
+  # mints the accepting instance's negotiation task for the offer's round —
+  # receiving the offer queues nothing, so an unaccepted offer has no task and
+  # submit refuses to settle a round nobody entered (command/acceptoffer.go,
+  # command/submit.go). The authority to accept is being the designated
+  # counterparty; on a single DCS a contract is its own origin, so the side of
+  # the rule this exercises is the refusal.
+  @DCS-IR-CWE-03 @DCS-FR-CWE-18 @clean_db
+  Scenario: The originator cannot accept its own offer
+    Given I am authenticated with roles: "Contract Creator"
+    And contract "Own Offer Contract" has reached contract state "OFFERED"
+    When the negotiator accepts the offer for contract "Own Offer Contract"
+    Then the response status is 400
+    And the contract "Own Offer Contract" is in state "OFFERED"

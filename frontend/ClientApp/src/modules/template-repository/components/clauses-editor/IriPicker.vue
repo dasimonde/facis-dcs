@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 
 /**
  * Picks an ODRL term that is an IRI reference — an action, a party
@@ -41,6 +41,8 @@ const knownValues = computed(() => {
 const custom = ref(!!props.modelValue && !knownValues.value.has(props.modelValue))
 const selectValue = computed(() => (custom.value ? CUSTOM : props.modelValue))
 
+const selectValueId = useId()
+
 function onSelect(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   if (value === CUSTOM) {
@@ -61,7 +63,7 @@ watch(
 
 <template>
   <div class="flex flex-col gap-1">
-    <select :value="selectValue" class="select-bordered select select-sm" @change="onSelect">
+    <select :id="selectValueId" :value="selectValue" class="select-bordered select select-sm" @change="onSelect">
       <option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option>
       <optgroup v-for="g in groups" :key="g.label" :label="g.label">
         <option v-for="o in g.options" :key="o.value" :value="o.value">{{ o.label }}</option>
@@ -70,6 +72,7 @@ watch(
     </select>
     <input
       v-if="custom"
+      :id="`${selectValueId}-custom`"
       :value="modelValue"
       type="text"
       :placeholder="placeholder"

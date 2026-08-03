@@ -11,6 +11,7 @@ var PACAuditRequest = Type("PACAuditRequest", func() {
 
 	Attribute("scope", String, "Scope that should be audited")
 	Attribute("did", String, "Optional resource DID filter")
+	Attribute("resource_id", String, "Optional resource DID filter alias used by audit-executor clients")
 	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
 
 	Required("scope", "justification")
@@ -179,8 +180,6 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	Method("audit", func() {
 		Description("trigger an audit on selected scope.")
 		Meta("dcs:requirements", "DCS-IR-PACM-01")
-		Meta("dcs:ui", "Auditing Tool")
-		Meta("dcs:pacm:components", "")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -208,8 +207,6 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	Method("audit_report", func() {
 		Description("generate and retrieve audit reports.")
 		Meta("dcs:requirements", "DCS-IR-PACM-02")
-		Meta("dcs:ui", "Auditing Tool")
-		Meta("dcs:pacm:components", "")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Archive Manager")
@@ -244,8 +241,6 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	Method("monitor", func() {
 		Description("Continuous compliance monitoring sweep: flags contracts pending approval that still have OPEN approval tasks (a missing required approval) and records the sweep in the audit trail. Technical/contractual conformance only — autonomous legal-conformity assessment (DCS-FR-PACM-03) is descoped per the client decision of 2026-07-26 (ADR-24).")
 		Meta("dcs:requirements", "DCS-IR-PACM-03")
-		Meta("dcs:ui", "Non-Compliance Investigation")
-		Meta("dcs:pacm:components", "")
 		Security(JWTAuth, func() {
 			Scope("Compliance Officer")
 		})
@@ -266,8 +261,6 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	Method("incident_report", func() {
 		Description("submit non-compliance findings as case records.")
 		Meta("dcs:requirements", "DCS-IR-PACM-04")
-		Meta("dcs:ui", "Non-Compliance Investigation")
-		Meta("dcs:pacm:components", "")
 		Security(JWTAuth, func() {
 			Scope("Compliance Officer")
 		})
@@ -293,8 +286,6 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	Method("checkpoint_head", func() {
 		Description("retrieve the newest audit-trail checkpoint head (ADR-16). Contains only hashes, counts and a trusted timestamp, so the response may be published onward — an external notary that stores one head pins the whole log before it, because every root chains to its predecessor.")
 		Meta("dcs:requirements", "DCS-IR-PACM-01")
-		Meta("dcs:ui", "Auditing Tool")
-		Meta("dcs:pacm:components", "")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -351,8 +342,6 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	Method("checkpoint_proof", func() {
 		Description("retrieve the inclusion proof tying one anchored audit entry to a timestamped checkpoint root (ADR-16). The entry bytes themselves are NOT part of this response; a verifier hashes the entry it already holds, nonce included, walks the siblings and compares against a root obtained from the external anchor.")
 		Meta("dcs:requirements", "DCS-IR-PACM-01")
-		Meta("dcs:ui", "Auditing Tool")
-		Meta("dcs:pacm:components", "")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")

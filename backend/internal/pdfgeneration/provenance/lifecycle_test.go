@@ -120,3 +120,85 @@ func TestLifecycleAssertion_OptionalFieldsOmittedWhenEmpty(t *testing.T) {
 	assert.NotContains(t, string(raw), `"reason"`)
 	assert.NotContains(t, string(raw), `"vc_id"`)
 }
+
+// A peer ships a PDF it has already signed, and the receiving instance's own
+// workflow starts over at OFFERED. Recording the local state would file that
+// signed artifact as "draft" — re-renderable — so the next local terminate or
+// expiry would append a C2PA manifest onto the counterparty's signed bytes.
+func TestArtifactC2PAStateFreezesAPeerSignedPDFTheLocalStateCallsADraft(t *testing.T) {
+	signed := signedPDF
+
+	for _, localState := range []string{"OFFERED", "NEGOTIATION", "APPROVED"} {
+		state, err := ArtifactC2PAState(localState, signed)
+		require.NoError(t, err)
+		assert.True(t, IsFrozenC2PAState(state),
+			"a PAdES-signed artifact received in %s must be frozen, got %q", localState, state)
+		assert.Equal(t, "active", state)
+	}
+}
+
+// The same receipt without a signature is an ordinary draft artifact: it must
+// stay renderable, or this instance could never render its own first artifact
+// for the contract.
+func TestArtifactC2PAStateLeavesAnUnsignedReceiptRenderable(t *testing.T) {
+	state, err := ArtifactC2PAState("OFFERED", []byte("%PDF-1.7\nno signature here\n"))
+
+	require.NoError(t, err)
+	assert.Equal(t, "draft", state)
+	assert.False(t, IsFrozenC2PAState(state))
+}
+
+// A state that is already frozen says something the signature does not: a
+// revocation ship lands in REVOKED, and its artifact is suspended, not active.
+func TestArtifactC2PAStateKeepsAnAlreadyFrozenState(t *testing.T) {
+	state, err := ArtifactC2PAState("REVOKED", signedPDF)
+
+	require.NoError(t, err)
+	assert.Equal(t, "suspended", state)
+}
+
+// signedPDF is the shape a PAdES signature value dictionary takes: /Type /Sig
+// with the /ByteRange covering the file around its /Contents.
+var signedPDF = []byte("%PDF-1.7\n12 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite" +
+	" /SubFilter /ETSI.CAdES.detached /ByteRange [0 840 960 1200] /Contents <30820> >>\nendobj\n")
+
+// clauseTextMentioningByteRange is an UNSIGNED PDF whose page content stream and
+// JSON-LD attachment carry a clause discussing /ByteRange. Contract text reaches
+// both verbatim, so it is author- and peer-controlled.
+var clauseTextMentioningByteRange = []byte("%PDF-1.7\n4 0 obj\n<< /Length 62 >>\nstream\n" +
+	"BT (This clause mentions /ByteRange for illustrative purposes) Tj ET\nendstream\nendobj\n")
+
+func TestCarriesPAdESSignatureNeedsTheSignatureDictionaryNotJustAByteRange(t *testing.T) {
+	assert.True(t, CarriesPAdESSignature(signedPDF))
+	assert.False(t, CarriesPAdESSignature(clauseTextMentioningByteRange),
+		"a clause discussing /ByteRange is not a signature")
+	assert.False(t, CarriesPAdESSignature([]byte("%PDF-1.7\n1 0 obj\n<< >>\nendobj\n")))
+	assert.True(t, CarriesPAdESSignature([]byte("<< /Type/Sig /ByteRange [0 1 2 3] >>")),
+		"/Type/Sig without the separating space is the same dictionary entry")
+	assert.False(t, CarriesPAdESSignature([]byte("<< /Type /SigFlags /ByteRange [0 1 2 3] >>")),
+		"/SigFlags is not /Sig")
+}
+
+// A conforming reader resolves /Byte#52ange as /ByteRange, so a peer spelling it
+// that way ships a genuinely signed PDF. Missing it files the signed artifact as
+// a re-renderable draft, and the next local terminate amends the counterparty's
+// signed bytes — the very failure the artifact-is-the-witness rule exists to
+// prevent.
+func TestCarriesPAdESSignatureResolvesNameEscapes(t *testing.T) {
+	escaped := []byte("%PDF-1.7\n12 0 obj\n<< /#54ype /S#69g /Byte#52ange [0 840 960 1200] >>\nendobj\n")
+
+	assert.True(t, CarriesPAdESSignature(escaped))
+}
+
+// The consequence at the receiving end: receivepdf stores pdf_c2pa_state from
+// ArtifactC2PAState, IsFrozenC2PAState("active") is true, and a frozen artifact
+// is served as-is forever. An unsigned peer offer whose text merely discusses
+// /ByteRange must stay a draft, or its C2PA banner asserts an ACTIVE contract
+// that is only OFFERED and no local transition ever corrects it.
+func TestArtifactC2PAStateLeavesAnOfferMentioningByteRangeADraft(t *testing.T) {
+	state, err := ArtifactC2PAState("OFFERED", clauseTextMentioningByteRange)
+
+	require.NoError(t, err)
+	assert.Equal(t, "draft", state)
+	assert.False(t, IsFrozenC2PAState(state))
+}

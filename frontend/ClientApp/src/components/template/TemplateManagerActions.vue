@@ -7,7 +7,8 @@ import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { type ContractTemplateState, TemplateState } from '@/types/contract-template-state'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import { reportActionError } from '@/utils/report-action-error'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 defineOptions({
   inheritAttrs: false,
@@ -69,7 +70,7 @@ const archive = async () => {
       await router.push({ name: ROUTES.TEMPLATES.LIST })
     }
   } catch (err) {
-    console.error('Archiving failed:', err)
+    reportActionError(err, 'Archive template')
   }
 }
 
@@ -84,7 +85,7 @@ const publish = async () => {
       await router.push({ name: ROUTES.TEMPLATES.LIST })
     }
   } catch (err) {
-    console.error('Publishing failed:', err)
+    reportActionError(err, 'Publish template')
   } finally {
     isPublishing.value = false
   }
@@ -100,7 +101,7 @@ async function register() {
       await router.push({ name: ROUTES.TEMPLATES.LIST })
     }
   } catch (err) {
-    console.error('Registration failed:', err)
+    reportActionError(err, 'Register template')
   }
 }
 </script>
@@ -111,6 +112,6 @@ async function register() {
     <span v-if="isPublishing" class="loading loading-sm loading-spinner"></span>
     Publish
   </button>
-  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" class="z-1000" @click="archive">Archive</button>
+  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" @click="archive">Archive</button>
   <ConfirmationModal ref="confirmation-modal" />
 </template>

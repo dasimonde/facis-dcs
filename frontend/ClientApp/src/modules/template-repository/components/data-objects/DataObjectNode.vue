@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { type ShapeClass, type ShapeProperty } from '@template-repository/utils/shape-library'
 import { type DcsContractDataObject, localNameOf } from '@/models/dcs-jsonld'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 /**
@@ -44,6 +44,8 @@ function binding(property: ShapeProperty): LeafBinding {
     if (field) {
       return { kind: 'negotiable', fieldId: target, label: field['dcs:label'], required: field['dcs:required'] }
     }
+    // An IRI-valued leaf's {"@id"} names an external resource, not a child.
+    if (property.iri) return { kind: 'fixed' }
     return { kind: 'nested', childId: target }
   }
   return { kind: 'fixed' }
@@ -62,8 +64,30 @@ function literalText(property: ShapeProperty): string {
 }
 
 function onLiteralInput(property: ShapeProperty, event: Event) {
-  const value = (event.target as HTMLInputElement).value
-  store.setDataObjectLiteral(props.object['@id'], property.path, value, property.datatype ?? 'xsd:string')
+  const value = (event.target as HTMLInputElement | HTMLSelectElement).value
+  store.setDataObjectLiteral(
+    props.object['@id'],
+    property.path,
+    value,
+    property.datatypeIri ?? property.datatype ?? 'xsd:string',
+  )
+}
+
+function iriText(property: ShapeProperty): string {
+  const value = props.object[property.path]
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && '@id' in value) return value['@id']
+  return ''
+}
+
+function onIriInput(property: ShapeProperty, event: Event) {
+  store.setDataObjectIri(props.object['@id'], property.path, (event.target as HTMLInputElement).value.trim())
+}
+
+// A leaf can go negotiable when a declared dcs:ContractField can express its
+// datatype — an external library's non-XSD datatype IRI cannot ride a field
+// declaration, and an IRI-valued fill would materialize as a string literal.
+function negotiableSupported(property: ShapeProperty): boolean {
+  return !property.datatypeIri && !property.iri && property.datatype !== undefined
 }
 
 function toggleNegotiable(property: ShapeProperty, event: Event) {
@@ -75,6 +99,7 @@ function toggleNegotiable(property: ShapeProperty, event: Event) {
       property.label,
       property.datatype ?? 'xsd:string',
       property.required,
+      property.options,
     )
   } else {
     store.makeDataLeafFixed(props.object['@id'], property.path)
@@ -105,11 +130,24 @@ function fillValue(fieldId: string): string {
 }
 
 function onFillInput(leaf: { fieldId: string; label: string }, event: Event) {
-  const value = (event.target as HTMLInputElement).value
+  const value = (event.target as HTMLInputElement | HTMLSelectElement).value
   props.setSemanticConditionValue?.('', leaf.fieldId, leaf.label, value)
 }
 
 const typeLabel = computed(() => shape.value?.label ?? localNameOf(props.object['@type']))
+
+// The first filled literal distinguishes same-class instances ("Legal
+// Person · Musterfirma GmbH") in a graph with several of them.
+const instanceHint = computed(() => {
+  for (const property of shape.value?.properties ?? []) {
+    const value = props.object[property.path]
+    if (typeof value === 'string' && value) return value
+    if (typeof value === 'object' && value !== null && !Array.isArray(value) && '@value' in value) {
+      return String(value['@value'])
+    }
+  }
+  return ''
+})
 </script>
 
 <template>
@@ -119,7 +157,10 @@ const typeLabel = computed(() => shape.value?.label ?? localNameOf(props.object[
     :data-testid="`data-object-${localNameOf(object['@type'])}`"
   >
     <div class="mb-2 flex items-center justify-between">
-      <span class="font-semibold">{{ typeLabel }}</span>
+      <span class="font-semibold">
+        {{ typeLabel }}
+        <span v-if="instanceHint" class="font-normal opacity-60">· {{ instanceHint }}</span>
+      </span>
       <button
         v-if="mode === 'template' && editable && depth === 0"
         type="button"
@@ -142,11 +183,40 @@ const typeLabel = computed(() => shape.value?.label ?? localNameOf(props.object[
           <span v-if="property.required" class="text-error">*</span>
         </span>
 
+        <!-- IRI-valued leaf (sh:nodeKind sh:IRI): names an external resource -->
+        <template v-if="property.iri">
+          <input
+            v-if="mode === 'template'"
+            :value="iriText(property)"
+            type="url"
+            placeholder="https://…"
+            class="input-bordered input input-sm w-72"
+            :data-testid="`iri-${localNameOf(property.path)}`"
+            :disabled="!editable"
+            @input="onIriInput(property, $event)"
+          />
+          <span v-else class="text-sm break-all" :data-testid="`iri-${localNameOf(property.path)}`">
+            {{ iriText(property) || '—' }}
+          </span>
+        </template>
+
         <!-- Literal-valued leaf -->
-        <template v-if="property.datatype">
+        <template v-else-if="property.datatype">
           <template v-if="binding(property).kind === 'negotiable'">
             <template v-if="mode === 'contract'">
+              <select
+                v-if="property.options"
+                :value="fillValue((binding(property) as { fieldId: string }).fieldId)"
+                class="select-bordered select w-48 select-sm"
+                :data-testid="`fill-${localNameOf(property.path)}`"
+                :disabled="!editable"
+                @change="onFillInput(binding(property) as { fieldId: string; label: string }, $event)"
+              >
+                <option value=""></option>
+                <option v-for="option in property.options" :key="option" :value="option">{{ option }}</option>
+              </select>
               <input
+                v-else
                 :value="fillValue((binding(property) as { fieldId: string }).fieldId)"
                 :type="property.datatype === 'xsd:decimal' || property.datatype === 'xsd:integer' ? 'number' : 'text'"
                 class="input-bordered input input-sm w-48"
@@ -160,21 +230,34 @@ const typeLabel = computed(() => shape.value?.label ?? localNameOf(props.object[
               negotiated at contract time
             </span>
           </template>
-          <input
-            v-else-if="mode === 'template'"
-            :value="literalText(property)"
-            :type="property.datatype === 'xsd:decimal' || property.datatype === 'xsd:integer' ? 'number' : 'text'"
-            class="input-bordered input input-sm w-48"
-            :data-testid="`literal-${localNameOf(property.path)}`"
-            :disabled="!editable"
-            @input="onLiteralInput(property, $event)"
-          />
+          <template v-else-if="mode === 'template'">
+            <select
+              v-if="property.options"
+              :value="literalText(property)"
+              class="select-bordered select w-48 select-sm"
+              :data-testid="`literal-${localNameOf(property.path)}`"
+              :disabled="!editable"
+              @change="onLiteralInput(property, $event)"
+            >
+              <option value=""></option>
+              <option v-for="option in property.options" :key="option" :value="option">{{ option }}</option>
+            </select>
+            <input
+              v-else
+              :value="literalText(property)"
+              :type="property.datatype === 'xsd:decimal' || property.datatype === 'xsd:integer' ? 'number' : 'text'"
+              class="input-bordered input input-sm w-48"
+              :data-testid="`literal-${localNameOf(property.path)}`"
+              :disabled="!editable"
+              @input="onLiteralInput(property, $event)"
+            />
+          </template>
           <span v-else class="text-sm" :data-testid="`literal-${localNameOf(property.path)}`">
             {{ literalText(property) || '—' }}
           </span>
 
           <label
-            v-if="mode === 'template' && editable"
+            v-if="mode === 'template' && editable && negotiableSupported(property)"
             class="label cursor-pointer gap-1 text-xs"
             :title="'Negotiable: agreed during contract negotiation instead of fixed here'"
           >

@@ -98,7 +98,7 @@ Feature: Authentication Endpoints
       | GET    | /signature/retrieve/placeholder | {}                                                        |
       | POST   | /signature/verify               | {'did':'placeholder'}                                     |
       | POST   | /signature/validate             | {'did':'placeholder'}                                     |
-      | POST   | /signature/revoke               | {'did':'placeholder','signer_did':'placeholder'}          |
+      | POST   | /signature/revoke               | {'did':'placeholder','signer_did':'placeholder','reason':'Access-control probe'} |
       | GET    | /signature/audit                | did=placeholder                                           |
       | POST   | /signature/compliance           | {'did':'placeholder'}                                     |
 

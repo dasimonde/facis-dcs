@@ -3,9 +3,14 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ .Release.Name }}-orce
-  {{- with .Values.ingress.annotations }}
+  {{- if or .Values.ingress.stripPrefix .Values.ingress.annotations }}
   annotations:
+    {{- if .Values.ingress.stripPrefix }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s-orce-strip-prefix@kubernetescrd" .Release.Namespace .Release.Name | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}

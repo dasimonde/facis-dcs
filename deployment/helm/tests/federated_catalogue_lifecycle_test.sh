@@ -226,7 +226,7 @@ statuslist_proxy_doc="$(awk '
 ' <<<"$backend_doc")"
 grep -q 'readinessProbe:' <<<"$statuslist_proxy_doc" &&
   grep -q 'httpGet:' <<<"$statuslist_proxy_doc" &&
-  grep -q 'path: "/statuslist/v1/tenants/credential/status/1"' <<<"$statuslist_proxy_doc" &&
+  grep -q 'path: "/statuslist/v1/tenants/c2pa/status/1"' <<<"$statuslist_proxy_doc" &&
   grep -q 'port: sl-proxy' <<<"$statuslist_proxy_doc" ||
   fail "BDD status-list proxy readiness does not verify the required seeded list route"
 if grep -q 'tcpSocket:' <<<"$statuslist_proxy_doc"; then

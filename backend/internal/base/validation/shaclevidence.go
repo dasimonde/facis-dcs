@@ -27,8 +27,9 @@ func SHACLEvidence(ctx context.Context, contractDocument any) (schemaVersion int
 	return version, ValidationReportHash(findings), nil
 }
 
-// RequireHubConformance blocks a document that violates the Semantic Hub's
-// SHACL shapes (canonical shapes + clause catalog): error-severity findings
+// RequireHubConformance blocks a document that violates the Semantic Hub
+// shapes graphs it declares (the canonical shapes with the clause catalog,
+// plus any registered library it names): error-severity findings
 // fail it with every violation spelled out; warnings/info pass. The gate
 // runs at contract submission and at signature application (DCS-FR-TR-20,
 // DCS-FR-PACM-03: non-conformant contracts MUST NOT proceed toward

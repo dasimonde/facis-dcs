@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/auth/oid4vp/status/codec"
 	"digital-contracting-service/internal/auth/oid4vp/status/envelope"
@@ -130,7 +131,24 @@ func (h *IETFToken) verifyJWT(body []byte) (envelope.VerifiedJWT, error) {
 	if err := requireStatusTrust(h.Trust); err != nil {
 		return envelope.VerifiedJWT{}, err
 	}
-	return envelope.VerifyES256JWT(body, func(issuer string, _ *jwt.Token) (*ecdsa.PublicKey, error) {
+	return envelope.VerifyES256JWT(body, func(issuer string, token *jwt.Token) (*ecdsa.PublicKey, error) {
+		// An issuer that publishes its key by certificate chain bundles no JWKS,
+		// so its status list is verified from the chain the token carries —
+		// against the same anchors and the same leaf-identifies-issuer binding
+		// the credential is held to. This is the path a statuslist+jwt from the
+		// issuer's own flow takes: SelectMechanismFromResponse routes that
+		// content type here, not to the XFSC handler.
+		if raw, ok := token.Header["x5c"]; ok {
+			key, err := sdjwt.VerificationKeyFromX5C(raw, h.Trust.X5CRoots, issuer)
+			if err != nil {
+				return nil, err
+			}
+			ecKey, ok := key.(*ecdsa.PublicKey)
+			if !ok {
+				return nil, fmt.Errorf("status list x5c leaf key is %T, not ECDSA", key)
+			}
+			return ecKey, nil
+		}
 		return h.Trust.ResolveECDSAPublicKey(issuer)
 	})
 }

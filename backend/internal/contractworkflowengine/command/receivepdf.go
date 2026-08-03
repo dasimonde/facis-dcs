@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -49,12 +49,12 @@ type PeerPdfReceiveCmd struct {
 // store and opens its own local workflow tasks (ADR-13): each DCS runs its own
 // RBAC; nothing crosses the boundary.
 type PeerPdfReceiver struct {
-	DB         *sqlx.DB
-	CRepo      db.ContractRepo
-	RTRepo     db.ReviewTaskRepo
-	ATRepo     db.ApprovalTaskRepo
-	NTRepo     db.NegotiationTaskRepo
-	IPFSClient *ipfs.APIClient
+	DB        *sqlx.DB
+	CRepo     db.ContractRepo
+	RTRepo    db.ReviewTaskRepo
+	ATRepo    db.ApprovalTaskRepo
+	NTRepo    db.NegotiationTaskRepo
+	Artifacts *artifactstore.Store
 }
 
 // Handle upserts the local copy from the shipped contract's JSON-LD. A first
@@ -71,6 +71,17 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 			log.Printf("could not rollback transaction: %v", err)
 		}
 	}(tx)
+
+	// Serialize receipts per contract IRI: a peer ships once per render, so two
+	// ships of the same contract can be in flight at once. Both would read no
+	// local copy yet, both would insert, and the loser dies on the primary key
+	// with its payload — the newer document — dropped, leaving this instance
+	// holding the older one until a retry lands. Queuing here makes the second
+	// receipt see the first one's copy and update it. Released on tx
+	// commit/rollback.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", cmd.ContractIRI); err != nil {
+		return fmt.Errorf("could not acquire the per-contract receipt lock for %s: %w", cmd.ContractIRI, err)
+	}
 
 	existing, err := h.CRepo.ReadProcessDataByDIDOrNil(ctx, tx, cmd.ContractIRI)
 	if err != nil {
@@ -110,11 +121,18 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err := h.CRepo.RemoteUpdate(ctx, tx, data); err != nil {
 			return fmt.Errorf("could not update local contract copy: %w", err)
 		}
+		// A new document arrived, so the round it belongs to is a new one: any
+		// engagement this instance had with the superseded version is owed again
+		// against this one. This carries tasks forward, it never mints a first
+		// one — receiving a document is not engaging with it.
+		if err := h.NTRepo.RollForward(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+			return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
+		}
 	} else {
 		// A first receipt is an inbound offer: this instance's intrinsic state
 		// starts at OFFERED (an offer on our table, awaiting our own review),
 		// which its local review/approval tasks then advance. The peer-facing
-		// extrinsic lifecycle (offered → accepted → executed) is inferred from
+		// extrinsic lifecycle (proposed → agreed → executed) is inferred from
 		// this plus the shipped PDF. A first receipt that already declares a
 		// revocation (this instance never saw the offer) lands directly in
 		// REVOKED — there is nothing left to review.
@@ -141,7 +159,12 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err := h.CRepo.RemoteCreate(ctx, tx, data); err != nil {
 			return fmt.Errorf("could not create local contract copy: %w", err)
 		}
-		if err := createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd.ContractIRI, cmd.LocalPeer, resp); err != nil {
+		// Review and approval tasks only. No negotiation task is minted here:
+		// receiving an offer is not engaging with it, and a task on arrival would
+		// make submit's "no open tasks" gate answer for a round nobody entered.
+		// The counterparty mints its own by accepting the offer or by proposing a
+		// redline on it (command/acceptoffer.go, command/negotiate.go).
+		if err := createReviewAndApprovalTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd.ContractIRI, cmd.LocalPeer, resp); err != nil {
 			return err
 		}
 	}
@@ -153,11 +176,24 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	// before this; this instance's own later changes append to this base (so the
 	// C2PA chain grows rather than resetting).
 	if len(cmd.Pdf) > 0 {
-		stored, err := h.IPFSClient.CreateFile(ctx, cmd.Pdf)
+		// The receiver encrypts the peer's verbatim bytes with its OWN CEK; the
+		// inbound PDF stays authoritative and byte-identical after decrypt.
+		storedCID, err := h.Artifacts.Put(ctx, artifactstore.ContractScope(cmd.ContractIRI), cmd.Pdf)
 		if err != nil {
 			return fmt.Errorf("could not store carried-over peer PDF in IPFS: %w", err)
 		}
-		c2paState, err := provenance.MapCWEStateToC2PA(data.State)
+		// pdf_c2pa_state describes the STORED ARTIFACT, not this instance's
+		// workflow. The peer ships a PDF it may already have signed while our own
+		// copy starts at OFFERED, so mapping the local state alone files a
+		// PAdES-signed artifact as "draft": a later local terminate, or the expiry
+		// cron, would then see a re-renderable draft and append a C2PA manifest
+		// onto the counterparty's signed bytes. The shipped bytes are in hand
+		// here, so the artifact answers for itself once, at the moment it is
+		// stored, instead of every lifecycle event afterwards having to ask. It is
+		// also this instance's record that the agreement is settled, which
+		// requireUnsettledAgreement reads to refuse a renegotiation of a document
+		// the peer already signed.
+		c2paState, err := provenance.ArtifactC2PAState(data.State, cmd.Pdf)
 		if err != nil {
 			return fmt.Errorf("could not map contract state to C2PA lifecycle: %w", err)
 		}
@@ -177,7 +213,7 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		}
 		payloadSum := sha256.Sum256(persistedData)
 		if err := h.CRepo.UpdatePDFState(ctx, tx, cmd.ContractIRI, db.ContractPDFState{
-			IPFSCID:     stored.Identifier.Value,
+			IPFSCID:     storedCID,
 			C2PAState:   c2paState,
 			PayloadHash: hex.EncodeToString(payloadSum[:]),
 		}); err != nil {

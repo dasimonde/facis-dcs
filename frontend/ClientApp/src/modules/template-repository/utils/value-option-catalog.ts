@@ -41,11 +41,6 @@ export function groupValueOptions(options: readonly ValueOption[]): readonly Val
   return [...groups.values()]
 }
 
-export function isTokenValueConstraint(constraint?: SemanticValueConstraint): boolean {
-  if (!constraint) return false
-  return !!constraint.pattern || !!constraint.format || !!constraint.allowedValuesRef
-}
-
 export function formatValueOption(value: unknown, options: readonly ValueOption[]): string {
   const raw = String(value)
   const option = options.find((item) => item.iri === raw || item.value === raw)

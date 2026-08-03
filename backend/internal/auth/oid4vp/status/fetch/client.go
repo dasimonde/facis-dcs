@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 const maxResponseSize = 16 << 20
@@ -25,8 +27,19 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+// NewClient builds the client used to fetch a status list.
+//
+// The URI comes out of a credential, so it is caller-influenced, though only by
+// a caller whose signature already verified against a trusted issuer — a
+// narrower reach than an issuer identifier, which is read before anything is
+// verified. It is bounded anyway: no redirects, and none of the addresses that
+// answer only because the request originates on this host.
+//
+// Loopback stays dialable, unlike the issuer resolver's default: every
+// deployment here co-locates the status service, and dev and CI serve status
+// lists from localhost.
 func NewClient() *Client {
-	return &Client{HTTPClient: &http.Client{Timeout: 10 * time.Second}}
+	return &Client{HTTPClient: safehttp.Client(10*time.Second, safehttp.Policy{AllowLoopback: true})}
 }
 
 func (c *Client) Fetch(ctx context.Context, uri string) (Response, error) {

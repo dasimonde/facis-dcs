@@ -26,24 +26,6 @@ type Responsible struct {
 	Counterparty string `json:"counterparty"`
 }
 
-func ToResponsible(raw any) (*Responsible, error) {
-	if raw == nil {
-		return nil, nil
-	}
-
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("marshal responsible: %w", err)
-	}
-
-	var r Responsible
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("unmarshal responsible: %w", err)
-	}
-
-	return &r, nil
-}
-
 func (r *Responsible) Value() (driver.Value, error) {
 	return json.Marshal(r)
 }
@@ -283,5 +265,33 @@ type ContractRepo interface {
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
 	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data Contract) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractPDFState, error)
+	// CountSignedSignatures returns how many committed (SIGNED) signatures the
+	// contract carries. A contract that carries one holds a PAdES-signed PDF
+	// that must never be re-rendered: a fresh render replaces the signed bytes
+	// outright. Appending to it is a different operation and is allowed —
+	// further signatures and the ADR-26 provenance re-anchor are both
+	// incremental updates (DCS-OR-C2PA-002, DCS-OR-C2PA-010).
+	CountSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) (int, error)
+	// ReadDIDsNeedingRegeneration returns the DIDs of at most limit contracts
+	// whose stored PDF is not a render of the document as it now stands, oldest
+	// first — the work list of the background regenerator's retry pass. Two
+	// things put a contract on it: no PDF in the artifact store at all, and a
+	// PDF whose recorded payload hash no longer matches the stored
+	// contract_data. The second is what a regeneration LOST to a transient
+	// pdf-core or artifact-store failure leaves behind, and nothing else
+	// re-renders it: the lifecycle event that asked for it is not redelivered,
+	// and the federation ship refuses such a PDF outright
+	// (dcstodcs.holdsSupersededPDF), so without this the contract would never be
+	// shippable again.
+	//
+	// Signed contracts are left out: the only reason one appears is that its
+	// artifact is MISSING, and the regenerator's answer to a missing artifact is
+	// a fresh render — an unsigned PDF stamped as authoritative over the peer's
+	// provenance. So is any artifact past "draft", whose recorded hash comes
+	// from signing rather than from a render and so is not expected to match.
+	// Contracts in excludeDIDs (attempts the caller has given up on) are left
+	// out too, so a permanently stuck row cannot occupy the batch and starve the
+	// transient failures behind it.
+	ReadDIDsNeedingRegeneration(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error)
 	UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data ContractPDFState) error
 }

@@ -34,7 +34,7 @@ func TestIssueLifecycleVC_IncludesInlineJSONLDContextAndSubjectID(t *testing.T) 
 	)
 
 	signer := &captureSigner{}
-	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", "http://statuslist/v1/tenants/default/status/1", assertion)
+	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", testStatusRef, assertion)
 	require.NoError(t, err)
 	require.NotEmpty(t, signer.lastUnsigned)
 
@@ -67,17 +67,22 @@ func TestIssueLifecycleVC_IncludesInlineJSONLDContextAndSubjectID(t *testing.T) 
 	assert.Equal(t, assertion.ContractID, subject["contract_id"])
 }
 
+// testStatusRef stands in for the entry a publisher allocated for the contract.
+var testStatusRef = CredentialStatusRef{
+	StatusListCredential: "http://statuslist/v1/tenants/default/status/1",
+	Index:                4711,
+}
+
 func TestIssueLifecycleVC_CredentialStatusIncludedWhenStatusListURISet(t *testing.T) {
 	effectiveAt := time.Date(2026, 5, 29, 16, 0, 0, 0, time.UTC)
 	contractID := "did:web:example.org:contracts:abc123"
-	statusURI := "http://statuslist/v1/tenants/default/status/1"
 	assertion := NewLifecycleAssertion(
 		contractID, "f00dbabe", "active", "approved",
 		"did:web:example.org:issuer", "", effectiveAt,
 	)
 
 	signer := &captureSigner{}
-	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", statusURI, assertion)
+	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", testStatusRef, assertion)
 	require.NoError(t, err)
 
 	var doc map[string]interface{}
@@ -85,14 +90,17 @@ func TestIssueLifecycleVC_CredentialStatusIncludedWhenStatusListURISet(t *testin
 
 	cs, ok := doc["credentialStatus"].(map[string]interface{})
 	require.True(t, ok, "credentialStatus must be present in unsigned VC")
-	// W3C VC DM 2.0: type must be BitstringStatusListEntry (DCS-OR-C2PA-005).
-	assert.Equal(t, "BitstringStatusListEntry", cs["type"])
+	// The advertised type must be the format the URI actually serves — the XFSC
+	// token status list, not a W3C BitstringStatusListCredential (DCS-OR-C2PA-005).
+	assert.Equal(t, "TokenStatusList", cs["type"])
 	assert.Equal(t, "revocation", cs["statusPurpose"])
 
-	expectedIndex := StatusListIndex(contractID)
-	assert.Equal(t, statusURI, cs["statusListCredential"])
-	assert.Equal(t, fmt.Sprintf("%s#%d", statusURI, expectedIndex), cs["id"])
-	assert.Equal(t, fmt.Sprintf("%d", expectedIndex), cs["statusListIndex"])
+	// The credential advertises the entry the publisher allocated, verbatim:
+	// nothing here re-derives it, so it cannot disagree with the entry a
+	// revocation flips.
+	assert.Equal(t, testStatusRef.StatusListCredential, cs["statusListCredential"])
+	assert.Equal(t, fmt.Sprintf("%s#%d", testStatusRef.StatusListCredential, testStatusRef.Index), cs["id"])
+	assert.Equal(t, fmt.Sprintf("%d", testStatusRef.Index), cs["statusListIndex"])
 }
 
 func TestIssueLifecycleVC_CredentialStatusOmittedWhenStatusListURIEmpty(t *testing.T) {
@@ -103,13 +111,13 @@ func TestIssueLifecycleVC_CredentialStatusOmittedWhenStatusListURIEmpty(t *testi
 	)
 
 	signer := &captureSigner{}
-	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", "", assertion)
+	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", CredentialStatusRef{}, assertion)
 	require.NoError(t, err)
 
 	var doc map[string]interface{}
 	require.NoError(t, json.Unmarshal(signer.lastUnsigned, &doc))
 	_, hasCS := doc["credentialStatus"]
-	assert.False(t, hasCS, "credentialStatus must be absent when statusListURI is empty")
+	assert.False(t, hasCS, "credentialStatus must be absent when no status list entry is given")
 }
 
 func TestIssueLifecycleVC_NormalizesNonURISubjectID(t *testing.T) {
@@ -125,7 +133,7 @@ func TestIssueLifecycleVC_NormalizesNonURISubjectID(t *testing.T) {
 	)
 
 	signer := &captureSigner{}
-	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", "http://statuslist/v1/tenants/default/status/1", assertion)
+	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", testStatusRef, assertion)
 	require.NoError(t, err)
 
 	var doc map[string]interface{}
@@ -154,7 +162,7 @@ func TestIssueLifecycleVC_VCDM2ValidFromNotIssuanceDate(t *testing.T) {
 	)
 
 	signer := &captureSigner{}
-	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", "", assertion)
+	_, _, err := IssueLifecycleVC(context.Background(), signer, "did:web:example.org:issuer", CredentialStatusRef{}, assertion)
 	require.NoError(t, err)
 
 	var doc map[string]interface{}

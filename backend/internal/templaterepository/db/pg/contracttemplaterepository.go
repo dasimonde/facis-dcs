@@ -18,6 +18,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"digital-contracting-service/internal/templaterepository/db"
 )
@@ -299,6 +300,23 @@ func (r *PostgresContractTemplateRepo) ReadPDFState(ctx context.Context, tx *sql
 		return nil, err
 	}
 	return &state, nil
+}
+
+func (r *PostgresContractTemplateRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error) {
+	var dids []string
+	// COALESCE: an empty Go slice binds as SQL NULL, and "did <> ALL (NULL)" is
+	// NULL — which would filter out every row and stall the sweep.
+	err := tx.SelectContext(ctx, &dids,
+		`SELECT DISTINCT did FROM contract_templates
+		 WHERE (pdf_ipfs_cid IS NULL OR pdf_ipfs_cid = '')
+		   AND did <> ALL (COALESCE($2::text[], '{}'))
+		 ORDER BY did
+		 LIMIT $1`, limit, pq.Array(excludeDIDs),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return dids, nil
 }
 
 func (r *PostgresContractTemplateRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data db.ContractTemplatePDFState) error {

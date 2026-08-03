@@ -27,6 +27,29 @@ async function gotoAs(page: Page, loginAs: LoginAs, role: DcsRole, url: string):
   await page.goto(url)
 }
 
+/**
+ * Navigates and waits for the control that proves the page arrived, reloading
+ * once if it does not. The runner hosts both DCS stacks and their
+ * port-forwards, and re-establishing one resets the browser's network stack
+ * mid-flight — the request dies rather than being slow, so nothing is pending
+ * and a longer timeout cannot help. Only re-issuing it can.
+ */
+async function gotoAsAndFind(
+  page: Page,
+  loginAs: LoginAs,
+  role: DcsRole,
+  url: string,
+  control: ReturnType<Page['getByRole']>,
+): Promise<void> {
+  await gotoAs(page, loginAs, role, url)
+  try {
+    await expect(control).toBeVisible({ timeout: 20_000 })
+  } catch {
+    await page.reload()
+    await expect(control).toBeVisible({ timeout: 20_000 })
+  }
+}
+
 /** Confirms the shared ConfirmationModal (comment/decision-note dialogs). */
 async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Confirmation' })
@@ -43,13 +66,27 @@ async function completeParticipantDialog(page: Page): Promise<void> {
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
 }
 
-/** Waits until the template detail view finished loading (name populated). */
+/**
+ * Waits until the template detail view finished loading (name populated).
+ *
+ * Reloads rather than waiting longer. The runner hosts both DCS stacks and
+ * their port-forwards, and re-establishing one resets the browser's network
+ * stack: the trace of the last failure carries 36 net::ERR_NETWORK_CHANGED and
+ * not one HTTP status. The view's load request dies in flight, so nothing is
+ * pending and no timeout can help — the fetch has to be issued again. A longer
+ * timeout was tried first and still failed.
+ */
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
-  // The default 15s is tight while the e2e runner also hosts the second DCS
-  // stack — this step was flaky, passing only on retry.
-  await expect(page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')).toHaveValue(name, {
-    timeout: 45_000,
-  })
+  const field = page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await expect(field).toHaveValue(name, { timeout: 20_000 })
+      return
+    } catch {
+      await page.reload()
+    }
+  }
+  await expect(field).toHaveValue(name, { timeout: 20_000 })
 }
 
 /**
@@ -90,19 +127,17 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
     await gotoAs(page, loginAs, 'Template Reviewer', `/ui/templates/review/${did}`)
     await waitForTemplateLoaded(page, name)
     await assertPdfExport(page, 'template', did, `${name} REVIEWED (in review)`)
-    // The backend accepts the reviewer recommendation only after a
-    // verification run — the Verify dialog is part of the review flow.
+    // Approve performs the mandatory verification before it offers the
+    // forwarding confirmation.
     const verified = page.waitForResponse(
       (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Verify', exact: true }).click()
-    await verified
-    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
     const forwarded = page.waitForResponse(
       (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await verified
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
     await forwarded
   })
 
@@ -198,8 +233,9 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   let contractTemplateDid = ''
   await test.step('create contract template from approved component', async () => {
     // DCS-FR-TR-25
-    await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
-    await page.getByRole('button', { name: /parent for other contracts/ }).click()
+    const parentChoice = page.getByRole('button', { name: /parent for other contracts/ })
+    await gotoAsAndFind(page, loginAs, 'Template Creator', '/ui/templates/new', parentChoice)
+    await parentChoice.click()
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(contractTemplateName)
     await page
       .getByRole('group')
@@ -330,7 +366,10 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await page
+      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
     await forwarded
     await assertPdfExport(page, 'contract', contractDid, 'contract REVIEWED')
   })

@@ -65,6 +65,11 @@ function onParamClick(conditionId: string, parameterName: string) {
           @mouseenter="onRuleEnter(c.conditionId)"
           @mouseleave="onRuleLeave"
         >
+          <span
+            v-if="c.accentColor"
+            class="mr-1 inline-block h-2 w-2 rounded-full align-baseline"
+            :style="{ backgroundColor: c.accentColor }"
+          />
           {{ c.conditionName }}
         </span>
         <ul class="mt-1 ml-3 space-y-0.5">

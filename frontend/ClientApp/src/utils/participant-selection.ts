@@ -11,4 +11,34 @@
 export interface ParticipantSelection {
   /** Counterparty `did:web`, or empty for a purely local contract. */
   counterparty: string
+  /**
+   * The contractual role the creating organization takes in the contract's ODRL
+   * rules (e.g. provider, customer). Binds the origin DID to that role's party
+   * node; the counterpart role stays open until the counterparty signs.
+   */
+  originatorRole?: string
+  /**
+   * Organizations authorized to read this contract, by legal name, matched
+   * against the OID4VP organization claim. Read authorization only.
+   */
+  parties?: string[]
+}
+
+/**
+ * The contractual roles a template declares, read off its party placeholder
+ * nodes (`…#party-<role>`), which is what the backend binds the originator to.
+ */
+export function declaredPartyRoles(document: { 'dcs:parties'?: unknown[] } | undefined): string[] {
+  const nodes = document?.['dcs:parties'] ?? []
+  const roles = new Set<string>()
+  for (const node of nodes) {
+    if (typeof node !== 'object' || node === null) continue
+    const iri = (node as { '@id'?: unknown })['@id']
+    if (typeof iri !== 'string') continue
+    const marker = iri.lastIndexOf('#party-')
+    if (marker === -1) continue
+    const role = iri.slice(marker + '#party-'.length)
+    if (role) roles.add(role)
+  }
+  return Array.from(roles)
 }

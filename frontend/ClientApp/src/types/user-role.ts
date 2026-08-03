@@ -15,8 +15,6 @@ export type UserRole =
   | 'SYSTEM_ADMINISTRATOR'
   | 'COMPLIANCE_OFFICER'
   | 'INTEGRATION_MANAGER'
-  | 'PROCESS_ORCHESTRATOR'
-  | 'VALIDATOR'
 
 /** Maps access-token role claim labels to UserRole ids. */
 const ROLE_LABEL_TO_USER_ROLE: Record<string, UserRole> = {
@@ -36,8 +34,6 @@ const ROLE_LABEL_TO_USER_ROLE: Record<string, UserRole> = {
   'Sys. Administrator': 'SYSTEM_ADMINISTRATOR',
   'Compliance Officer': 'COMPLIANCE_OFFICER',
   'Integration Manager': 'INTEGRATION_MANAGER',
-  'Process Orchestrator': 'PROCESS_ORCHESTRATOR',
-  Validator: 'VALIDATOR',
 }
 
 /** Reads roles from a JWT payload. */

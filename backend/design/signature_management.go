@@ -223,8 +223,9 @@ var SMContractRevokeRequest = Type("SMContractRevokeRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("signer_did", String, "DID of the signer whose signature should be revoked")
+	Attribute("reason", String, "Reason for revoking the signature", func() { MinLength(1) })
 
-	Required("did", "signer_did")
+	Required("did", "signer_did", "reason")
 })
 
 var SMContractRevokeResponse = Type("SMContractRevokeResponse", func() {
@@ -394,7 +395,7 @@ var SMSignatureRequestPublishResponse = Type("SMSignatureRequestPublishResponse"
 	Description("The published OID4VP Document-Retrieval request as QR/deep-link data (ADR-12). The wallet fetches the request object at request_uri, fetches the to-be-signed document it references, signs it with the signatory's own key, and posts the signed document back to the request object's response_uri.")
 
 	Attribute("ceremony_id", String, "Identifier of the ceremony")
-	Attribute("client_id", String, "x509_san_dns client_id of the DCS relying party the request object is bound to")
+	Attribute("client_id", String, "OpenID4VP client identifier of the DCS relying party the request object is bound to, prefix included (x509_san_dns:<dns-name>)")
 	Attribute("request_uri", String, "HTTPS URL the wallet fetches the signed OID4VP request object (JAR) from")
 	Attribute("wallet_uri", String, "openid4vp:// deep link (request-by-reference) the signer's wallet opens")
 	Attribute("nonce", String, "Fresh nonce bound into the request object")
@@ -420,8 +421,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("retrieve", func() {
 		Description("fetch contracts, recording an audit-trail entry for the read.")
 		Meta("dcs:requirements", "DCS-IR-SM-01")
-		Meta("dcs:ui", "Secure Contract Viewer", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Signer Authorization & PoA application")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
@@ -453,8 +452,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("retrieve_by_id", func() {
 		Description("fetch a contract and its signature envelope by DID, recording an audit-trail entry for the read.")
 		Meta("dcs:requirements", "DCS-IR-SM-01")
-		Meta("dcs:ui", "Secure Contract Viewer")
-		Meta("dcs:sm:components", "Signer Authorization & PoA application")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
@@ -480,12 +477,15 @@ var _ = Service("SignatureManagement", func() {
 	Method("verify", func() {
 		Description("check contract integrity & envelope.")
 		Meta("dcs:requirements", "DCS-IR-SM-02")
-		Meta("dcs:ui", "Secure Contract Viewer")
-		Meta("dcs:sm:components", "Counterparty Authorization & PoA verification")
 
+		// Read-only integrity check over the envelope retrieve_by_id already
+		// hands these roles; the Secure Contract Viewer offers it as step 2 to
+		// signer and manager alike.
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
 			Scope("Sys. Contract Signer")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
 		})
 
 		Payload(SMContractVerifyRequest)
@@ -505,7 +505,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("provenance", func() {
 		Description("The C2PA provenance chain embedded in the signed/exported contract PDF (DCS-OR-C2PA-008): one entry per manifest in the JUMBF store, oldest first, with its dcs.lifecycle assertion. Powers the Secure Contract Viewer's provenance display.")
 		Meta("dcs:requirements", "DCS-OR-C2PA-008")
-		Meta("dcs:ui", "Secure Contract Viewer")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
@@ -543,6 +542,7 @@ var _ = Service("SignatureManagement", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -550,6 +550,7 @@ var _ = Service("SignatureManagement", func() {
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -573,6 +574,7 @@ var _ = Service("SignatureManagement", func() {
 		Error("level_below_required", ErrorResult, "The submitted signature's level does not meet the contract's required signature level (SM-01)")
 		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
 		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -580,6 +582,7 @@ var _ = Service("SignatureManagement", func() {
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("signature_invalid", StatusUnprocessableEntity)
 			Response("document_mismatch", StatusUnprocessableEntity)
 			Response("nonce_mismatch", StatusUnprocessableEntity)
@@ -653,6 +656,7 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("not_found", ErrorResult, "Ceremony not found")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -661,6 +665,7 @@ var _ = Service("SignatureManagement", func() {
 			Response("bad_request", StatusBadRequest)
 			Response("not_found", StatusNotFound)
 			Response("ceremony_required", StatusUnprocessableEntity)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -769,6 +774,7 @@ var _ = Service("SignatureManagement", func() {
 		Error("level_below_required", ErrorResult, "The submitted signature's level does not meet the contract's required signature level (SM-01)")
 		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
 		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -777,6 +783,7 @@ var _ = Service("SignatureManagement", func() {
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("not_found", StatusNotFound)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("signature_invalid", StatusUnprocessableEntity)
 			Response("document_mismatch", StatusUnprocessableEntity)
 			Response("nonce_mismatch", StatusUnprocessableEntity)
@@ -790,12 +797,14 @@ var _ = Service("SignatureManagement", func() {
 	Method("validate", func() {
 		Description("validate the contract's applied signature(s) and return any compliance findings.")
 		Meta("dcs:requirements", "DCS-IR-SM-04", "DCS-IR-SM-05")
-		Meta("dcs:ui", "Secure Contract Viewer", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
+		// The signer closes the Secure Contract Viewer wizard on the signature
+		// they just applied; validation is a read-only check.
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Contract Signer")
+			Scope("Sys. Contract Signer")
 		})
 
 		Payload(SMContractValidateRequest)
@@ -815,8 +824,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("revoke", func() {
 		Description("revoke a signature.")
 		Meta("dcs:requirements", "DCS-IR-SM-06")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Timestamping")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -840,8 +847,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("audit", func() {
 		Description("retrieve compliance/audit logs.")
 		Meta("dcs:requirements", "DCS-IR-SM-08")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -866,8 +871,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("view", func() {
 		Description("Signature Compliance Viewer (DCS-FR-SM-26): per-signature signer identity, credential class/signature level, status, and timestamps, plus the contract's cryptographic integrity findings — the data behind the viewer UI.")
 		Meta("dcs:requirements", "DCS-FR-SM-26", "DCS-IR-SM-05")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -897,8 +900,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("compliance", func() {
 		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: signature level SES/AES/QES, signature status, presence of active signed credentials) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
 		Meta("dcs:requirements", "DCS-IR-SM-07")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")

@@ -32,8 +32,8 @@ const sortedTemplates = computed(() => {
 
 const hasTemplates = computed(() => props.templates.length > 0)
 
-const applySearchResult = (searchResult: TemplateResourcesItem[]) => {
-  searchedTemplates.value = searchResult
+const applySearchResult = (searchResult: TemplateResourcesItem[] | null) => {
+  searchedTemplates.value = searchResult ?? props.templates
 }
 
 watch(

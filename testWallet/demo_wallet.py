@@ -35,6 +35,7 @@ from urllib.parse import urlencode
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dcs_wallet.oid4vp_flow import (
+    bind_hydra_login_challenge,
     default_log,
     presentation_context_from_link,
     resolve_presentation_link,
@@ -171,7 +172,12 @@ def main() -> int:
     parser.add_argument(
         "--credential",
         default=None,
-        help="Credential stem in testWallet/credentials/ (e.g. test, johndoe.pid)",
+        help=(
+            "Credential stem in testWallet/credentials/ (e.g. test, johndoe.pid). "
+            "Comma-separate one per credential query when the request asks for "
+            "several (the signing ceremony asks for a PoA and a PID): "
+            "janesmith,janesmith.pid"
+        ),
     )
     parser.add_argument(
         "--headless",
@@ -210,8 +216,25 @@ def main() -> int:
     if r.status_code != 200:
         default_log("login", "FAILED", status=r.status_code, body=r.text[:300])
         return 1
-    request_uri = r.json()["request_uri"]
+    initiation = r.json()
+    request_uri = initiation["request_uri"]
     default_log("login-ok", "initiate OK", request_uri_prefix=request_uri[:96])
+
+    # The DCS mints its session through Hydra, so the presentation callback
+    # refuses a login attempt no login_challenge is bound to. A browser binds it
+    # by following authorize_url; headless, the wallet has to do that walk
+    # itself or its presentation is rejected after it is already built.
+    try:
+        bind_hydra_login_challenge(
+            session,
+            api,
+            state=str(initiation["state"]),
+            authorize_url=str(initiation["authorize_url"]),
+        )
+    except (KeyError, RuntimeError) as exc:
+        default_log("login-challenge", "FAILED", error=str(exc))
+        return 1
+
     link = resolve_presentation_link(request_uri)
     ctx = presentation_context_from_link(link)
     return run_presentation_flow(session, ctx, credential_name=credential)

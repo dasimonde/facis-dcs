@@ -40,8 +40,12 @@ func jadesTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 		t.Fatal(err)
 	}
 
+	// assertionMethod names the signing key by a relative DID URL, and an
+	// embedded method sits beside it: both are shapes DID Core permits and this
+	// deployment's own gendid does not emit.
 	didJSON := map[string]any{
-		"id": "did:web:" + host,
+		"id":              "did:web:" + host,
+		"assertionMethod": []any{"#key-1"},
 		"verificationMethod": []map[string]any{
 			{
 				"id": "did:web:" + host + "#key-1",
@@ -119,8 +123,26 @@ func TestVerifyShippedJadesRejectsForeignKey(t *testing.T) {
 	jws := signShippedContract(t, imposter, iri, 1, pdfPayload)
 
 	_, err := verifyShippedJades(jws, iri, "did:web:dcs-a.localhost", pdfPayload, sender)
-	if err == nil || !strings.Contains(err.Error(), "did:web key") {
+	if err == nil || !strings.Contains(err.Error(), "not published by peer") {
 		t.Fatalf("expected the foreign-key ship to be rejected with a key mismatch, got: %v", err)
+	}
+}
+
+// A key the peer publishes, but for key agreement only, may not sign a contract.
+func TestVerifyShippedJadesRejectsKeyNotPublishedForAssertions(t *testing.T) {
+	sender := jadesTestDIDDocument(t, "dcs-a.localhost")
+	pdfPayload := []byte(`{"x":1}`)
+	iri := "did:web:dcs-a.localhost:contract:42"
+	jws := signShippedContract(t, sender, iri, 1, pdfPayload)
+
+	// Same document, same key — published for key agreement instead of assertions.
+	demoted := *sender
+	demoted.KeyAgreement = demoted.AssertionMethod
+	demoted.AssertionMethod = nil
+
+	_, err := verifyShippedJades(jws, iri, "did:web:dcs-a.localhost", pdfPayload, &demoted)
+	if err == nil || !strings.Contains(err.Error(), "not published by peer") {
+		t.Fatalf("expected a key published only for key agreement to be refused, got: %v", err)
 	}
 }
 

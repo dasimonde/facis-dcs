@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -122,7 +123,11 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	if err != nil {
 		return nil, fmt.Errorf("contract data validation failed: %w", err)
 	}
-	renewalContractData, err := attachRenewsContractReference(normalizedContractData, cmd.OriginalDID, original.ContractVersion)
+	unsignedContractData, err := unsignRenewedDocument(normalizedContractData)
+	if err != nil {
+		return nil, fmt.Errorf("could not clear the previous term's signature attribution: %w", err)
+	}
+	renewalContractData, err := attachRenewsContractReference(unsignedContractData, cmd.OriginalDID, original.ContractVersion)
 	if err != nil {
 		return nil, fmt.Errorf("could not attach renewal reference: %w", err)
 	}
@@ -130,13 +135,26 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	var resp db.Responsible
 	if original.Responsible != nil {
 		resp = db.Responsible{
-			Creator:     localPeer,
-			Reviewers:   original.Responsible.Reviewers,
-			Approvers:   original.Responsible.Approvers,
-			Negotiators: original.Responsible.Negotiators,
+			Creator:      localPeer,
+			Reviewers:    original.Responsible.Reviewers,
+			Approvers:    original.Responsible.Approvers,
+			Negotiators:  original.Responsible.Negotiators,
+			Counterparty: original.Responsible.Counterparty,
 		}
 	} else {
 		resp = db.Responsible{Creator: localPeer}
+	}
+
+	// Establish the new term's parties and signature fields the same way a plain
+	// create does (Creator.Handle), now that the previous term's attribution is
+	// gone: the copy already declares the carried-over parties and their fields,
+	// so this adds only what the original was missing.
+	seeded, changed, err := SeedPartiesAndSignatureFields(*renewalContractData, resp.GetParties())
+	if err != nil {
+		return nil, fmt.Errorf("could not seed contract parties and signature fields: %w", err)
+	}
+	if changed {
+		renewalContractData = &seeded
 	}
 
 	newStartDate := original.StartDate
@@ -192,8 +210,13 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	// negotiation tasks for the new instance follow the exact same rules as
 	// a plain create — automatic metadata carryover (DCS-FR-CWE-22) extends
 	// to who is responsible, not just contract fields.
-	if err := createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd.DID, cmd.RenewedBy, resp); err != nil {
+	if err := createReviewAndApprovalTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd.DID, cmd.RenewedBy, resp); err != nil {
 		return nil, err
+	}
+	for _, negotiator := range resp.Negotiators {
+		if err := mintNegotiationTask(ctx, tx, h.NTRepo, cmd.DID, negotiator, cmd.RenewedBy, initialContractVersion); err != nil {
+			return nil, err
+		}
 	}
 
 	evt := contractevents.RenewEvent{
@@ -216,6 +239,66 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	}
 
 	return &RenewResult{OriginalContractVersion: original.ContractVersion}, nil
+}
+
+// signatureAttributionPredicates are the assertions the act of signing stamps
+// onto a contract's party node: who signed for that party
+// (signingmanagement/command/apply.go recordSignatory writes dcs:hasSignatory
+// and the dcs:hasPowerOfAttorney that authorized them) and the ODRL role the
+// seal assigned when the offer was accepted (sealAgreementForSigning writes
+// odrl:function — odrl:contractedParty asserts that this party accepted).
+var signatureAttributionPredicates = []string{
+	"dcs:hasSignatory",
+	"dcs:hasPowerOfAttorney",
+	"odrl:function",
+}
+
+// unsignRenewedDocument strips the previous term's signature evidence from the
+// document a renewal copies, so a renewal draft that nobody has signed does not
+// assert in its machine-readable contract that named people signed it under
+// named authority — an assertion that would travel into the rendered PDF, to
+// every peer, and into the Power-of-Attorney compliance findings
+// (signingmanagement/command/compliance.go reads exactly these predicates).
+//
+// It clears predicates and never removes a party node. The nodes are also the
+// read-authorization records (attachContractParties' #party-N nodes and their
+// dcs:legalName, which gate query/contract/querybyid.go), and CreateCmd.Parties
+// is not persisted anywhere — a dropped node could not be rebuilt.
+//
+// The signature FIELDS are left in place: they declare where the new term is to
+// be signed, not that it was, and an authored multi-signatory contract names
+// them itself, so they are part of the terms the renewal inherits.
+func unsignRenewedDocument(raw *datatype.JSON) (*datatype.JSON, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(*raw, &doc); err != nil {
+		return nil, fmt.Errorf("could not decode contract data: %w", err)
+	}
+
+	nodes, _ := doc["dcs:parties"].([]any)
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, predicate := range signatureAttributionPredicates {
+			delete(node, predicate)
+		}
+	}
+
+	// Break the seal: the first signature retyped the offered policy set into
+	// the odrl:Agreement those signatures bind. A renewal is a fresh offer of
+	// the same terms, and nobody has accepted it yet.
+	if policies, ok := doc["dcs:policies"].(map[string]any); ok {
+		if policyType, _ := policies["@type"].(string); strings.HasSuffix(policyType, "Agreement") {
+			policies["@type"] = "odrl:Offer"
+		}
+	}
+
+	encoded, err := datatype.NewJSON(doc)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode contract data: %w", err)
+	}
+	return &encoded, nil
 }
 
 // attachRenewsContractReference adds the dcs:renewsContract back-reference

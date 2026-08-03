@@ -106,7 +106,11 @@ func (s *processAuditAndCompliancesrvc) latestAuditRun(ctx context.Context, scop
 	return raw, nil
 }
 
-func toPACExternalAuditResponse(response auditexecutor.Response) *processauditandcompliance.PACExternalAuditResponse {
+// toPACExternalAuditResponse renders the executor verdict plus the timeline the
+// DCS procured and submitted as evidence. The evidence is grouped per audited
+// resource for the executor request; the `timeline` attribute is a flat entry
+// list, so the groups are concatenated and each entry keeps its own `did`.
+func toPACExternalAuditResponse(response auditexecutor.Response, evidence []*auditEvidenceResource) *processauditandcompliance.PACExternalAuditResponse {
 	findings := make([]*processauditandcompliance.PACAuditFinding, 0, len(response.Findings))
 	for _, finding := range response.Findings {
 		findings = append(findings, &processauditandcompliance.PACAuditFinding{
@@ -122,11 +126,22 @@ func toPACExternalAuditResponse(response auditexecutor.Response) *processauditan
 	if len(response.Receipt) != 0 && string(response.Receipt) != "null" {
 		_ = json.Unmarshal(response.Receipt, &receipt)
 	}
+	timeline := make([]*processauditandcompliance.PACResourceAuditTrailEntry, 0, len(evidence))
+	for _, audited := range evidence {
+		if audited == nil {
+			continue
+		}
+		for _, entry := range audited.AuditTrail {
+			if entry != nil {
+				timeline = append(timeline, entry)
+			}
+		}
+	}
 	return &processauditandcompliance.PACExternalAuditResponse{
 		ContractVersion: response.ContractVersion, AuditID: response.AuditID,
 		CorrelationID: response.CorrelationID, Scope: response.Scope, Resource: resource,
 		Executor:   &processauditandcompliance.PACAuditExecutor{ID: response.Executor.ID, Version: response.Executor.Version},
-		ExecutedAt: response.ExecutedAt, Findings: findings, Receipt: receipt,
+		ExecutedAt: response.ExecutedAt, Findings: findings, Receipt: receipt, Timeline: timeline,
 	}
 }
 

@@ -62,11 +62,10 @@ func TestParseDomainOntologyRequiresReferencedConstraints(t *testing.T) {
 	_, err := parseDomainOntology(`
 @prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
 @prefix dcst: <https://w3id.org/facis/dcs/taxonomy/v1#> .
-@prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-dcst:field-company-role a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-company-role a dcs:DomainField ;
   rdfs:label "Company Contract Role"@en ;
   rdfs:range xsd:string ;
   dcs:hasValueConstraint dcst:missing-constraint .

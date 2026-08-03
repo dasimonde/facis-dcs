@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -50,51 +49,47 @@ func mustX5ChainPEMWithSubject(t *testing.T, subject pkix.Name) string {
 // error even though the signature verified. The caller reports the failure as
 // claimSignature.mismatch and the asset's validation_state becomes Invalid — a
 // cryptographically sound signature indistinguishable from a forged one. The
-// chain must therefore be refused at load time rather than producing manifests
-// no verifier accepts.
-func TestLoadSigningMaterialRejectsLeafWithoutOrganization(t *testing.T) {
+// chain must therefore be refused when the caller supplies it rather than
+// producing manifests no verifier accepts.
+func TestParseSigningChainRejectsLeafWithoutOrganization(t *testing.T) {
 	chain := mustX5ChainPEMWithSubject(t, pkix.Name{CommonName: "DCS Dev dcs-c2pa Signer"})
-	env := map[string]string{envX5ChainPEM: chain}
 
-	_, err := loadSigningMaterialFromEnv(func(k string) string { return env[k] }, os.ReadFile)
+	_, err := ParseSigningChainPEM([]byte(chain))
 	if err == nil {
-		t.Fatalf("loadSigningMaterialFromEnv() accepted a leaf without an organizationName")
+		t.Fatalf("ParseSigningChainPEM() accepted a leaf without an organizationName")
 	}
 	if !strings.Contains(err.Error(), "organizationName") {
 		t.Fatalf("error does not name the missing field: %v", err)
 	}
 }
 
-// TestLoadSigningMaterialAcceptsLeafWithOrganization is the positive control:
-// the same certificate gains an O= and must load.
-func TestLoadSigningMaterialAcceptsLeafWithOrganization(t *testing.T) {
+// TestParseSigningChainAcceptsLeafWithOrganization is the positive control:
+// the same certificate gains an O= and must parse.
+func TestParseSigningChainAcceptsLeafWithOrganization(t *testing.T) {
 	chain := mustX5ChainPEMWithSubject(t, pkix.Name{
 		Organization: []string{"FACIS DCS"},
 		CommonName:   "DCS Dev dcs-c2pa Signer",
 	})
-	env := map[string]string{envX5ChainPEM: chain}
 
-	material, err := loadSigningMaterialFromEnv(func(k string) string { return env[k] }, os.ReadFile)
+	parsed, err := ParseSigningChainPEM([]byte(chain))
 	if err != nil {
-		t.Fatalf("loadSigningMaterialFromEnv() error = %v", err)
+		t.Fatalf("ParseSigningChainPEM() error = %v", err)
 	}
-	if len(material.certChainDER) != 1 {
-		t.Fatalf("cert chain length = %d, want 1", len(material.certChainDER))
+	if len(parsed) != 1 {
+		t.Fatalf("cert chain length = %d, want 1", len(parsed))
 	}
 }
 
-// TestLoadSigningMaterialChecksLeafNotAnchor guards against checking the wrong
+// TestParseSigningChainChecksLeafNotAnchor guards against checking the wrong
 // certificate: only the leaf signs claims, so a chain whose CA carries the
 // organizationName but whose leaf does not must still be refused.
-func TestLoadSigningMaterialChecksLeafNotAnchor(t *testing.T) {
+func TestParseSigningChainChecksLeafNotAnchor(t *testing.T) {
 	leaf := mustX5ChainPEMWithSubject(t, pkix.Name{CommonName: "DCS Dev dcs-c2pa Signer"})
 	anchor := mustX5ChainPEMWithSubject(t, pkix.Name{
 		Organization: []string{"FACIS DCS"},
 		CommonName:   "DCS Dev C2PA CA",
 	})
-	env := map[string]string{envX5ChainPEM: leaf + anchor}
-
-	if _, err := loadSigningMaterialFromEnv(func(k string) string { return env[k] }, os.ReadFile); err == nil {
-		t.Fatalf("loadSigningMaterialFromEnv() accepted a chain whose leaf has no organizationName")
+	if _, err := ParseSigningChainPEM([]byte(leaf + anchor)); err == nil {
+		t.Fatalf("ParseSigningChainPEM() accepted a chain whose leaf has no organizationName")
 	}
 }

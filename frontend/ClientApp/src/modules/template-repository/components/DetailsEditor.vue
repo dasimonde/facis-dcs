@@ -20,6 +20,12 @@ const description = computed({
   set: (value: string) => store.updateDescription(value),
 })
 const descriptionId = useId()
+const props = defineProps<{
+  nameError?: string
+  descriptionError?: string
+}>()
+const nameErrorId = useId()
+const descriptionErrorId = useId()
 </script>
 
 <template>
@@ -60,10 +66,14 @@ const descriptionId = useId()
         :id="nameId"
         v-model="name"
         class="input-bordered input w-full"
+        data-testid="template-global-name"
         type="text"
         required
+        :aria-invalid="!!props.nameError"
+        :aria-describedby="props.nameError ? nameErrorId : undefined"
         :disabled="!uiStore.isTemplateEditable"
       />
+      <p v-if="props.nameError" :id="nameErrorId" class="text-sm text-error">{{ props.nameError }}</p>
     </fieldset>
 
     <fieldset class="fieldset border-none p-0">
@@ -73,9 +83,15 @@ const descriptionId = useId()
         :id="descriptionId"
         v-model="description"
         class="textarea-bordered textarea h-24 w-full"
+        data-testid="template-base-description"
         required
+        :aria-invalid="!!props.descriptionError"
+        :aria-describedby="props.descriptionError ? descriptionErrorId : undefined"
         :disabled="!uiStore.isTemplateEditable"
       ></textarea>
+      <p v-if="props.descriptionError" :id="descriptionErrorId" class="text-sm text-error">
+        {{ props.descriptionError }}
+      </p>
     </fieldset>
   </div>
 </template>

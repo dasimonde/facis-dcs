@@ -1,7 +1,6 @@
 @prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
 @prefix dcst: <https://w3id.org/facis/dcs/taxonomy/v1#> .
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-@prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
@@ -12,11 +11,24 @@
 # just the seeded starting point — the builder discovers whatever ontologies
 # and shapes are registered in the Semantic Hub, so real deployments register
 # their own vocabulary (Gaia-X, an industry profile) and this stays minimal.
+#
+# This file is parsed configuration, not axioms. What reads it: the field
+# picker and the audit's known-field check index subjects typed
+# dcs:DomainField, taking rdfs:label, rdfs:range (which input widget) and
+# rdfs:domain (which group). dcs:ValueConstraint nodes and their SKOS
+# catalogs supply the choices a form offers and the labels beside them.
+#
+# What does NOT read it: any gate. A dcs:pattern, dcs:minInclusive or
+# dcs:allowedValue below is never compared against a submitted value on any
+# server-side path — the frontend checks them before submit, and that is
+# all. Value constraints that are ENFORCED are SHACL, declared as
+# sh:pattern / sh:in / sh:minInclusive in facis-dcs-clause-catalog.ttl,
+# which is concatenated into the shapes graph every document is validated
+# against at offer, submit and sign.
 
-<https://w3id.org/facis/sla/ontology> a owl:Ontology ;
+<https://w3id.org/facis/sla/ontology>
   rdfs:label "FACIS SLA Domain Fields"@en ;
-  rdfs:comment "A minimal domain-field catalog for SLA contracting; register richer vocabularies in the Semantic Hub."@en ;
-  rdfs:seeAlso <https://w3id.org/facis/dcs/ontology/v1> .
+  rdfs:comment "A minimal domain-field catalog for SLA contracting; register richer vocabularies in the Semantic Hub."@en .
 
 # ---- Entity classes a field's rdfs:domain names ----
 
@@ -29,20 +41,17 @@ dcs:LegalTerms a rdfs:Class ; rdfs:label "Legal Terms"@en .
 dcs:SLO a rdfs:Class ; rdfs:label "Service Level Objective"@en .
 dcs:SignatureRequirement a rdfs:Class ; rdfs:label "Signature Requirement"@en .
 
-dcs:DomainField a owl:Class ;
-  rdfs:subClassOf rdf:Property ;
+dcs:DomainField
   rdfs:label "Domain Field"@en ;
-  skos:definition "A contract field templates bind clause content and ODRL constraints to; its IRI is its identity."@en .
+  skos:definition "A contract field templates bind clause content and ODRL constraints to; its IRI is its identity. The marker type this file's readers index on."@en .
 
 dcs:ContractPartyRoleCode a rdfs:Class ;
-  rdfs:subClassOf dcs:VocabularyTerm ;
   rdfs:label "Contract Party Role Code"@en .
 
 # ---- Document-level party + its contract role (drives entity roles) ----
 
 dcs:party a rdf:Property ;
   rdfs:label "Company Party"@en ;
-  dcs:documentProperty "parties" ;
   rdfs:range dcs:CompanyParty .
 
 dcs:role a rdf:Property ;
@@ -160,54 +169,54 @@ dcst:currency-USD a skos:Concept ;
 
 # ---- Domain fields ----
 
-dcst:field-company-legalName a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-company-legalName a dcs:DomainField ;
   rdfs:label "Company Legal Name"@en ;
   rdfs:domain dcs:CompanyParty ;
   rdfs:range xsd:string .
 
-dcst:field-company-location-country a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-company-location-country a dcs:DomainField ;
   rdfs:label "Company Country"@en ;
   rdfs:domain dcs:CompanyParty ;
   rdfs:range xsd:string ;
   dcs:hasValueConstraint dcst:constraint-iso3166-alpha3-country .
 
-dcst:field-company-location-postalCode a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-company-location-postalCode a dcs:DomainField ;
   rdfs:label "Company Postal Code"@en ;
   rdfs:domain dcs:CompanyParty ;
   rdfs:range xsd:string .
 
-dcst:field-contract-governingLaw a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-contract-governingLaw a dcs:DomainField ;
   rdfs:label "Governing Law"@en ;
   rdfs:domain dcs:LegalTerms ;
   rdfs:range xsd:string ;
   dcs:hasValueConstraint dcst:constraint-governing-law .
 
-dcst:field-contract-validity-endDate a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-contract-validity-endDate a dcs:DomainField ;
   rdfs:label "Validity End Date"@en ;
   rdfs:range xsd:date .
 
-dcst:field-contract-payment-amount a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-contract-payment-amount a dcs:DomainField ;
   rdfs:label "Payment Amount"@en ;
   rdfs:domain dcs:PaymentTerm ;
   rdfs:range xsd:decimal .
 
-dcst:field-contract-payment-currency a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-contract-payment-currency a dcs:DomainField ;
   rdfs:label "Payment Currency"@en ;
   rdfs:domain dcs:PaymentTerm ;
   rdfs:range xsd:string ;
   dcs:hasValueConstraint dcst:constraint-iso4217-currency .
 
-dcst:field-service-description a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-service-description a dcs:DomainField ;
   rdfs:label "Service Description"@en ;
   rdfs:range xsd:string .
 
-dcst:field-service-sla-availability a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-service-sla-availability a dcs:DomainField ;
   rdfs:label "SLA Availability"@en ;
   rdfs:domain dcs:SLO ;
   rdfs:range xsd:decimal ;
   dcs:hasValueConstraint dcst:constraint-sla-availability-percent .
 
-dcst:field-signature-requiredLevel a dcs:DomainField, owl:DatatypeProperty ;
+dcst:field-signature-requiredLevel a dcs:DomainField ;
   rdfs:label "Required Signature Level"@en ;
   rdfs:domain dcs:SignatureRequirement ;
   rdfs:range xsd:string ;

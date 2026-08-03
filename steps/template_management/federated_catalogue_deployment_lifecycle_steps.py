@@ -100,7 +100,31 @@ def _create_isolated_namespace(context):
     if owned:
         def cleanup():
             # The generated prefix makes the destructive target explicit.
-            if namespace.startswith("dcs-fc-lifecycle-"):
+            if not namespace.startswith("dcs-fc-lifecycle-"):
+                return
+            # These namespaces hold a full catalogue stack -- Postgres, fc-service
+            # and, for the legacy upgrade, Neo4j -- on the same single kind node as
+            # the two DCS instances. Deleting without waiting returns while every
+            # pod is still running, so the features that follow (encryption at
+            # rest, checkpoints, SLA federation) execute against a node that is
+            # still carrying this scenario's load. Drop the pods first, then wait
+            # for the namespace, so the compute is actually released here.
+            # A teardown that overruns must not fail the scenario that owns it.
+            try:
+                _run(
+                    [
+                        _kubectl_binary(), "-n", namespace, "delete", "pod", "--all",
+                        "--grace-period=0", "--force", "--wait=false",
+                    ],
+                    timeout=60,
+                )
+                _run(
+                    [_kubectl_binary(), "delete", "namespace", namespace, "--wait=true"],
+                    timeout=float(
+                        os.environ.get("BDD_FC_LIFECYCLE_TEARDOWN_TIMEOUT_SECONDS", "180")
+                    ),
+                )
+            except subprocess.TimeoutExpired:
                 _run(
                     [_kubectl_binary(), "delete", "namespace", namespace, "--wait=false"],
                     timeout=30,
@@ -302,10 +326,10 @@ def step_given_fresh_fc_install(context):
     context.catalogue_calls = []
     previous_dcs_base_url = os.environ.get("BDD_DCS_BASE_URL")
     os.environ["BDD_DCS_BASE_URL"] = context.fc_lifecycle_base_url
-    previous_statuslist_url = os.environ.get("STATUSLIST_SERVICE_URL")
-    os.environ["STATUSLIST_SERVICE_URL"] = os.environ.get(
-        "BDD_FC_LIFECYCLE_STATUSLIST_URL",
-        "http://localhost:18080/statuslist",
+    previous_issuer_base = os.environ.get("ISSUER_BASE_URL")
+    os.environ["ISSUER_BASE_URL"] = os.environ.get(
+        "BDD_FC_LIFECYCLE_ISSUER_BASE_URL",
+        "http://localhost:18080/issuer",
     )
     def restore_dcs_base_url():
         if previous_dcs_base_url is None:
@@ -313,14 +337,14 @@ def step_given_fresh_fc_install(context):
         else:
             os.environ["BDD_DCS_BASE_URL"] = previous_dcs_base_url
 
-    def restore_statuslist_url():
-        if previous_statuslist_url is None:
-            os.environ.pop("STATUSLIST_SERVICE_URL", None)
+    def restore_issuer_base():
+        if previous_issuer_base is None:
+            os.environ.pop("ISSUER_BASE_URL", None)
         else:
-            os.environ["STATUSLIST_SERVICE_URL"] = previous_statuslist_url
+            os.environ["ISSUER_BASE_URL"] = previous_issuer_base
 
     context.add_cleanup(restore_dcs_base_url)
-    context.add_cleanup(restore_statuslist_url)
+    context.add_cleanup(restore_issuer_base)
     # Tokens are scoped by API base, but clearing removes any ambiguity when a
     # previous scenario happened to use the same generated namespace name.
     from steps.support.services.auth_service import AuthService  # noqa: PLC0415
@@ -451,6 +475,25 @@ def step_then_fresh_catalogue_operations_used_no_retry(context):
     )
 
 
+def _ensure_legacy_commit_present():
+    """Make LEGACY_CHART_COMMIT's tree readable by `git archive`.
+
+    CI checks out at depth 1, so a commit this far back is a ref this clone has
+    never fetched and `git archive` fails with "not a tree object". Deepen just
+    that one commit rather than the whole history.
+    """
+    if _run(["git", "cat-file", "-e", f"{LEGACY_CHART_COMMIT}^{{tree}}"], timeout=30).returncode == 0:
+        return
+    fetched = _run(
+        ["git", "fetch", "--no-tags", "--depth=1", "origin", LEGACY_CHART_COMMIT],
+        timeout=300,
+    )
+    _assert_success(
+        fetched,
+        f"deepening the shallow clone to reach Neo4j legacy chart commit {LEGACY_CHART_COMMIT}",
+    )
+
+
 @given("an isolated namespace contains the old Neo4j-based development installation")
 def step_given_legacy_neo4j_install(context):
     _create_isolated_namespace(context)
@@ -458,6 +501,7 @@ def step_given_legacy_neo4j_install(context):
     legacy_root = Path(tempfile.mkdtemp(prefix="facis-dcs-legacy-chart-"))
     context.add_cleanup(lambda: shutil.rmtree(legacy_root, ignore_errors=True))
     archive_path = legacy_root / "legacy-chart.tar"
+    _ensure_legacy_commit_present()
     archive = _run(
         [
             "git",
@@ -904,7 +948,7 @@ exit 0''',
         REPO_ROOT / "tests" / "bdd" / "scripts" / "keep_port_forward.sh",
         scripts_dir / "keep_port_forward.sh",
     )
-    (scripts_dir / "ensure_statuslist_for_bdd.py").touch()
+    (scripts_dir / "check_status_list.py").touch()
     venv = root / "venv"
     (venv / "bin").mkdir(parents=True)
     (venv / "bin" / "activate").touch()

@@ -66,46 +66,90 @@ func (c *APIClient) CreateFile(ctx context.Context, data any) (*IPFSResult, erro
 		body = raw
 	}
 
-	url := c.baseURL + "/api/ipfs/create"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	result, err := c.createTenantFileWithRetry(ctx, body)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("do request: %w", err)
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, body)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-
-	var result IPFSResult
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, err
 	}
 
 	if c.mfsBaseURL != "" {
 		err := c.copyToMFS(ctx, c.mfsBaseURL, result.Identifier.Value, result.Identifier.Value)
 		if err != nil {
-			return &result, err
+			return result, err
 		}
 	}
 
-	return &result, nil
+	return result, nil
+}
+
+// createTenantFileWithRetry stores bytes through the tenant document manager,
+// retrying transport failures and 5xx the same way reads already retry.
+//
+// The document manager pins to its IPFS node as part of the call, and a pin is
+// a network hop that can fail transiently under load — a single blip otherwise
+// fails the whole signing. Retrying is safe because the store is content
+// addressed: the same bytes always yield the same CID, so a retried write
+// converges on the object the first attempt was creating.
+func (c *APIClient) createTenantFileWithRetry(ctx context.Context, body []byte) (*IPFSResult, error) {
+	url := c.baseURL + "/api/ipfs/create"
+
+	attempts := c.fetchAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 && c.fetchBackoff > 0 {
+			time.Sleep(c.fetchBackoff)
+		}
+
+		result, status, err := c.createTenantOnce(ctx, url, body)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if status == http.StatusOK {
+			return result, nil
+		}
+		lastErr = fmt.Errorf("unexpected status %d", status)
+		// A 4xx is a definitive answer about these bytes; only the server-side
+		// transients are worth another attempt.
+		if status < 500 {
+			return nil, lastErr
+		}
+	}
+	return nil, lastErr
+}
+
+func (c *APIClient) createTenantOnce(ctx context.Context, url string, body []byte) (*IPFSResult, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("do request: %w", err)
+	}
+	defer func(Body io.ReadCloser) {
+		if err := Body.Close(); err != nil {
+			log.Println("could not close response body")
+		}
+	}(resp.Body)
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, bodyBytes)
+	}
+
+	var result IPFSResult
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, resp.StatusCode, nil
 }
 
 func (c *APIClient) FetchFile(cid string) (*IPFSResult, error) {

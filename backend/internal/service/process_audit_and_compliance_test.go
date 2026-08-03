@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -13,43 +11,6 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 )
-
-func TestAuditEvidenceWireUsesExactSnakeCaseKeysForTimelineAndCheck(t *testing.T) {
-	did := "did:example:contract"
-	timeline, check := "TIMELINE", "CHECK"
-	rule, result, reason := "ARCHIVE-1", "PASSED", "chain intact"
-	resources := auditEvidenceToWire([]*auditEvidenceResource{{
-		Did: did, Component: "contract-storage-archive", CreatedAt: "2026-07-31T10:00:00Z",
-		AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
-			{ID: 1, Component: "contract-workflow-engine", EventType: "UPDATED", EventData: map[string]any{"ok": true}, Did: &did, CreatedAt: "2026-07-31T09:00:00Z", Kind: &timeline},
-			{ID: 2, Component: "contract-storage-archive", EventType: "ARCHIVE_INTEGRITY_AUDIT_CHECK", EventData: map[string]any{}, Did: &did, CreatedAt: "2026-07-31T10:00:00Z", Kind: &check, RuleID: &rule, Result: &result, Reason: &reason},
-		},
-	}})
-	raw, err := json.Marshal(resources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded []map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	trail := decoded[0]["audit_trail"].([]any)
-	want := []string{"component", "created_at", "did", "event_data", "event_type", "id", "kind", "reason", "res_log_pred_cid", "result", "rule_id"}
-	for index, rawEntry := range trail {
-		entry := rawEntry.(map[string]any)
-		got := make([]string, 0, len(entry))
-		for key := range entry {
-			got = append(got, key)
-		}
-		slices.Sort(got)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("entry %d keys = %v, want %v; JSON=%s", index, got, want, raw)
-		}
-	}
-	if trail[0].(map[string]any)["kind"] != "TIMELINE" || trail[1].(map[string]any)["kind"] != "CHECK" {
-		t.Fatalf("wire kinds changed: %s", raw)
-	}
-}
 
 type countingAuditExecutor struct {
 	calls int
@@ -168,6 +129,13 @@ func TestResolveAuditScopeMapsUIScopes(t *testing.T) {
 			contract:  true,
 		},
 		{
+			name:      "contract singular case insensitive",
+			scope:     "CONTRACT",
+			scopeName: "contracts",
+			component: componenttype.ContractWorkflowEngine,
+			contract:  true,
+		},
+		{
 			name:      "archive",
 			scope:     "archive",
 			scopeName: "archive",
@@ -273,6 +241,70 @@ func TestResolveAuditScopeAcceptsComponentTypes(t *testing.T) {
 func TestResolveAuditScopeRejectsUnknownScope(t *testing.T) {
 	if _, err := resolveAuditScope("unknown"); err == nil {
 		t.Fatal("resolveAuditScope returned nil error for unknown scope")
+	}
+}
+
+func TestAuditRequestDIDAcceptsResourceIDAlias(t *testing.T) {
+	resourceID := " did:example:contract "
+	request := &processauditandcompliance.PACAuditRequest{ResourceID: &resourceID}
+	if got := auditRequestDID(request); got != "did:example:contract" {
+		t.Fatalf("auditRequestDID() = %q", got)
+	}
+}
+
+func TestAuditEvidenceResourceUsesExecutorWireNames(t *testing.T) {
+	kind, result, ruleID, reason := "CHECK", "FAILED", "RULE-1", "Power of Attorney denied"
+	resource := auditEvidenceResource{
+		Did: "did:example:contract", Component: "PROCESS_AUDIT_AND_COMPLIANCE",
+		CreatedAt: "2026-07-29T12:00:00Z",
+		AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{{
+			ID: 1, EventType: "PAC_TRUST_GATE_DENIAL", CreatedAt: "2026-07-29T12:00:00Z",
+			Kind: &kind, Result: &result, RuleID: &ruleID, Reason: &reason,
+		}},
+	}
+	raw, err := json.Marshal(resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	trail := envelope["audit_trail"].([]any)
+	entry := trail[0].(map[string]any)
+	if entry["kind"] != "CHECK" || entry["rule_id"] != "RULE-1" || entry["reason"] != reason {
+		t.Fatalf("unexpected executor wire entry: %s", raw)
+	}
+	if _, leaked := entry["RuleID"]; leaked {
+		t.Fatalf("Goa service field name leaked into executor wire contract: %s", raw)
+	}
+}
+
+func TestExternalAuditResponseCarriesTheSubmittedTimeline(t *testing.T) {
+	firstDID, secondDID := "did:example:one", "did:example:two"
+	evidence := []*auditEvidenceResource{
+		{Did: firstDID, Component: "CONTRACT_WORKFLOW_ENGINE", AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 1, EventType: "CONTRACT_CREATED", Did: &firstDID},
+			nil,
+		}},
+		nil,
+		{Did: secondDID, Component: "CONTRACT_WORKFLOW_ENGINE", AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 2, EventType: "CONTRACT_SIGNED", Did: &secondDID},
+		}},
+	}
+	response := toPACExternalAuditResponse(auditexecutor.Response{
+		ContractVersion: auditexecutor.ContractVersion, AuditID: "audit-1", CorrelationID: "audit-1",
+		Scope: "contracts", ExecutedAt: "2026-07-29T12:00:00Z",
+	}, evidence)
+
+	if len(response.Timeline) != 2 {
+		t.Fatalf("expected the gathered evidence to be flattened into the timeline, got %d entries", len(response.Timeline))
+	}
+	if response.Timeline[0].EventType != "CONTRACT_CREATED" || response.Timeline[1].EventType != "CONTRACT_SIGNED" {
+		t.Fatalf("unexpected timeline order: %+v", response.Timeline)
+	}
+	if response.Timeline[0].Did == nil || *response.Timeline[0].Did != firstDID {
+		t.Fatalf("a flattened entry lost the DID it is anchored on: %+v", response.Timeline[0])
 	}
 }
 

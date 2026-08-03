@@ -32,8 +32,8 @@ class PDFService:
         )
 
     @staticmethod
-    def verify_contract_pdf(context, did: str) -> requests.Response:
-        headers = getattr(context, "headers", {})
+    def verify_contract_pdf(context, did: str, headers=None) -> requests.Response:
+        headers = headers if headers is not None else getattr(context, "headers", {})
         return requests.get(
             contract_verify_pdf_url(context, did),
             headers=headers,

@@ -51,7 +51,7 @@ func (h *TrustGateDenialReporter) Handle(ctx context.Context, query TrustGateDen
 
 // HandleTx is Handle's transaction-scoped half: it lets a caller that must
 // also touch another table in the SAME commit (e.g. clearing a sync_fails
-// retry entry atomically with the incident that terminates it, ADR-19 AC10)
+// retry entry atomically with the incident that terminates it)
 // record the denial without a separate, independently-committing
 // transaction.
 func (h *TrustGateDenialReporter) HandleTx(ctx context.Context, tx *sqlx.Tx, query TrustGateDenialQry) error {
@@ -63,6 +63,8 @@ func (h *TrustGateDenialReporter) HandleTx(ctx context.Context, tx *sqlx.Tx, que
 		DID:        query.DID,
 		PeerDID:    query.PeerDID,
 		Direction:  query.Direction,
+		RuleID:     "FEDERATION_TRUST_GATE_DENIAL",
+		Severity:   "error",
 		Reason:     query.Reason,
 		OccurredAt: time.Now().UTC(),
 	}
@@ -74,8 +76,8 @@ func (h *TrustGateDenialReporter) HandleTx(ctx context.Context, tx *sqlx.Tx, que
 
 // HandleTxDeduped is HandleTx with an existence check for the exact same
 // (DID, PeerDID, Direction) combination, performed in the same transaction
-// immediately before the insert. A terminal policy-endpoint denial (ADR-19
-// AC10 — PolicyFailure) can legitimately be reached more than once for the
+// immediately before the insert. A terminal policy-endpoint denial
+// (PolicyFailure) can legitimately be reached more than once for the
 // SAME underlying interaction: a single contract offer fires both an Offer
 // and, once the PDF is regenerated, a PDF_REGENERATED event, each
 // independently triggering a ship attempt a few hundred ms apart, and both

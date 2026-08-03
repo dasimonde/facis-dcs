@@ -41,16 +41,16 @@ const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const isAuditingAuthorized = computed(
   () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
-      authStore.user?.roles?.includes(role),
-    ) ?? false,
+    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft).filter((tab) => {
-    // Don't show diff tab in the contract view.
-    return tab.id !== 'diff'
-  }),
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
+    'details',
+    'content',
+    'audit',
+    'structure',
+  ]),
 )
 
 // The view holds its own copy from retrieve-by-id rather than the contracts
@@ -199,7 +199,7 @@ const exportBundle = async () => {
                   </div>
                 </div>
 
-                <!-- Deployment KPIs (DCS-FR-CWE-31, DCS-FR-CWE-09) -->
+                <!-- Deployment KPIs with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) -->
                 <div
                   v-if="contract.kpis && contract.kpis.length > 0"
                   class="card mt-4 border border-base-300 bg-base-100 shadow-sm"
@@ -211,11 +211,31 @@ const exportBundle = async () => {
                         v-for="kpi in contract.kpis"
                         :key="`${kpi.metric}-${kpi.observed_at}`"
                         class="flex items-center gap-2 text-sm"
+                        data-testid="contract-kpi-row"
                       >
                         <span class="font-medium">{{ kpi.metric }}</span>
                         <span>{{ kpi.value }}</span>
                         <span class="text-xs text-base-content/40">{{ kpi.observed_at }}</span>
-                        <span v-if="kpi.violation" class="badge badge-sm badge-error">Violation</span>
+                        <span
+                          v-if="kpi.verdict === 'violated'"
+                          class="badge badge-sm badge-error"
+                          data-testid="contract-kpi-verdict"
+                        >
+                          Violation
+                        </span>
+                        <span
+                          v-else-if="kpi.verdict === 'satisfied'"
+                          class="badge badge-sm badge-success"
+                          data-testid="contract-kpi-verdict"
+                        >
+                          Satisfied
+                        </span>
+                        <span v-else class="badge badge-ghost badge-sm" data-testid="contract-kpi-verdict">
+                          Not evaluated
+                        </span>
+                        <span v-if="kpi.rule" class="text-xs text-base-content/40" data-testid="contract-kpi-rule">
+                          {{ kpi.rule }}
+                        </span>
                       </li>
                     </ul>
                   </div>
@@ -255,13 +275,14 @@ const exportBundle = async () => {
               <div v-show="activeTab === 'content'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
-                    <div>
+                    <div data-testid="contract-readonly-preview">
                       <TemplatePreview
                         :layout="dcsDraftStore.layout"
                         :blocks="dcsDraftStore.blocks"
                         :semantic-conditions="dcsDraftStore.semanticConditions"
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
+                        disabled
                       />
                     </div>
 

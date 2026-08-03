@@ -1,6 +1,69 @@
 package machineidentity
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+// The row an issued target credential produces has to be the row the
+// DCS_SYSTEM_CLIENTS seed produces for a target declared in deployment
+// configuration (cmd/dcs/machine_identity_seed.go): named after the client it
+// authenticates as, attributed to the deployment, enabled, holding exactly the
+// Contract Target System role. Where the two drift, only one of the two ways to
+// register a target ever authorises a callback.
+func TestContractTargetIdentityMatchesTheSeededRowShape(t *testing.T) {
+	issued := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	identity, err := ContractTargetCredential{
+		ClientID:       "dcs-target-6f1a",
+		TargetName:     "Runtime target",
+		ParticipantDID: "did:web:dcs-a.localhost%3A18080",
+		IssuedBy:       "did:web:operator.example",
+		IssuedAt:       issued,
+	}.Identity()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The seed names the identity after its client, and machine_identities.name
+	// is unique — a generated name taken from the target would collide.
+	if identity.Name != "dcs-target-6f1a" || identity.OAuthClientID != "dcs-target-6f1a" {
+		t.Fatalf("row is not keyed on the client it authenticates as: name=%q client=%q", identity.Name, identity.OAuthClientID)
+	}
+	if identity.ParticipantDID != "did:web:dcs-a.localhost%3A18080" {
+		t.Fatalf("wrong attribution: %q", identity.ParticipantDID)
+	}
+	if !identity.Enabled {
+		t.Fatal("a freshly issued credential is disabled and resolves to no caller")
+	}
+	roles, err := identity.Roles()
+	if err != nil {
+		t.Fatalf("roles are unreadable: %v", err)
+	}
+	if len(roles) != 1 || roles[0] != "Contract Target System" {
+		t.Fatalf("expected exactly the Contract Target System role, got %v", roles)
+	}
+	if identity.CreatedBy != "did:web:operator.example" {
+		t.Fatalf("the issuer was not recorded: %q", identity.CreatedBy)
+	}
+	if identity.SecretIssuedAt == nil || !identity.SecretIssuedAt.Equal(issued) {
+		t.Fatalf("the issue date was not recorded: %v", identity.SecretIssuedAt)
+	}
+	if identity.Description == nil || *identity.Description == "" {
+		t.Fatal("nothing says which target the client belongs to")
+	}
+}
+
+// A row with no client to match, or nobody to attribute its callbacks to,
+// cannot authorise anything — it is refused where it is written rather than
+// where it first fails to resolve.
+func TestContractTargetIdentityNeedsAClientAndADID(t *testing.T) {
+	if _, err := (ContractTargetCredential{ParticipantDID: "did:web:dcs.example"}).Identity(); err == nil {
+		t.Fatal("an identity with no OAuth2 client was accepted")
+	}
+	if _, err := (ContractTargetCredential{ClientID: "dcs-target-6f1a"}).Identity(); err == nil {
+		t.Fatal("an identity with no participant DID was accepted")
+	}
+}
 
 func TestRolesRoundTrip(t *testing.T) {
 	encoded, err := EncodeRoles([]string{"Sys. Contract Creator", "Sys. Auditor"})

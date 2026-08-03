@@ -35,7 +35,11 @@ type AuthConfig struct {
 	// OAuth client id: OpenID4VP requires a prefixed identifier, and a bare
 	// value means the "pre-registered" prefix, which wallets outside a
 	// pre-agreed federation refuse outright.
-	OID4VPClientID    string
+	OID4VPClientID string
+	// ParticipantDID is this instance's own participant identity. A login
+	// credential attests authority for one organization, and an instance only
+	// grants access to itself — see the login check in auth_login.go.
+	ParticipantDID    string
 	PublicAPIBase     string
 	LogoutRedirectURI string
 	UIPath            string
@@ -54,6 +58,7 @@ type authSvc struct {
 	presentations     authdb.PresentationAttemptRepo
 	requestSigner     oid4vprequest.Signer
 	oid4vpClientID    string
+	participantDID    string
 }
 
 func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg AuthConfig) (genauth.Service, error) {
@@ -71,6 +76,10 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 
 	if cfg.DCQLQuery == nil {
 		return nil, fmt.Errorf("oid4vp DCQL query is required")
+	}
+
+	if strings.TrimSpace(cfg.ParticipantDID) == "" {
+		return nil, fmt.Errorf("participant DID is required")
 	}
 
 	if cfg.PIDDCQLQuery == nil {
@@ -98,6 +107,7 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 		presentations:     presentations,
 		requestSigner:     cfg.RequestSigner,
 		oid4vpClientID:    cfg.OID4VPClientID,
+		participantDID:    cfg.ParticipantDID,
 	}, nil
 }
 

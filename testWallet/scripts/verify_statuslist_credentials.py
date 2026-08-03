@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify status list URIs in testWallet credentials match live service data."""
+"""Verify every testWallet credential against the status list it names."""
 
 from __future__ import annotations
 
@@ -15,15 +15,15 @@ from dcs_wallet.sdjwt import split_sd_jwt
 from dcs_wallet.status_list import (
     bit_is_revoked,
     credential_status_from_claims,
-    encoded_list_from_payload,
-    fetch_status_list_payload,
+    encoded_list_from_claims,
+    fetch_status_list,
 )
 
 CREDENTIAL_EXT = ".jwt"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify wallet credential status vs statuslist-service")
+    parser = argparse.ArgumentParser(description="Verify wallet credential status against the issuer's status list")
     parser.add_argument(
         "--credentials-dir",
         type=Path,
@@ -54,8 +54,7 @@ def main() -> int:
         idx, uri = parsed
         try:
             if uri not in list_cache:
-                payload = fetch_status_list_payload(uri)
-                encoded = encoded_list_from_payload(payload)
+                encoded = encoded_list_from_claims(fetch_status_list(uri))
                 list_cache[uri] = encoded
 
             if bit_is_revoked(list_cache[uri], idx):

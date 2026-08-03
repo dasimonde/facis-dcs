@@ -17,7 +17,12 @@ jobs:
       contents: read
       checks: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The suite grew from 31 to 50 minutes when the mutual-settlement scenarios
+    # gained a full counterparty drive to APPROVED each, and 60 killed it
+    # mid-run with the diagnostic dump skipped — a suite that cannot finish
+    # reports nothing at all. Raised to leave headroom; the growth itself is
+    # worth reducing rather than absorbing indefinitely.
+    timeout-minutes: 90
     concurrency:
       group: bdd-kind-${{ github.ref }}
       cancel-in-progress: true
@@ -26,6 +31,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # The Federated Catalogue upgrade scenario installs the last
+          # Neo4j-based chart straight out of Git history; the default depth-1
+          # clone does not carry that commit's tree.
           fetch-depth: 0
 
       # The kind node loads the heavy DSS demo bundle (~1-2GB) alongside the two
@@ -93,8 +101,8 @@ jobs:
             DOCKER_IMAGE_REPOSITORY=digital-contracting-service \
             DOCKER_IMAGE_TAG=bdd \
             DOCKER_BUILD="docker buildx build --load" \
-            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image --cache-to type=gha,mode=max,scope=dcs-image" \
-            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image --cache-to type=gha,mode=max,scope=pdf-core-image"
+            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image-v2 --cache-to type=gha,mode=max,scope=dcs-image-v2" \
+            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image-v2 --cache-to type=gha,mode=max,scope=pdf-core-image-v2"
 
       - name: Save DSS image to cache
         if: always() && steps.dss-cache.outputs.cache-hit != 'true'
@@ -387,8 +395,8 @@ jobs:
             DOCKER_IMAGE_REPOSITORY=digital-contracting-service \
             DOCKER_IMAGE_TAG=bdd \
             DOCKER_BUILD="docker buildx build --load" \
-            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image --cache-to type=gha,mode=max,scope=dcs-image" \
-            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image --cache-to type=gha,mode=max,scope=pdf-core-image"
+            DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image-v2 --cache-to type=gha,mode=max,scope=dcs-image-v2" \
+            PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image-v2 --cache-to type=gha,mode=max,scope=pdf-core-image-v2"
 
       - name: Save DSS image to cache
         if: always() && steps.dss-cache.outputs.cache-hit != 'true'

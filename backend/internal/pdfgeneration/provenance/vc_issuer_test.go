@@ -11,6 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// stubStatusEntry is the allocated entry the stub publishers hand back.
+var stubStatusEntry = CredentialStatusRef{
+	StatusListCredential: "http://statuslist/v1/tenants/default/status/1",
+	Index:                4711,
+}
+
 // stubStatusListPublisher is a test double for StatusListPublisher.
 type stubStatusListPublisher struct {
 	publishCalled bool
@@ -18,17 +24,17 @@ type stubStatusListPublisher struct {
 	failPublish   bool
 }
 
-func (s *stubStatusListPublisher) PublishStatus(_ context.Context, _, _, _ string, _ time.Time) (string, error) {
+func (s *stubStatusListPublisher) PublishStatus(_ context.Context, _, _, _ string, _ time.Time) (CredentialStatusRef, error) {
 	s.publishCalled = true
 	if s.failPublish {
-		return "", errors.New("status list service unavailable")
+		return CredentialStatusRef{}, errors.New("status list service unavailable")
 	}
-	return "http://statuslist/v1/tenants/default/status/1", nil
+	return stubStatusEntry, nil
 }
 
-func (s *stubStatusListPublisher) RevokeStatus(_ context.Context, _ string) (string, error) {
+func (s *stubStatusListPublisher) RevokeStatus(_ context.Context, _ string) (CredentialStatusRef, error) {
 	s.revokeCalled = true
-	return "http://statuslist/v1/tenants/default/status/1", nil
+	return stubStatusEntry, nil
 }
 
 // TestLocalVCIssuer_IssuesVCAndPublishesStatus verifies the happy path:
@@ -129,13 +135,13 @@ type trackingStatusListPublisher struct {
 	onPublish func()
 }
 
-func (s *trackingStatusListPublisher) PublishStatus(_ context.Context, _, _, _ string, _ time.Time) (string, error) {
+func (s *trackingStatusListPublisher) PublishStatus(_ context.Context, _, _, _ string, _ time.Time) (CredentialStatusRef, error) {
 	if s.onPublish != nil {
 		s.onPublish()
 	}
-	return "http://statuslist/v1/tenants/default/status/1", nil
+	return stubStatusEntry, nil
 }
 
-func (s *trackingStatusListPublisher) RevokeStatus(_ context.Context, _ string) (string, error) {
-	return "http://statuslist/v1/tenants/default/status/1", nil
+func (s *trackingStatusListPublisher) RevokeStatus(_ context.Context, _ string) (CredentialStatusRef, error) {
+	return stubStatusEntry, nil
 }

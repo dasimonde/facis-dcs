@@ -106,6 +106,25 @@ def ipfs_add_bytes(data: bytes) -> str:
     return cid
 
 
+def ipfs_cat_bytes(cid: str) -> bytes:
+    """Fetch the raw bytes stored under `cid` from the shared in-cluster IPFS
+    node, exactly as an IPFS-level reader would see them — bypassing the DCS
+    API entirely. Read-only counterpart of ipfs_add_bytes over the same
+    BDD_IPFS_EXEC seam; used by the opaque-at-rest scenarios
+    (features/26_encryption_at_rest/) to prove stored artifacts are
+    ciphertext, not plaintext PDFs (DCS-NFR-SEC-14).
+    """
+    cmd = _ipfs_exec_prefix() + ["ipfs", "cat", cid]
+    proc = subprocess.run(cmd, capture_output=True, timeout=60)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ipfs cat {cid} failed (exit {proc.returncode}): "
+            f"{proc.stderr.decode(errors='replace')}"
+        )
+    assert proc.stdout, f"ipfs cat {cid} returned no bytes"
+    return proc.stdout
+
+
 def swap_contract_pdf_cid(context, did: str, new_pdf_bytes: bytes) -> CidSwapHandle:
     """Point contracts.pdf_ipfs_cid at a NEW CID holding `new_pdf_bytes`, for
     `did`. Only the CID column is touched — pdf_c2pa_state/pdf_payload_hash/

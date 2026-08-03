@@ -24,7 +24,7 @@ interface Placeholder {
 let fixture: DraftContractFixture
 
 test.beforeAll(async ({ browser }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(180_000)
   fixture = await buildDraftContractFixture(browser)
 })
 

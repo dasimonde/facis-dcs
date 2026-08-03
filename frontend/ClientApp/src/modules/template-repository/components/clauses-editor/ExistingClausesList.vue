@@ -50,7 +50,7 @@ function getPlaceholderLabel(seg: Segment): string {
 
 <template>
   <div class="space-y-2">
-    <p v-if="!clauseBlocks.length" class="py-6 text-center text-xs text-base-content/40 italic">
+    <p v-if="!clauseBlocks.length" class="py-6 text-center text-xs text-base-content/70 italic">
       Create clauses from Data Requirements to see them here.
     </p>
     <div

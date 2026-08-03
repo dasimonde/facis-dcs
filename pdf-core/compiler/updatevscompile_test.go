@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -11,7 +10,7 @@ import (
 // the same payload. Their page content must be byte-identical, especially for a
 // rich/filled payload — otherwise B rejects with "human-readable does not match".
 func TestUpdatePDFPageContentMatchesFreshCompile(t *testing.T) {
-	ctx := context.Background()
+	ctx := testChainContext()
 	base, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(filledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("base compile: %v", err)
@@ -64,7 +63,7 @@ const richFilledContractPayload = `{
 }`
 
 func TestUpdatePDFRichPageContentMatchesFreshCompile(t *testing.T) {
-	ctx := context.Background()
+	ctx := testChainContext()
 	base, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(richFilledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("base compile: %v", err)
@@ -84,7 +83,7 @@ func TestUpdatePDFRichPageContentMatchesFreshCompile(t *testing.T) {
 }
 
 func TestStackedAmendmentsMatchFreshCompile(t *testing.T) {
-	ctx := context.Background()
+	ctx := testChainContext()
 	v1 := richFilledContractPayload
 	v2 := strings.Replace(v1, "15000", "10000", 1)
 	v3 := strings.Replace(v1, "15000", "12500", 1)

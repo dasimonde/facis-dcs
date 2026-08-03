@@ -70,7 +70,12 @@ def step_when_applied_signature_revoked(context, name):
     signer_did = signatures[0]["signer_did"]
     context.requests_response = post_json(
         context, signature_revoke_url(context),
-        {"did": did, "signer_did": signer_did}, headers=manager_h,
+        {
+            "did": did,
+            "signer_did": signer_did,
+            "reason": "Compliance check revocation",
+        },
+        headers=manager_h,
     )
 
 
@@ -97,11 +102,16 @@ _PASSING_VALIDATION_FINDINGS = {
     # in the signing evidence (signingmanagement/query/validate.go).
     "SHACL validation report re-verified against the pinned hub schema version — no drift",
     "Validation passed",
-    # The EU DSS leg accepts a wallet-produced AES (integrity sound + signatory
-    # certificate present); a non-qualified dev-CA chain is expected for AES and
-    # is not a defect (signingmanagement/query/validate.go ValidAESFinding).
-    "EU DSS validation confirms a valid Advanced Electronic Signature",
 }
+
+# The EU DSS leg reports what DSS actually returned rather than claiming DSS
+# confirmed an AES: a non-qualified dev-CA chain yields INDETERMINATE, which is
+# expected here and not a defect. The indication is appended to the finding, so
+# this one is matched by prefix (signingmanagement/query/validate.go
+# ValidAESFinding).
+_PASSING_VALIDATION_PREFIXES = (
+    "EU DSS reports no integrity or cryptographic failure",
+)
 
 
 @then('the signature validation for contract "{name}" reports only passing checks')
@@ -115,7 +125,12 @@ def step_then_validation_no_findings(context, name):
         f"Expected the signature validation of freshly-signed contract '{name}' to report "
         f"its passing confirmations (e.g. the document-integrity check), got an empty findings list"
     )
-    negative = [f for f in findings if f not in _PASSING_VALIDATION_FINDINGS]
+    negative = [
+        f
+        for f in findings
+        if f not in _PASSING_VALIDATION_FINDINGS
+        and not f.startswith(_PASSING_VALIDATION_PREFIXES)
+    ]
     assert not negative, (
         f"Expected a freshly-signed contract '{name}' to report only passing validation "
         f"confirmations, got defect findings: {negative} (full list: {findings})"
@@ -201,8 +216,15 @@ def step_then_signature_view_contents(context, name, status, cred):
     assert sig.get("signed_at"), f"Expected a signing timestamp, got: {sig}"
     assert "PAdES" in str(sig.get("format")), f"Expected a PAdES container format, got: {sig.get('format')}"
     findings = body.get("integrity_findings") or []
-    assert findings and all(f in _PASSING_VALIDATION_FINDINGS for f in findings), (
-        f"Expected only passing integrity confirmations in the signature view, got: {findings}"
+    negative = [
+        f
+        for f in findings
+        if f not in _PASSING_VALIDATION_FINDINGS
+        and not f.startswith(_PASSING_VALIDATION_PREFIXES)
+    ]
+    assert findings and not negative, (
+        f"Expected only passing integrity confirmations in the signature view, got: {negative} "
+        f"(full list: {findings})"
     )
 
 

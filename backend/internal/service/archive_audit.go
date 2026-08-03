@@ -66,14 +66,18 @@ func (s *processAuditAndCompliancesrvc) auditArchiveTrailEntries(ctx context.Con
 			CreatedAt: entry.StoredAt.UTC().Format(time.RFC3339),
 			Kind:      stringPointer("TIMELINE"),
 		})
+		// Integrity checks cover live entries only: a soft-deleted entry's
+		// snapshot was disposed of and its CEK shredded (DCS-NFR-SEC-13), so
+		// re-fetching it would report the erasure as permanent corruption.
+		// The timeline summary above still documents the deletion itself.
+		if entry.DeletedAt != nil {
+			continue
+		}
 		archiveStoreEvents, err := s.ATrailReader.ReadAuditLogEntriesByComponentAndDID(ctx, tx, componenttype.ContractStorageArchive, did)
 		if err != nil {
 			return nil, err
 		}
 		integrityEntries := s.archiveIntegrityTrailEntries(ctx, entry, i, archiveStoreEvents, notaryEvents, chainErr)
-		if err != nil {
-			return nil, err
-		}
 		result[did] = append(result[did], integrityEntries...)
 	}
 	if err := tx.Commit(); err != nil {

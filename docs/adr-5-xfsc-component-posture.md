@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted. Revised 2026-07-28 to record the retained Federated Catalogue's
-supported graph-store and deployment lifecycle and ORCE's role as the
-reference PAC audit executor.
+Accepted. Revised 2026-07-29 to record the retained Status List Service's
+binary compatibility model, durable contract-status publication and
+fail-closed trust defaults. The 2026-07-28 revision recorded the retained
+Federated Catalogue's supported graph-store and deployment lifecycle and
+ORCE's role as the reference PAC audit executor.
 
 ## Context
 
@@ -23,7 +25,7 @@ substituted.
 | XFSC component | Posture |
 |---|---|
 | Federated Catalogue | Retained. DCS integrates with its asset, schema, query and verification interfaces (`backend/internal/templatecatalogueintegration/client/client.go:100-105`, `backend/internal/templatecatalogueintegration/client/client.go:108-183`). The supported co-deployment uses Fuseki as its graph store; Neo4j/n10s is no longer a runtime dependency (`deployment/helm/charts/federated-catalogue/templates/deployment.yaml:41-53`). |
-| XFSC Status List Service | Retained, integrated as specified — credential revocation status (`backend/internal/auth/oid4vp/status_list*.go`) and C2PA lifecycle status publication both resolve to it. |
+| XFSC Status List Service | Retained. Credential checks consume signed XFSC status lists and the supported W3C Bitstring Status List form; contract suspension and termination are durably published to XFSC. XFSC's single bit is interpreted as `active` when clear and `revoked` when set; a requested suspension is therefore represented by the same set bit and rejected fail-closed rather than reported as a distinct XFSC state (`backend/internal/auth/oid4vp/status/handler/xfsc.go:107-121`, `backend/internal/auth/oid4vp/status/policy.go:75-99`, `backend/internal/signingmanagement/command/revoke.go:89-97`). |
 | ORCE (orchestration engine) | Retained. IR-SI-02's Node-RED-webhook compatibility is satisfied by the shipped flows. In addition to contract-target orchestration, ORCE provides this environment's reference implementation of the versioned PAC audit-executor contract (`deployment/helm/charts/orce/flows/audit-executor-flow.json:1-94`). |
 | Crypto Provider Service (Appendix D's "essential crypto parts") | **Substituted** by PKCS#11/HSM key custody (ADR-1). IR-HI-01's "standardized interfaces" wording is read as satisfied by PKCS#11 itself being the standardized interface — DCS does not require the specific Crypto Provider Service REST API to satisfy that requirement, since PKCS#11 already is one. |
 | OCM W-Stack (issuance/verification/retrieval/well-known) | Not used for VC signing — see [adr-ocmw-vc-signing.md](adr-ocmw-vc-signing.md) for the detailed evaluation of why the OCM-W protocol (OID4VCI wallet-pull) does not fit DCS's synchronous in-process signing requirement. Remains the natural integration point if DCS later issues credentials *to* wallet holders (a different feature than what it does today). |
@@ -117,6 +119,40 @@ with scope, format, CID, justification and summary in
 (`backend/internal/service/process_audit_and_compliance.go:481-500`,
 `backend/internal/service/process_audit_and_compliance.go:520-563`).
 
+### Status-list compatibility and publication
+
+The credential-verification boundary is strict. Missing status references,
+unavailable lists, unknown mechanisms, malformed encodings and untrusted or
+invalid list signatures do not authorize the holder. W3C Bitstring Status
+Lists preserve their declared revocation or suspension purpose, while both
+states are rejection outcomes (`backend/internal/auth/oid4vp/status/verifier.go:34-79`,
+`backend/internal/auth/oid4vp/status/policy.go:65-106`,
+`backend/internal/auth/oid4vp/status/handler/w3c_bitstring.go:30-82`).
+Unsigned XFSC fallback exists only as an explicit environment option; with the
+option disabled, retrieval or signature failure is terminal
+(`backend/internal/auth/oid4vp/status/handler/xfsc.go:19-78`).
+
+Contract termination and signature revocation enqueue the desired lifecycle
+status in the same database transaction as the state change and audit event
+(`backend/internal/contractworkflowengine/command/terminate.go:84-107`,
+`backend/internal/signingmanagement/command/revoke.go:58-97`). The queue key is
+`(contract_did, status)`, so repeated requests for the same desired state are
+idempotent. A database-backed worker claims pending entries without competing
+workers duplicating the same attempt, records failures and retries with bounded
+backoff (`backend/migrations/sql/20260729a_poa_sync_and_status_publication.sql:7-26`,
+`backend/internal/pdfgeneration/statuspublication/queue.go:24-36`,
+`backend/internal/pdfgeneration/statuspublication/queue.go:52-150`).
+
+The production chart deliberately supplies neither the development issuer
+registry nor the Dev Root. An x5c-bearing credential without configured trust
+anchors is refused. The development trust files and unsigned XFSC fallback are
+enabled only by the BDD/BDD2 overlays
+(`deployment/helm/values.yaml:62-85`,
+`deployment/helm/values.bdd.yml:73-80`,
+`deployment/helm/values.bdd2.yml:59-64`,
+`backend/internal/auth/oid4vp/sdjwt/keys.go:133-167`). The concrete production
+issuer/root profile is operator configuration and is not selected by this ADR.
+
 ## Consequences
 
 - The substitution is documented rather than silently made, so a reviewer
@@ -126,6 +162,12 @@ with scope, format, CID, justification and summary in
   PKCS#11 directly) stays open: DCS's signer interfaces (`VCSigner`,
   the HSM `crypto.Signer`) are narrow enough that a Crypto-Provider-backed
   implementation could be substituted without touching call sites.
+- XFSC compatibility does not invent a third binary value for suspension.
+  Suspension and revocation both set the blocking bit; the contract lifecycle
+  banner remains separately available to explain whether the business state is
+  suspended or terminated.
+- A transient status-service failure remains visible and retryable. It never
+  turns into an `active` authorization or verification result.
 - A development installation that still contains the obsolete Neo4j/n10s
   catalogue is replaced by the current Fuseki-based chart; catalogue data from
   the unreleased development stack is not migrated. This is explicitly covered

@@ -166,7 +166,23 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
       (r) => r.url().includes('/signature/revoke') && r.request().method() === 'POST' && r.ok(),
     )
     await sigRow.getByRole('button', { name: 'Revoke', exact: true }).click()
+    const confirmation = page.getByRole('dialog', { name: 'Confirmation' })
+    await confirmation.getByPlaceholder('Reason for revocation').fill('Superseded during compliance review')
+    await confirmation.getByRole('button', { name: 'Submit' }).click()
     await revoked
     await expect(page.locator('.badge').filter({ hasText: 'REVOKED' }).first()).toBeVisible()
+  })
+
+  await test.step('the contract PDF still exports after revocation — revocation is not erasure', async () => {
+    // DCS-NFR-BR-06 voids the agreement; the content keys stay live (only an
+    // archive deletion shreds them, ADR-28) — the revoked contract's PDF must
+    // remain readable to authorized users.
+    await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+    const exported = page.waitForResponse((r) => r.url().includes(`/pdf/export/contract/${contractDid}`) && r.ok(), {
+      timeout: 120_000,
+    })
+    await page.getByRole('button', { name: 'Export PDF' }).click()
+    await exported
+    await expect(page.getByText('Content erased — encryption keys destroyed')).toHaveCount(0)
   })
 })

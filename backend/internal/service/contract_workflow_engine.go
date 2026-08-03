@@ -26,8 +26,8 @@ import (
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/identity"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/command"
@@ -61,7 +61,6 @@ type contractWorkflowEnginesrvc struct {
 	ATrailReader         base.AuditTrailReader
 	DCSToDCSSynchronizer dcstodcs.DCSToDCSSynchronizer
 	TrustPool            *identity.EUTrustPool
-	IPFSClient           *ipfs.APIClient
 	ArchiveNotary        command.ArchiveNotary
 	ArchiveTSA           *tsa.APIClient
 	TargetClient         command.ContractTargetClient
@@ -80,7 +79,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo,
 	sRepo db2.SyncRepository, trustPool *identity.EUTrustPool,
 	fcClient *fcclient.FederatedCatalogueClient, auditTrailReader base.AuditTrailReader, didDocument identity.DIDDocument,
-	ipfsClient *ipfs.APIClient, archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
+	archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
 	deploymentRepo db.DeploymentRepo, targetRepo db.ContractTargetRepo,
 	targetClient command.ContractTargetClient,
 	workflowGate *workflowgate.Coordinator,
@@ -103,7 +102,6 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		DIDDocument:      didDocument,
 		ATrailReader:     auditTrailReader,
 		TrustPool:        trustPool,
-		IPFSClient:       ipfsClient,
 		ArchiveNotary:    archiveNotary,
 		ArchiveTSA:       archiveTSA,
 		TargetClient:     targetClient,
@@ -113,7 +111,83 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		HydraAdmin:           hydraAdmin,
 		HydraPublicIssuerURL: hydraPublicIssuerURL,
 	}
+	if workflowGate != nil {
+		for _, gate := range []string{"submission", "offer", "approval", "deployment"} {
+			workflowGate.SetReviewContinuation(gate, service.resumeReviewedWorkflowGate)
+		}
+	}
 	return service
+}
+
+func workflowRoles(ctx context.Context) []string {
+	roles := middleware.GetUserRoles(ctx)
+	result := make([]string, 0, len(roles))
+	for _, role := range roles {
+		result = append(result, role.String())
+	}
+	return result
+}
+
+func (s *contractWorkflowEnginesrvc) runWorkflowGate(ctx context.Context, gate, did string, updatedAt time.Time, continuation map[string]any) (time.Time, bool, error) {
+	_, reused, snapshotUpdatedAt, err := s.WorkflowGate.ExecuteSnapshot(ctx, workflowgate.Input{
+		Gate: gate, ContractDID: did, ExpectedUpdatedAt: updatedAt,
+		Requester: middleware.GetParticipantID(ctx), Roles: workflowRoles(ctx),
+		Continuation: continuation,
+	})
+	return snapshotUpdatedAt, reused, err
+}
+
+func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Context, run workflowgate.Run) error {
+	stringValue := func(name string) string {
+		value, _ := run.Continuation[name].(string)
+		return value
+	}
+	roles := userrole.UserRoles{}
+	if values, ok := run.Continuation["user_roles"].([]any); ok {
+		for _, value := range values {
+			if role, ok := value.(string); ok {
+				roles = append(roles, userrole.UserRole(role))
+			}
+		}
+	}
+	switch run.Gate {
+	case "submission":
+		handler := command.Submitter{
+			DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo,
+			NRepo: s.NRepo, NTRepo: s.NTRepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
+		}
+		return handler.Handle(ctx, command.SubmitCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			SubmittedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
+			UserRoles: roles, CauserDID: stringValue("causer_did"),
+		})
+	case "offer":
+		return (&command.Offerer{DB: s.DB, CRepo: s.CRepo, DIDDocument: s.DIDDocument}).Handle(ctx, command.OfferCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			OfferedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
+			UserRoles: roles, CauserDID: stringValue("causer_did"),
+		})
+	case "approval":
+		return (&command.Approver{
+			DB: s.DB, CRepo: s.CRepo, ATRepo: s.ATRepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
+		}).Handle(ctx, command.ApproveCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			ApprovedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
+			UserRoles: roles, CauserDID: stringValue("causer_did"),
+		})
+	case "deployment":
+		_, err := (&command.Deployer{
+			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
+			TargetRepo: s.TargetRepo, Target: s.TargetClient, PeerSigs: s.SRepo,
+		}).Handle(ctx, command.DeployCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			RequestedBy: stringValue("requested_by"), LocalPeer: stringValue("causer_did"),
+			TargetIDOverride: stringValue("target_id"),
+		})
+		return err
+	default:
+		return fmt.Errorf("reviewed continuation is not available for gate %q", run.Gate)
+	}
 }
 
 // mapContractCommandError classifies a contract command handler error for
@@ -130,6 +204,9 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
+		errors.Is(err, command.ErrKPIVerdictUnknown) ||
+		errors.Is(err, command.ErrKPIRuleMissing) ||
+		errors.Is(err, command.ErrKPIRuleUnknown) ||
 		// Deployment refusals are the operator's to fix — no target designated,
 		// one that is not registered, one that is disabled. Returning 500 made
 		// each read as an outage rather than as the answer to what was asked.
@@ -140,6 +217,9 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrContractNotRenewable) ||
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
+		errors.Is(err, command.ErrAgreementSettled) ||
+		errors.Is(err, command.ErrOwnAgreementSettled) ||
+		errors.Is(err, command.ErrNegotiationNotSettled) ||
 		errors.Is(err, db.ErrNoMatchingDecision) {
 		return contractworkflowengine.MakeBadRequest(err)
 	}
@@ -333,6 +413,27 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	gateUpdatedAt, reusedGate, err := s.runWorkflowGate(ctx, "submission", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"holder_did":   middleware.GetHolderDID(ctx),
+		"user_roles":   workflowRoles(ctx),
+		"causer_did":   localPeer,
+	})
+	if err != nil {
+		return nil, err
+	}
+	updatedAt = gateUpdatedAt
+	if reusedGate {
+		qryHandler := contract.GetProcessDataByIDHandler{DB: s.DB, CRepo: s.CRepo}
+		processData, readErr := qryHandler.Handle(ctx, contract.GetProcessDataByIDQry{
+			DID: req.Did, RetrievedBy: middleware.GetParticipantID(ctx),
+			HolderDID: middleware.GetHolderDID(ctx),
+		})
+		if readErr == nil && processData.UpdatedAt.After(updatedAt) {
+			return &contractworkflowengine.ContractSubmitResponse{Did: req.Did, CurrentState: processData.State.String()}, nil
+		}
+	}
+
 	cmd := command.SubmitCmd{
 		DID:          req.Did,
 		UpdatedAt:    updatedAt,
@@ -503,6 +604,28 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 	}, nil
 }
 
+// supersessionItems reads back the annotation the negotiation merge left on a
+// change request it accepted and then discarded (last-accepted-wins). A reader
+// of the contract otherwise sees only the ACCEPTED decision and would take the
+// request's content for part of the agreement.
+func supersessionItems(annotation *datatype.JSON) ([]*contractworkflowengine.ContractNegotiationSupersessionItem, error) {
+	if annotation == nil {
+		return nil, nil
+	}
+	var records []db.NegotiationSupersession
+	if err := json.Unmarshal(*annotation, &records); err != nil {
+		return nil, fmt.Errorf("could not read superseded change request record: %w", err)
+	}
+	items := make([]*contractworkflowengine.ContractNegotiationSupersessionItem, 0, len(records))
+	for _, record := range records {
+		items = append(items, &contractworkflowengine.ContractNegotiationSupersessionItem{
+			SupersededBy: record.SupersededByID,
+			Fields:       record.Fields,
+		})
+	}
+	return items, nil
+}
+
 func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *contractworkflowengine.ContractRetrieveByIDRequest) (res *contractworkflowengine.ContractRetrieveByIDResponse, err error) {
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
@@ -538,12 +661,17 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 	for _, item := range contractResult.Negotiations {
 		negotiation, ok := negotiations[item.ID]
 		if !ok {
+			superseded, err := supersessionItems(item.SupersededBy)
+			if err != nil {
+				return nil, contractworkflowengine.MakeInternalError(err)
+			}
 			negotiation = &contractworkflowengine.ContractNegotiationItem{
 				ID:              item.ID,
 				ContractVersion: item.ContractVersion,
 				ChangeRequest:   item.ChangeRequest,
 				CreatedBy:       item.CreatedBy,
 				CreatedAt:       item.CreatedAt.String(),
+				Superseded:      superseded,
 			}
 			negotiations[item.ID] = negotiation
 		}
@@ -575,7 +703,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		expPolicy = &s
 	}
 
-	kpis, kpiViolations, err := s.retrieveKPIs(ctx, req.Did)
+	kpis, err := s.retrieveKPIs(ctx, req.Did)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -598,7 +726,11 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		}
 	}
 
-	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String()))
+	evidence, err := s.signatureEvidence(ctx, req.Did, localPeer, contractResult)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String(), evidence))
 	return &contractworkflowengine.ContractRetrieveByIDResponse{
 		Did:                contractResult.DID,
 		ContractVersion:    contractResult.ContractVersion,
@@ -619,10 +751,50 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		ExpNoticePeriod:    contractResult.ExpNoticePeriod,
 		Responsible:        contractResult.Responsible,
 		Kpis:               kpis,
-		KpiViolations:      kpiViolations,
 		TargetID:           contractResult.TargetID,
 		TargetName:         targetName,
 	}, nil
+}
+
+// signatureEvidence collects who has signed a contract as far as this instance
+// can evidence it: the fields the document declares, the ones carrying a local
+// SIGNED signature row, and the peer this instance holds a verified
+// cross-instance signature from. The extrinsic projection needs this to report
+// an agreement executed only once every declared signature is collected
+// (DCS-FR-SM-10) rather than on the first local one.
+func (s *contractWorkflowEnginesrvc) signatureEvidence(ctx context.Context, did, localPeer string, result *contract.GetByIDResult) (contractstate.SignatureEvidence, error) {
+	evidence := contractstate.SignatureEvidence{LocalPeer: localPeer}
+	if result.ContractData == nil || !result.ContractData.IsNotNullValue() {
+		return evidence, nil
+	}
+	evidence.Declared = validation.RequiredSignatureFields([]byte(*result.ContractData))
+	if len(evidence.Declared) == 0 {
+		return evidence, nil
+	}
+	if result.Responsible != nil {
+		evidence.Parties = []string{result.Responsible.Creator, result.Responsible.Counterparty}
+	}
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return evidence, fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	signed, err := s.CRepo.ReadSignedSignatureFieldNames(ctx, tx, did)
+	if err != nil {
+		return evidence, fmt.Errorf("could not read signed signature fields: %w", err)
+	}
+	evidence.SignedLocally = signed
+
+	peerSig, err := s.SRepo.GetSyncSignature(ctx, tx, did)
+	if err != nil {
+		return evidence, fmt.Errorf("could not read the counterparty signature: %w", err)
+	}
+	if peerSig != nil {
+		evidence.PeerSigners = []string{peerSig.FromPeerDID}
+	}
+	return evidence, nil
 }
 
 // KpiObservations serves the reported KPI values as a JSON-LD observation
@@ -653,15 +825,22 @@ func (s *contractWorkflowEnginesrvc) KpiObservations(ctx context.Context, req *c
 
 	observations := make([]any, 0, len(entries))
 	for _, entry := range entries {
-		observations = append(observations, map[string]any{
+		observation := map[string]any{
 			"@id":               fmt.Sprintf("%s#kpi-%d", base.ResourceIRI("contract", req.Did), entry.ID),
 			"@type":             "dcs:KPIObservation",
 			"dcs:metricName":    entry.Metric,
 			"dcs:observedValue": entry.Value,
 			"dcs:observedAt":    entry.ObservedAt.Format(time.RFC3339),
-			"dcs:violation":     entry.Violation,
+			"dcs:verdict":       entry.Verdict,
 			"dcs:aboutContract": map[string]any{"@id": base.ResourceIRI("contract", req.Did)},
-		})
+		}
+		// The rule is a node reference, not a literal: it is the @id the ODRL
+		// rule carries inside the contract the target system was deployed, so a
+		// reader follows it back to the exact term the verdict is about.
+		if entry.RuleID != nil {
+			observation["dcs:aboutRule"] = map[string]any{"@id": *entry.RuleID}
+		}
+		observations = append(observations, observation)
 	}
 	return map[string]any{
 		"@context":        semantichub.AnchorURL("context", semantichub.ContextName, contextVersion),
@@ -671,53 +850,39 @@ func (s *contractWorkflowEnginesrvc) KpiObservations(ctx context.Context, req *c
 	}, nil
 }
 
-// retrieveKPIs reads the KPI values reported via deployment callbacks for a
-// contract (DCS-FR-CWE-31, DCS-FR-CWE-09), returning both the per-KPI list
-// and the distinct set of metric names whose latest reported value violates
-// its contractual SLA threshold.
-func (s *contractWorkflowEnginesrvc) retrieveKPIs(ctx context.Context, did string) ([]*contractworkflowengine.ContractDeploymentKPIItem, []string, error) {
+// retrieveKPIs reads the KPI reports received via deployment callbacks for a
+// contract (DCS-FR-CWE-31, DCS-FR-CWE-09), each with the verdict the target
+// system reached and the ODRL rule it named (ADR-33).
+func (s *contractWorkflowEnginesrvc) retrieveKPIs(ctx context.Context, did string) ([]*contractworkflowengine.ContractDeploymentKPIItem, error) {
 	if s.DeploymentRepo == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not start transaction: %w", err)
+		return nil, fmt.Errorf("could not start transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	entries, err := s.DeploymentRepo.ReadKPIsByDID(ctx, tx, did)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not read KPIs for contract %s: %w", did, err)
+		return nil, fmt.Errorf("could not read KPIs for contract %s: %w", did, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, fmt.Errorf("could not commit transaction: %w", err)
+		return nil, fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	kpis := make([]*contractworkflowengine.ContractDeploymentKPIItem, 0, len(entries))
-	latestViolation := map[string]bool{}
-	order := make([]string, 0)
 	for _, entry := range entries {
-		violation := entry.Violation
 		kpis = append(kpis, &contractworkflowengine.ContractDeploymentKPIItem{
 			Metric:     entry.Metric,
 			Value:      entry.Value,
 			ObservedAt: entry.ObservedAt.Format(time.RFC3339),
-			Violation:  &violation,
+			Verdict:    entry.Verdict,
+			Rule:       entry.RuleID,
 		})
-		if _, seen := latestViolation[entry.Metric]; !seen {
-			order = append(order, entry.Metric)
-		}
-		latestViolation[entry.Metric] = violation
 	}
 
-	violations := make([]string, 0)
-	for _, metric := range order {
-		if latestViolation[metric] {
-			violations = append(violations, metric)
-		}
-	}
-
-	return kpis, violations, nil
+	return kpis, nil
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, req *contractworkflowengine.ContractHistoryRetrieveByIDRequest) (res []*contractworkflowengine.ContractHistoryRetrieveByIDResponse, err error) {
@@ -834,6 +999,52 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 	}
 
 	return &contractworkflowengine.ContractNegotiationResponse{
+		Did: req.Did,
+	}, nil
+}
+
+// AcceptOffer takes an inbound offer into negotiation unchanged. Not to be
+// confused with Respond(action_flag=ACCEPTING), which decides one already
+// proposed change request.
+func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contractworkflowengine.ContractOfferAcceptRequest) (res *contractworkflowengine.ContractOfferAcceptResponse, err error) {
+
+	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	handler := command.OfferAcceptor{
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		NTRepo:      s.NTRepo,
+		DIDDocument: s.DIDDocument,
+	}
+	err = handler.Handle(ctx, command.AcceptOfferCmd{
+		DID:        req.Did,
+		UpdatedAt:  updatedAt,
+		AcceptedBy: middleware.GetParticipantID(ctx),
+		HolderDID:  middleware.GetHolderDID(ctx),
+		UserRoles:  middleware.GetUserRoles(ctx),
+		CauserDID:  localPeer,
+	})
+	if err != nil {
+		return nil, mapContractCommandError(err)
+	}
+
+	return &contractworkflowengine.ContractOfferAcceptResponse{
 		Did: req.Did,
 	}, nil
 }
@@ -1114,6 +1325,16 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	updatedAt, _, err = s.runWorkflowGate(ctx, "approval", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"holder_did":   middleware.GetHolderDID(ctx),
+		"user_roles":   workflowRoles(ctx),
+		"causer_did":   localPeer,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	cmd := command.ApproveCmd{
 		DID:        req.Did,
 		UpdatedAt:  updatedAt,
@@ -1359,6 +1580,16 @@ func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractwor
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	updatedAt, _, err = s.runWorkflowGate(ctx, "offer", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"holder_did":   middleware.GetHolderDID(ctx),
+		"user_roles":   workflowRoles(ctx),
+		"causer_did":   localPeer,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	cmd := command.OfferCmd{
 		DID:       req.Did,
 		UpdatedAt: updatedAt,
@@ -1521,12 +1752,22 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	updatedAt, _, err = s.runWorkflowGate(ctx, "deployment", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"causer_did":   localPeer,
+		"target_id":    targetID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	handler := command.Deployer{
 		DB:             s.DB,
 		CRepo:          s.CRepo,
 		DeploymentRepo: s.DeploymentRepo,
 		TargetRepo:     s.TargetRepo,
 		Target:         s.TargetClient,
+		PeerSigs:       s.SRepo,
 	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
 		DID:              req.Did,
@@ -1586,6 +1827,12 @@ func (s *contractWorkflowEnginesrvc) DeploymentCallback(ctx context.Context, req
 		}
 		if req.Kpi.Value != nil {
 			cmd.KPIValue = *req.Kpi.Value
+		}
+		if req.Kpi.Verdict != nil {
+			cmd.KPIVerdict = *req.Kpi.Verdict
+		}
+		if req.Kpi.Rule != nil {
+			cmd.KPIRule = *req.Kpi.Rule
 		}
 	}
 
@@ -1769,8 +2016,25 @@ func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, r
 		return contractworkflowengine.MakeBadRequest(fmt.Errorf(
 			"%d contract(s) still deploy to this target system; designate another one for them first", designating))
 	}
+	// The credential's authority goes with the target it belonged to. Its
+	// registry row is what grants the Contract Target System scope, so leaving
+	// it behind would keep a client authorised for a destination that no longer
+	// exists. The Hydra client itself is left alone: a target whose client comes
+	// from deployment configuration shares it with a declared system client, and
+	// removing that from here would take a configured credential away with no
+	// way to put it back short of a reinstall. Without a registry row it
+	// resolves to no caller and is refused everywhere.
+	target, err := s.TargetRepo.ReadTarget(ctx, tx, req.ID)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
 	if err := s.TargetRepo.DeleteTarget(ctx, tx, req.ID); err != nil {
 		return contractworkflowengine.MakeInternalError(err)
+	}
+	if target != nil && target.OAuthClientID != nil && strings.TrimSpace(*target.OAuthClientID) != "" {
+		if err := s.MachineIdentities.DeleteByClientIDTx(ctx, tx, strings.TrimSpace(*target.OAuthClientID)); err != nil {
+			return contractworkflowengine.MakeInternalError(err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return contractworkflowengine.MakeInternalError(err)

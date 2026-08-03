@@ -3,9 +3,12 @@ ceremony (ADR-12).
 
 Where ceremony_driver.py calls the DCS's prepare/submit endpoints directly, this
 driver consumes the STANDARD OID4VP Document-Retrieval request object instead:
-given the QR (client_id + request_uri the DCS's publish step emits), it
+given the QR (the openid4vp:// deep link, or the request_uri out of it, the
+DCS's publish step emits), it
 
-    1. fetches the signed request object (JAR) from request_uri,
+    1. fetches the signed request object (JAR) from request_uri by the method the
+       deep link asks for, and verifies its signature against the certificate
+       chain in its own header,
     2. parses its claims (documentDigests, documentLocations, response_uri, nonce),
     3. fetches the to-be-signed document from documentLocations[].uri,
     4. signs it with the signatory's own key via the external SCA (an EU DSS),
@@ -29,10 +32,16 @@ import base64
 import json
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from dcs_wallet.jades_signer import sign_jades_payload
+from dcs_wallet.oid4vp_flow import (
+    resolve_presentation_link,
+    verify_authorization_request_jwt,
+    wallet_metadata_json,
+)
 from dcs_wallet.remote_signer import sign_pdf
 
 
@@ -53,14 +62,46 @@ def _get(url: str, accept: str = "*/*") -> bytes:
 
 
 def _decode_jwt_claims(compact_jwt: str) -> dict:
-    """Decode a compact JWS payload (claims) without verifying the signature —
-    the wallet trusts the request_uri it was handed and only needs the claims."""
+    """Decode a compact JWS payload (claims) without verifying the signature.
+    Only for inspecting a request object whose signature has already been
+    checked, or one being examined rather than acted on."""
     parts = compact_jwt.strip().split(".")
     if len(parts) < 2:
         raise RuntimeError("request object is not a compact JWT")
     payload_b64 = parts[1]
     payload_b64 += "=" * (-len(payload_b64) % 4)
     return json.loads(base64.urlsafe_b64decode(payload_b64))
+
+
+def _fetch_request_object(request_uri: str, method: str, client_id: str) -> dict:
+    """Fetch the Document-Retrieval request object and return its VERIFIED
+    claims. POST (what the ceremony's deep link asks for) carries a wallet_nonce
+    the request object must echo — without that check the wallet cannot tell a
+    fresh request object from a replayed one."""
+    wallet_nonce: str | None = None
+    if method == "post":
+        wallet_nonce = str(uuid.uuid4())
+        body = urlencode({
+            "wallet_nonce": wallet_nonce,
+            "wallet_metadata": wallet_metadata_json(client_id),
+        }).encode()
+        request = urllib.request.Request(
+            request_uri,
+            data=body,
+            headers={
+                "Accept": "application/oauth-authz-req+jwt",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+    else:
+        request = urllib.request.Request(
+            request_uri, headers={"Accept": "application/oauth-authz-req+jwt"}
+        )
+
+    with urllib.request.urlopen(request, timeout=120) as resp:
+        request_object = resp.read().decode().strip()
+
+    return verify_authorization_request_jwt(request_object, expected_wallet_nonce=wallet_nonce)
 
 
 def sign_via_document_retrieval(
@@ -74,14 +115,17 @@ def sign_via_document_retrieval(
     family_name: str | None = None,
 ) -> dict:
     """Consume the OID4VP Document-Retrieval request object and return the DCS's
-    callback response (JSON). user is the sole-control token: the signing
-    certificate's subject identifies the ceremony's signatory (ADR-20 cert↔PID
-    name match) — GIVEN_NAME/SURNAME default to (user, "BDD-Testperson"),
-    matching the ceremony's PID (see signer.ensure_signing_material); pass
-    given_name/family_name explicitly to mint a deliberately mismatched cert.
+    callback response (JSON). request_uri is the openid4vp:// deep link the
+    publish step emits, or the request_uri out of it. user is the sole-control
+    token: the signing certificate's subject identifies the ceremony's signatory
+    (ADR-20 cert↔PID name match) — GIVEN_NAME/SURNAME default to (user,
+    "BDD-Testperson"), matching the ceremony's PID (see
+    signer.ensure_signing_material); pass given_name/family_name explicitly to
+    mint a deliberately mismatched cert.
     """
-    request_object = _get(request_uri, accept="application/oauth-authz-req+jwt").decode()
-    claims = _decode_jwt_claims(request_object)
+    link = resolve_presentation_link(request_uri)
+    request_uri = link.request_uri
+    claims = _fetch_request_object(request_uri, link.request_uri_method, link.client_id)
 
     locations = claims.get("documentLocations") or []
     response_uri = claims.get("response_uri")
@@ -152,7 +196,7 @@ def _main() -> None:
     parser = argparse.ArgumentParser(
         description="Sign a DCS contract via the OID4VP Document-Retrieval ceremony (fetch request object -> fetch document -> sign -> post to callback)."
     )
-    parser.add_argument("--request-uri", required=True, help="request_uri from the publish QR")
+    parser.add_argument("--request-uri", required=True, help="openid4vp:// deep link (or the request_uri inside it) from the publish QR")
     parser.add_argument("--user", required=True, help="signatory name; the signing cert is 'CN=DCS Signatory <user>'")
     parser.add_argument("--field", default="", help="signature field for multi-signer contracts")
     parser.add_argument("--dss-url", default=os.getenv("DSS_URL", "http://localhost:18099"))

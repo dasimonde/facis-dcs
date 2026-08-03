@@ -16,9 +16,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -45,7 +45,7 @@ type Approver struct {
 }
 
 type ArchiveSnapshotStorer interface {
-	CreateFile(ctx context.Context, data any) (*ipfs.IPFSResult, error)
+	Put(ctx context.Context, scope artifactstore.Scope, plaintext []byte) (string, error)
 }
 
 type ArchiveNotary interface {

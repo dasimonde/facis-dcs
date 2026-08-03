@@ -33,10 +33,13 @@ type SignatureCeremony struct {
 	PidClaims   []byte  `db:"pid_claims"`
 	KbSdHash    *string `db:"kb_sd_hash"`
 	// The Power of Attorney presented at signing (UC-14, FR-SM-03): the verified
-	// organization the signatory is authorized to act for, and their roles. nil
-	// until the ceremony's PoA presentation is verified.
+	// organization the signatory is authorized to act for, their roles, and the
+	// presentation itself as the wallet delivered it — the evidence a
+	// counterparty needs to verify this signature's authority for itself
+	// (ADR-31). All nil until the ceremony's PoA presentation is verified.
 	PoAOrganization *string    `db:"poa_organization"`
 	PoARoles        []byte     `db:"poa_roles"`
+	PoAVpToken      *string    `db:"poa_vp_token"`
 	CreatedAt       time.Time  `db:"created_at"`
 	VerifiedAt      *time.Time `db:"verified_at"`
 	ExpiresAt       time.Time  `db:"expires_at"`
@@ -109,11 +112,44 @@ type PreparedRequest struct {
 	Roles             []byte
 }
 
+// VerifiedPresentation is the outcome of a completed signing-ceremony
+// presentation: the verified signatory, the PID presentation and its disclosed
+// claims, and the Power of Attorney that authorized the signature.
+type VerifiedPresentation struct {
+	CeremonyID      string
+	SignerDID       string
+	VpToken         string
+	PidClaims       []byte
+	KbSdHash        string
+	PoAOrganization string
+	PoARoles        []byte
+	PoAVpToken      string
+}
+
+// AppliedPoA is the Power-of-Attorney evidence behind one applied signature:
+// the party the credential authorizes, the signatory it is held by, and the
+// presentation as the wallet delivered it (ADR-31).
+type AppliedPoA struct {
+	FieldName    string `db:"field_name"`
+	SignerDID    string `db:"signer_did"`
+	Presentation string `db:"poa_vp_token"`
+	// SummaryVC is the signing summary this instance issued for that signature
+	// (DCS-FR-SM-08), carried so the counterparty can verify who signed for
+	// which party without trusting the shipper's word for it.
+	SummaryVC string `db:"summary_vc"`
+}
+
 // CeremonyRepo persists signing ceremonies.
 type CeremonyRepo interface {
 	CreateCeremony(ctx context.Context, tx *sqlx.Tx, c SignatureCeremony) error
 	GetCeremonyByID(ctx context.Context, tx *sqlx.Tx, id string) (*SignatureCeremony, error)
-	MarkCeremonyVerified(ctx context.Context, tx *sqlx.Tx, id, signerDID, vpToken string, pidClaims []byte, kbSdHash, poaOrganization string, poaRoles []byte) error
+	MarkCeremonyVerified(ctx context.Context, tx *sqlx.Tx, verified VerifiedPresentation) error
+	// ListAppliedPoAs returns the retained Power of Attorney of every signature
+	// applied to the contract, most recent per signature field — the evidence
+	// the synchronizer ships to the counterparty.
+	ListAppliedPoAs(ctx context.Context, tx *sqlx.Tx, contractDID string) ([]AppliedPoA, error)
+	// RecordSummaryVC retains the signing summary issued for a ceremony.
+	RecordSummaryVC(ctx context.Context, tx *sqlx.Tx, ceremonyID string, summary []byte) error
 	// StorePreparedRequest persists the published signing request (the
 	// to-be-signed PDF + digest + request object nonce/expiry + the publishing
 	// signer's context) on a verified ceremony (ADR-12 publish).

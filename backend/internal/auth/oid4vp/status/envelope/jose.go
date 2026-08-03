@@ -2,8 +2,6 @@ package envelope
 
 import (
 	"crypto/ecdsa"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -59,42 +57,6 @@ func VerifyES256JWT(raw []byte, resolveKey func(issuer string, token *jwt.Token)
 		Claims: claimMap,
 		Raw:    raw,
 	}, nil
-}
-
-func JWTPayloadSegment(raw []byte) ([]byte, error) {
-	parts := strings.Split(strings.TrimSpace(string(raw)), ".")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("not a compact JWT")
-	}
-	return base64.RawURLEncoding.DecodeString(parts[1])
-}
-
-func ClaimsFromJWT(raw []byte) (map[string]any, error) {
-	payload, err := JWTPayloadSegment(raw)
-	if err != nil {
-		return nil, err
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, err
-	}
-	return claims, nil
-}
-
-func JWTHeader(raw []byte) (map[string]any, error) {
-	parts := strings.Split(strings.TrimSpace(string(raw)), ".")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("not a compact JWT")
-	}
-	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return nil, err
-	}
-	var header map[string]any
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return nil, err
-	}
-	return header, nil
 }
 
 func NormalizeContentType(contentType string) string {

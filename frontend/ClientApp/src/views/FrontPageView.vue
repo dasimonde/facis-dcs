@@ -60,7 +60,7 @@ const stages: Stage[] = [
   {
     name: 'Audit & Archive',
     description:
-      'Every lifecycle action is recorded in a tamper-proof, IPFS-anchored trail. Auditors run scoped audits with exportable reports; archived contracts stay verifiable end to end.',
+      'Every lifecycle action is recorded in a tamper-evident, IPFS-anchored trail. Auditors run scoped audits with exportable reports; archived contracts stay verifiable end to end.',
     roles: 'Auditor, Archive Manager',
     routeName: ROUTES.AUDIT.LIST,
     linkLabel: 'Open Audit',

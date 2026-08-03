@@ -246,15 +246,6 @@ func toStringSlice(v interface{}) []string {
 	return out
 }
 
-// ExtractBearerToken expected format "Authorization: Bearer <token>"
-func ExtractBearerToken(authHeader string) (string, error) {
-	const bearerPrefix = "Bearer "
-	if !strings.HasPrefix(authHeader, bearerPrefix) {
-		return "", fmt.Errorf("invalid authorization header format")
-	}
-	return strings.TrimPrefix(authHeader, bearerPrefix), nil
-}
-
 // unexported key type to avoid context key collisions.
 type authCtxKey struct{}
 
@@ -301,23 +292,4 @@ func GetParticipantID(ctx context.Context) string {
 // InjectAuthContext injects the validated identity into the request context.
 func InjectAuthContext(ctx context.Context, roles []string, holderDID string, participantID string) context.Context {
 	return context.WithValue(ctx, authCtxKey{}, AuthContext{Roles: roles, HolderDID: holderDID, ParticipantID: participantID})
-}
-
-// unexported key type for the raw bearer token.
-type bearerTokenCtxKey struct{}
-
-// InjectBearerToken stores the raw JWT presented on the incoming request so
-// downstream handlers can forward it to pdf-core, which uses it to authenticate
-// its call back to the internal C2PA signing endpoint (DCS-IR-HI-01).
-func InjectBearerToken(ctx context.Context, token string) context.Context {
-	return context.WithValue(ctx, bearerTokenCtxKey{}, token)
-}
-
-// GetBearerToken returns the raw JWT stored by InjectBearerToken, or "" when the
-// request carried no token (e.g. an internal, non-authenticated code path).
-func GetBearerToken(ctx context.Context) string {
-	if tok, ok := ctx.Value(bearerTokenCtxKey{}).(string); ok {
-		return tok
-	}
-	return ""
 }

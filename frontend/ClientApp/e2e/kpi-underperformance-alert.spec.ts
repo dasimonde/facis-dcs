@@ -25,7 +25,7 @@ import type { APIRequestContext } from '@playwright/test'
  *
  * The one step that is not a click is the KPI report: the reporter is the
  * contract *target system*, an external party posting over the deployment
- * callback channel with its shared secret, quoting the correlation id the
+ * callback channel with its own credential, quoting the correlation id the
  * manager's deployment returned. No DCS user performs it and no control exists
  * to click.
  *
@@ -34,8 +34,12 @@ import type { APIRequestContext } from '@playwright/test'
  *
  * The threshold is the one buildApprovedContract already authors through the
  * clause editor: an ODRL constraint binding the Payment Amount contract field
- * with "less than or equal to" 500. Reporting 900 against that field breaches
- * it. Nothing here is seeded behind the UI's back.
+ * with "less than or equal to" 500. The target system is what executes and
+ * observes the contract, so it is the target that concludes 900 breaches that
+ * rule and says so — verdict plus the rule's @id, quoted back from the
+ * odrl:policy the deployment envelope handed it (ADR-33). The DCS records the
+ * verdict, attributes it to that rule, and alerts on it; it derives none of it.
+ * Nothing here is seeded behind the UI's back.
  */
 
 // The target authenticates its callback as its own registered client (ADR-27),
@@ -63,6 +67,38 @@ const targetAccessToken = async (request: APIRequestContext) => {
  *  correctly, but the deployment would never reach ACTIVE. Registering a target
  *  through the UI is covered by machine-credentials.spec.ts. */
 const SEEDED_TARGET_NAME = process.env.E2E_CONTRACT_TARGET_NAME ?? 'BDD Contract Target'
+
+type JsonLdNode = Record<string, unknown>
+
+const ODRL_RULE_BUCKETS = ['odrl:permission', 'odrl:prohibition', 'odrl:obligation']
+
+/** The @id of the rule in the deployed odrl:policy whose constraint names
+ *  `fieldIri` as its odrl:leftOperand. A verdict names one term of the signed
+ *  contract, and this is how the target picks the term its measurement is
+ *  about — the @id travelled to it verbatim in the deployment envelope. */
+const ruleConstrainingField = (policy: JsonLdNode, fieldIri: string): string => {
+  const constrains = (node: unknown): boolean => {
+    if (Array.isArray(node)) return node.some(constrains)
+    if (node !== null && typeof node === 'object') {
+      const left = (node as JsonLdNode)['odrl:leftOperand'] as JsonLdNode | undefined
+      if (left?.['@id'] === fieldIri) return true
+      return Object.values(node as JsonLdNode).some(constrains)
+    }
+    return false
+  }
+
+  for (const bucket of ODRL_RULE_BUCKETS) {
+    const rules = policy[bucket]
+    const nodes = (Array.isArray(rules) ? rules : rules ? [rules] : []) as JsonLdNode[]
+    for (const rule of nodes) {
+      if (!constrains(rule['odrl:constraint'])) continue
+      const ruleId = rule['@id']
+      expect(typeof ruleId, 'the deployed rule carries the @id a verdict has to name').toBe('string')
+      return ruleId as string
+    }
+  }
+  throw new Error(`no deployed ODRL rule constrains ${fieldIri}: ${JSON.stringify(policy)}`)
+}
 
 test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance alert the compliance officer can see', async ({
   page,
@@ -157,12 +193,13 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
       return iri
     })
 
-  const correlationId = await test.step('the contract manager re-dispatches it to the target', async () => {
+  const deployment = await test.step('the contract manager re-dispatches it to the target', async () => {
     // UC-05's stimulus is a Contract Manager submitting a contract for
     // deployment, and the state machine treats DEPLOY from ACTIVE as an
     // idempotent re-dispatch — the operator's recovery when a target has to
     // receive the contract again. Clicking it is what a manager would do, and
-    // the response carries the correlation id the target's callback must quote.
+    // the response carries both the correlation id the target's callback must
+    // quote and the rules it is handed to enforce.
     await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
     const deploy = page.getByTestId('deploy-contract')
     await expect(deploy, 'a manager can re-dispatch an active contract to its target').toBeVisible({
@@ -188,24 +225,53 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
     await page.unroute('**/contract/deploy')
 
     expect(captured!.status, `redeploy ${captured!.status}: ${captured!.text}`).toBe(200)
-    const body = JSON.parse(captured!.text) as { correlation_id?: string; target_name?: string }
+    const body = JSON.parse(captured!.text) as {
+      correlation_id?: string
+      target_name?: string
+      payload?: { 'odrl:policy'?: JsonLdNode }
+    }
     expect(body.correlation_id, 'the deployment names the correlation id its callback quotes').toBeTruthy()
     expect(body.target_name, 'the deployment names the target system it went to').toBeTruthy()
-    return body.correlation_id!
+    const policy = body.payload?.['odrl:policy']
+    expect(policy, 'the envelope hands the target the rules it is to enforce').toBeTruthy()
+    return {
+      correlationId: body.correlation_id!,
+      ruleId: ruleConstrainingField(policy!, boundFieldIri),
+    }
   })
 
-  await test.step('the target reports a value that breaches the contract threshold', async () => {
+  await test.step('the target concludes the reported value breaches a rule and says which', async () => {
     // 900 against "Payment Amount <= 500" — the constraint authored in the
-    // clause editor by the fixture.
+    // clause editor by the fixture. The classification is the target's, and it
+    // names the rule it concluded about so the recorded row is traceable to
+    // that term of the contract (ADR-33).
     const res = await page.request.post('/api/contract/deployment/callback', {
       headers: { Authorization: `Bearer ${await targetAccessToken(page.request)}` },
       data: {
         did: contractDid,
-        correlation_id: correlationId,
-        kpi: { metric: boundFieldIri, value: '900' },
+        correlation_id: deployment.correlationId,
+        kpi: {
+          metric: 'payment_amount',
+          value: '900',
+          verdict: 'violated',
+          rule: deployment.ruleId,
+        },
       },
     })
     expect(res.ok(), `KPI callback ${res.status()}: ${await res.text()}`).toBeTruthy()
+  })
+
+  await test.step('the manager sees the verdict recorded against the rule it names', async () => {
+    await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+    const row = page.getByTestId('contract-kpi-row').filter({ hasText: 'payment_amount' })
+    await expect(row, 'the reported KPI reaches the contract detail').toHaveCount(1, { timeout: 30_000 })
+    await expect(row.getByTestId('contract-kpi-verdict'), "the target's own verdict is what is shown").toHaveText(
+      'Violation',
+    )
+    await expect(
+      row.getByTestId('contract-kpi-rule'),
+      'the verdict is traceable to the exact rule inside the contract',
+    ).toHaveText(deployment.ruleId)
   })
 
   await test.step('the compliance officer sweeps and is alerted', async () => {
@@ -226,7 +292,10 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
       row.getByTestId('monitor-risk-underperformance-badge'),
       'underperformance is highlighted as an alert, not listed as another grey row',
     ).toBeVisible()
-    // The officer must be able to act on it: the detail names the observed value.
+    // The officer must be able to act on it: the detail names the observed
+    // value and the rule the target concluded it breached, so the alert points
+    // at a term of the contract rather than at "something is wrong".
     await expect(row.getByTestId('monitor-risk-detail')).toContainText('900')
+    await expect(row.getByTestId('monitor-risk-detail')).toContainText(deployment.ruleId)
   })
 })

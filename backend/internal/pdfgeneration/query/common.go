@@ -6,14 +6,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 )
@@ -33,9 +32,22 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // (pdf-core's /verify treats the signed span as an opaque suffix), and the
 // verifier must never falsely report a passed PDF signature check it did not
 // actually perform.
-const pdfSignatureNotAvailable = "not_available"
+const pdfSignatureNotAvailable = provenance.CheckNotAvailable
 
-// stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-004) for the
+const (
+	statusPublicationConsistencyWait = 6 * time.Second
+	statusPublicationRetryInterval   = 100 * time.Millisecond
+)
+
+// Failure classes reported in PDFVerifyResult.Discrepancy.
+const (
+	discrepancyNone         = ""
+	discrepancyHashMismatch = "content_hash_mismatch"
+	discrepancyNotAuthentic = "artifact_not_authentic"
+	discrepancyFailed       = "verification_failed"
+)
+
+// stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-003) for the
 // given contract state into pdfBytes and returns the updated PDF plus the
 // renderer version pdf-core reports. It performs no IPFS storage or DB
 // bookkeeping — callers decide what to do with the result. This is the
@@ -47,14 +59,20 @@ const pdfSignatureNotAvailable = "not_available"
 //   - appendAndCache below, for lifecycle transitions that happen entirely
 //     before any PAdES signature exists (draft-state edits).
 //
-// A PDF that already carries a PAdES signature (DCS-FR-SM-16/B) must never be
-// passed to this function again: any incremental update to a referenced
-// embedded-file object (the C2PA manifest attachment) after signing, however
-// carefully byte-range-preserving, is treated as an unexplained/illegal
-// modification by standards-compliant PAdES validators (Adobe Reader,
-// pyHanko's diff-analysis) — even though the CMS signature itself stays
-// cryptographically valid. See exportcontract.go/verifycontract.go, which
-// freeze the PDF once its C2PA state is no longer "draft".
+// A PDF that already carries a PAdES signature must never be passed to this
+// function again: rewriting a referenced embedded-file object (the C2PA
+// manifest attachment) after signing, however carefully byte-range-preserving,
+// is treated as an unexplained modification by standards-compliant PAdES
+// validators (Adobe Reader, pyHanko's diff-analysis) — even though the CMS
+// signature itself stays cryptographically valid. See
+// exportcontract.go/verifycontract.go, which freeze the PDF once its C2PA
+// state is no longer "draft".
+//
+// This restriction is specific to re-stamping lifecycle state. It is not a
+// general "never append to a signed PDF" rule: DCS-OR-C2PA-002 mandates
+// appending via PDF incremental updates, and signingmanagement's finalize()
+// appends a provenance-only manifest after signing (ADR-26). (There is no
+// DCS-FR-SM-16/B sub-clause; the earlier citation here was wrong.)
 func stampLifecycle(
 	ctx context.Context,
 	did, state string,
@@ -95,7 +113,8 @@ func appendAndCache(
 	tx *sqlx.Tx,
 	did, state string,
 	jsonldBytes, pdfBytes []byte,
-	ipfsClient *ipfs.APIClient,
+	artifacts *artifactstore.Store,
+	scope artifactstore.Scope,
 	pdfCore *pdfcore.Client,
 	vcIssuer provenance.VCIssuer,
 	issuerDID string,
@@ -111,11 +130,10 @@ func appendAndCache(
 		return pdfBytes, err
 	}
 
-	ipfsResult, err := ipfsClient.CreateFile(ctx, updatedPDF)
+	pdfCID, err := artifacts.Put(ctx, scope, updatedPDF)
 	if err != nil {
 		return updatedPDF, fmt.Errorf("store PDF in IPFS for %s: %w", did, err)
 	}
-	pdfCID := ipfsResult.Identifier.Value
 
 	if err := updateState(ctx, tx, did, PDFStateData{
 		IPFSCID:         pdfCID,
@@ -130,41 +148,179 @@ func appendAndCache(
 	return updatedPDF, nil
 }
 
-func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+// tamperedVerifyResult is the verdict for an artifact that failed
+// authenticated decryption. Every check reports negative rather than absent:
+// the stored bytes are not the ones this instance sealed, so nothing about
+// them verifies, and the hashes stay empty because there is no trustworthy
+// content to hash.
+func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
+	return &pdfgen.PDFVerifyResult{
+		Match:               false,
+		C2paManifestFound:   false,
+		C2paSignatureStatus: provenance.CheckInvalid,
+		VcProofStatus:       provenance.CheckInvalid,
+		StatusListCheck:     "failed",
+		StatusListError:     ptrToString("stored artifact is not authentic"),
+		LifecycleStatus:     ptrToString(lifecycleStatus),
+		PdfSignatureStatus:  pdfSignatureNotAvailable,
+		Discrepancy:         ptrToString(discrepancyNotAuthentic),
+	}
+}
+
+func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
+	credentials *provenance.CredentialVerifier, statuses *provenance.CredentialStatusVerifier,
+	lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
 	if verifyErr != nil {
 		c2paManifestFound = strings.Contains(verifyErr.Error(), "status 409")
 	}
-	c2paSignatureValid := verifyErr == nil
 
+	// pdf-core answers 409 specifically for "manifest present, content hash
+	// comparison failed" — the genuine MR/HR discrepancy — which is a different
+	// finding from a manifest that is missing or a call that never landed.
+	discrepancy := discrepancyNone
+	switch {
+	case verifyErr == nil:
+	case c2paManifestFound:
+		discrepancy = discrepancyHashMismatch
+	default:
+		discrepancy = discrepancyFailed
+	}
+
+	// A /verify that never returned a body carries no claim-signature verdict:
+	// pdf-core reports one only for a PDF it accepted, so there is nothing to
+	// report rather than a failure to report.
+	c2paSignatureStatus := provenance.CheckNotAvailable
+	switch {
+	case verifyErr != nil:
+	case result.C2PASignatureValid:
+		c2paSignatureStatus = provenance.CheckValid
+	default:
+		c2paSignatureStatus = provenance.CheckInvalid
+	}
+
+	vcProofStatus := provenance.CheckNotAvailable
+	if result.VCPresent && len(result.VCBytes) > 0 {
+		vcProofStatus = provenance.CredentialCheck(credentials.Verify(result.VCBytes))
+	}
+
+	// The revocation lookup follows the credential's OWN credentialStatus, so it
+	// runs only once the credential is known to be the issuer's: an unverified
+	// credential points the check wherever its author chose. Without a verdict on
+	// the credential the revocation state is unknown, which is said rather than
+	// left empty — empty reads as "nothing to report", and that is how a revoked
+	// contract came back clean.
 	statusListURI := ""
 	statusListStatus := ""
-	if result.VCProofValid && len(result.VCBytes) > 0 {
+	statusListCheck := "not_available"
+	statusListError := ""
+	switch {
+	case vcProofStatus == provenance.CheckValid:
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
-		if cred, idx, ok := provenance.ExtractCredentialStatusFields(result.VCBytes); ok {
-			httpClient := &http.Client{Timeout: 10 * time.Second}
-			if status, err := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx); err == nil {
-				statusListStatus = status
+		_, present, err := provenance.ExtractCredentialStatus(result.VCBytes)
+		switch {
+		case err != nil:
+			match = false
+			statusListStatus = "unavailable"
+			statusListCheck = "failed"
+			statusListError = fmt.Sprintf("invalid embedded status-list reference: %v", err)
+		case !present:
+			match = false
+			statusListStatus = "unavailable"
+			statusListCheck = "failed"
+			statusListError = "embedded lifecycle credential has no usable status-list reference"
+		default:
+			queryStatus := func() (string, error) {
+				return statuses.State(ctx, result.VCBytes)
+			}
+			var statusPassed bool
+			statusListStatus, statusListCheck, statusListError, statusPassed =
+				evaluateLiveStatusCheck(ctx, lifecycleStatus, queryStatus)
+			if !statusPassed {
+				match = false
 			}
 		}
+	case vcProofStatus != provenance.CheckNotAvailable:
+		statusListStatus = "UNKNOWN (lifecycle credential proof not verified)"
 	}
 
 	return &pdfgen.PDFVerifyResult{
-		Match:              match,
-		C2paManifestFound:  c2paManifestFound,
-		C2paSignatureValid: c2paSignatureValid,
-		VcProofValid:       result.VCProofValid,
-		StatusListURI:      ptrToString(statusListURI),
-		StatusListStatus:   ptrToString(statusListStatus),
-		LifecycleStatus:    ptrToString(lifecycleStatus),
+		Match:             match,
+		C2paManifestFound: c2paManifestFound,
+		// The digests pdf-core reached its verdict on, carried through rather than
+		// recomputed here. They ride along with a 409 content mismatch too, where
+		// base and stored diverge and name which side moved; all three are empty
+		// only when pdf-core could not compute them at all.
+		JsonldHash:          result.JSONLDHash,
+		BasePdfHash:         result.BasePDFHash,
+		StoredBasePdfHash:   result.StoredBasePDFHash,
+		C2paSignatureStatus: c2paSignatureStatus,
+		VcProofStatus:       vcProofStatus,
+		StatusListURI:       ptrToString(statusListURI),
+		StatusListStatus:    ptrToString(statusListStatus),
+		StatusListCheck:     statusListCheck,
+		StatusListError:     ptrToString(statusListError),
+		LifecycleStatus:     ptrToString(lifecycleStatus),
 		// DCS-OR-C2PA-006: the PDF-signature check is an independently named
 		// check, distinct from the C2PA COSE signature check. This path performs
 		// no cryptographic PAdES re-verification, so it honestly reports
 		// "not_available" rather than faking a passed PDF-signature verification.
 		PdfSignatureStatus: pdfSignatureNotAvailable,
+		Discrepancy:        ptrToString(discrepancy),
 	}, nil
+}
+
+func evaluateLiveStatusCheck(
+	ctx context.Context,
+	lifecycleStatus string,
+	query func() (string, error),
+) (status, check, failure string, passed bool) {
+	state, err := queryStatusWithPublicationBarrier(ctx, lifecycleStatus, query)
+	if err != nil {
+		// The error itself, not a cause invented for it: it distinguishes a
+		// service that never answered from a list that was served and could not
+		// be used, and those are looked into in different places.
+		return "unavailable", "failed", err.Error(), false
+	}
+	// "passed" says the lookup ran and the list it read established the state:
+	// the list's own signature verified against the configured trust anchors,
+	// and its leaf identified the issuer it names (ADR-34 §3). Before that it
+	// said only that a URL had answered, and the value had to carry the
+	// qualification with it.
+	return state, "passed", "", true
+}
+
+func queryStatusWithPublicationBarrier(
+	ctx context.Context,
+	lifecycleStatus string,
+	query func() (string, error),
+) (string, error) {
+	status, err := query()
+	if err != nil || status != "active" ||
+		(lifecycleStatus != "terminated" && lifecycleStatus != "suspended") {
+		return status, err
+	}
+
+	timer := time.NewTimer(statusPublicationConsistencyWait)
+	defer timer.Stop()
+	ticker := time.NewTicker(statusPublicationRetryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-timer.C:
+			return status, nil
+		case <-ticker.C:
+			status, err = query()
+			if err != nil || status != "active" {
+				return status, err
+			}
+		}
+	}
 }
 
 func stateToReason(state string) string {

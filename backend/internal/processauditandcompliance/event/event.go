@@ -179,6 +179,8 @@ type TrustGateDenialEvent struct {
 	DID        string    `json:"did"`
 	PeerDID    string    `json:"peer_did"`
 	Direction  string    `json:"direction"`
+	RuleID     string    `json:"rule_id"`
+	Severity   string    `json:"severity"`
 	Reason     string    `json:"reason"`
 	OccurredAt time.Time `json:"occurred_at"`
 }

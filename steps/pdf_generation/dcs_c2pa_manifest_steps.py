@@ -153,13 +153,13 @@ def step_then_verify_four_named_checks(context, name):
         f"{context.requests_response.text}"
     )
     body = context.requests_response.json()
-    # c2pa_manifest_found / vc_proof_valid / status_list_status /
-    # pdf_signature_status live on PDFVerifyResult
+    # c2pa_manifest_found / c2pa_signature_status / vc_proof_status /
+    # status_list_status / pdf_signature_status live on PDFVerifyResult
     # (backend/design/pdf_generation.go).
     required_fields = {
         "pdf_signature_status": "PDF signature",
         "c2pa_manifest_found": "C2PA manifest",
-        "vc_proof_valid": "VC signature",
+        "vc_proof_status": "VC signature",
         "status_list_status": "status list",
     }
     missing = [
@@ -171,6 +171,14 @@ def step_then_verify_four_named_checks(context, name):
         f"Verify response for contract '{name}' is missing named check field(s): "
         f"{', '.join(missing)} — response: {body}"
     )
+    # The two signature checks are three-state, never a bare boolean: a check
+    # that was not performed must be distinguishable from one that passed.
+    for field in ("c2pa_signature_status", "vc_proof_status"):
+        assert body.get(field) in ("valid", "invalid", "indeterminate", "not_available"), (
+            f"Expected {field} for contract '{name}' to report one of "
+            f"valid/invalid/indeterminate/not_available, got {body.get(field)!r} "
+            f"in response {body}"
+        )
 
 
 @then(

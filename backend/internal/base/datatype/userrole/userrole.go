@@ -32,9 +32,6 @@ const (
 	ComplianceOfficer   UserRole = "Compliance Officer"
 	IntegrationManager  UserRole = "Integration Manager"
 
-	ProcessOrchestrator UserRole = "Process Orchestrator"
-	Validator           UserRole = "Validator"
-
 	SystemContractCreator  UserRole = "Sys. Contract Creator"
 	SystemContractReviewer UserRole = "Sys. Contract Reviewer"
 	SystemContractApprover UserRole = "Sys. Contract Approver"
@@ -68,7 +65,6 @@ func (r UserRole) IsValid() bool {
 		ContractCreator, ContractReviewer, ContractApprover, ContractManager,
 		ContractNegotiator, ContractSigner, ContractObserver,
 		ArchiveManager, Auditor, SystemAdministrator, ComplianceOfficer, IntegrationManager,
-		ProcessOrchestrator, Validator,
 		SystemContractCreator, SystemContractReviewer, SystemContractApprover,
 		SystemContractManager, SystemContractSigner, ContractTargetSystem,
 		SystemAuditor:

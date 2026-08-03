@@ -45,8 +45,13 @@ if printf '%s' "$existing" | grep -q "label:[[:space:]]*$NEW_LABEL$"; then
   echo "Key '$NEW_LABEL' already present."
 else
   ID="$(printf '%s' "$NEW_LABEL" | md5sum | cut -c1-8)"
+  # dcs-ecdh versions are key-agreement keys (CEK wrapping): need CKA_DERIVE usage.
+  USAGE=()
+  if [ "$BASE_LABEL" = "dcs-ecdh" ]; then
+    USAGE=(--usage-derive)
+  fi
   pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --login --pin "$PIN" \
-    --keypairgen --key-type EC:prime256v1 --label "$NEW_LABEL" --id "$ID"
+    --keypairgen --key-type EC:prime256v1 --label "$NEW_LABEL" --id "$ID" ${USAGE[@]+"${USAGE[@]}"}
 fi
 
 # Optionally bind the new key to a dev-CA leaf so verifiers can check signatures

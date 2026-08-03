@@ -3,8 +3,14 @@
 [![Behavior Tests](https://github.com/eclipse-xfsc/facis-dcs/actions/workflows/bdd-kind.yml/badge.svg)](https://github.com/eclipse-xfsc/facis-dcs/actions/workflows/bdd-kind.yml)
 
 The **Digital Contracting Service** provides an **open-source platform** for creating, signing, and managing contracts digitally.  
-Integrated with the **European Digital Identity Wallet (EUDI)**, it guarantees that all digital transactions are secure, legally binding, and interoperable.  
-DCS allows organizations to streamline business processes, reduce paperwork, and ensure **compliance with eIDAS 2.0 regulations**, while fostering trust across federated partners.
+It is designed for integration with the **European Digital Identity Wallet (EUDI)** ecosystem and targets **eIDAS 2.0 Advanced Electronic Signatures (AES)**, so that organizations can streamline business processes, reduce paperwork, and establish trust across federated partners.
+
+> **Status.** DCS is not certified and has not been conformance-tested against a
+> production EUDI wallet or a qualified trust service provider. Wallet
+> interaction is exercised against the project's own test wallet, signatures are
+> AES-targeted rather than qualified, and no legal effect is claimed for them.
+> The decision records under [`docs/`](docs/) state what each mechanism does and
+> does not establish.
 
 **The detailed specifications for the Digital Contracting Service (DCS) can be found: [SRS_FACIS_DCS](https://github.com/eclipse-xfsc/facis/tree/main/DCS/specification/SRS_FACIS_DCS.pdf).**
 

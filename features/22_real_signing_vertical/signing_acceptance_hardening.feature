@@ -37,7 +37,7 @@ Feature: Signing acceptance-path hardening
     Given contract "SAH Revoked PID Contract" has reached contract state "APPROVED"
     When I start a signing ceremony for contract "SAH Revoked PID Contract" field "SAHRevokedPidField" as "Contract Signer"
     And the PID for contract "SAH Revoked PID Contract"'s ceremony is revoked before it is presented
-    Then the ceremony presentation for contract "SAH Revoked PID Contract" is rejected
+    Then the ceremony presentation for contract "SAH Revoked PID Contract" is rejected for a revoked PID
 
   @ADR-20 @SM-01 @DCS-NFR-BR-03
   Scenario: An AES signature is rejected on a field requiring QES
@@ -56,9 +56,10 @@ Feature: Signing acceptance-path hardening
     Then the ceremony callback for contract "SAH Replay Contract" rejects the signature
 
   # A real EUDI wallet's issued PID carries its issuer certificate as an x5c
-  # chain, not a bare jwk trusted via DID allow-list — this project's own dev
-  # PID issuance never exercised that path until now (ResolveIssuerVerification
-  # KeyForPID, backend/internal/auth/oid4vp/sdjwt/keys.go).
+  # chain, not a bare jwk trusted via DID allow-list. The chain is verified to
+  # a configured anchor and the leaf must name the issuer the credential claims
+  # (backend/internal/auth/oid4vp/sdjwt/keys.go, verificationKeyFromX5C), and
+  # the issuer must be trusted for the pid purpose like any other.
   @ADR-20 @DCS-FR-SM-18
   Scenario: A PID signed with x5c by the trusted dev issuer is accepted
     Given contract "SAH X5C PID Trusted Contract" has reached contract state "APPROVED"

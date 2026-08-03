@@ -1,19 +1,36 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useTemplateRef } from 'vue'
 import { RouterLink } from 'vue-router'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { ROUTES } from '@/router/router'
+import { type ArchivedContract, type ArchiveErasureStatus, archiveService } from '@/services/archive-service'
 import { type ArchiveStatistics, archiveStatisticsService } from '@/services/archive-statistics-service'
+import { useAuthStore } from '@/stores/auth-store'
+import { useErrorStore } from '@/stores/error-store'
 
 /**
  * Contract Archive Dashboard (DCS-FR-CSA-21): an overview of archived
  * contract statistics, recent actions, storage volume, expiring contracts,
  * and compliance status. Rows drill down into the per-contract archive
- * audit trail.
+ * audit trail. Archive Managers additionally see the archived-contract
+ * entries with their key-erasure state and the delete-with-shred action
+ * (DCS-FR-CSA-17, DCS-NFR-SEC-13).
  */
 
 const statistics = ref<ArchiveStatistics | null>(null)
 const error = ref('')
 const loading = ref(true)
+
+const authStore = useAuthStore()
+const errorStore = useErrorStore()
+const isArchiveManager = computed(() => authStore.user?.roles.includes('ARCHIVE_MANAGER') ?? false)
+
+const entries = ref<ArchivedContract[]>([])
+const entriesError = ref('')
+const erasureStatuses = ref<Record<string, ArchiveErasureStatus>>({})
+const expandedErasureDid = ref<string | null>(null)
+const deleting = ref(false)
+const confirmationModal = useTemplateRef('confirmation-modal')
 
 onMounted(async () => {
   try {
@@ -23,7 +40,99 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  if (isArchiveManager.value) {
+    await loadEntries()
+  }
 })
+
+async function loadEntries() {
+  entriesError.value = ''
+  try {
+    entries.value = await archiveService.retrieve()
+    await loadErasureStatuses()
+  } catch (err) {
+    entriesError.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+async function loadErasureStatuses() {
+  const dids = Array.from(new Set(entries.value.map((entry) => entry.did)))
+  const results = await Promise.allSettled(dids.map((did) => archiveService.erasureStatus(did)))
+  const statuses: Record<string, ArchiveErasureStatus> = {}
+  for (const result of results) {
+    if (result.status === 'fulfilled') statuses[result.value.did] = result.value
+  }
+  erasureStatuses.value = statuses
+}
+
+function toggleErasureDetails(did: string) {
+  expandedErasureDid.value = expandedErasureDid.value === did ? null : did
+}
+
+const expandedStatus = computed(() =>
+  expandedErasureDid.value ? (erasureStatuses.value[expandedErasureDid.value] ?? null) : null,
+)
+
+const annotating = ref(false)
+
+// DCS-FR-CSA-11: summary and tags are the only mutable part of an archive
+// entry. The dialog takes the summary; tags are entered on the same line,
+// comma-separated, because the shared modal offers a single text field.
+async function annotateEntry(entry: ArchivedContract) {
+  const dialog = confirmationModal.value
+  if (!dialog) return
+  const { isCanceled, data: summary } = await dialog.reveal({
+    message: `Summary for "${entry.name?.trim() ?? entry.did}". Leave empty to have one generated from the contract metadata.`,
+    editor: { placeholder: 'Summary' },
+  })
+  if (isCanceled) return
+  const { isCanceled: tagsCanceled, data: tags } = await dialog.reveal({
+    message: 'Tags for this entry, comma-separated. Leave empty to keep the current set.',
+    editor: { placeholder: 'e.g. supply, 2026, renewed' },
+  })
+  if (tagsCanceled) return
+  const tagList = (tags ?? '')
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0)
+  annotating.value = true
+  try {
+    const trimmedSummary = summary?.trim()
+    await archiveService.annotate(
+      entry.did,
+      trimmedSummary === '' ? undefined : trimmedSummary,
+      tagList.length > 0 ? tagList : undefined,
+    )
+    await loadEntries()
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  } finally {
+    annotating.value = false
+  }
+}
+
+async function deleteEntry(entry: ArchivedContract) {
+  const dialog = confirmationModal.value
+  if (!dialog) return
+  const displayName = entry.name?.trim() ? entry.name : entry.did
+  const { isCanceled, data: justification } = await dialog.reveal({
+    message: `Delete the archive entry for "${displayName}"? A justification is required and is recorded with the deletion.`,
+    editor: { requiredText: true, placeholder: 'Justification' },
+    acknowledgement: 'Encryption keys will be destroyed on both instances (irreversible)',
+  })
+  if (isCanceled || !justification) return
+  deleting.value = true
+  try {
+    await archiveService.delete(entry.did, justification)
+    errorStore.add('Archive entry deleted — encryption keys destroyed', 'info')
+    statistics.value = await archiveStatisticsService.statistics()
+    await loadEntries()
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  } finally {
+    deleting.value = false
+  }
+}
 
 const storageDisplay = computed(() => {
   const bytes = statistics.value?.storage_bytes ?? 0
@@ -82,6 +191,146 @@ function shortDid(did: string): string {
           <div class="stat-desc">soft-deleted entries</div>
         </div>
       </div>
+
+      <!-- Archived contract entries with key-erasure state and delete-with-shred -->
+      <section v-if="isArchiveManager" class="card bg-base-100 shadow" data-testid="archive-entries">
+        <div class="card-body">
+          <h2 class="card-title">Archived contracts</h2>
+          <div v-if="entriesError" class="alert alert-error" data-testid="archive-entries-error">
+            {{ entriesError }}
+          </div>
+          <p v-else-if="entries.length === 0" class="text-sm opacity-70" data-testid="archive-entries-empty">
+            No archived contracts.
+          </p>
+          <table v-else class="table table-zebra table-sm">
+            <thead>
+              <tr>
+                <th>Contract</th>
+                <th>Version</th>
+                <th>State</th>
+                <th>Annotation</th>
+                <th>Encryption</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="entry in entries" :key="`${entry.did}-${entry.contract_version}`">
+                <tr :data-testid="`archive-entry-${entry.did}`">
+                  <td>
+                    <RouterLink
+                      :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: entry.did } }"
+                      class="link link-primary"
+                    >
+                      {{ entry.name || shortDid(entry.did) }}
+                    </RouterLink>
+                    <div class="font-mono text-xs opacity-70">{{ shortDid(entry.did) }}</div>
+                  </td>
+                  <td>{{ entry.contract_version }}</td>
+                  <td>
+                    <span class="badge badge-ghost badge-sm">{{ entry.state }}</span>
+                  </td>
+                  <td :data-testid="`archive-annotation-${entry.did}`">
+                    <div v-if="entry.archive_summary" class="max-w-xs truncate text-sm">
+                      {{ entry.archive_summary }}
+                    </div>
+                    <div v-else class="text-sm opacity-50">Not annotated</div>
+                    <div v-if="entry.archive_tags?.length" class="mt-1 flex flex-wrap gap-1">
+                      <span v-for="tag in entry.archive_tags" :key="tag" class="badge badge-ghost badge-xs">
+                        {{ tag }}
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    <button
+                      v-if="erasureStatuses[entry.did]?.local_status === 'shredded'"
+                      type="button"
+                      class="badge cursor-pointer badge-sm badge-error"
+                      :data-testid="`erasure-badge-${entry.did}`"
+                      @click="toggleErasureDetails(entry.did)"
+                    >
+                      Keys destroyed
+                    </button>
+                    <button
+                      v-else-if="erasureStatuses[entry.did]"
+                      type="button"
+                      class="badge cursor-pointer badge-ghost badge-sm"
+                      :data-testid="`erasure-badge-${entry.did}`"
+                      @click="toggleErasureDetails(entry.did)"
+                    >
+                      Keys live
+                    </button>
+                  </td>
+                  <td class="text-right">
+                    <button
+                      class="btn btn-ghost btn-xs"
+                      :disabled="annotating"
+                      :data-testid="`archive-annotate-${entry.did}`"
+                      @click="annotateEntry(entry)"
+                    >
+                      Annotate
+                    </button>
+                    <button
+                      class="btn text-error btn-ghost btn-xs"
+                      :disabled="deleting"
+                      :data-testid="`archive-delete-${entry.did}`"
+                      @click="deleteEntry(entry)"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="expandedErasureDid === entry.did && expandedStatus">
+                  <td colspan="6">
+                    <div class="space-y-2 p-2 text-sm" :data-testid="`erasure-details-${entry.did}`">
+                      <template v-if="expandedStatus.local_status === 'shredded'">
+                        <div>
+                          <span class="font-medium">Keys destroyed</span>
+                          {{ formatTimestamp(expandedStatus.shredded_at ?? '') }}
+                          by {{ expandedStatus.shredded_by }} —
+                          {{ expandedStatus.shred_reason }}
+                        </div>
+                      </template>
+                      <div v-else>Encryption keys are live — the archived content is decryptable.</div>
+                      <table v-if="expandedStatus.peers.length > 0" class="table table-xs">
+                        <thead>
+                          <tr>
+                            <th>Peer</th>
+                            <th>Status</th>
+                            <th>Requested</th>
+                            <th>Confirmed</th>
+                            <th>Retries</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="peer in expandedStatus.peers" :key="peer.peer_did">
+                            <td class="font-mono text-xs">{{ peer.peer_did }}</td>
+                            <td>
+                              <span
+                                class="badge badge-sm"
+                                :class="peer.status === 'confirmed' ? 'badge-success' : 'badge-warning'"
+                              >
+                                {{ peer.status }}
+                              </span>
+                            </td>
+                            <td>{{ formatTimestamp(peer.requested_at) }}</td>
+                            <td>{{ peer.confirmed_at ? formatTimestamp(peer.confirmed_at) : '—' }}</td>
+                            <td>
+                              {{ peer.retry_count }}
+                              <span v-if="peer.last_tried_at" class="opacity-70">
+                                (last tried {{ formatTimestamp(peer.last_tried_at) }})
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div class="grid gap-6 lg:grid-cols-2">
         <!-- Expiring contracts -->
@@ -153,5 +402,14 @@ function shortDid(did: string): string {
         </section>
       </div>
     </template>
+
+    <ConfirmationModal ref="confirmation-modal" />
   </div>
 </template>
+
+<style scoped>
+.stat-title,
+.stat-desc {
+  color: color-mix(in oklab, var(--color-base-content) /* var(--color-base-content) */ 70%, transparent);
+}
+</style>

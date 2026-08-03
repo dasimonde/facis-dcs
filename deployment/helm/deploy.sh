@@ -191,6 +191,40 @@ if [ -z "$(backend_env DSS_URL)" ]; then
   echo "  note: DSS_URL unset — no validator, so externally produced signatures are refused"
 fi
 
+# At-rest encryption (DCS-NFR-SEC-14) rides on the StorageClass of these PVCs.
+# A claim keeps the class it was born with, so a values change after first
+# install silently does nothing — assert the bound class against the class the
+# rendered manifest asked for. No configured class means the cluster default
+# was used: that is an operator prerequisite this script cannot assert.
+manifest_pvc_storageclass() {
+  helm -n "$NAMESPACE" get manifest "$RELEASE" 2>/dev/null | awk -v pvc="$1" '
+    function flush() { if (kind == "PersistentVolumeClaim" && name == pvc) { gsub(/"/, "", sc); print sc } }
+    /^---/   { flush(); kind = ""; name = ""; sc = ""; next }
+    /^kind:/ { kind = $2 }
+    /^  name:/ { if (name == "") name = $2 }
+    /^[[:space:]]*storageClassName:/ { sc = $2 }
+    END      { flush() }'
+}
+
+storageclass_check() {
+  local label="$1" pvc="$2" desired actual
+  kubectl -n "$NAMESPACE" get pvc "$pvc" >/dev/null 2>&1 || return 0
+  desired="$(manifest_pvc_storageclass "$pvc")"
+  actual="$(kubectl -n "$NAMESPACE" get pvc "$pvc" -o jsonpath='{.spec.storageClassName}' 2>/dev/null)"
+  if [ -z "$desired" ]; then
+    echo "  note: $label PVC has no StorageClass configured (bound: ${actual:-cluster default}) — encrypted storage is an operator prerequisite, not asserted"
+  elif [ "$actual" = "$desired" ]; then
+    echo "  ok: $label PVC bound to configured StorageClass '$desired'"
+  else
+    note_problem "$label PVC is bound to StorageClass '${actual:-<none>}' but '$desired' is configured — a pre-existing claim keeps its class; recreate the PVC to move it"
+  fi
+}
+
+log "Checking StorageClass of the at-rest-relevant PVCs"
+storageclass_check "postgres"  "${RELEASE}-postgresql"
+storageclass_check "ipfs"      "${RELEASE}-ipfs"
+storageclass_check "hsm-token" "${RELEASE}-digital-contracting-service-hsm-token"
+
 # A peer resolves this instance by appending /.well-known/did.json to the bare
 # hostname. Anything else claiming /.well-known on the ingress (Hydra's OIDC
 # discovery) shadows these documents, and nothing inside the cluster notices.

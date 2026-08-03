@@ -14,10 +14,12 @@ without a valid PoA, which is recorded as an audit event (FR-SM-04/-26).
 from __future__ import annotations
 
 import json
+import uuid
 
 from behave import given, then, when
 
 from steps.support.api_client import (
+    contract_peer_pdf_url,
     post_json,
     signature_compliance_url,
     signature_request_url,
@@ -25,7 +27,7 @@ from steps.support.api_client import (
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
 from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (
-    CEREMONY_AUD,
+    ceremony_aud,
     _build_pid_presentation,
     _complete_ceremony_via_presentation,
     _fetch_pending_nonce,
@@ -43,7 +45,7 @@ def _start_party_ceremony(context, name):
     ceremony_id = resp.json()["ceremony_id"]
     nonce = _fetch_pending_nonce(context, ceremony_id)
     presentation, _issuer, _disc, subject_did = _build_pid_presentation(
-        given_name="PoA Signatory", family_name="BDD-Testperson", aud=CEREMONY_AUD, nonce=nonce,
+        given_name="PoA Signatory", family_name="BDD-Testperson", aud=ceremony_aud(context), nonce=nonce,
     )
     context.poa_ceremony = {"id": ceremony_id, "presentation": presentation, "subject_did": subject_did, "party_did": party_did, "nonce": nonce}
 
@@ -125,6 +127,199 @@ def step_when_tamper_counterparty_poa(context, name):
     })
     cursor.execute("UPDATE contracts SET contract_data = %s WHERE did = %s", (json.dumps(doc), did))
     context.db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Mutual Power-of-Attorney binding across instances (ADR-31): the shipping
+# instance carries the credential behind each signature it applied, and the
+# receiver verifies it instead of reading the contract's dcs:hasPowerOfAttorney
+# claim as though a peer's own assertion were evidence.
+# ---------------------------------------------------------------------------
+
+
+def _poa_presentation_from_untrusted_issuer(organization: str) -> str:
+    """A structurally genuine Power of Attorney authorizing organization, issued
+    by an issuer no instance configures — the honest "present but does not
+    verify" case, and the one an operator most plausibly meets: a counterparty
+    whose issuer was never granted the `peer` purpose here."""
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.issuer import issue_access_credential  # noqa: PLC0415
+    from dcs_wallet.status_list import role_credential_index  # noqa: PLC0415
+
+    keys = AuthService.load_wallet_keys()
+    roles = ["Contract Signer"]
+    return issue_access_credential(
+        organization=organization,
+        roles=roles,
+        issuer_private=keys.issuer_private,
+        wallet_private=keys.wallet_private,
+        status_index=role_credential_index(organization=organization, roles=roles),
+        issuer_did="did:web:untrusted-poa-issuer.example:issuer:poa",
+        aud="https://the-counterparty.example",
+        nonce="a-nonce-this-instance-never-issued",
+    )
+
+
+def _retained_signing_summary(context, contract_did: str) -> str:
+    """The signing summary instance A issued for the signature it applied
+    (migrations/sql/20260732_signature_summary_evidence.sql). It rides beside the
+    Power of Attorney on the wire, and the receiver reads the attribution from
+    it — so a ship built here must carry the real one, or it is refused for
+    missing evidence instead of for the credential under test."""
+    cursor = context.db.cursor()
+    cursor.execute(
+        "SELECT summary_vc FROM signature_ceremonies "
+        " WHERE contract_did = %s AND consumed_at IS NOT NULL AND summary_vc IS NOT NULL "
+        " ORDER BY consumed_at DESC LIMIT 1",
+        (contract_did,),
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    assert row and row[0], (
+        f"no signing summary is retained for {contract_did}; the ship this scenario builds is only "
+        "the synchronizer's own ship with the Power of Attorney substituted, so the rest of the "
+        "evidence has to be the real thing"
+    )
+    summary = row[0]
+    return summary if isinstance(summary, str) else bytes(summary).decode()
+
+
+@when('instance A ships contract "{name}"\'s PDF to instance B with a Power of Attorney that does not verify')
+def step_when_a_ships_bad_poa_to_b(context, name):
+    """Instance A's own outbound ship with exactly one substitution: the Power of
+    Attorney behind its signature is one instance B cannot verify (an issuer no
+    instance grants the `peer` purpose). A's identity and challenge-response, A's
+    real agreement credential, A's own signed PDF and the signing summary A
+    issued for that signature are all genuine, so B's refusal can only come from
+    the credential itself — every gate in front of it passes.
+
+    The ship is built here rather than driven through A's synchronizer because a
+    synchronizer ship is retried from sync_fails until it succeeds, and each
+    attempt raises its own incident on B; a scenario asserting exactly one
+    incident has to make exactly one attempt."""
+    import base64  # noqa: PLC0415
+
+    from steps.peer_trust.dcs_peer_trust_steps import (  # noqa: PLC0415
+        _as_instance,
+        _own_identity,
+        _sign_secret_value_with_dev_key,
+    )
+    from steps.support.services.pdf_service import PDFService  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    party_did, token_dir = _own_identity(context)
+
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_a)
+    export = PDFService.export_contract_pdf(context, did, headers=manager_h)
+    assert export.status_code == 200, (
+        f"could not export contract '{name}' from instance A: {export.status_code} {export.text}"
+    )
+
+    secret_value = str(uuid.uuid4())
+    secret_hash = base64.b64encode(_sign_secret_value_with_dev_key(token_dir, secret_value)).decode()
+
+    payload = {
+        "from_peer_did": party_did,
+        "contract_iri": did,
+        "pdf": base64.b64encode(export.content).decode(),
+        "secret_value": secret_value,
+        "secret_hash": secret_hash,
+        "contract_state": "SIGNED",
+        "signatory_poas": [{
+            "party": party_did,
+            "presentation": _poa_presentation_from_untrusted_issuer(party_did),
+            "summary": _retained_signing_summary(context, did),
+        }],
+    }
+    with _as_instance(context, context.base_url_b):
+        context.requests_response = post_json(context, contract_peer_pdf_url(context), payload, headers={})
+
+
+@then("instance B refuses the ship because the counterparty's Power of Attorney does not verify")
+def step_then_pdf_rejected_counterparty_poa(context):
+    resp = context.requests_response
+    assert resp.status_code != 200, (
+        f"Expected the ship to be refused: a Power of Attorney that is shipped and does not verify "
+        f"fails closed (ADR-31), got 200: {resp.text}"
+    )
+    body = resp.text.lower()
+    assert "power of attorney" in body, (
+        f"Expected the rejection to name the Power of Attorney specifically, not some other "
+        f"non-200 outcome, got {resp.status_code}: {resp.text}"
+    )
+
+
+@then('exactly one incident is recorded in instance B\'s audit trail for contract "{name}"')
+def step_then_one_incident_on_b(context, name):
+    import time  # noqa: PLC0415
+
+    from steps.peer_trust.dcs_peer_trust_steps import _as_instance  # noqa: PLC0415
+    from steps.peer_trust.dcs_trust_pdp_steps import _count_trust_gate_incidents  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    with _as_instance(context, context.base_url_b):
+        deadline = time.monotonic() + 60
+        matching = []
+        while time.monotonic() < deadline:
+            matching = _count_trust_gate_incidents(context, contract_did=did, api_base=context.base_url_b)
+            if matching:
+                break
+            time.sleep(2)
+    assert len(matching) == 1, (
+        f"Expected exactly one PAC_TRUST_GATE_DENIAL incident in instance B's audit trail for "
+        f"contract '{name}' (did={did}), got {len(matching)}: {matching}"
+    )
+
+
+@then("instance B holds instance A's signature with its Power of Attorney verified")
+def step_then_counterparty_poa_verified_on_b(context):
+    """Instance B accepted a signature ship that carried A's Power of Attorney.
+    B verifies that credential before it persists anything of the ship, so the
+    stored provenance and the absence of a denial incident together say the
+    verification passed — a credential that did not verify would have refused
+    the exchange and raised one instead."""
+    import time  # noqa: PLC0415
+
+    import requests as _requests  # noqa: PLC0415
+
+    from steps.peer_trust.dcs_trust_pdp_steps import _count_trust_gate_incidents  # noqa: PLC0415
+
+    c_did = context.cross_instance_contract_did
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_b)
+
+    party = None
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        resp = _requests.get(
+            f"{context.base_url_b}/contract/retrieve/{c_did}",
+            headers=manager_h,
+            timeout=context.http_timeout_seconds,
+        )
+        if resp.status_code == 200:
+            nodes = (resp.json().get("contract_data") or {}).get("dcs:parties") or []
+            for node in nodes:
+                if isinstance(node, dict) and node.get("@id") == context.peer_did_a and node.get("dcs:hasSignatory"):
+                    party = node
+                    break
+        if party:
+            break
+        time.sleep(2)
+
+    assert party, (
+        f"Expected instance B to hold instance A ({context.peer_did_a}) as a signed party of {c_did}; "
+        "a refused Power of Attorney would have blocked the whole ship"
+    )
+    authorized_by = party.get("dcs:hasPowerOfAttorney")
+    if isinstance(authorized_by, dict):
+        authorized_by = authorized_by.get("@id")
+    assert authorized_by == context.peer_did_a, (
+        f"Expected the signed party to be authorized for itself, got: {authorized_by}"
+    )
+
+    denials = _count_trust_gate_incidents(context, contract_did=c_did, api_base=context.base_url_b)
+    assert not denials, (
+        f"Expected instance B to record no trust-gate denial for {c_did}, got: {denials}"
+    )
 
 
 @then('an audit event records the Power of Attorney finding for contract "{name}"')

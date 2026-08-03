@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,8 +15,16 @@ import (
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pathutil"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/service"
 )
+
+// issuerX5ChainPathEnv points at the PEM certificate chain that publishes this
+// deployment's own signing key — the chain the hsm-provision job issues for the
+// C2PA claim signature (c2pa-x5chain.pem), bound to the same PKCS#11 key. It is
+// what the status list this deployment serves carries in its x5c header, and
+// what its own trust anchor is read out of.
+const issuerX5ChainPathEnv = "DCS_ISSUER_X5CHAIN_PATH"
 
 func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 	publicIssuerURL := strings.TrimRight(strings.TrimSpace(os.Getenv("HYDRA_PUBLIC_ISSUER_URL")), "/")
@@ -61,19 +70,48 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 	// the JWKS issuer path); an x5c credential presented with no trust
 	// anchors configured is refused outright, never silently trusted off its
 	// own embedded leaf cert (sdjwt.verificationKeyFromX5C).
+	var x5cRoots *x509.CertPool
 	if x5cPath := strings.TrimSpace(os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PATH")); x5cPath != "" {
-		x5cRoots, err := oid4vp.LoadX5CTrustAnchors(x5cPath)
+		x5cRoots, err = oid4vp.LoadX5CTrustAnchors(x5cPath)
 		if err != nil {
 			return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
 		}
+	}
+
+	// This deployment issues credentials of its own — the contract lifecycle
+	// credential and the signing summary — and therefore serves and signs their
+	// status list (ADR-34). It also verifies that list, through exactly the path
+	// it verifies anyone else's: chain against the configured anchors, leaf
+	// against the issuer the token names. So the anchor of its own chain has to
+	// be among those anchors, and it cannot be a committed one — the
+	// provisioning job mints it per install — so it is read back out of the
+	// chain the deployment signs with. Without this every verification of our
+	// own provenance credential would report the revocation state as unknown.
+	if chainPath := strings.TrimSpace(os.Getenv(issuerX5ChainPathEnv)); chainPath != "" {
+		root, err := provenance.StatusListRoot(chainPath)
+		if err != nil {
+			return service.AuthConfig{}, fmt.Errorf("dcs configuration error: %s: %w", issuerX5ChainPathEnv, err)
+		}
+		if x5cRoots == nil {
+			x5cRoots = x509.NewCertPool()
+		}
+		x5cRoots.AddCert(root)
+	}
+
+	if x5cRoots != nil {
 		trustCfg.SetX5CTrustRoots(x5cRoots)
 	}
 
-	xfscAllowUnsignedFallback := false
-	if v := strings.TrimSpace(os.Getenv("OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK")); strings.EqualFold(v, "true") {
-		xfscAllowUnsignedFallback = true
+	// Optional: the endpoint the `orce` mechanism delegates key resolution to.
+	// It is what lets a deployment trust an issuer published through a registry
+	// this build knows nothing about — the flow resolves the identifier and
+	// answers with a JWKS. An issuer configured for `orce` without this set is
+	// refused at first use with that reason named.
+	if orceResolver := strings.TrimSpace(os.Getenv("OID4VP_ORCE_RESOLVER_URL")); orceResolver != "" {
+		trustCfg.ORCEResolverURL = orceResolver
 	}
-	if err := oid4vp.ConfigureStatusListVerification(trustDataPath, xfscAllowUnsignedFallback); err != nil {
+
+	if err := oid4vp.ConfigureStatusListVerification(trustCfg); err != nil {
 		return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
 	}
 

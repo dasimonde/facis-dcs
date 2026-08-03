@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +45,7 @@ const cleanUnfilledPayload = `{
 }`
 
 func TestCleanContractFieldRendersFilledValue(t *testing.T) {
-	pdf, err := CompilePDF(WithSigner(context.Background(), NewCapturingSigner()), []byte(cleanContractFieldPayload), CanonicalCompiledAt)
+	pdf, err := CompilePDF(WithSigner(testChainContext(), NewCapturingSigner()), []byte(cleanContractFieldPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("clean field contract must compile: %v", err)
 	}
@@ -63,7 +62,7 @@ func TestCleanContractFieldRendersFilledValue(t *testing.T) {
 }
 
 func TestCleanContractFieldUnfilledRendersEmptySlot(t *testing.T) {
-	pdf, err := CompilePDF(WithSigner(context.Background(), NewCapturingSigner()), []byte(cleanUnfilledPayload), CanonicalCompiledAt)
+	pdf, err := CompilePDF(WithSigner(testChainContext(), NewCapturingSigner()), []byte(cleanUnfilledPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("clean field template must compile: %v", err)
 	}
@@ -81,7 +80,7 @@ func TestCleanContractFieldUnfilledRendersEmptySlot(t *testing.T) {
 // must have byte-identical page content to a fresh CompilePDF of the same
 // payload (otherwise a peer's /verify rejects with a content mismatch).
 func TestCleanContractFieldUpdateMatchesFreshCompile(t *testing.T) {
-	ctx := context.Background()
+	ctx := testChainContext()
 	base, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(cleanContractFieldPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("base compile: %v", err)
@@ -164,7 +163,7 @@ func TestCleanContractFieldRecompileMatchesPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("updatePDF: %v", err)
 	}
-	if err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), updated); err != nil {
 		t.Fatalf("VerifyIncrementalUpdate rejected an honestly amended field PDF: %v", err)
 	}
 	// The recompiled visible content must carry the filled value, not the @id.

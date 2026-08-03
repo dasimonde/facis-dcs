@@ -6,7 +6,7 @@ the OID4VP login, without importing the behave step modules (which pull in the
 bdd-executor runtime).
 
 Usage: python3 complete_signing_webhook.py <openid4vp://... | request_uri>
-Env:   STATUSLIST_SERVICE_URL, BDD_DCS_BASE_URL
+Env:   ISSUER_BASE_URL, BDD_DCS_BASE_URL
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonce
     from dcs_wallet.issuer import DEFAULT_ISSUER_DID, sign_credential_sd_jwt, sign_key_binding_jwt
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status
+    from dcs_wallet.status_list import build_credential_status, pid_credential_index
 
     keys = AuthService.load_wallet_keys()
     holder_key = keys.wallet_private
@@ -62,20 +62,17 @@ def build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonce
 
     # A real status claim (ADR-20): VerifyPID's status-list check is no longer
     # skipped, so a PID presentation with none would be rejected outright.
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
-
     now = int(time.time())
     issued = sign_credential_sd_jwt(
         visible_claims={
             "iss": DEFAULT_ISSUER_DID,
             "sub": subject_did,
-            "vct": "urn:eudi:pid:de:1",
+            "vct": "urn:dcs:pid:demo:v1",
             "iat": now - 3600,
             "exp": now + 3600,
             "cnf": {"jwk": cnf_jwk(holder_public)},
             "status": build_credential_status(
-                sub=subject_did, organization=given_name, roles=[family_name],
-                service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+                index=pid_credential_index(given_name=given_name, family_name=family_name),
             ),
         },
         selective_claims={"given_name": given_name, "family_name": family_name},

@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { watchDebounced } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { type ArchiveErasureStatus, archiveService } from '@/services/archive-service'
 import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob as saveBlob } from '@/utils/download-blob'
+import { claimReportedHttpError } from '@/utils/report-action-error'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
 
@@ -34,7 +37,7 @@ const authStore = useAuthStore()
 const isArchiveManagerOnly = computed(
   () => authStore.user?.roles.includes('ARCHIVE_MANAGER') && !authStore.user?.roles.includes('AUDITOR'),
 )
-type AuditResult = 'passed' | 'failed' | 'review'
+type AuditResult = 'passed' | 'failed' | 'review' | 'not_evaluated'
 type TableFilterKey = 'result' | 'category' | 'component' | 'did'
 
 const emptyValueLabel = '-'
@@ -128,6 +131,9 @@ const passedCheckCount = computed(() =>
 const reviewCheckCount = computed(() =>
   hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'review').length : 0,
 )
+const notEvaluatedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'not_evaluated').length : 0,
+)
 const auditIsEmpty = computed(() => hasExecutedAudit.value && findings.value.length === 0 && !error.value)
 const auditHasPassed = computed(
   () =>
@@ -168,6 +174,25 @@ watch(selectedScope, () => {
   selectedFindingId.value = null
 })
 
+// Key-erasure state of the inspected archive entry (DCS-NFR-SEC-13): shown
+// whenever the archive scope is filtered to one contract DID, so the entry's
+// "Keys destroyed" record stays visible after the entry itself left the
+// archive listing.
+const erasureStatus = ref<ArchiveErasureStatus | null>(null)
+watchDebounced(
+  [selectedScope, didFilter],
+  async ([scope, did]) => {
+    erasureStatus.value = null
+    if (scope !== 'archive' || !did.trim()) return
+    try {
+      erasureStatus.value = await archiveService.erasureStatus(did.trim())
+    } catch {
+      // no erasure record to show — the panel simply stays hidden
+    }
+  },
+  { debounce: 400, immediate: true },
+)
+
 const executeAudit = async () => {
   const scope = selectedScope.value
   const query = currentAuditQuery.value
@@ -187,6 +212,9 @@ const executeAudit = async () => {
     selectedFindingId.value = null
   } catch (err) {
     console.error('Audit Error:', err)
+    // The failure is rendered in place, per scope, so the interceptor's toast
+    // for it is dropped rather than announced a second time.
+    claimReportedHttpError(err)
     auditErrorsByScope.value = {
       ...auditErrorsByScope.value,
       [scope]: err instanceof Error ? err.message : 'Audit could not be executed.',
@@ -211,6 +239,7 @@ const generateReport = async (format: AuditReportFormat) => {
     downloadBlob(artifact.bytes, artifact.contentType, artifact.filename)
   } catch (err) {
     console.error('Audit Report Error:', err)
+    claimReportedHttpError(err)
     auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: 'Audit report could not be generated.' }
   } finally {
     reportLoadingScope.value = null
@@ -298,6 +327,8 @@ function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-erro
   if (result === 'failed') {
     return 'badge-error'
   }
+  // A not-evaluated finding shares the neutral badge with an unknown one: it is
+  // neither a pass nor a review task (ADR-33).
   return result === 'review' ? 'badge-warning' : 'badge-ghost'
 }
 
@@ -311,16 +342,22 @@ function auditResult(finding: AuditFinding): AuditResult | null {
   if (finding.status === 'REVIEW') {
     return 'review'
   }
+  if (finding.status === 'NOT_EVALUATED') {
+    return 'not_evaluated'
+  }
   return null
 }
 
-function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs Review' | 'Unknown' {
+function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs Review' | 'Not Evaluated' | 'Unknown' {
   const result = auditResult(finding)
   if (result === 'passed') {
     return 'Passed'
   }
   if (result === 'failed') {
     return 'Failed'
+  }
+  if (result === 'not_evaluated') {
+    return 'Not Evaluated'
   }
   return result === 'review' ? 'Needs Review' : 'Unknown'
 }
@@ -336,6 +373,11 @@ function auditResultSummary(finding: AuditFinding): string {
   }
   if (result === 'review') {
     return assertion ? `Review: ${assertion}` : 'Review required'
+  }
+  if (result === 'not_evaluated') {
+    return assertion
+      ? `Not evaluated here: ${assertion}`
+      : 'Not evaluated here - the executing target system reports this verdict'
   }
   return assertion ? `Unknown result: ${assertion}` : 'Unknown result'
 }
@@ -384,15 +426,17 @@ function severityBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-err
     return 'badge-warning'
   }
   if (
+    severity === 'satisfied' ||
     severity === 'passed' ||
     severity === 'pass' ||
     severity === 'success' ||
     severity === 'ok' ||
-    severity === 'compliant' ||
-    severity === 'info'
+    severity === 'compliant'
   ) {
     return 'badge-success'
   }
+  // 'deferred' falls through to the neutral badge: the DCS reached no verdict,
+  // so it must not read as a passing check (ADR-33).
   return 'badge-ghost'
 }
 
@@ -404,6 +448,17 @@ function findingDetails(finding: AuditFinding): Record<string, unknown> | null {
     return finding.details.finding
   }
   return finding.details
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) {
+    return emptyValueLabel
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
 }
 </script>
 
@@ -440,6 +495,13 @@ function findingDetails(finding: AuditFinding): Record<string, unknown> | null {
             Needs Review
           </div>
           <div class="stat-value text-2xl text-base-content">{{ reviewCheckCount }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-title flex items-center gap-2 text-base-content/70">
+            <span class="size-2 rounded-full bg-base-content/30"></span>
+            Not Evaluated
+          </div>
+          <div class="stat-value text-2xl text-base-content">{{ notEvaluatedCheckCount }}</div>
         </div>
       </div>
 
@@ -529,11 +591,78 @@ function findingDetails(finding: AuditFinding): Record<string, unknown> | null {
     <div v-if="selectedAuditLoading" class="p-4" role="status">Executing audit...</div>
     <div v-else-if="error" class="alert rounded-box alert-error" role="alert">{{ error }}</div>
     <div v-if="auditHasPassed" class="alert rounded-box alert-success" role="status">
-      Audit passed. No failed checks or review findings were returned.
+      Audit passed. Every check returned a verdict, and none failed or needs review.
+    </div>
+    <div v-if="notEvaluatedCheckCount > 0" class="alert rounded-box alert-info" role="status">
+      {{ notEvaluatedCheckCount }} check(s) were not evaluated here. Their verdict belongs to the target system that
+      executes the contract, which observes the facts they depend on.
     </div>
     <div v-if="auditIsEmpty" class="alert rounded-box alert-info" role="status">
-      Audit completed successfully. No matching entries were found.
+      Audit completed. No matching entries were found.
     </div>
+
+    <!-- Erasure state of the inspected archive entry (DCS-NFR-SEC-13) -->
+    <section
+      v-if="erasureStatus"
+      class="rounded-box border border-base-content/10 bg-base-100 p-4"
+      data-testid="erasure-status"
+    >
+      <div class="flex flex-wrap items-center gap-3">
+        <h3 class="font-bold">Encryption keys</h3>
+        <span
+          v-if="erasureStatus.local_status === 'shredded'"
+          class="badge badge-error"
+          data-testid="erasure-status-badge"
+        >
+          Keys destroyed
+        </span>
+        <span v-else class="badge badge-ghost" data-testid="erasure-status-badge">Keys live</span>
+      </div>
+      <details class="collapse-arrow collapse mt-2 rounded-box border border-base-content/10">
+        <summary class="collapse-title text-sm font-medium">Erasure details</summary>
+        <div class="collapse-content space-y-3 text-sm" data-testid="erasure-status-details">
+          <div v-if="erasureStatus.local_status === 'shredded'">
+            Destroyed {{ formatDateTime(erasureStatus.shredded_at) }} by {{ erasureStatus.shredded_by }} —
+            {{ erasureStatus.shred_reason }}
+          </div>
+          <div v-else>The local encryption keys are live — the archived content is decryptable.</div>
+          <p v-if="erasureStatus.peers.length === 0" class="opacity-70">No counterparty instance holds keys.</p>
+          <table v-else class="table table-xs">
+            <thead>
+              <tr>
+                <th>Peer</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Confirmed</th>
+                <th>Retries</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="peer in erasureStatus.peers"
+                :key="peer.peer_did"
+                :data-testid="`erasure-peer-${peer.peer_did}`"
+              >
+                <td class="font-mono text-xs">{{ peer.peer_did }}</td>
+                <td>
+                  <span class="badge badge-sm" :class="peer.status === 'confirmed' ? 'badge-success' : 'badge-warning'">
+                    {{ peer.status }}
+                  </span>
+                </td>
+                <td>{{ formatDateTime(peer.requested_at) }}</td>
+                <td>{{ peer.confirmed_at ? formatDateTime(peer.confirmed_at) : '—' }}</td>
+                <td>
+                  {{ peer.retry_count }}
+                  <span v-if="peer.last_tried_at" class="opacity-70">
+                    (last tried {{ formatDateTime(peer.last_tried_at) }})
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
 
     <div v-if="!selectedAuditLoading && !error" class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
       <div class="min-w-0 overflow-x-auto rounded-box border border-base-content/10">

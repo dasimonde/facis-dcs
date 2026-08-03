@@ -26,13 +26,17 @@ import (
 // or under one authorizing a different organization than the party it signed as
 // (UC-14, FR-SM-03/-04). The organization rides the party node so this holds for
 // a counterparty's signature synced from another instance.
-func poaComplianceFindings(raw datatype.JSON) []string {
+//
+// It returns the parties it judged, so the caller knows which of this instance's
+// own signatures the document accounts for and which it must judge from the
+// retained ceremony evidence instead.
+func poaComplianceFindings(raw datatype.JSON) (findings []string, attributed map[string]bool) {
+	attributed = map[string]bool{}
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil
+		return nil, attributed
 	}
 	nodes, _ := doc["dcs:parties"].([]any)
-	var findings []string
 	for _, rawNode := range nodes {
 		node, ok := rawNode.(map[string]any)
 		if !ok {
@@ -43,15 +47,72 @@ func poaComplianceFindings(raw datatype.JSON) []string {
 			continue
 		}
 		party, _ := node["@id"].(string)
-		poaOrg := nodeIRI(node["dcs:hasPowerOfAttorney"])
-		switch {
-		case poaOrg == "":
-			findings = append(findings, fmt.Sprintf("Party %s signed with no Power of Attorney (signatory %s)", party, signatory))
-		case poaOrg != party:
-			findings = append(findings, fmt.Sprintf("Party %s signed under a Power of Attorney authorizing %s, not this party (signatory %s)", party, poaOrg, signatory))
-		}
+		attributed[strings.TrimSpace(party)] = true
+		findings = append(findings, poaFinding(party, signatory, nodeIRI(node["dcs:hasPowerOfAttorney"]))...)
 	}
-	return findings
+	return findings, attributed
+}
+
+// poaFinding applies the Power-of-Attorney rule to one attributed signature,
+// wherever the attribution was read from.
+func poaFinding(party, signatory, poaOrg string) []string {
+	switch {
+	case poaOrg == "":
+		return []string{fmt.Sprintf("Party %s signed with no Power of Attorney (signatory %s)", party, signatory)}
+	case poaOrg != party:
+		return []string{fmt.Sprintf("Party %s signed under a Power of Attorney authorizing %s, not this party (signatory %s)", party, poaOrg, signatory)}
+	}
+	return nil
+}
+
+// signatureAuthorities resolves the ceremony an applied signature was made
+// under — the record of the authority behind a signature the frozen contract
+// document could not be given. db.CeremonyRepo satisfies it.
+type signatureAuthorities interface {
+	GetCeremonyByID(ctx context.Context, tx *sqlx.Tx, id string) (*db.SignatureCeremony, error)
+}
+
+// appliedSignatureFindings judges the signatures this instance applied that the
+// contract document does not account for.
+//
+// A signature made once the artifact is frozen cannot be written into the
+// document — the bytes are signed and can never be re-rendered — so its
+// signatory and its authority live on the ceremony that produced it and in the
+// signing summary issued from it, which is also what ships to the counterparty.
+// Reading only the document would leave a countersignature judged by nobody:
+// silently no finding, which reads exactly like a compliant signature.
+func appliedSignatureFindings(
+	ctx context.Context, tx *sqlx.Tx, ceremonies signatureAuthorities, signatures []db.SignatureRecord, attributed map[string]bool,
+) ([]string, error) {
+	if ceremonies == nil {
+		return nil, errors.New("the compliance viewer needs the signing ceremonies to judge a signature the contract document does not record")
+	}
+	var findings []string
+	for _, sig := range signatures {
+		if sig.Status != "SIGNED" || sig.FieldName == nil || sig.CeremonyID == nil {
+			continue
+		}
+		// The signature field IS the party it was signed for: the ceremony
+		// refuses unless the Power of Attorney authorizes exactly that name
+		// (ceremony.go), and the seeded fields are named for the party DIDs.
+		party := strings.TrimSpace(*sig.FieldName)
+		if party == "" || attributed[party] {
+			continue
+		}
+		ceremony, err := ceremonies.GetCeremonyByID(ctx, tx, *sig.CeremonyID)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve the ceremony behind the signature for %q: %w", party, err)
+		}
+		if ceremony == nil {
+			continue
+		}
+		poaOrg := ""
+		if ceremony.PoAOrganization != nil {
+			poaOrg = strings.TrimSpace(*ceremony.PoAOrganization)
+		}
+		findings = append(findings, poaFinding(party, sig.SignerDID, poaOrg)...)
+	}
+	return findings, nil
 }
 
 // nodeIRI reads an IRI from a JSON-LD value that is either {"@id": iri} or a
@@ -77,6 +138,10 @@ type ComplianceCmd struct {
 type ComplianceValidator struct {
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
+	// CeremonyRepo resolves the authority behind a signature the contract
+	// document does not record, which is every signature applied once the
+	// artifact was already signed.
+	CeremonyRepo db.CeremonyRepo
 }
 
 // Handle evaluates the contract's signatures against the signature
@@ -111,15 +176,30 @@ func (h *ComplianceValidator) Handle(ctx context.Context, cmd ComplianceCmd) ([]
 	// Power of Attorney (UC-14, FR-SM-03/-04): every signed party — this
 	// instance's own and any counterparty whose signature arrived over the peer
 	// sync — must have signed under a PoA authorizing the very party it signed as.
-	// The organization travels on the party node (dcs:hasPowerOfAttorney), so a
-	// counterparty running a misconfigured or malicious DCS is caught here.
+	// The organization travels on the party node (dcs:hasPowerOfAttorney) for
+	// every signature the document could still carry, so a counterparty running a
+	// misconfigured or malicious DCS is caught here; a signature applied to an
+	// already-signed artifact is judged from the ceremony it was made under,
+	// which is where its authority is retained instead.
 	contract, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not read contract data: %w", err)
 	}
+	attributed := map[string]bool{}
 	if contract.ContractData != nil {
-		findings = append(findings, poaComplianceFindings(*contract.ContractData)...)
+		var documentFindings []string
+		documentFindings, attributed = poaComplianceFindings(*contract.ContractData)
+		findings = append(findings, documentFindings...)
 	}
+	signatures, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not load signatures: %w", err)
+	}
+	appliedFindings, err := appliedSignatureFindings(ctx, tx, h.CeremonyRepo, signatures, attributed)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, appliedFindings...)
 
 	evt := signingmanagementevents.ComplianceValidationEvent{
 		DID:             cmd.DID,

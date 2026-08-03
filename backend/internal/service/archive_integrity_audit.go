@@ -17,6 +17,7 @@ import (
 	"time"
 
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/tsa"
@@ -276,11 +277,11 @@ func (s *processAuditAndCompliancesrvc) evaluateArchiveIntegrityChecks(ctx conte
 	}
 	if strings.TrimSpace(entry.SnapshotCID) == "" {
 		checks["ARCHIVE_IPFS_SNAPSHOT"] = errors.New("snapshot_cid is empty")
-	} else if s.ATrailReader.IPFSClient == nil {
-		checks["ARCHIVE_IPFS_SNAPSHOT"] = errors.New("IPFS client is unavailable")
-	} else if fetched, err := s.ATrailReader.IPFSClient.FetchFile(entry.SnapshotCID); err != nil {
+	} else if s.ATrailReader.Artifacts == nil {
+		checks["ARCHIVE_IPFS_SNAPSHOT"] = errors.New("artifact store is unavailable")
+	} else if fetched, err := s.ATrailReader.Artifacts.Get(ctx, artifactstore.ContractScope(entry.DID), entry.SnapshotCID); err != nil {
 		checks["ARCHIVE_IPFS_SNAPSHOT"] = fmt.Errorf("IPFS snapshot fetch failed: %w", err)
-	} else if hash, err := cwecommand.HashArchiveSnapshot(datatype.JSON(fetched.Data)); err != nil || hash != entry.ContentHash || !jsonSemanticallyEqual(entry.ContractSnapshot, fetched.Data) {
+	} else if hash, err := cwecommand.HashArchiveSnapshot(datatype.JSON(fetched)); err != nil || hash != entry.ContentHash || !jsonSemanticallyEqual(entry.ContractSnapshot, fetched) {
 		checks["ARCHIVE_IPFS_SNAPSHOT"] = errors.New("IPFS snapshot does not match archived DB snapshot and content hash")
 	}
 	archiveEntryID := archiveNotaryEntryID(entry.DID, entry.ContractVersion)

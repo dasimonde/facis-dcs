@@ -21,5 +21,8 @@ persistence:
   size: 8Gi
   accessModes:
     - ReadWriteOnce
+  # Empty uses the cluster default StorageClass. Set an encrypted class per
+  # environment; this volume holds the dcs/hydra/statuslist databases.
+  storageClassName: ""
 
 resources: {}

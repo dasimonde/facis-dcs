@@ -3,7 +3,6 @@ package compiler
 import (
 	"context"
 	"regexp"
-	"sync"
 	"time"
 )
 
@@ -148,10 +147,6 @@ type bmffBox struct {
 	Raw     []byte
 }
 
-type signingMaterial struct {
-	certChainDER [][]byte
-}
-
 const (
 	c2paStoreUUID  = "6332706100110010800000AA00389B71" // c2pa
 	c2paManifUUID  = "63326D6100110010800000AA00389B71" // c2ma
@@ -160,22 +155,6 @@ const (
 	c2paClmUUID    = "6332636C00110010800000AA00389B71" // c2cl
 	c2paSigUUID    = "6332637300110010800000AA00389B71" // c2cs
 	cborUUID       = "63626F7200110010800000AA00389B71" // cbor
-)
-
-const (
-	envOntologyBaseURL = "DCS_PDF_CORE_ONTOLOGY_BASE_URL"
-	// envX5ChainPEM / envX5ChainPEMFile carry the dev CA leaf certificate whose
-	// public key matches the backend's dcs-c2pa token key. pdf-core embeds it in
-	// the COSE_Sign1 protected header as the RFC 9360 x5chain; it holds no private
-	// key — the DCS backend signs the Sig_structure and posts it back.
-	envX5ChainPEM     = "DCS_PDF_CORE_C2PA_X5CHAIN_PEM"
-	envX5ChainPEMFile = "DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE"
-)
-
-var (
-	signingMaterialOnce   sync.Once
-	signingMaterialCached signingMaterial
-	signingMaterialErr    error
 )
 
 // startXrefPattern captures the byte offset in a trailer's startxref keyword.

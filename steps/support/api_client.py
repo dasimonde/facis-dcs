@@ -46,6 +46,14 @@ def contract_negotiate_url(context) -> str:
     return f"{context.base_url}/contract/negotiate"
 
 
+def contract_accept_offer_url(context) -> str:
+    """Accepting an INBOUND offer as-is (backend/design/contract_workflow_engine.go
+    accept_offer): mints the accepting instance's negotiation task for the
+    offer's round and moves OFFERED -> NEGOTIATION. Distinct from
+    /contract/respond, which decides one already-proposed change request."""
+    return f"{context.base_url}/contract/accept-offer"
+
+
 def contract_negotiation_draft_url(context, did: str = None) -> str:
     """PUT saves to the bare path; GET/DELETE address the caller's draft by
     contract DID (backend/design/contract_workflow_engine.go
@@ -145,6 +153,13 @@ def archive_delete_url(context) -> str:
     return f"{context.base_url}/archive/delete"
 
 
+def archive_erasure_status_url(context) -> str:
+    """GET /archive/erasure-status?did= (backend/design/contract_storage_archive.go
+    erasure_status): local CEK shred state plus the per-peer erase-handshake
+    ledger for one contract."""
+    return f"{context.base_url}/archive/erasure-status"
+
+
 def archive_annotate_url(context) -> str:
     return f"{context.base_url}/archive/annotate"
 
@@ -155,6 +170,37 @@ def signature_view_url(context) -> str:
 
 def pac_audit_url(context) -> str:
     return f"{context.base_url}/pac/audit"
+
+
+def pac_audit_timeline(response) -> list[dict]:
+    """The DCS-procured audit entries of one POST /pac/audit response.
+
+    /pac/audit answers with a single external-audit-executor run envelope
+    (backend/design/process_audit_and_compliance.go, PACExternalAuditResponse),
+    not with a list of per-scope trails: `findings` is the executor's verdict
+    and `timeline` is the evidence the DCS itself gathered and submitted.
+    Entries carry their own `did`, so the per-resource grouping the executor
+    request uses is not reproduced here.
+    """
+    body = response.json()
+    assert isinstance(body, dict) and body.get("audit_id"), (
+        f"Expected an executor-run audit envelope from /pac/audit, got: {body!r}"
+    )
+    return [entry for entry in (body.get("timeline") or []) if isinstance(entry, dict)]
+
+
+def pac_checkpoint_head_url(context) -> str:
+    return f"{context.base_url}/pac/audit/checkpoint/head"
+
+
+def pac_checkpoint_proof_url(context, entry_cid: str) -> str:
+    return f"{context.base_url}/pac/audit/checkpoint/proof/{entry_cid}"
+
+
+def admin_hsm_keys_url(context) -> str:
+    """GET /admin/hsm-keys (backend/design/key_inventory.go): the read-only
+    HSM key inventory for the Sys. Administrator."""
+    return f"{context.base_url}/admin/hsm-keys"
 
 
 def pac_report_url(context) -> str:
@@ -186,6 +232,13 @@ def contract_peer_pdf_url(context) -> str:
 
 def contract_peer_provenance_url(context) -> str:
     return f"{context.base_url}/peer/contracts/provenance"
+
+
+def contract_peer_settlement_url(context) -> str:
+    """POST /peer/contracts/settlement (post_settlement,
+    backend/design/dcs_to_dcs.go): where a peer deposits its signed statement
+    that it settled a named version of a contract this instance holds."""
+    return f"{context.base_url}/peer/contracts/settlement"
 
 
 def signature_prepare_url(context) -> str:
@@ -385,3 +438,19 @@ def contract_export_url(context, did: str) -> str:
 
 def template_export_url(context, did: str) -> str:
     return f"{context.base_url}/template/export/{did}"
+
+
+# sh:shapesGraph is SHACL's multi-valued data-graph -> shapes-graph link
+# (ADR-8): a document declares the canonical hub shapes first and, when its
+# data objects are modelled against registered SHACL libraries (ADR-23), one
+# further anchor per library. Steps asserting the pin read the canonical one.
+
+def hub_shapes_anchors(document: dict) -> list:
+    declared = document.get("sh:shapesGraph")
+    entries = declared if isinstance(declared, list) else [declared]
+    anchors = []
+    for entry in entries:
+        anchor = entry.get("@id") if isinstance(entry, dict) else entry
+        if isinstance(anchor, str) and "/semantic/shapes/" in anchor:
+            anchors.append(anchor)
+    return anchors

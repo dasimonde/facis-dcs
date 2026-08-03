@@ -34,7 +34,11 @@ trap cleanup EXIT
 
 BDD_PUBLIC_ORIGIN="${BDD_PUBLIC_ORIGIN:-http://localhost:18080}"
 export BDD_PUBLIC_ORIGIN
-export STATUSLIST_SERVICE_URL="${STATUSLIST_SERVICE_URL:-${BDD_PUBLIC_ORIGIN}/statuslist}"
+# The status list every BDD credential names, served and signed by this
+# release's ORCE issuer (ADR-34). It has to be the URL the BACKEND fetches,
+# because the verifier requires the token's sub to equal the credential's URI —
+# the ingress origin is reachable from both the host and the cluster.
+export ISSUER_BASE_URL="${ISSUER_BASE_URL:-${BDD_PUBLIC_ORIGIN}/issuer}"
 
 # BDD_DCS_BASE_URL_A / _B: the two-instance (@two-instance) peer-trust
 # scenarios (steps/peer_trust/dcs_peer_trust_steps.py) address instance A and
@@ -359,6 +363,13 @@ export BDD_ORCE_ARCHIVE_NOTARY_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive-audit-events.jsonl"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN="$ORCE_TOKEN"
 export BDD_ORCE_AUDIT_CONTROL_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit-executor/test"
+# The reference executor endpoint itself, reached through the same port-forward
+# as its control seam above. Its ingress-relative fallback (<origin>/orce/...)
+# cannot be used: the DCS Ingress claims the /orce prefix on the same host for
+# the webhook platform (backend/cmd/dcs/http.go mounts /orce/ on the service
+# root), so an ingress-addressed /orce/audit/run is answered by the DCS mux
+# with "404 page not found" and never reaches Node-RED.
+export BDD_ORCE_AUDIT_EXECUTOR_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit/run"
 export BDD_ORCE_NAMESPACE="$K8S_NAMESPACE"
 export BDD_ORCE_DEPLOYMENT="$ORCE_DEPLOYMENT"
 export BDD_KUBECTL="$KUBECTL_BIN"
@@ -404,18 +415,25 @@ echo "ORCE contract-target flow is reachable (HTTP $orce_code); BDD_ORCE_TARGET_
 source "$VENV_PATH/bin/activate"
 export BDD_DCS_BASE_URL
 
-echo "Checking statuslist for BDD at $STATUSLIST_SERVICE_URL"
-python "$PWD/scripts/ensure_statuslist_for_bdd.py"
+echo "Checking the issuer status list at $ISSUER_BASE_URL"
+python "$PWD/scripts/check_status_list.py"
 
 export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable"
 
 # Canonical bdd-executor integration requires the package in the active environment.
 python -c 'import eu.xfsc.bdd.core' >/dev/null
 
-# Isolated-stack features (clean-DB assumptions, component restarts) run in
-# their dedicated targets, not the shared full-suite stack. Callers that DO
-# provide the isolation (run_bdd_audit_kind_once) override ARG_BDD_TAGS.
-EXTRA_ARGS=(${ARG_BDD_TAGS---tags=-isolated_stack})
+# @isolated_stack scenarios arrange their own isolation (own namespace, own
+# Helm release) inside the same cluster, so they belong in the sequential
+# full-suite pass. The suite therefore runs unfiltered by default; a caller
+# that wants a subset (run_bdd_audit_kind_once) passes ARG_BDD_TAGS.
+# Note ARG_BDD_TAGS arrives from the Makefile recipe as set-but-empty, so the
+# test must be on emptiness, not on being unset.
+EXTRA_ARGS=()
+if [[ -n "${ARG_BDD_TAGS:-}" ]]; then
+  # shellcheck disable=SC2206
+  EXTRA_ARGS+=(${ARG_BDD_TAGS})
+fi
 if [[ -n "${ARG_BDD:-}" ]]; then
   # shellcheck disable=SC2206
   EXTRA_ARGS+=(${ARG_BDD})

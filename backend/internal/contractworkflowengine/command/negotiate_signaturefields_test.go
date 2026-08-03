@@ -38,7 +38,7 @@ func TestSeedSignatureFieldsDistinctDIDs(t *testing.T) {
 	raw, err := datatype.NewJSON(map[string]any{"@id": "urn:contract:1", "@type": "dcs:Contract"})
 	require.NoError(t, err)
 
-	seeded, changed, err := seedSignatureFields(raw, []string{"did:web:origin", "did:web:peer"})
+	seeded, changed, err := SeedSignatureFields(raw, []string{"did:web:origin", "did:web:peer"})
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -57,7 +57,7 @@ func TestSeedSignatureFieldsSingleInstance(t *testing.T) {
 	raw, err := datatype.NewJSON(map[string]any{"@id": "urn:contract:1", "@type": "dcs:Contract"})
 	require.NoError(t, err)
 
-	seeded, changed, err := seedSignatureFields(raw, []string{"did:web:solo"})
+	seeded, changed, err := SeedSignatureFields(raw, []string{"did:web:solo"})
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -73,12 +73,12 @@ func TestSeedSignatureFieldsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 
 	dids := []string{"did:web:origin", "did:web:peer"}
-	firstRun, changed, err := seedSignatureFields(raw, dids)
+	firstRun, changed, err := SeedSignatureFields(raw, dids)
 	require.NoError(t, err)
 	require.True(t, changed)
 	first := signatureFieldsOf(t, firstRun)
 
-	secondRun, changed, err := seedSignatureFields(firstRun, dids)
+	secondRun, changed, err := SeedSignatureFields(firstRun, dids)
 	require.NoError(t, err)
 	require.False(t, changed)
 
@@ -105,7 +105,7 @@ func TestSeedSignatureFieldsExplicitDeclarationWins(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	seeded, changed, err := seedSignatureFields(raw, []string{"did:web:origin", "did:web:peer"})
+	seeded, changed, err := SeedSignatureFields(raw, []string{"did:web:origin", "did:web:peer"})
 	require.NoError(t, err)
 	require.False(t, changed)
 

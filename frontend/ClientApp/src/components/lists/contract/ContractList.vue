@@ -4,7 +4,7 @@ import { computed, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'v
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import Pagination from '@/components/Pagination.vue'
 import { ROUTES } from '@/router/router'
-import { useContractsStore } from '@/stores/contracts-store.ts'
+import { useContractsStore } from '@/stores/contracts-store'
 import { useContractStateFilterStore } from '@/stores/state-filter-store'
 import { contractStates } from '@/types/contract-state'
 import { compareValues } from '@/utils/comparison'

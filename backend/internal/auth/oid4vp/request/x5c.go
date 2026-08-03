@@ -11,11 +11,13 @@ import (
 	"digital-contracting-service/internal/base/identity"
 )
 
-// X5CSigner signs OpenID4VP Document-Retrieval request objects (JAR) with the
-// DCS's own DID/hostname certificate chain in the header (x5c) rather than a
-// bare jwk. client_id_scheme=x509_san_dns requires this: a real wallet
-// resolves trust from the leaf certificate's SAN — which must equal
-// client_id — not from an out-of-band key lookup keyed by kid (docretrieval.go).
+// X5CSigner signs every OpenID4VP request object (JAR) this deployment issues
+// — login, PID, the signing ceremony's identity presentation and its
+// Document-Retrieval request — with the DCS's own DID/hostname certificate
+// chain in the header (x5c) rather than a bare jwk. The x509_san_dns client
+// identifier requires this: a real wallet resolves trust from the leaf
+// certificate's SAN — which must equal client_id — not from an out-of-band key
+// lookup keyed by kid, and a bare jwk anchors to nothing it knows.
 // It reuses the same HSM-backed key and eIDAS-shaped certificate chain
 // already published at /.well-known/did.json and used for DCS-to-DCS JAdES
 // sync (jades.Sign) — the DCS attesting as itself, never as a contracting party.
@@ -29,23 +31,36 @@ func NewX5CSigner(did *identity.DIDDocument) (*X5CSigner, error) {
 	if did == nil {
 		return nil, fmt.Errorf("did document is required for x5c JAR signing")
 	}
-	if len(did.VerificationMethod) == 0 {
-		return nil, fmt.Errorf("did document has no verification method")
+	method := did.SigningMethod()
+	if method == nil {
+		return nil, fmt.Errorf("did document is not bound to a signer")
 	}
-	if len(did.VerificationMethod[0].PublicKeyJWK.X5C) == 0 {
-		return nil, fmt.Errorf("did document carries no x5c certificate chain")
+	if len(method.PublicKeyJWK.X5C) == 0 {
+		return nil, fmt.Errorf("verification method %q carries no x5c certificate chain", method.ID)
 	}
 	return &X5CSigner{did: did}, nil
 }
 
-// ClientID returns the DNS hostname the signer's own certificate identifies
-// (VerifyEIDASCertificate already asserts the leaf matches it) — the
-// client_id an x509_san_dns request object must declare.
+// ClientID returns the complete OpenID4VP client identifier every request
+// object this signer signs must declare — prefix and the DNS hostname the
+// signer's own certificate identifies (VerifyEIDASCertificate already asserts
+// the leaf matches it). It is the sole source of that identifier, so the deep
+// link, the identity request object, the Document-Retrieval request object and
+// the audience a presentation is checked against cannot name the verifier
+// differently.
 func (s *X5CSigner) ClientID() (string, error) {
 	if s == nil || s.did == nil {
 		return "", fmt.Errorf("x5c signer is not configured")
 	}
-	return s.did.GetHostname()
+	hostname, err := s.did.GetHostname()
+	if err != nil {
+		return "", err
+	}
+	clientID := X509SANDNSClientID(hostname)
+	if clientID == "" {
+		return "", fmt.Errorf("did document hostname %q carries no dns name", hostname)
+	}
+	return clientID, nil
 }
 
 // SignAuthorizationRequestJWT returns a compact oauth-authz-req+jwt signed by
@@ -55,9 +70,14 @@ func (s *X5CSigner) SignAuthorizationRequestJWT(claims jwt.MapClaims) (string, e
 	if s == nil || s.did == nil {
 		return "", fmt.Errorf("x5c signer is not configured")
 	}
-	kid := s.did.VerificationMethod[0].ID
-	x5c := []string(s.did.VerificationMethod[0].PublicKeyJWK.X5C)
-	extraHeaders := map[string]any{"x5c": x5c}
+	// kid and chain both describe the key that actually signs below: the method
+	// the document publishes this instance's signer as.
+	method := s.did.SigningMethod()
+	if method == nil {
+		return "", fmt.Errorf("did document is not bound to a signer")
+	}
+	kid := method.ID
+	extraHeaders := map[string]any{"x5c": []string(method.PublicKeyJWK.X5C)}
 
 	return signES256JWT(kid, claims, extraHeaders, func(signingInput string) ([]byte, error) {
 		der, err := s.did.Sign([]byte(signingInput))
@@ -78,22 +98,25 @@ const X509SANDNSClientPrefix = "x509_san_dns"
 // read as the "pre-registered" prefix, which means "you already know me out of
 // band" and is refused by any wallet that has no such prior arrangement.
 func X509SANDNSClientID(hostname string) string {
-	host := strings.TrimSpace(hostname)
-	// Strip any prefix first: what follows it is the name, and the prefix's own
-	// colon must not be mistaken for a port separator below.
-	host = strings.TrimPrefix(host, X509SANDNSClientPrefix+":")
-	if host == "" {
-		return ""
-	}
-	// A dNSName SAN holds a name, never a port, so an identifier carrying one
-	// can match no certificate. Deployments reached on a non-default port —
-	// dev and the test cluster — would otherwise claim a hostname their own
-	// certificate cannot back, and a wallet refuses exactly that.
-	if idx := strings.LastIndex(host, ":"); idx > 0 {
-		host = host[:idx]
-	}
+	host := dnsNameOf(hostname)
 	if host == "" {
 		return ""
 	}
 	return X509SANDNSClientPrefix + ":" + host
+}
+
+// dnsNameOf reduces a hostname, or an already-rendered client identifier, to
+// the bare dNSName a certificate SAN can hold. A dNSName holds a name, never a
+// port, so an identifier carrying one can match no certificate: deployments
+// reached on a non-default port — dev and the test cluster — would otherwise
+// claim a hostname their own certificate cannot back, and a wallet refuses
+// exactly that.
+func dnsNameOf(hostname string) string {
+	// Strip any prefix first: what follows it is the name, and the prefix's own
+	// colon must not be mistaken for a port separator below.
+	host := strings.TrimPrefix(strings.TrimSpace(hostname), X509SANDNSClientPrefix+":")
+	if idx := strings.LastIndex(host, ":"); idx > 0 {
+		host = host[:idx]
+	}
+	return host
 }

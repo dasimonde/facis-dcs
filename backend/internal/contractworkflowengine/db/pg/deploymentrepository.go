@@ -71,16 +71,16 @@ func (r *PostgresDeploymentRepo) MarkDispatchFailed(ctx context.Context, tx *sql
 
 func (r *PostgresDeploymentRepo) CreateKPI(ctx context.Context, tx *sqlx.Tx, data db.ContractKPI) error {
 	statement := `
-        INSERT INTO contract_kpis (did, correlation_id, metric, value, observed_at, violation)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO contract_kpis (did, correlation_id, metric, value, observed_at, verdict, rule_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
     `
-	_, err := tx.ExecContext(ctx, statement, data.DID, data.CorrelationID, data.Metric, data.Value, data.ObservedAt, data.Violation)
+	_, err := tx.ExecContext(ctx, statement, data.DID, data.CorrelationID, data.Metric, data.Value, data.ObservedAt, data.Verdict, data.RuleID)
 	return err
 }
 
 func (r *PostgresDeploymentRepo) ReadKPIsByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractKPI, error) {
 	query := `
-        SELECT id, did, correlation_id, metric, value, observed_at, violation
+        SELECT id, did, correlation_id, metric, value, observed_at, verdict, rule_id
         FROM contract_kpis
         WHERE did = $1
         ORDER BY observed_at ASC, id ASC

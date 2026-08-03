@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applySession, type DcsRole, expect, mintSession, test } from './dcs-test'
-import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_STATUSLIST_URL } from '../playwright.config'
+import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_ISSUER_BASE_URL } from '../playwright.config'
 import type { Browser, Page } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -73,14 +73,12 @@ export async function submitReviewApproveTemplate(
     const verified = page.waitForResponse(
       (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Verify', exact: true }).click()
-    await verified
-    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
     const forwarded = page.waitForResponse(
       (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await verified
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
     await forwarded
   })
 
@@ -384,7 +382,10 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await page
+      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
     await forwarded
   })
 
@@ -483,7 +484,10 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await page
+      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
     await forwarded
   })
 
@@ -508,8 +512,18 @@ async function startCeremonyAndPrepareDocument(
   await row.getByRole('link', { name: /Open/ }).click()
   await expect(page).toHaveURL(/\/signing\/.+/)
 
+  // The badge follows the VERDICT, not the call completing
+  // (SecureContractViewerView.verify), so an absent badge is a failed integrity
+  // check rather than a slow one, and step 3 stays closed behind it. Capture the
+  // verdict the viewer read so the failure names the mismatch and its findings
+  // instead of reporting a missing element.
+  const verified = page.waitForResponse((r) => r.url().includes('/signature/verify'), { timeout: 60_000 })
   await page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await expect(page.getByText('Verified', { exact: true })).toBeVisible()
+  const verifyResponse = await verified
+  await expect(
+    page.getByText('Verified', { exact: true }),
+    `the integrity check of ${contractDid} did not pass, so the ceremony stays closed: HTTP ${verifyResponse.status()} ${await verifyResponse.text().catch(() => '')}`,
+  ).toBeVisible()
 
   const ceremonyStarted = page.waitForResponse(
     (r) => r.url().includes('/signature/request') && r.request().method() === 'POST',
@@ -537,7 +551,7 @@ async function startCeremonyAndPrepareDocument(
     cwd: repoRoot,
     env: {
       ...process.env,
-      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      ISSUER_BASE_URL: E2E_ISSUER_BASE_URL,
       BDD_DCS_BASE_URL: E2E_API_BASE,
       E2E_SIGNATORY: E2E_SIGNATORY_NAME,
     },

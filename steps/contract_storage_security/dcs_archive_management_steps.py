@@ -11,6 +11,7 @@ import time
 from behave import given, then, when
 
 from steps.support.api_client import (
+    pac_audit_timeline,
     pac_audit_url,
     archive_annotate_url,
     archive_audit_url,
@@ -163,13 +164,10 @@ def step_then_archive_deletion_audited(context, name):
             headers=headers,
         )
         assert resp.status_code == 200, f"Archive audit query failed: {resp.status_code} {resp.text}"
-        entries = OrceAuditControlService.evidence_groups(context, "archive")
         event_types_for_did = [
             str(entry.get("event_type", "")).upper()
-            for scope_result in entries
-            if isinstance(scope_result, dict)
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict) and entry.get("did") == did
+            for entry in pac_audit_timeline(resp)
+            if entry.get("did") == did
         ]
         if "DELETE_ARCHIVED_CONTRACT" in event_types_for_did:
             return
@@ -389,13 +387,10 @@ def step_then_archive_annotation_audited(context, name):
             headers=headers,
         )
         assert resp.status_code == 200, f"Archive audit query failed: {resp.status_code} {resp.text}"
-        entries = OrceAuditControlService.evidence_groups(context, "archive")
         event_types_for_did = [
             str(entry.get("event_type", "")).upper()
-            for scope_result in entries
-            if isinstance(scope_result, dict)
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict) and entry.get("did") == did
+            for entry in pac_audit_timeline(resp)
+            if entry.get("did") == did
         ]
         if "ANNOTATE_ARCHIVED_CONTRACT" in event_types_for_did:
             return

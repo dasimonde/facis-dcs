@@ -1,10 +1,9 @@
 {{- if .Values.pkcs11.provisioning.enabled }}
 # Provisions the co-deployed SoftHSM2 software token (dev/staging/CI only, never
 # a production HSM): initializes the token, generates the five DCS ECDSA P-256
-# keys, and issues the C2PA x5chain bound to the dcs-c2pa token key, published as
-# a Secret that pdf-core mounts (pdf-core signs COSE bytes via the backend's
-# PKCS#11 key and only needs the public x5chain, DCS-IR-HI-01). Idempotent; runs
-# on every install/upgrade after the token PVC exists.
+# keys, and issues the C2PA x5chain bound to the dcs-c2pa token key onto the
+# shared token volume, where the backend reads it (DCS-IR-HI-01). Idempotent;
+# runs on every install/upgrade after the token PVC exists.
 {{- if .Values.pkcs11.provisioning.publishSecrets }}
 apiVersion: v1
 kind: ServiceAccount
@@ -113,10 +112,15 @@ spec:
               LABEL={{ .Values.pkcs11.tokenLabel | quote }}
               MODULE={{ .Values.pkcs11.modulePath | quote }}
               SO_PIN={{ .Values.pkcs11.provisioning.soPin | quote }}
-              SECRET_NAME={{ include "digital-contracting-service.hsmX5ChainSecretName" . | quote }}
               IDENTITY_SECRET_NAME={{ include "digital-contracting-service.identitySecretName" . | quote }}
               DID_HOSTNAME={{ include "digital-contracting-service.didHostname" . | quote }}
               CRL_URL={{ printf "http://%s:%v%s/crl/dcs-c2pa.crl" (include "digital-contracting-service.fullname" .) .Values.service.port (include "digital-contracting-service.apiPath" .) | quote }}
+              # The origin this deployment serves its status list under and the
+              # did:web it issues credentials as. Both go into the leaf's SANs:
+              # a verifier refuses a status list whose leaf does not name the
+              # issuer the token claims to come from (ADR-34).
+              STATUS_LIST_ISSUER_URL={{ include "digital-contracting-service.statusListIssuerURL" . | quote }}
+              STATUS_LIST_ISSUER_DID={{ include "digital-contracting-service.issuerDID" . | quote }}
 
               /app/scripts/hsm-provision.sh "$TOKEN_DIR" "$LABEL" "$PKCS11_PIN" "$SO_PIN" "$MODULE"
 
@@ -124,8 +128,15 @@ spec:
               # stays a stable trust anchor across upgrades. No second leaf for
               # a contract-signing cert: the DCS holds no contract-signing key
               # (ADR-12/ADR-20) — only the C2PA claim-signing chain is provisioned.
+              if [ -z "$STATUS_LIST_ISSUER_DID" ]; then
+                STATUS_LIST_ISSUER_DID="did:web:$(printf '%s' "$DID_HOSTNAME" | sed 's/:/%3A/g')"
+              fi
+              if [ -z "$STATUS_LIST_ISSUER_URL" ]; then
+                STATUS_LIST_ISSUER_URL="http://${DID_HOSTNAME}"
+              fi
               /app/scripts/c2pa-cert-provision.sh "$TOKEN_DIR" "$LABEL" "$PKCS11_PIN" \
-                "$TOKEN_DIR/c2pa-x5chain.pem" "$MODULE" "$CRL_URL"
+                "$TOKEN_DIR/c2pa-x5chain.pem" "$MODULE" "$CRL_URL" \
+                "$STATUS_LIST_ISSUER_URL" "$STATUS_LIST_ISSUER_DID"
 
               # Derive did.json from the dcs-did token key with the same /app/gendid
               # tool dev-stack.sh uses natively (identity.NewDIDDocument is fatal on
@@ -160,8 +171,8 @@ spec:
               {{- if not .Values.pkcs11.provisioning.publishSecrets }}
               # publishSecrets=false: every artifact above already lives on the
               # shared token volume (did.json, c2pa-x5chain.pem), which the
-              # backend and pdf-core mount directly. Touching the Kubernetes API
-              # here is what would need RBAC, so we stop.
+              # backend mounts directly. Touching the Kubernetes API here is
+              # what would need RBAC, so we stop.
               echo "hsm-provision done (artifacts on ${TOKEN_DIR}, Secret publication disabled)."
               exit 0
               {{- end }}
@@ -189,22 +200,6 @@ spec:
                   echo "Created secret ${name}."
                 fi
               }
-
-              # Publish the C2PA x5chain as a Secret for pdf-core via the K8s API.
-              x5chain_json="$(jq -Rs . < "$TOKEN_DIR/c2pa-x5chain.pem")"
-              x5chain_payload="$(cat <<EOF
-              {
-                "apiVersion": "v1",
-                "kind": "Secret",
-                "metadata": { "name": "${SECRET_NAME}" },
-                "type": "Opaque",
-                "stringData": {
-                  "x5chain-pem": ${x5chain_json}
-                }
-              }
-              EOF
-              )"
-              put_secret "$SECRET_NAME" "$x5chain_payload"
 
               # Publish did.json as the identity Secret (identitySecretName
               # helper — <fullname>-identity, unique per release so two BDD

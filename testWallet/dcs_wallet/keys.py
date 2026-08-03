@@ -116,12 +116,44 @@ def jwk_from_did_jwk(did: str) -> dict[str, Any]:
     return public_jwk(raw)
 
 
-def build_trust_json(*, issuer_public: dict[str, Any], issuer_dids: list[str], vcts: list[str]) -> dict[str, Any]:
+def build_trust_json(
+    *,
+    issuer_public: dict[str, Any],
+    issuer_dids: list[str],
+    vcts: list[str],
+    x5c_issuers: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a trust document in the schema LoadTrustConfig accepts (ADR-31).
+
+    An entry states which purposes the issuer is granted, which organizations it
+    may attest, and how its key is resolved. Emitting the older bare-jwks form
+    produces a document the backend refuses outright.
+
+    The dev fixture wildcards organizations because its issuers stand in for
+    every party the BDD suite invents; a real deployment names them. peer_dynamic
+    is off: `peer` is checked when a signing ceremony verifies a Power of
+    Attorney, so trusting an unlisted issuer there is self-attestation.
+    """
     issuer_key = public_key_material(issuer_public)
     issuers: dict[str, Any] = {}
     for did in issuer_dids:
-        issuers[did] = {"jwks": {"keys": [issuer_key]}}
-    return {"vcts": list(dict.fromkeys(vcts)), "issuers": issuers}
+        issuers[did] = {
+            "purposes": ["login", "peer", "pid"],
+            "organizations": ["*"],
+            "mechanism": "jwks",
+            "jwks": {"keys": [issuer_key]},
+        }
+    # An x5c issuer publishes its key through its certificate chain, verified
+    # against the configured anchors, so it carries no jwks here. It is granted
+    # `pid` alone: an identity document must not grant access, and it names no
+    # organization because a PID attests a person rather than a party.
+    for did in x5c_issuers or []:
+        issuers[did] = {"purposes": ["pid"], "mechanism": "x5c"}
+    return {
+        "vcts": list(dict.fromkeys(vcts)),
+        "peer_dynamic": False,
+        "issuers": issuers,
+    }
 
 
 def load_json(path: Path) -> dict[str, Any]:

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 )
 
 func TestUnauthorizedAccessRisksFlagEachDeniedActorOnce(t *testing.T) {
@@ -64,6 +66,35 @@ func TestUnderperformanceRisksNameMetricAndValue(t *testing.T) {
 	require.True(t, risks[0].DetectedAt.Equal(checkedAt))
 }
 
+// ADR-33: a verdict is a conclusion about one named rule of the signed
+// contract, and the alert is where that attribution reaches a human. Without
+// the rule @id an operator is told a contract underperforms but not which term
+// of it was breached.
+func TestUnderperformanceRisksNameTheViolatedRule(t *testing.T) {
+	risks := underperformanceRisksFromKPIs([]violatingKPI{{
+		DID:    "did:web:example:contract:1",
+		Metric: "coverage",
+		Value:  "80",
+		RuleID: "urn:uuid:rule-availability",
+	}}, time.Now().UTC())
+
+	require.Len(t, risks, 1)
+	require.Contains(t, risks[0].Detail, "urn:uuid:rule-availability")
+}
+
+// Two rules breached on the same metric are two findings, not one: the risk
+// register keys on a hash of the detail text (ADR-32), so the rule @id is what
+// keeps the second breach from being swallowed as already reported.
+func TestUnderperformanceRisksDistinguishRulesOnTheSameMetric(t *testing.T) {
+	risks := underperformanceRisksFromKPIs([]violatingKPI{
+		{DID: "did:web:example:contract:2", Metric: "coverage", Value: "80", RuleID: "urn:uuid:rule-a"},
+		{DID: "did:web:example:contract:2", Metric: "coverage", Value: "80", RuleID: "urn:uuid:rule-b"},
+	}, time.Now().UTC())
+
+	require.Len(t, risks, 2)
+	require.NotEqual(t, risks[0].Detail, risks[1].Detail)
+}
+
 // Each breaching report is its own alert: collapsing them would hide that a
 // contract is missing several targets.
 func TestUnderperformanceRisksOnePerReport(t *testing.T) {
@@ -82,6 +113,26 @@ func TestUnderperformanceRisksSkipReportsWithoutContractDID(t *testing.T) {
 
 func TestUnderperformanceRisksEmptyWhenNothingViolating(t *testing.T) {
 	require.Empty(t, underperformanceRisksFromKPIs(nil, time.Now().UTC()))
+}
+
+// The sweep reads a reported verdict, and only the target's own "violated" is
+// a breach. "not_evaluated" is the outcome ADR-33 makes first-class: the sweep
+// must not select it as a violation, and must not fold it in with "satisfied"
+// either — an unobserved rule is not a rule found in order. The predicate is
+// where both hold, so it is asserted here rather than in the mapper, which only
+// ever sees rows this query already selected.
+func TestUnderperformanceSweepSelectsOnlyTheReportedViolation(t *testing.T) {
+	require.Equal(t, cwedb.KPIVerdictViolated, breachVerdict)
+	require.NotEqual(t, cwedb.KPIVerdictSatisfied, breachVerdict)
+	require.NotEqual(t, cwedb.KPIVerdictNotEvaluated, breachVerdict)
+
+	require.Contains(t, violatingKPIQuery, "WHERE verdict = $1")
+	require.NotContains(t, violatingKPIQuery, cwedb.KPIVerdictSatisfied)
+	require.NotContains(t, violatingKPIQuery, cwedb.KPIVerdictNotEvaluated)
+	// The dropped boolean column, whose false meant "not violated OR not
+	// evaluated" — selecting on it again would make the two invisible anew.
+	require.NotContains(t, violatingKPIQuery, "violation")
+	require.Contains(t, violatingKPIQuery, "rule_id")
 }
 
 // A deployment the target never received is the failure an operator most needs

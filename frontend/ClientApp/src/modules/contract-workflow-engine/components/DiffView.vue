@@ -6,7 +6,7 @@ import {
   type ContractPlainTextBlock,
   useContractPlainTextConverter,
 } from '@contract-workflow-engine/composables/useContractPlainTextConverter'
-import type { ContractData } from '@/models/contract-data'
+import type { ContractData } from '@/models/contract/contract-data'
 
 const props = withDefaults(
   defineProps<{

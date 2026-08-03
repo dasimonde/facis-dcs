@@ -10,6 +10,7 @@ from behave import given, then, when
 from steps.support.api_client import (
     contract_retrieve_url,
     get_with_headers,
+    pac_audit_timeline,
     pac_audit_url,
     pac_monitor_url,
     pac_report_url,
@@ -193,6 +194,58 @@ def step_then_flagged_risk_audited(context, name):
     raise AssertionError(
         f"Expected a PAC_COMPLIANCE_RISK audit event for contract '{name}' (did={did}) "
         f"in the PROCESS_AUDIT_AND_COMPLIANCE trail, got entries: {found}"
+    )
+
+
+@then('the PAC audit trail records exactly one "{risk_type}" risk for contract "{name}"')
+def step_then_risk_audited_once(context, risk_type, name):
+    """DCS-FR-PACM-02: a violation alerts when it is detected, not on every
+    sweep that still sees it. The sweep response keeps listing the risk for as
+    long as it holds — that answers "what is wrong now" — but the audit trail
+    and the webhook alert fire once per incident (querymonitor.go reconcile,
+    backed by compliance_risk_findings).
+
+    Anchoring is async (outbox -> TSA -> IPFS), so a duplicate could simply not
+    have landed yet: wait for the first event, then let the trail settle before
+    counting, or this would pass without proving anything.
+    """
+    import time  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    headers = AuthService.get_headers_for_roles(["Auditor"])
+
+    def risk_events():
+        resp = post_json(
+            context,
+            pac_audit_url(context),
+            {"scope": "PROCESS_AUDIT_AND_COMPLIANCE", "justification": "BDD risk dedup audit re-trigger"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
+        return [
+            entry
+            for entry in pac_audit_timeline(resp)
+            if entry.get("event_type") == "PAC_COMPLIANCE_RISK"
+            and entry.get("did") == did
+            and (entry.get("event_data") or {}).get("risk_type") == risk_type
+        ]
+
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        if risk_events():
+            break
+        time.sleep(2)
+    else:
+        raise AssertionError(
+            f"No PAC_COMPLIANCE_RISK audit event for contract '{name}' (did={did}) with "
+            f"risk_type '{risk_type}' appeared within 90s"
+        )
+
+    time.sleep(15)
+    events = risk_events()
+    assert len(events) == 1, (
+        f"Expected exactly one PAC_COMPLIANCE_RISK event for contract '{name}' (did={did}) "
+        f"with risk_type '{risk_type}' after two sweeps, got {len(events)}: {events}"
     )
 
 

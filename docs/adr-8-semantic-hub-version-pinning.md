@@ -37,7 +37,12 @@ enforced — the hub was a write-only ledger.
   - `"sh:shapesGraph"` (`http://www.w3.org/ns/shacl#shapesGraph` — SHACL's
     own data-graph→shapes-graph link) carries the versioned shapes URL
     (`/semantic/shapes/{name}?version=N`) and is the **pin carrier** for
-    revalidation.
+    revalidation. It is multi-valued, as in SHACL: the canonical shapes
+    first, then one anchor per registered SHACL library the document's own
+    data objects are modelled against (ADR-23). A document is validated
+    against exactly the named entries — resolved by name *and* version, not
+    version alone — so an unrelated library someone registered and left
+    active cannot change a verdict.
   - `"dcterms:conformsTo"` (Dublin Core, as used by DCAT/PROF) names the
     versioned validation profile URL
     (`/semantic/profile/{name}?version=N`).
@@ -49,10 +54,11 @@ enforced — the hub was a write-only ledger.
 - **Version pinning**: a document is validated against the hub SHACL shapes
   version that was **active at the document's own creation time**. Anchors
   are written once, at production time, never re-normalized — this ADR
-  makes it load-bearing: `AuditContractContent` parses the pinned version
-  out of the document's own `sh:shapesGraph` anchor
-  (`pinnedHubShapesVersion`) and, when present, revalidates against that
-  exact version via `ShapeSource.ShapesAt`, not whatever is active now.
+  makes it load-bearing: `AuditContractContent` parses the declared entries
+  out of the document's own `sh:shapesGraph` anchors
+  (`declaredShapesGraphs`) and revalidates against exactly those
+  (name, version) hub entries via `ShapeSource.ShapesAt`, not whatever is
+  active now.
   JSON-LD expansion during validation likewise resolves the context version
   pinned in the document's own `@context` URL (`ShapeSource.ContextAt`),
   hermetically (no network fetch). New documents (no existing pin) validate
@@ -115,6 +121,68 @@ enforced — the hub was a write-only ledger.
   (`backend/internal/base/validation/shapesource.go:46-82`,
   `backend/internal/semantichub/shapesource.go:53-80`,
   `backend/internal/processauditandcompliance/workflowgate/workflowgate.go:234-282`).
+- **A contract is pinned to the envelope and to what it declares, nothing
+  else.** `dcs:effectiveShapes` holds the DCS envelope graphs (`facis-dcs`,
+  `clause-catalog`) at the versions active when the contract was created, plus
+  every shape library the contract's own `sh:shapesGraph` names (ADR-23)
+  (`backend/internal/semantichub/semantichub.go` `ResolveEffectiveBundle`,
+  `backend/internal/contractworkflowengine/command/create.go`
+  `effectiveBundleRefs`, `backend/internal/base/validation/documentdata.go`
+  `PinSemanticBundle`). Pinning every registered library instead — which the
+  hub-wide "active shapes" query did — judged a contract against graphs it has
+  no relation to, up to and including one a concurrently running test had just
+  published, and made those graphs part of what its ship had to carry.
+- **A pinned LIBRARY travels with the contract that pins it.** "Hub versions
+  are immutable, so a pinned version is always resolvable" holds within one
+  instance only: a contract pinned to a shape library published on the
+  authoring instance names, on the counterparty, a graph that hub has never
+  held, and its workflow gate blocks every transition on `ErrSchemaNotFound`.
+  The DCS-to-DCS ship therefore carries the libraries the shipped contract's
+  `dcs:effectiveShapes` names (`pinned_shapes` on `post_pdf`,
+  `backend/internal/dcstodcs/pinnedshapes.go`), and the receiver installs the
+  ones it lacks at exactly the pinned version. The ship is the carrier because
+  it is already the authenticated channel (did:web challenge-response, the
+  ADR-19 trust gate, JAdES against the peer's published assertion key); no
+  second federation path is introduced. Fail-closed in four directions, each
+  refusing the exchange rather than degrading a verdict: a library pin neither
+  shipped nor held, shipped content contradicting a version this hub already
+  holds under that name, a shipped entry the contract does not pin, and a
+  shipped entry naming the envelope. Falling back to the receiver's own graph
+  for a library is never an option — two instances would reach different
+  verdicts on the same document.
+- **Peer-supplied content occupies its own namespace, and the envelope is
+  never peer-supplied.** An imported graph is stored under `kind="peer-shapes"`
+  (`backend/migrations/sql/20260739_peer_shapes_kind.sql`,
+  `semantichub.PeerShapesKind`). Everything that answers "what does this
+  instance publish or enforce" reads `kind="shapes"` alone: `Seed`'s
+  latest-version probe, `ResolveEffectiveBundle`, `ActiveShapeLibraryClasses`,
+  and the `/semantic/schema/{register,rollback,retrieve,versions}` endpoints,
+  whose `kind` enum does not admit the peer namespace. So a peer can neither
+  activate a graph here, nor advance the version number `Seed` registers
+  against, nor shadow a library this instance publishes — pinned resolution
+  reads this hub's own entry first and the peer namespace only when it holds
+  none (`semantichub.pinnedShapesContent`).
+
+  The envelope is stricter still: it is this deployment's own invariant — the
+  graph `RequireHubConformance` blocks offer, submit and signing on — not
+  evidence about a contract. It never travels, an inbound entry naming it
+  refuses the ship, and an envelope name never resolves to a peer-written row.
+  Each instance judges the envelope by its own graph, at the pinned version
+  where it holds one and at its active version otherwise. That last fallback is
+  what makes the federation survive genesis skew: two deployments built from
+  different image digests hold different content at the same version number
+  (each seeds its own), so comparing or requiring the peer's envelope would
+  refuse every ship between them — offers, counter-offers, the signed
+  agreement, the `REVOKED` ship DCS-NFR-BR-06 requires the receiver to adopt,
+  and the wrapped CEK — with no repair path in the hub API.
+- **Residual, accepted.** Two instances that independently publish a library
+  under the same name AND the same version number with different content still
+  refuse each other's ships for that contract; unlike the envelope this is an
+  operator-created collision and republishing under a free version resolves it.
+  The pinned validation **profile** (`ProfileAt`) and the pinned **@context**
+  (`ContextAt`) do not travel on `post_pdf`, so a contract pinned to a drifted
+  version of either is still refused on the counterparty; both instances seed
+  identical genesis today, which is why it does not surface.
 - **Decision precedence is `BLOCKED > REVIEW > PASSED`.** A blocking local
   finding prevents dispatch; a failed executor result or finding blocks the
   transition; any review result holds it for a Compliance Officer; only the

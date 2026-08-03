@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted, rolling out (2026-07-25). **Supersedes acceptance-path clauses of
+Accepted; revised 2026-07-29 for the completed one-hop PoA trust and
+cross-instance revalidation baseline. Originally accepted 2026-07-25.
+**Supersedes acceptance-path clauses of
 [ADR-12](adr-12-wallet-driven-signing.md)**: the "possible refinement" framing
 around to-be-signed byte pinning is retracted — it is now a hard requirement,
 implemented — and ADR-12's QES descope (citing SRS §199) is retracted. Builds
@@ -271,22 +273,49 @@ steps, and non-historical docs.
   `VerifyPID`'s status-list check, previously skipped because EUDIPLO PIDs
   carried no status claim, is **re-enabled** — a self-issued dev PID now
   carries a real one, so SM-18 status checks run for real, not vacuously.
-- In dev/test, the PID issuer is **self-issuance** tooling
+- In dev/test, the PID/PoA issuer is **self-issuance** tooling
   (`testWallet/scripts/issue_pid_credentials.py`, mirroring the local signing
   primitives already used for the Power of Attorney credential in
-  `dcs_wallet/issuer.py`), trusted via `backend/config/oid4vp/trust.dev.json`
-  — the **same** dev issuer key/DID the PoA credential already trusts
-  (`did:web:dev.example:issuer:poa`), not a new identity. **This is a
-  dev-edge substitution and must never appear in a production trust store.**
-  A production deployment configures a real PID issuer registry as trust
-  anchors — a configuration change, not a code change; the verification code
-  itself (`VerifyPID`, `sdjwt.VerifyCredentialForPID`) is unchanged and
-  production-shaped either way.
+  `dcs_wallet/issuer.py`). Its x5c chain terminates at the project Dev Root.
+  **This is a dev/demo substitution and must never become an implicit
+  production trust anchor.** The production chart has OID4VP trust disabled,
+  an empty trust-data path and no x5c anchor; only the BDD/BDD2 overlays opt in
+  to the development trust files (`deployment/helm/values.yaml:62-85`,
+  `deployment/helm/values.bdd.yml:73-80`,
+  `deployment/helm/values.bdd2.yml:59-64`). A production deployment supplies
+  its issuer registry and trust anchors as operator configuration; this ADR
+  does not define that profile.
 - Self-issued PIDs' `given_name`/`family_name` are threaded into the test
   wallet's signing certificates as `GIVEN_NAME`/`SURNAME` (item 4's
   groundwork — see `dcs_wallet/signer.py`'s `ensure_signing_material`), so
   the cert↔PID name-match gate has real, aligned data on the happy path, and
   a deliberate mismatch (explicit override) is the negative test.
+
+### 9. One-hop PoA evidence and peer revalidation
+
+The v1 PoA profile is `urn:dcs:poa:v1` with the delegation depth fixed at one
+by ADR-24. An x5c-bearing PoA therefore contains exactly an issuer leaf and a
+self-signed CA root, and that chain must terminate at a separately configured
+trust anchor. Empty trust configuration and untrusted roots fail closed
+(`backend/internal/auth/oid4vp/sdjwt/keys.go:101-167`,
+`backend/internal/auth/oid4vp/sdjwt/payload.go:138-170`). Holder binding,
+the original nonce/audience and live credential status are checked before the
+ceremony is accepted (`backend/internal/auth/oid4vp/verify.go:231-274`,
+`backend/internal/auth/oid4vp/statuslist_verify.go:46-88`).
+
+The signing summary binds the already verified PoA presentation together with
+its original nonce and audience, without embedding PID disclosures
+(`backend/internal/pdfgeneration/provenance/signing_summary.go:12-32`,
+`backend/internal/pdfgeneration/provenance/signing_summary.go:80-96`,
+`backend/internal/signingmanagement/command/apply.go:738-817`). A receiving DCS
+does not trust that assertion merely because the peer transported it. Before
+adopting the contract content-encryption key or persisting synchronization
+provenance, it revalidates the presentation signature, status, holder,
+nonce/audience, issuer-authoritative organization and signing party. Rejection
+creates a traceable PAC trust-gate finding
+(`backend/internal/service/dcs_to_dcs.go:160-184`,
+`backend/internal/service/dcs_to_dcs.go:192-240`,
+`backend/internal/service/dcs_to_dcs.go:245-289`).
 
 ### Long-term validation for archived QES signatures (decided, not deferred)
 
@@ -328,6 +357,10 @@ this decision as its origin.
 - EUDIPLO is not a dependency of this DCS anywhere — build, deploy, docs, or
   test. The self-issuance dev-trust substitution is explicitly and
   permanently marked as dev-only.
+- Peer delivery of a signed acceptance now carries the original PoA
+  presentation context. Missing, altered, stale-status or wrong-party evidence
+  is rejected before peer key material or signature provenance is stored, and
+  the rejection remains auditable.
 - QES contracts are not yet independently verifiable after certificate
   expiry — tracked, not silent (see above).
 - The QES-succeeds BDD happy path needs a mock EU trusted list provisioned
@@ -342,7 +375,8 @@ this decision as its origin.
 | SM-16 (secure key usage; integrity validation upon signing) | Byte pinning + DSS validation + sole-control gate, all before finalize |
 | SM-18 (status/integrity/timestamp validation) | `checkStatusList` re-enabled for PID; DSS validation for the signature itself |
 | SM-26 (Signature Compliance Viewer: signer identity, cert, level, qualification) | `signer_cert_subject`/`signer_cert_serial` recorded on the ceremony; achieved level recorded on the signature |
-| DCS-FR-SM-03/-04 (PoA presented and checked at signing) | Unchanged from ADR-12/UC-14; now carried in the same wallet-presented `vp_token` as the PID |
+| DCS-FR-SM-03/-04 (PoA presented, status-checked and checked again by a receiving peer) | One-hop `urn:dcs:poa:v1` is holder-, nonce-, audience-, issuer-organization- and party-bound; receiver rejection precedes CEK/provenance persistence |
+| DCS-FR-SM-05, DCS-IR-CI-09 (VC/status integration and refresh) | Signed W3C and retained XFSC status formats are normalized; missing, invalid, unknown or unavailable status evidence fails closed |
 
 Not yet covered (see Consequences): archived QES long-term validation
 (B-LT/B-LTA); the QES-succeeds CI happy path pending DSS mock-trust-list

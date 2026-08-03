@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"digital-contracting-service/internal/auth/oid4vp/status"
@@ -13,33 +12,50 @@ import (
 
 var statusListVerifier *status.Verifier
 
-// ConfigureStatusListVerification wires the status-list verifier used by OID4VP.
-func ConfigureStatusListVerification(
-	trustDataPath string,
-	xfscAllowUnsignedFallback bool,
-) error {
-	return configureStatusListVerification(trustDataPath, xfscAllowUnsignedFallback, os.Getenv)
-}
+// StatusListVerifier returns the verifier ConfigureStatusListVerification wired,
+// for the paths outside OID4VP that also have to resolve a credential's status —
+// the C2PA provenance verification, whose lifecycle credential names this
+// deployment's own list (ADR-34). They share this one so an issuer trusted for a
+// presented credential and an issuer trusted for a provenance credential cannot
+// become two different sets. nil until configuration has run, which every caller
+// must treat as "the state is unknown", never as "not revoked".
+func StatusListVerifier() *status.Verifier { return statusListVerifier }
 
-func configureStatusListVerification(
-	trustDataPath string,
-	xfscAllowUnsignedFallback bool,
-	getenv func(string) string,
-) error {
-
+// ConfigureStatusListVerification wires the status-list verifier used by
+// OID4VP, off the trust config already loaded rather than off a second read of
+// the same file. The status-list path used to re-parse the trust document with
+// its own struct, which had no purposes and no organizations fields — so the
+// two paths could disagree about who is trusted without anything saying so.
+func ConfigureStatusListVerification(trustCfg *TrustConfig) error {
 	var trust *status.TrustConfig
-	path := strings.TrimSpace(trustDataPath)
-	if path != "" {
-		cfg, err := status.LoadTrustConfig(path)
+	if trustCfg != nil {
+		bundled := map[string]json.RawMessage{}
+		for issuer, entry := range trustCfg.Issuers {
+			bundled[issuer] = entry.JWKS
+		}
+		cfg, err := status.NewTrustConfig(bundled)
 		if err != nil {
-			return fmt.Errorf("load status list trust config %q: %w", path, err)
+			return fmt.Errorf("status list trust config: %w", err)
+		}
+		// An issuer configured to publish its key by certificate chain bundles
+		// no JWKS, so its status list is verified from the chain the token
+		// carries. Without the anchors here that chain verifies against
+		// nothing and the status list is refused, which is every status list
+		// an x5c issuer signs.
+		cfg.X5CRoots = trustCfg.X5CTrustRoots()
+		// Neither a bundled key nor an anchor means every status list this
+		// deployment ever fetches resolves to no key and is refused. That is a
+		// misconfiguration to report at startup, not one to discover at the
+		// first login. Either alone is enough: our own issuers publish by
+		// certificate and bundle no key at all (ADR-34).
+		if len(cfg.Issuers) == 0 && cfg.X5CRoots == nil {
+			return fmt.Errorf(
+				"status list trust config: no issuer carries a bundled JWKS and no x5c trust anchors are configured, " +
+					"so no status list could be verified")
 		}
 		trust = cfg
 	}
-
-	statusListVerifier = handler.NewVerifier(trust, handler.Options{
-		XFSCAllowUnsignedFallback: xfscAllowUnsignedFallback,
-	})
+	statusListVerifier = handler.NewVerifier(trust, handler.Options{})
 	return nil
 }
 

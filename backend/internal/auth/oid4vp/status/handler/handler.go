@@ -19,9 +19,8 @@ func NewVerifier(trust *status.TrustConfig, opts Options) *status.Verifier {
 			status.MechanismW3CBitstring: &W3CBitstring{Fetcher: client, Trust: trust},
 			status.MechanismIETFToken:    &IETFToken{Fetcher: client, Trust: trust},
 			status.MechanismXFSC: &XFSC{
-				Fetcher:               client,
-				Trust:                 trust,
-				AllowUnsignedFallback: opts.XFSCAllowUnsignedFallback,
+				Fetcher: client,
+				Trust:   trust,
 			},
 		},
 		Policy: status.StrictPolicy{},

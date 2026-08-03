@@ -30,13 +30,13 @@ const eventType = useContractEventType()
         </div>
         <div v-else-if="eventType.isSubmitEvent(audit)" class="flex justify-between">
           <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
-          <div>
+          <div v-if="audit.event_data.new_state">
             Transition:
-            <span class="relative -top-0.5 badge badge-soft badge-xs badge-secondary">
+            <span class="relative -top-0.5 badge badge-soft badge-xs badge-secondary" aria-label="From state">
               {{ toProperCase(audit.event_data.previous_state) }}
             </span>
-            →
-            <span class="relative -top-0.5 badge badge-soft badge-xs badge-secondary">
+            <span aria-hidden="true">→</span>
+            <span class="relative -top-0.5 badge badge-soft badge-xs badge-secondary" aria-label="To state">
               {{ toProperCase(audit.event_data.new_state) }}
             </span>
           </div>
@@ -83,6 +83,19 @@ const eventType = useContractEventType()
         </div>
         <div v-else-if="eventType.isIncreaseContractVersionEvent(audit)">
           <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
+        </div>
+        <div v-else-if="eventType.isNegotiationChangeSupersededEvent(audit)">
+          <div>
+            Version {{ audit.event_data.merged_contract_version }} does not carry these accepted change requests:
+          </div>
+          <ul>
+            <li
+              v-for="discard in audit.event_data.superseded"
+              :key="`${discard.negotiation_id}-${discard.superseded_by}`"
+            >
+              {{ discard.negotiation_id }} — {{ discard.fields.join(', ') }} superseded by {{ discard.superseded_by }}
+            </li>
+          </ul>
         </div>
         <div v-else>{{ audit.event_data }}</div>
       </div>

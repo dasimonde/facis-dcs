@@ -94,6 +94,40 @@ func TestDisabledIdentityIsRefused(t *testing.T) {
 	}
 }
 
+// The credential issued to a contract target through the API resolves here, at
+// the same gate the declaratively seeded targets pass: this is where the
+// Contract Target System scope its deployment callback needs comes from, and a
+// client with no registry row gets none.
+func TestIssuedContractTargetCredentialResolvesToItsRole(t *testing.T) {
+	identity, err := machineidentity.ContractTargetCredential{
+		ClientID:       "dcs-target-6f1a",
+		TargetName:     "Runtime target",
+		ParticipantDID: "did:web:dcs-a.localhost%3A18080",
+	}.Identity()
+	if err != nil {
+		t.Fatalf("could not build the target identity: %v", err)
+	}
+
+	validator := &HydraJWTValidator{config: HydraJWTConfig{
+		ClientID:      "dcs-client",
+		SystemClients: stubRegistry{identity.OAuthClientID: identity},
+	}}
+
+	system, ok, err := validator.systemClientFor(context.Background(), Claims{ClientID: "dcs-target-6f1a"})
+	if err != nil {
+		t.Fatalf("resolution failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("an API-issued target credential was not recognised as a machine caller")
+	}
+	if len(system.Roles) != 1 || system.Roles[0] != "Contract Target System" {
+		t.Fatalf("the target credential carries %v, not the Contract Target System role", system.Roles)
+	}
+	if system.ParticipantDID != "did:web:dcs-a.localhost%3A18080" {
+		t.Fatalf("wrong participant attribution: %q", system.ParticipantDID)
+	}
+}
+
 // With no registry wired at all, no client-credentials token gets in.
 func TestNoRegistryRejectsAll(t *testing.T) {
 	validator := &HydraJWTValidator{config: HydraJWTConfig{ClientID: "dcs-client"}}

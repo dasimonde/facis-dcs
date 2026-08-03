@@ -35,6 +35,10 @@ pdfCore:
     pullPolicy: Never
 
 extraEnv:
+  # This stack trusts the issuer fixture committed to the repo. It has to
+  # declare that, so no deployment inherits it by omission.
+  - name: DCS_ALLOW_DEV_TRUST
+    value: "true"
   - name: JWT_ALG_NONE_SUPPORTED
     value: "true"
   - name: AUTH_INSECURE_COOKIES
@@ -46,11 +50,24 @@ extraEnv:
   # orce release).
   - name: DCS_TRUST_PDP_URL
     value: "http://dcs-orce:1880/trust-pdp"
+  # did:web is https, and the resolver makes that exception only for loopback on
+  # its own. The synthetic peers the ADR-19 scenarios use are in-cluster Services
+  # on plain http under names that are not loopback, so they are named here
+  # rather than reinstating a silent http fallback that would also apply on the
+  # internet. See identity.DIDWebSchemes.
+  - name: DCS_DIDWEB_INSECURE_HOSTS
+    value: "dcs-orce:1880,dcs-orce-mismatch:1880,dcs-orce-trusted:1880"
   # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut). The prod
   # default is minutes; BDD/e2e run it fast so a peer PDF ship that fires before
   # the async regenerator stored the CID (or that transiently failed) is
   # re-attempted and delivered well within the scenarios' replication wait.
   - name: DCS_SYNC_FAIL_RETRY_INTERVAL
+    value: "10s"
+  # Background regeneration retry cadence (conf.PDFRegenerationRetryTimeOut).
+  # The prod default is minutes; BDD/e2e run it fast so a PDF whose regeneration
+  # failed transiently (pdf-core or IPFS) is re-rendered and stored — and the
+  # deferred peer ship then has something to send — within the scenarios' waits.
+  - name: DCS_PDF_REGENERATION_RETRY_INTERVAL
     value: "10s"
   # Real deployment dispatch to the shipped ORCE contract-target-flow
   # (UC-05-01): the flow verifies the payload hash, acks synchronously, and
@@ -74,9 +91,11 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json
-    xfscAllowUnsignedFallback: true
-    # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
-    # issuer" scenarios) verifies against this baked-in dev cert.
+    # Baked-in bundle of the roots this stack verifies chains to: the dev PID
+    # issuer's own certificate (signing_acceptance_hardening.feature's "trusted
+    # dev issuer" scenarios) and the root the dev ORCE credential issuer is
+    # handed rather than generating one, which is what the signed status list a
+    # login credential names chains to.
     x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 postgresql:
@@ -266,7 +285,7 @@ pkcs11:
     enabled: true
     soPin: "12345678"
 
-# XFSC Status List Service: required (fatal on startup if STATUSLIST_SERVICE_URL unreachable).
+# XFSC Status List Service: deployed, with nothing consuming it (ADR-34).
 statuslistService:
   enabled: true
   tenantID: c2pa
@@ -292,16 +311,22 @@ statuslistService:
   bddListInit:
     enabled: true
     tenantIDs:
-      - credential
       - c2pa
+      # Instance B shares this service but not this instance's database, and a
+      # revocation entry is allocated out of that database (migration 20260734).
+      # Two instances allocating into one list would hand the same bit to two
+      # unrelated contracts, so B gets its own tenant — see values.bdd2.yml.
+      - c2pa2
 
 statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
-  # The backend immediately dereferences this exact seeded credential list;
-  # Pod readiness therefore requires the full proxy→Ingress→list route.
-  readinessPath: "/statuslist/v1/tenants/credential/status/1"
+  # A list this service actually serves, so Pod readiness requires the full
+  # proxy→Ingress→list route. Login credentials no longer live here — they name
+  # the ORCE issuer's own signed list — so the "credential" tenant is gone and
+  # the C2PA one this instance allocates from takes its place.
+  readinessPath: "/statuslist/v1/tenants/c2pa/status/1"
 
 # IPFS: required — IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL are fatal on startup.
 ipfs:
@@ -373,9 +398,9 @@ orce:
     internalTimeoutSeconds: 30
     allowInsecureTLS: true
     bearerToken: "bdd-checkpoint-sink-token"
-  # The ADR-19 AC5 mismatched-federation-rules scenario resolves this second
-  # did:web against the same ORCE pod; off by default in the chart because it is
-  # a test fixture.
+  # The ADR-19 mismatched-federation-rules (AC5) and trusted-peer (AC7/AC8/AC9)
+  # scenarios resolve their did:web identities against the same ORCE pod; off by
+  # default in the chart because they are test fixtures.
   syntheticPeer:
     enabled: true
   persistence:
@@ -425,6 +450,14 @@ orce:
     hosts:
       - host: "localhost"
         path: /contract-target
+      # No /orce rule here. The DCS mounts its webhook platform at /orce/ on
+      # the service root (backend/cmd/dcs/http.go, DCS-FR-TR-22) and claims the
+      # prefix on this same host, so a second rule for it is a coin toss that
+      # the webhook platform loses. The audit-executor control and run seams
+      # are reached over the ORCE port-forward instead
+      # (BDD_ORCE_AUDIT_CONTROL_URL / BDD_ORCE_AUDIT_EXECUTOR_URL in
+      # tests/bdd/scripts/run_bdd_helm.sh), which is why this rule was only
+      # ever an unused fallback.
 
 auditExecutor:
   url: "http://dcs-orce:1880/customer-audit/run"
@@ -500,3 +533,7 @@ contractTargets:
     # admin UI, because the suite has no operator to click through it. A real
     # deployment issues the credential once and rotates it (ADR-27).
     oauth_client_id: "dcs-orce-target"
+
+# In-cluster service credential for the background PDF regenerator, which runs on
+# NATS events with no user JWT. Never a shared or committed value in a real
+# deployment: the chart refuses to render without one.

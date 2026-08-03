@@ -53,6 +53,23 @@ Feature: Process audit and compliance management
     Then get http 200:Success code
     And the monitoring sweep flags contract "PAC Denied Access Contract" with an "UNAUTHORIZED_ACCESS" compliance risk attributed to actor "UnrelatedCorp"
 
+  # DCS-FR-PACM-02 runs the sweep unattended on a schedule (the pac-monitor
+  # CronJob, backed by cmd/pacmonitor), so the same violation is seen again and
+  # again. Alerting therefore has to be per incident, not per sweep: the audit
+  # trail records the risk once, while the sweep response keeps reporting it for
+  # as long as it holds. Two consecutive sweeps are what distinguishes the two.
+  @UC-08-02 @DCS-IR-PACM-03 @DCS-FR-PACM-02 @DCS-NFR-SEC-11
+  Scenario: Continuous monitoring alerts once per violation, not on every sweep
+    Given I am authenticated with roles: "Contract Creator"
+    And I have created contract "PAC Repeat Sweep Contract" with parties "Acme Corp" and "TechVendor Inc"
+    When a representative of unrelated party "UnrelatedCorp" attempts to access contract "PAC Repeat Sweep Contract"
+    Then the access is denied with a "not authorized to access this contract" error
+    When the Compliance Officer requests continuous monitoring
+    And the Compliance Officer requests continuous monitoring
+    Then get http 200:Success code
+    And the monitoring sweep flags contract "PAC Repeat Sweep Contract" with an "UNAUTHORIZED_ACCESS" compliance risk attributed to actor "UnrelatedCorp"
+    And the PAC audit trail records exactly one "UNAUTHORIZED_ACCESS" risk for contract "PAC Repeat Sweep Contract"
+
   @UC-08-02 @DCS-IR-PACM-04
   Scenario: Compliance Officer submits a non-compliance incident report
     When the Compliance Officer submits a non-compliance incident report

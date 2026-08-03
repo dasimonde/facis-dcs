@@ -178,6 +178,7 @@ def step_given_operator_fixture(context, name, field, operator, right_operand, a
 
 @when('approval is attempted for contract "{name}"')
 def step_when_approval_attempted(context, name):
+    context.odrl_approval_attempted_for = name
     _advance_to_reviewed(context, name)
     did, updated_at = ContractService._contract_data(context, name)
     headers = AuthService.get_headers_for_roles(["Contract Approver"])
@@ -305,6 +306,31 @@ def step_then_every_rule_has_parties_and_target(context, name):
 # ---------------------------------------------------------------------------
 
 
+def _assert_refusal_names_the_violated_rule(context, name, resp):
+    """The refusal has to be the ODRL check's, not any other 4xx that happens
+    to land here. Only validation.ValidateContractPolicySatisfaction — the
+    check at the approve.go and apply.go entry points — produces "contract
+    policy validation failed", and its message names the rule
+    (`ODRL policy "<rule @id>" violated: …`). Asserting only on the status code
+    let the workflow gate's generic "local Semantic Hub evaluation" refusal
+    stand in for the specific one, at a transition several steps earlier.
+    """
+    marker = "contract policy validation failed"
+    assert marker in resp.text, (
+        f"expected the refusal for '{name}' to come from the ODRL satisfaction "
+        f"check (a message containing {marker!r}), got: {resp.status_code} {resp.text}"
+    )
+    rules = [
+        rule.get("@id")
+        for rule in odrl.extract_policy_rules(_stored_policies(context, name))
+        if rule.get("@id")
+    ]
+    assert any(rule in resp.text for rule in rules), (
+        f"expected the refusal for '{name}' to name the violated rule (one of "
+        f"{rules}), got: {resp.text}"
+    )
+
+
 @then("the approval is rejected because an ODRL constraint is violated")
 def step_then_approval_rejected_constraint_violated(context):
     resp = context.requests_response
@@ -312,6 +338,7 @@ def step_then_approval_rejected_constraint_violated(context):
         f"expected approval of a contract with a violated ODRL constraint to "
         f"be rejected, but it succeeded: {resp.status_code} {resp.text}"
     )
+    _assert_refusal_names_the_violated_rule(context, context.odrl_approval_attempted_for, resp)
 
 
 @then('the sign attempt for contract "{name}" is rejected and the contract remains unsigned')
@@ -353,5 +380,6 @@ def step_then_approval_outcome(context, name, expected):
             f"expected the constraint-violating approval for '{name}' to be "
             f"rejected, but it succeeded: {resp.text}"
         )
+        _assert_refusal_names_the_violated_rule(context, name, resp)
     else:
         raise NotImplementedError(f"unknown expected outcome {expected!r} — use 'satisfied' or 'violated'")

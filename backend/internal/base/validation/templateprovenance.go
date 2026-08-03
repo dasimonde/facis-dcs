@@ -61,7 +61,7 @@ func AuditTemplateApprovalProvenance(resourceDID string, entries []datatype.Audi
 		findings = append(findings, templateProvenanceFinding(
 			"FACIS-TPL-PROV-000",
 			"Template approval provenance is consistent",
-			"info",
+			SeveritySatisfied,
 			"create, review, approval, and registration provenance checks passed",
 			"event_type",
 		))

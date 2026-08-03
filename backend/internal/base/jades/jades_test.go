@@ -40,7 +40,8 @@ func testDIDDocument(t *testing.T) *identity.DIDDocument {
 	}
 
 	didJSON := map[string]any{
-		"id": "did:web:jades-test.localhost",
+		"id":              "did:web:jades-test.localhost",
+		"assertionMethod": []any{"#key-1"},
 		"verificationMethod": []map[string]any{
 			{
 				"id": "did:web:jades-test.localhost#key-1",

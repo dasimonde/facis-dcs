@@ -4,7 +4,7 @@ import { computed, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'v
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import Pagination from '@/components/Pagination.vue'
 import { ROUTES } from '@/router/router'
-import { useContractTemplatesStore } from '@/stores/contract-templates-store.ts'
+import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useTemplateStateFilterStore } from '@/stores/state-filter-store'
 import { contractTemplateStates } from '@/types/contract-template-state'
 import { compareValues } from '@/utils/comparison'
@@ -12,7 +12,7 @@ import TemplateListItem from './TemplateListItem.vue'
 import TemplateListSearch from './TemplateListSearch.vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const templatesStore = useContractTemplatesStore()
 const { loading, error } = storeToRefs(templatesStore)

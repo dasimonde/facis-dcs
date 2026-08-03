@@ -15,3 +15,10 @@ var ErrNotAParty = errors.New("not a party to this contract")
 // negotiation change_request they themselves authored (FR-CWE-07: a
 // reviewer/negotiator may not approve their own redline proposal).
 var ErrConflictOfInterest = errors.New("conflict of interest - cannot approve own proposal")
+
+// ErrNegotiationNotSettled refuses a submit against a negotiation round this
+// instance never entered. A round is identified by the contract version, and a
+// negotiation task exists for it only because a party engaged: authored the
+// contract, accepted the inbound offer, or proposed a redline on it. No task,
+// no engagement — and "no open tasks" would otherwise read as settlement.
+var ErrNegotiationNotSettled = errors.New("negotiation is not settled: this instance has not engaged with this round")

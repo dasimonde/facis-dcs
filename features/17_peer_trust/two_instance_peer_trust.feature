@@ -14,16 +14,18 @@
 # CheckForUntrustedPeers), so every ADR-19 scenario below is expected to fail
 # red; that is the point of writing them ahead of the implementation.
 #
-# The untrusted-peer single-instance-testable scenarios use a syntactically
-# distinct did:web identity that resolves, hostname-wise, to THIS SAME
-# instance's own dev key and (per ADR-19) its own
-# /.well-known/dcs-agreement-credential.json — see
-# steps/peer_trust/dcs_peer_trust_steps.py for why this is honest evidence
-# specifically for the agreement-credential/PDP gate, not just "any"
-# rejection, and for which sub-cases (missing credential; PDP unreachable)
-# are honestly simulatable this way versus which are not (signature-invalid
-# or hash-mismatched credentials — flagged as open points at their own
-# scenarios below).
+# The single-instance-testable scenarios ship as synthetic did:web peers the
+# orce Node-RED fixture serves — one publishing no agreement credential at all
+# (AC4), one whose credential names a deliberately wrong rules hash (AC5), and
+# one whose credential verifies against this build's rules hash so only the PDP
+# is left to decide (AC7 inbound, AC8, AC9) — plus, on the OUTBOUND path only,
+# a case-varied spelling of this instance's own DID, which resolves to this
+# instance's own key and credential. See
+# steps/peer_trust/dcs_peer_trust_steps.py and
+# steps/peer_trust/synthetic_trusted_peer.py for why each is honest evidence
+# for the gate its own scenario names rather than for "any" rejection, and for
+# the one sub-case still not simulatable (a present-but-signature-invalid
+# credential — flagged as an open point at AC4).
 #
 # The @two-instance scenarios need a second real DCS process and
 # BDD_DCS_BASE_URL_A/_B rather than the single-instance BDD_DCS_BASE_URL
@@ -51,7 +53,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   @REQ-fed-agreement-AC2 @DCS-IR-SI-12
   Scenario: The agreement credential's signature verifies against the instance's own published VC key
     Given I fetch this instance's own agreement credential
-    Then the credential's proof verifies against the second verificationMethod key published in this instance's own did.json
+    Then the credential's proof verifies against the key it names, which this instance publishes for assertions and not for authentication
 
   # ---------------------------------------------------------------------
   # AC3: both instances of the same build agree — same rules hash, and an
@@ -91,6 +93,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
     When instance A drives the contract to APPROVED through its own local workflow
+    And instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance A applies a ceremony-backed signature to the contract
     Then instance B stores a JAdES sync-provenance artifact for that contract signed by instance A
 
@@ -115,6 +118,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
     When instance A drives the contract to APPROVED through its own local workflow
+    And instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance A applies a ceremony-backed signature to the contract
     And instance A revokes the applied signature of the cross-instance contract
     Then the contract state "REVOKED" is replicated on both instance A and instance B
@@ -190,12 +194,28 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # AC7: the local policy endpoint (PDP) is consulted on every interaction,
   # in- and outbound; a 2xx response lets it proceed. Single-instance, orce
   # trust-PDP flow in "allow" mode.
+  #
+  # The inbound scenarios (AC7 inbound, AC8, AC9) ship as the THIRD orce
+  # synthetic peer, did:web:dcs-orce-trusted%3A1880: a separate authority whose
+  # agreement credential verifies against the running build's federation rules
+  # hash, so layer 3a passes and the PDP is the only gate left to decide the
+  # interaction. It is neither this instance (which PostPdf's same-peer guard,
+  # identity.SameDIDWeb, refuses before any trust layer runs) nor the
+  # credential-less route AC4 uses. Its key material and credential are minted
+  # per run by the harness and published through the orce flow's control
+  # surface (steps/peer_trust/synthetic_trusted_peer.py) rather than checked in,
+  # because a static credential's rules hash stops matching the build the day
+  # the rules document changes.
+  #
+  # "The policy endpoint was consulted" is likewise read per contract
+  # (GET /trust-pdp/last?contractDID=...), not as the control surface's global
+  # last request — which any earlier consult in the run already satisfied.
   # ---------------------------------------------------------------------
 
   @REQ-fed-agreement-AC7
   Scenario: An inbound PostPdf interaction consults the local policy endpoint before proceeding
     Given the local policy endpoint (PDP) is running and allows every request
-    And a cryptographically valid peer identity
+    And a cryptographically valid peer whose agreement credential this instance accepts
     And contract "AC7 Inbound PDP Consult" exists locally, created by this instance
     When that peer ships contract "AC7 Inbound PDP Consult"'s PDF to this instance's PostPdf endpoint
     Then the policy endpoint was consulted for this interaction
@@ -213,29 +233,35 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # incident count is scoped to THIS scenario's own contract DID — an
   # unscoped global count is unreliable in a shared long-lived environment
   # where earlier/orphaned denials can already have raised unrelated
-  # incidents.
+  # incidents. Both the rejection and the incident must name the policy
+  # endpoint: the peer's credential verifies, so a denial attributed to the
+  # credential check would be this scenario passing for the wrong reason.
   # ---------------------------------------------------------------------
 
   @REQ-fed-agreement-AC8
   Scenario: A denying policy endpoint rejects the interaction with exactly one incident and no retry
     Given the local policy endpoint (PDP) is running and denies every request
-    And a cryptographically valid peer identity
+    And a cryptographically valid peer whose agreement credential this instance accepts
     And contract "AC8 PDP Deny" exists locally, created by this instance
     When that peer ships contract "AC8 PDP Deny"'s PDF to this instance's PostPdf endpoint
     Then the interaction is denied and exactly one incident is recorded in the audit trail for contract "AC8 PDP Deny"
     And no sync_fails retry entry exists for contract "AC8 PDP Deny"
 
   # ---------------------------------------------------------------------
-  # AC9: the PDP request body carries the documented fields. (Checked via
-  # the orce control flow's GET /trust-pdp/last, which reports the most
-  # recently received request — not an exact request COUNT, unlike the
-  # retired local-stub version of this pack.)
+  # AC9: the PDP request body carries the documented fields. Checked via the
+  # orce control flow's GET /trust-pdp/last?contractDID=..., which reports the
+  # request recorded for THIS scenario's contract — not an exact request COUNT,
+  # unlike the retired local-stub version of this pack, and not the run's
+  # global last request, which said nothing about this interaction. The peer
+  # and contract it names are asserted against what the scenario shipped, and
+  # agreementCredential is non-empty only because layer 3a accepted this peer's
+  # credential first.
   # ---------------------------------------------------------------------
 
   @REQ-fed-agreement-AC7 @REQ-fed-agreement-AC9
   Scenario: The policy endpoint receives peerDID, agreementCredential, direction, contractDID, and targetState
     Given the local policy endpoint (PDP) is running and allows every request
-    And a cryptographically valid peer identity
+    And a cryptographically valid peer whose agreement credential this instance accepts
     And contract "AC9 PDP Body Shape" exists locally, created by this instance
     When that peer ships contract "AC9 PDP Body Shape"'s PDF to this instance's PostPdf endpoint
     Then the policy endpoint recorded a request naming the peer, the agreement credential, the direction, the contract, and the target state
@@ -285,3 +311,142 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     And the default trust-PDP Node-RED flow is wired on both instances
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
+
+  # ---------------------------------------------------------------------
+  # DCS-NFR-BR-03 (@two-instance): a contract lacking its required
+  # signatures must not proceed to deployment or execution — including
+  # across the federation, where each party's signature row stays in its own
+  # database and the signature fields are named for the PARTIES (create.go
+  # seedSignatureFields). Both instances designate a target BEFORE signing,
+  # so the auto-deploy subscriber (DCS-FR-CWE-06) has a destination and its
+  # own run of the gate is observable: an ungated deployment would be
+  # dispatched to the ORCE contract-target flow and its acknowledgement
+  # would move the contract to ACTIVE.
+  #
+  # The counterparty's field is satisfied by the JAdES that peer ships with
+  # its own signed copy (DCS-FR-SM-02, verified on receipt against the
+  # peer's published assertion key) — the evidence in the AC above — and by
+  # nothing else, so half-signed refuses and countersigned proceeds.
+  #
+  # SETTLEMENT AND SIGNATURE ARE TWO DIFFERENT MILESTONES, and this scenario
+  # only holds because they are: BOTH parties settle first (each side's own
+  # NEGOTIATION -> SUBMITTED ships its settlement artifact to the other, and
+  # neither may sign before it holds the other's), and only then does A sign
+  # alone. B is settled-but-unsigned for the two refusal assertions in the
+  # middle, which is exactly the state the deployment gate is about.
+  # ---------------------------------------------------------------------
+
+  @DCS-NFR-BR-03 @DCS-FR-SM-07 @DCS-FR-CWE-06 @two-instance
+  Scenario: A federated contract deploys only once both parties have signed
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A points the cross-instance contract at its own target system
+    And instance B drives its own copy of the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    Then a manual deployment of the cross-instance contract on instance A is rejected because signing is incomplete
+    And the cross-instance contract on instance A does not activate while the counterparty has not signed
+    When instance B points the cross-instance contract at its own target system
+    And instance B applies a ceremony-backed signature to the contract
+    Then the cross-instance contract on instance B activates automatically once both parties have signed
+    And a manual deployment of the cross-instance contract on instance A is accepted once the counterparty has countersigned
+
+  # ---------------------------------------------------------------------
+  # THE MUTUAL-SETTLEMENT GATE ITSELF (backend/internal/signingmanagement/
+  # command/apply.go assertCounterpartiesSettled, reached from both
+  # /signature/prepare and /signature/submit).
+  #
+  # Every scenario above shows the gate letting a signature through once both
+  # parties settled. These two are the other half — what it refuses — because
+  # a gate only ever observed passing is indistinguishable from no gate.
+  #
+  # Signing claims both parties agreed the same document. ADR-13 keeps
+  # intrinsic state local, so this instance reaching APPROVED says nothing
+  # about the counterparty: the only thing that does is the settlement
+  # artifact the peer signs and ships on its own NEGOTIATION -> SUBMITTED. The
+  # refusal is its own API code, counterparty_not_settled — "the contract is
+  # waiting for the counterparty", not "you may not sign" — and the signer's
+  # state is otherwise complete, ceremony included.
+  # ---------------------------------------------------------------------
+
+  @DCS-FR-SM-02 @two-instance
+  Scenario: Instance A may not sign before instance B has settled the same document
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A attempts a ceremony-backed signature on the contract
+    Then the signature attempt on instance A is refused because the counterparty has not settled
+    When instance B drives its own copy of the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    Then instance A holds an applied signature for its own party field
+
+  # ---------------------------------------------------------------------
+  # The version binding, from the outside. A settlement is a statement about
+  # ONE version of ONE document, bound by the SHA-256 of its JCS
+  # canonicalization — never by contract_version, which is a per-instance
+  # counter (the sender bumps it on merging a redline, the receiver on every
+  # inbound ship) and so cannot be compared across the boundary.
+  #
+  # The artifact shipped here is genuine in every other respect: instance A's
+  # own key, its own identity, addressed to instance B, for a contract B holds
+  # and a party B knows. Only the document digest names something else — so
+  # the refusal can come from nothing but the digest binding, and the
+  # signature that settlement would have authorised stays refused.
+  # ---------------------------------------------------------------------
+
+  @DCS-FR-SM-02 @two-instance
+  Scenario: A settlement naming another document authorises no signature
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A ships instance B a settlement naming a document instance B does not hold
+    Then instance B refuses the settlement because it covers another document
+    When instance B drives its own copy of the contract to APPROVED through its own local workflow
+    And instance B attempts a ceremony-backed signature on the contract
+    Then the signature attempt on instance B is refused because the counterparty has not settled
+
+  # ---------------------------------------------------------------------
+  # TAKING AN AGREEMENT BACK (contractworkflowengine/command/
+  # settledagreement.go withdrawOwnSettlement, on submit.go's reviewer-reject
+  # branch and on reject.go's approver rejection).
+  #
+  # A party that settled is held to the version it settled: while its own
+  # settlement names the document it stores, every command that would persist
+  # a different one is refused (requireUnsettledAgreement, from /contract/
+  # submit's new contract_data and from a structured redline alike). That
+  # refusal is only legitimate because the party has a way to change its mind,
+  # and this scenario is that way — without it the gate is a deadlock rather
+  # than a gate, and the round that reached SUBMITTED could never be reopened
+  # to say anything new.
+  #
+  # The way out is the rejection the workflow already had: sending the
+  # submission back reopens the negotiation tasks, so it also withdraws the
+  # agreement whose transition it undoes. Read directly from
+  # contract_settlements on both sides of the rejection, because the row IS
+  # the statement — a scenario that only observed the redline succeeding would
+  # equally pass on an instance that had never settled at all.
+  #
+  # The rest of the scenario is what makes the withdrawal correct rather than
+  # merely permissive: the next round settles the REDLINED document, both
+  # parties settle that same version, and the signature the mutual gate then
+  # allows is a signature over the document both of them last agreed to.
+  # ---------------------------------------------------------------------
+
+  @DCS-IR-CWE-03 @DCS-FR-SM-02 @two-instance
+  Scenario: Reopening a round takes instance A's agreement back, and the version it settles instead is the one that signs
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to SUBMITTED through its own local workflow
+    Then instance A holds its own settlement of the contract as it stands
+    When instance A's reviewer rejects the submission back into negotiation
+    Then instance A holds no settlement of its own for the contract
+    When instance A redlines the reopened contract
+    Then the redlined document reaches instance B within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    Then instance A holds its own settlement of the contract as it stands
+    When instance B drives its own copy of the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    Then instance A holds an applied signature for its own party field

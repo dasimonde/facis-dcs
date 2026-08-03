@@ -82,6 +82,19 @@ spec:
                 port:
                   number: {{ $.Values.service.port | int }}
           {{- end }}
+          {{- /* The status list this instance serves for the credentials it issues
+               (ADR-34). Root-mounted for the same reason the documents above are: a
+               verifier holding one of those credentials has the URL the credential
+               names and nothing else, so reaching the list cannot depend on knowing
+               this instance's API prefix. A prefix rather than an exact path because
+               the list id is part of it. */}}
+          - path: /status-list/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "digital-contracting-service.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port | int }}
           {{- /* Hydra public OAuth2/OIDC routes — keeps Hydra off the edge; browser traffic
                proxied through this ingress. selfIssuerURL must match the ingress host. */}}
           {{- if and $.Values.hydra.enabled $.Values.hydra.route.paths }}

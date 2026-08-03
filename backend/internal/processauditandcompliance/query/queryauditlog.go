@@ -20,6 +20,7 @@ import (
 
 type GetAuditLogQry struct {
 	Scope         componenttype.ComponentType
+	RelatedScopes []componenttype.ComponentType
 	AuditedBy     string
 	HolderDID     string
 	UserRoles     userrole.UserRoles
@@ -44,9 +45,33 @@ func (h *Auditor) Handle(ctx context.Context, query GetAuditLogQry) ([][]datatyp
 		}
 	}(tx)
 
-	result, err := h.ATrailReader.ReadAuditLogEntriesByComponent(ctx, tx, query.Scope)
-	if err != nil {
-		return nil, fmt.Errorf("could not read audit log entries: %w", err)
+	var result [][]datatype.AuditLogEntry
+	if query.DID != "" {
+		entries, readErr := h.ATrailReader.ReadAuditLogEntriesByComponentAndDID(ctx, tx, query.Scope, query.DID)
+		if readErr != nil {
+			return nil, fmt.Errorf("could not read resource audit log entries: %w", readErr)
+		}
+		result = [][]datatype.AuditLogEntry{entries}
+	} else {
+		result, err = h.ATrailReader.ReadAuditLogEntriesByComponent(ctx, tx, query.Scope)
+		if err != nil {
+			return nil, fmt.Errorf("could not read audit log entries: %w", err)
+		}
+	}
+	for _, relatedScope := range query.RelatedScopes {
+		if query.DID != "" {
+			related, readErr := h.ATrailReader.ReadAuditLogEntriesByComponentAndDID(ctx, tx, relatedScope, query.DID)
+			if readErr != nil {
+				return nil, fmt.Errorf("could not read related %s resource audit log entries: %w", relatedScope, readErr)
+			}
+			result = append(result, related)
+		} else {
+			related, readErr := h.ATrailReader.ReadAuditLogEntriesByComponent(ctx, tx, relatedScope)
+			if readErr != nil {
+				return nil, fmt.Errorf("could not read related %s audit log entries: %w", relatedScope, readErr)
+			}
+			result = append(result, related...)
+		}
 	}
 
 	evt := event2.AuditEvent{

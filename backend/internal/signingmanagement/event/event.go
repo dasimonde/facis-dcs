@@ -128,6 +128,7 @@ func (e AuditEvt) GetDID() string {
 type RevokeEvent struct {
 	DID             string             `json:"did"`
 	ContractVersion int                `json:"contract_version,omitempty"`
+	Reason          string             `json:"reason"`
 	RevokedBy       string             `json:"revoked_by"`
 	OccurredAt      time.Time          `json:"occurred_at"`
 	HolderDID       string             `json:"holder_did"`
@@ -162,26 +163,6 @@ func (e ComplianceValidationEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e ComplianceValidationEvent) GetDID() string {
-	return e.DID
-}
-
-// SigningRequestEvent is emitted when contract is reviewed.
-type SigningRequestEvent struct {
-	DID             string             `json:"did"`
-	ContractVersion int                `json:"contract_version"`
-	RequestedBy     string             `json:"requested_by"`
-	OccurredAt      time.Time          `json:"occurred_at"`
-	HolderDID       string             `json:"holder_did"`
-	UserRoles       userrole.UserRoles `json:"user_roles"`
-}
-
-// EventType implements the Event interface.
-func (e SigningRequestEvent) EventType() string {
-	return eventtype.SigningRequest.String()
-}
-
-// GetDID implements the Event interface.
-func (e SigningRequestEvent) GetDID() string {
 	return e.DID
 }
 

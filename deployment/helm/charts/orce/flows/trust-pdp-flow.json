@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "Trust PDP",
         "disabled": false,
-        "info": "Federation trust policy endpoint (ADR-19): answers every {peerDID, agreementCredential, direction, contractDID, targetState} POST to /trust-pdp according to a controllable flow-context mode (default 'allow'), the bootstrap dev/CI/BDD mutual-trust flow every DCS_TRUST_PDP_URL points at by default. POST /trust-pdp/mode steers the mode (allow/deny/silent); GET /trust-pdp/last returns the last captured request body. Operators replace or extend the decision function with dataspace-specific checks (peer allowlists as policy, trust lists, a Gaia-X Clearing House via the GXDCH compliance API) as backend lookups of their own endpoint."
+        "info": "Federation trust policy endpoint (ADR-19): answers every {peerDID, agreementCredential, direction, contractDID, targetState} POST to /trust-pdp according to a controllable flow-context mode (default 'allow'), the bootstrap dev/CI/BDD mutual-trust flow every DCS_TRUST_PDP_URL points at by default. POST /trust-pdp/mode steers the mode (allow/deny/silent); GET /trust-pdp/last returns the last captured request body, and GET /trust-pdp/last?contractDID=<iri> the last one captured for that contract. Operators replace or extend the decision function with dataspace-specific checks (peer allowlists as policy, trust lists, a Gaia-X Clearing House via the GXDCH compliance API) as backend lookups of their own endpoint."
     },
     {
         "id": "b2c3d4e5f6a7b8c9",
@@ -28,7 +28,7 @@
         "type": "function",
         "z": "a1b2c3d4e5f6a7b8",
         "name": "Decide (allow/deny/silent)",
-        "func": "flow.set(\"last_request\", msg.payload);\nconst mode = flow.get(\"mode\") || \"allow\";\nif (mode === \"silent\") {\n  // Simulates an unreachable policy endpoint: no output at all, so the\n  // downstream http response node never fires and the caller's HTTP\n  // request hangs until its own client-side timeout (ADR-19 fail-closed:\n  // an unreachable endpoint must deny exactly like an explicit deny).\n  return null;\n}\nmsg.headers = { \"Content-Type\": \"application/json\" };\nif (mode === \"deny\") {\n  msg.statusCode = 403;\n  msg.payload = { decision: \"deny\" };\n} else {\n  msg.statusCode = 200;\n  msg.payload = { decision: \"allow\" };\n}\nreturn msg;",
+        "func": "flow.set(\"last_request\", msg.payload);\n// Also keyed by contract: \"was the PDP consulted for THIS interaction\" cannot\n// be answered from the global last request \u2014 any earlier consult, from any\n// other scenario, already satisfies that. The per-contract entry is what a\n// caller asserts against (GET /trust-pdp/last?contractDID=...).\nconst contractDID = (msg.payload && msg.payload.contractDID) || \"\";\nif (contractDID) {\n  const byContract = flow.get(\"requests_by_contract\") || {};\n  byContract[contractDID] = msg.payload;\n  flow.set(\"requests_by_contract\", byContract);\n}\nconst mode = flow.get(\"mode\") || \"allow\";\nif (mode === \"silent\") {\n  // Simulates an unreachable policy endpoint: no output at all, so the\n  // downstream http response node never fires and the caller's HTTP\n  // request hangs until its own client-side timeout (ADR-19 fail-closed:\n  // an unreachable endpoint must deny exactly like an explicit deny).\n  return null;\n}\nmsg.headers = { \"Content-Type\": \"application/json\" };\nif (mode === \"deny\") {\n  msg.statusCode = 403;\n  msg.payload = { decision: \"deny\" };\n} else {\n  msg.statusCode = 200;\n  msg.payload = { decision: \"allow\" };\n}\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -124,7 +124,7 @@
         "type": "function",
         "z": "a1b2c3d4e5f6a7b8",
         "name": "Return last captured request",
-        "func": "const last = flow.get(\"last_request\");\nmsg.headers = { \"Content-Type\": \"application/json\" };\nif (last === undefined) {\n  msg.statusCode = 404;\n  msg.payload = { error: \"no request captured yet\" };\n} else {\n  msg.statusCode = 200;\n  msg.payload = last;\n}\nreturn msg;",
+        "func": "// Without ?contractDID= this reports the most recent request of any\n// interaction; with it, the most recent request that named that contract \u2014\n// the only form that proves a consult happened for one specific interaction\n// rather than at some earlier point in the run.\nconst contractDID = (msg.req && msg.req.query && msg.req.query.contractDID) || \"\";\nconst last = contractDID\n  ? (flow.get(\"requests_by_contract\") || {})[contractDID]\n  : flow.get(\"last_request\");\nmsg.headers = { \"Content-Type\": \"application/json\" };\nif (last === undefined) {\n  msg.statusCode = 404;\n  msg.payload = contractDID\n    ? { error: \"no request captured for this contract yet\", contractDID: contractDID }\n    : { error: \"no request captured yet\" };\n} else {\n  msg.statusCode = 200;\n  msg.payload = last;\n}\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,

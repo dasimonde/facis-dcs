@@ -18,13 +18,14 @@
 #   Hydra admin  : localhost:30085
 #   NATS             : localhost:30422
 #   ORCE             : localhost:30180
-#   Status List Service : localhost:30821  (XFSC status list management)
+#   Credential issuer: localhost:30181  (release dcs-issuer, installed by
+#                      dev-stack.sh from values.issuer-base.yml +
+#                      values.issuer.dev.yml — NOT part of this release)
+#   Status List Service : localhost:30821  (XFSC; nothing consumes it, ADR-34)
 #   IPFS Gateway: localhost:30480
 #   IPFS API    : localhost:30501
 #
 # Backend .env.dev1 (see that file for the full set):
-#   STATUSLIST_SERVICE_URL=http://localhost:30821
-#   OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK=true
 #   ISSUER_DID=did:web:localhost%3A8991
 # The backend runs natively and provisions its own SoftHSM2 token via
 # dev-stack.sh (scripts/hsm-provision.sh), so no in-cluster PKCS#11 token here.
@@ -152,6 +153,16 @@ oidc:
   realm: "gaia-x"
   keycloakScheme: "http"
 
+# The chart default trusts no issuer (values.yaml). The dev stack runs against
+# the dev fixture baked into the image, so it opts back in explicitly —
+# otherwise the backend renders with no trust document and every credential
+# presentation fails closed.
+oid4vp:
+  trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
+    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+
 # XFSC Status List Service (DCS-OR-C2PA-005)
 statuslistService:
   enabled: true
@@ -235,3 +246,12 @@ ipfsDocumentManager:
 
 route:
   basePath: "/api"
+
+extraEnv:
+  # This stack trusts the issuer fixture committed to the repo.
+  - name: DCS_ALLOW_DEV_TRUST
+    value: "true"
+
+# In-cluster service credential for the background PDF regenerator, which runs on
+# NATS events with no user JWT. Never a shared or committed value in a real
+# deployment: the chart refuses to render without one.

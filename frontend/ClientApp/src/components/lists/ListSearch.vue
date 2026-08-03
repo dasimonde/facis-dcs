@@ -19,6 +19,7 @@ const emit = defineEmits<{
 
 const searchQuery = ref('')
 const isSearching = ref(false)
+const searchError = ref<string | null>(null)
 
 type FilterLabels = typeof props.filterLabels
 type FilterLabelKey = keyof FilterLabels
@@ -27,6 +28,9 @@ type FilterLabelValue = FilterLabels[FilterLabelKey]
 const selectedFilter = ref<FilterLabelValue>(Object.values(props.filterLabels)[0] ?? '')
 const filterPopover = useTemplateRef('filter-popover')
 const searchResults: ShallowRef<T[]> = shallowRef([])
+// The search currently in flight, so a caller that has to publish a result can
+// wait for it rather than read searchResults mid-request.
+let pendingSearch: Promise<void> | null = null
 
 const selectedOption: Ref<T | null> = ref(null)
 
@@ -55,15 +59,26 @@ const isFilterSelectionDisabled = computed(() => Object.entries(props.filterLabe
 async function searchRequest() {
   if (searchQuery.value.length < 1 || !searchKey.value) {
     searchResults.value = []
+    pendingSearch = null
     return
   }
 
   isSearching.value = true
-  try {
-    await retrieveSearch()
-  } finally {
-    isSearching.value = false
-  }
+  searchError.value = null
+  const run = (async () => {
+    try {
+      await retrieveSearch()
+    } catch (e: unknown) {
+      // A search that could not run has NOT established that nothing matches;
+      // reporting it as an empty result is how a 403 reads as "no results".
+      searchResults.value = []
+      searchError.value = e instanceof Error && e.message ? e.message : 'Search failed'
+    } finally {
+      isSearching.value = false
+    }
+  })()
+  pendingSearch = run
+  await run
 }
 
 async function retrieveSearch() {
@@ -73,13 +88,20 @@ async function retrieveSearch() {
 }
 
 async function searchList(event?: Event) {
-  if (event && event.target instanceof HTMLInputElement) {
-    if (event.target.value !== searchQuery.value) {
-      await searchRequest()
-    }
+  if (event && event.target instanceof HTMLInputElement && event.target.value !== searchQuery.value) {
+    await searchRequest()
+  } else if (searchQuery.value.trim().length > 0) {
+    // Typing already started a search, and clicking Search is not an input
+    // event, so nothing above awaits it. Emitting now publishes the empty
+    // searchResults the arriving response never gets to correct.
+    await (pendingSearch ?? searchRequest())
   }
-  if (searchQuery.value.trim().length > 0) emit('searchResult', searchedItems.value)
-  else emit('searchResult', null)
+  if (searchError.value) return
+  if (searchQuery.value.trim().length > 0) {
+    emit('searchResult', searchedItems.value)
+  } else {
+    emit('searchResult', null)
+  }
 }
 
 function getDisplayValue(template: T | null): string {
@@ -203,6 +225,7 @@ function handlePopoverToggle(event: ToggleEvent) {
           <ComboboxOption :value="inputValue" class="hidden"></ComboboxOption>
 
           <div v-if="isSearching" class="px-4 py-2 text-base-content/50">Searching...</div>
+          <div v-else-if="searchError" role="alert" class="px-4 py-2 text-error">{{ searchError }}</div>
           <template v-else-if="searchedItems.length > 0">
             <ComboboxOption
               v-for="item in searchedItems"

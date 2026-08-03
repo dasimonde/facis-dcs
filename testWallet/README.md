@@ -14,7 +14,7 @@ wallet is a configuration change, not a code change (see
 cd testWallet
 pip install -r requirements.txt
 python3 scripts/generate_keys.py --yes   # wallet.jwk, issuer-dev.jwk, wallet-ca (signing certs)
-python3 scripts/ensure_statuslist_for_dev.py
+python3 scripts/check_status_list.py     # the issuer serves the list the credentials name
 python3 scripts/issue_credentials.py     # PoA + self-issued PID credentials from credentials/*.template.json
 ```
 
@@ -41,10 +41,19 @@ DCS. PID credentials for dev/test are **self-issued locally**:
 - Self-issued PIDs carry a real status-list claim
   (`dcs_wallet.status_list.build_credential_status`), so the DCS's SM-18
   status check (`checkStatusList` in `VerifyPID`) runs for real. Revoke one
-  for the negative test with `scripts/revoke_statuslist_index.py <index>`
-  (look up the index in the issued `*.pid.jwt`'s `status.status_list.idx`
-  claim, or pass `--credential <file>` to resolve it automatically) — run
-  `scripts/ensure_statuslist_for_dev.py` first so the tenant exists.
+  for the negative test with `scripts/revoke_statuslist_index.py --credential
+  credentials/<name>.pid.jwt`, which posts to the issuer's own admin endpoint
+  and reads the bit back.
+
+### Status list
+
+Every credential here points at the ORCE issuer's own signed list,
+`<ISSUER_BASE_URL>/status-list/1` (ADR-34). Each credential holds an index of
+its own, allocated in `dcs_wallet/status_list.py`: the committed credential
+files have a named entry each, identities a test mints get one derived from
+the identity, and identities a scenario revokes are reserved by name. Sharing
+a bit would mean revoking one credential revokes the other, so issuance
+refuses a committed credential with no allocation of its own.
 
 ### Cert↔PID name alignment
 

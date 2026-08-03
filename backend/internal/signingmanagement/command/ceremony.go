@@ -16,16 +16,11 @@ import (
 
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/signingmanagement/db"
-	"digital-contracting-service/internal/signingmanagement/pidverify"
 )
 
 // ceremonyTTL is how long a started ceremony stays valid for a wallet to
 // present the PID before it must be restarted.
 const ceremonyTTL = 15 * time.Minute
-
-// ceremonyAudience is the fixed OID4VP audience/client_id bound into the
-// KB-JWT of a PID presentation for a signing ceremony.
-const ceremonyAudience = pidverify.Audience
 
 // StartCeremonyCmd carries the inputs for starting a signing ceremony.
 type StartCeremonyCmd struct {
@@ -33,6 +28,11 @@ type StartCeremonyCmd struct {
 	FieldName   string
 	RequestedBy string
 	BaseURL     string
+	// ClientID is the OpenID4VP client identifier this deployment presents
+	// itself to a wallet with — the x509_san_dns identifier its own certificate
+	// backs. It is the audience the presented KB-JWTs bind to, so it travels
+	// into the deep link the wallet scans rather than being a fixed name.
+	ClientID string
 }
 
 // StartCeremonyHandler creates a pending signing ceremony (FR-SM-14).
@@ -41,11 +41,11 @@ type StartCeremonyHandler struct {
 	CeremonyRepo db.CeremonyRepo
 }
 
-func buildCeremonyWalletURI(baseURL, ceremonyID string) string {
+func buildCeremonyWalletURI(baseURL, ceremonyID, clientID string) string {
 	requestURI := strings.TrimRight(baseURL, "/") + "/signature/request/" + url.PathEscape(ceremonyID) + "/object"
 
 	q := url.Values{}
-	q.Set("client_id", ceremonyAudience)
+	q.Set("client_id", clientID)
 	q.Set("request_uri", requestURI)
 	q.Set("request_uri_method", "post")
 
@@ -62,10 +62,14 @@ func (h *StartCeremonyHandler) Handle(ctx context.Context, cmd StartCeremonyCmd)
 	}
 	defer rollback(tx)
 
+	if strings.TrimSpace(cmd.ClientID) == "" {
+		return nil, fmt.Errorf("openid4vp client_id is not configured")
+	}
+
 	now := time.Now().UTC()
 	id := uuid.NewString()
 	nonce := uuid.NewString()
-	walletURI := buildCeremonyWalletURI(cmd.BaseURL, id)
+	walletURI := buildCeremonyWalletURI(cmd.BaseURL, id, cmd.ClientID)
 	expiresAt := now.Add(ceremonyTTL)
 
 	ceremony := db.SignatureCeremony{
@@ -119,6 +123,10 @@ type PresentationCmd struct {
 	PidClaims       any
 	PoAOrganization string
 	PoARoles        any
+	// PoAVpToken is the Power-of-Attorney presentation as the wallet delivered
+	// it, retained so the counterparty can verify this signature's authority
+	// for itself rather than reading an unbacked claim (ADR-31).
+	PoAVpToken string
 }
 
 // PresentationHandler records a verified PID+PoA presentation and marks the
@@ -169,7 +177,7 @@ func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd Pres
 	// signed and only "then authorizes the signing operation", so a missing PoA is
 	// a hard failure here: the ceremony does not verify and signing cannot proceed.
 	// It must also authorize the party actually signed — the signature field is the
-	// participating org DID (seedSignatureFields), so the PoA organization must
+	// participating org DID (SeedSignatureFields), so the PoA organization must
 	// equal the ceremony's field (FR-SM-03).
 	poaOrganization := strings.TrimSpace(cmd.PoAOrganization)
 	if poaOrganization == "" {
@@ -185,7 +193,16 @@ func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd Pres
 		}
 	}
 
-	if err := h.CeremonyRepo.MarkCeremonyVerified(ctx, tx, cmd.CeremonyID, signerDID, cmd.VpToken, pidBytes, sdHash, poaOrganization, poaRoles); err != nil {
+	if err := h.CeremonyRepo.MarkCeremonyVerified(ctx, tx, db.VerifiedPresentation{
+		CeremonyID:      cmd.CeremonyID,
+		SignerDID:       signerDID,
+		VpToken:         cmd.VpToken,
+		PidClaims:       pidBytes,
+		KbSdHash:        sdHash,
+		PoAOrganization: poaOrganization,
+		PoARoles:        poaRoles,
+		PoAVpToken:      strings.TrimSpace(cmd.PoAVpToken),
+	}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

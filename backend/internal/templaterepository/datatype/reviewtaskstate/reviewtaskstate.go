@@ -33,7 +33,7 @@ func NewReviewTaskState(s string) (ReviewTaskState, error) {
 	return ts, nil
 }
 
-// IsValid checks if the ReviewTaskState is a valid role
+// IsValid reports whether the value is one of the declared ReviewTaskState values.
 func (s ReviewTaskState) IsValid() bool {
 	upper := ReviewTaskState(strings.ToUpper(string(s)))
 	return validState[upper]

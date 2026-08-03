@@ -15,19 +15,28 @@ Endpoint surface (backend/design/contract_workflow_engine.go):
 
 2. `POST /contract/deployment/callback` (target -> DCS, DCS-IR-SI-05):
    payload `{"did", "correlation_id", "status", ...}` (ack/status update)
-   or `{"did", "correlation_id", "kpi": {"metric", "value"}}` (KPI report),
-   authenticated as the target's own OAuth2 client (ADR-27): a bearer token
-   from the client_credentials grant, and accepted only for deployments
-   dispatched to that target. One shared secret proved merely that SOME
-   target was calling, so any registered target could acknowledge another's
-   deployment. (The signing ceremony's callback authenticates differently
-   again, by unguessable ceremony id plus ADR-20 nonce binding — see
-   steps/real_signing_vertical.)
+   or `{"did", "correlation_id", "kpi": {"metric", "value", "verdict",
+   "rule"}}` (KPI report), authenticated as the target's own OAuth2 client
+   (ADR-27): a bearer token from the client_credentials grant, and accepted
+   only for deployments dispatched to that target. One shared secret proved
+   merely that SOME target was calling, so any registered target could
+   acknowledge another's deployment. (The signing ceremony's callback
+   authenticates differently again, by unguessable ceremony id plus ADR-20
+   nonce binding — see steps/real_signing_vertical.)
+
+   The target system classifies, the DCS records (ADR-33): `verdict` is the
+   target's own conclusion — satisfied, violated or not_evaluated — and
+   `rule` is the `@id` of the ODRL rule it concluded about, quoted back from
+   the `odrl:policy` the deployment envelope carried. A stated verdict that
+   names no rule, or names a rule this contract did not deploy, is refused
+   with 400: an untraceable conclusion is a malformed report. A report
+   carrying no verdict at all is silence, and is recorded as not_evaluated —
+   never as compliance.
 
 3. `GET /contract/retrieve/{did}` carries a `"kpis"` field (list of
-   `{"metric", "value", "observed_at", "violation"}`). SLA violations are
-   asserted as a per-KPI `"violation": true` marker OR the metric name
-   appearing in a top-level `"kpi_violations"` list.
+   `{"metric", "value", "observed_at", "verdict", "rule"}`). The DCS derives
+   no verdict of its own, so an SLA breach is asserted as the target's
+   reported `"verdict": "violated"` on a named `"rule"`.
 
 4. Archive entries (`GET /archive/search?did=...`) carry an `"evidence"`
    JSON object with a nested `"deployment"` object:
@@ -179,23 +188,81 @@ def _kpi_entries(retrieve_json: dict) -> list:
     return kpis if isinstance(kpis, list) else []
 
 
-def _kpi_violation_names(retrieve_json: dict) -> list:
-    violations = retrieve_json.get("kpi_violations")
-    return violations if isinstance(violations, list) else []
+ODRL_RULE_BUCKETS = ("odrl:permission", "odrl:prohibition", "odrl:obligation")
 
 
-def _odrl_bound_field_iri(context, name: str) -> str:
-    """The @id of the contract's ODRL-bound contract field — the node IRI a
-    KPI reports against (EvaluateKPIViolation binds by this IRI, not a
-    label). Read straight from the stored contract so it reflects the @id the
-    backend rebased the fixture's urn: node to."""
-    did, _ = ContractService._contract_data(context, name)
-    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=manager_h)
-    assert retrieve.status_code == 200, retrieve.text
-    fields = (retrieve.json().get("contract_data") or {}).get("dcs:contractFields") or []
-    assert fields, f"contract '{name}' declares no dcs:ContractField to bind a KPI to"
-    return fields[0]["@id"]
+def deployed_rule_ids(policy: dict) -> list:
+    """The `@id` of every ODRL rule an `odrl:policy` slot carries, nested
+    duties and consequences included — the set a reported verdict may name
+    (command.deployedRuleIDs is the backend's counterpart)."""
+
+    def collect(rules, out):
+        nodes = rules if isinstance(rules, list) else [rules]
+        for rule in nodes:
+            if not isinstance(rule, dict):
+                continue
+            rule_id = str(rule.get("@id") or "").strip()
+            if rule_id:
+                out.append(rule_id)
+            for nested in ("odrl:duty", "odrl:consequence"):
+                if nested in rule:
+                    collect(rule[nested], out)
+
+    ids: list = []
+    for bucket in ODRL_RULE_BUCKETS:
+        if bucket in (policy or {}):
+            collect(policy[bucket], ids)
+    return ids
+
+
+def deployed_policy(context, name: str) -> dict:
+    """The `odrl:policy` the deployment envelope handed the target, read off
+    the deploy response's own echo of the dispatched payload. That echo is the
+    only place the harness sees what the target sees, and the rules travel in
+    it verbatim — same `@id`s, so a verdict quoting one is traceable back to
+    the term of the contract the parties signed (ADR-33)."""
+    policy = getattr(context, "deployment_policy", None)
+    assert isinstance(policy, dict), (
+        f"contract '{name}' has not been deployed in this scenario, so no odrl:policy was echoed "
+        "back to quote a rule @id from"
+    )
+    return policy
+
+
+def sole_deployed_rule(context, name: str) -> str:
+    """The single rule the deployed policy carries. The ODRL fixtures state
+    exactly one, so a scenario about "the rule this contract deployed" needs no
+    further discrimination; a contract carrying several has to say which."""
+    rules = deployed_rule_ids(deployed_policy(context, name))
+    assert len(rules) == 1, (
+        f"expected contract '{name}' to deploy exactly one ODRL rule for the target to conclude "
+        f"about, got: {rules!r}"
+    )
+    return rules[0]
+
+
+def rule_constraining_field(policy: dict, field_iri: str) -> str:
+    """The `@id` of the deployed rule whose constraint names `field_iri` as its
+    `odrl:leftOperand` — how a scenario picks the one term of a multi-rule
+    contract that governs the quantity its target measured."""
+
+    def constrains(node) -> bool:
+        if isinstance(node, dict):
+            if str((node.get("odrl:leftOperand") or {}).get("@id") or "") == field_iri:
+                return True
+            return any(constrains(value) for value in node.values())
+        if isinstance(node, list):
+            return any(constrains(item) for item in node)
+        return False
+
+    for bucket in ODRL_RULE_BUCKETS:
+        rules = (policy or {}).get(bucket) or []
+        for rule in rules if isinstance(rules, list) else [rules]:
+            if isinstance(rule, dict) and constrains(rule.get("odrl:constraint")):
+                rule_id = str(rule.get("@id") or "").strip()
+                assert rule_id, f"the deployed rule constraining {field_iri} carries no @id to attribute a verdict to"
+                return rule_id
+    raise AssertionError(f"no deployed ODRL rule constrains {field_iri}; policy was: {policy!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +396,9 @@ def step_when_deploy_contract(context, name):
         body = context.requests_response.json()
         context.deployment_correlation_id = body.get("correlation_id")
         context.deployment_content_hash = body.get("content_hash")
+        # The rules the target is handed, verbatim: a KPI verdict quotes one of
+        # their @ids back (ADR-33).
+        context.deployment_policy = (body.get("payload") or {}).get("odrl:policy")
         ContractService._refresh_contract(context, name)
 
 
@@ -502,39 +572,48 @@ def step_then_archive_has_tsa_timestamp(context, name):
     )
 
 
-@when('the target reports a KPI value "{metric}" = "{value}" for contract "{name}"')
-def step_when_target_reports_kpi(context, metric, value, name):
+def report_kpi(context, name: str, metric: str, value: str, verdict=None, rule=None):
+    """Post a KPI report over the deployment callback as the target system
+    itself would (DCS-IR-SI-05). `verdict` and `rule` are omitted from the wire
+    entirely when None — an absent verdict is the target saying nothing, which
+    is a different report from one that says "not_evaluated"."""
     did, _ = ContractService._contract_data(context, name)
+    kpi = {"metric": metric, "value": value}
+    if verdict is not None:
+        kpi["verdict"] = verdict
+    if rule is not None:
+        kpi["rule"] = rule
     payload = {
         "did": did,
         "correlation_id": getattr(context, "deployment_correlation_id", None) or "bdd-unknown-correlation",
-        "kpi": {"metric": metric, "value": value},
+        "kpi": kpi,
     }
     headers = _target_callback_headers()
     context.requests_response = post_json(context, contract_deployment_callback_url(context), payload, headers=headers)
 
 
-# @step, not @when: a scenario that asserts something AFTER a breach needs the
-# breach as part of its Given block, so this must bind in any block.
-@step('the target reports a KPI value for the ODRL-bound field of contract "{name}" = "{value}"')
-def step_when_target_reports_kpi_for_bound_field(context, name, value):
-    # The metric IS the bound placeholder's @id, so EvaluateKPIViolation binds
-    # it to the ODRL constraint by node IRI (DCS-FR-CWE-09).
-    step_when_target_reports_kpi(context, _odrl_bound_field_iri(context, name), value, name)
+# @step, not @when: a scenario that asserts something AFTER a report needs the
+# report as part of its Given block, so these must bind in any block.
+@step('the target reports a KPI value "{metric}" = "{value}" for contract "{name}"')
+def step_when_target_reports_kpi(context, metric, value, name):
+    report_kpi(context, name, metric, value)
 
 
-@then('the contract detail for "{name}" shows a KPI violation flag for its ODRL-bound field')
-def step_then_contract_detail_shows_kpi_violation_for_bound_field(context, name):
-    step_then_contract_detail_shows_kpi_violation(context, name, _odrl_bound_field_iri(context, name))
+@step(
+    'the target reports KPI "{metric}" = "{value}" for contract "{name}", '
+    'concluding "{verdict}" on the rule it deployed'
+)
+def step_when_target_reports_kpi_with_verdict(context, metric, value, name, verdict):
+    report_kpi(context, name, metric, value, verdict=verdict, rule=sole_deployed_rule(context, name))
 
 
-@then('the semantic KPI observations for "{name}" record a violated observation for its ODRL-bound field')
-def step_then_semantic_kpi_observations_for_bound_field(context, name):
-    step_then_semantic_kpi_observations(context, name, _odrl_bound_field_iri(context, name))
+@step('the target reports KPI "{metric}" = "{value}" for contract "{name}", concluding "{verdict}" on rule "{rule}"')
+def step_when_target_reports_kpi_naming_rule(context, metric, value, name, verdict, rule):
+    report_kpi(context, name, metric, value, verdict=verdict, rule=rule)
 
 
-@then('the contract detail for "{name}" shows a target-reported KPI "{metric}"')
-def step_then_contract_detail_shows_target_kpi(context, name, metric):
+@then('the contract detail for "{name}" shows a target-reported KPI "{metric}" recorded as "{verdict}"')
+def step_then_contract_detail_shows_target_kpi(context, name, metric, verdict):
     """DCS-FR-CWE-31 ("KPIs sent from the target system"): the metric below
     is measured and reported by the ORCE contract-target-flow itself (its
     activation latency), not by any harness callback — so its value is only
@@ -549,9 +628,14 @@ def step_then_contract_detail_shows_target_kpi(context, name, metric):
         kpis = _kpi_entries(retrieve.json())
         matching = [k for k in kpis if str(k.get("metric")) == metric]
         if matching:
-            value = str(matching[-1].get("value"))
+            entry = matching[-1]
+            value = str(entry.get("value"))
             assert value and float(value) > 0, (
                 f"Expected the target-measured KPI '{metric}' to carry a positive number, got {value!r}"
+            )
+            assert str(entry.get("verdict")) == verdict, (
+                f"Expected the DCS to record the target's own conclusion on '{metric}' as {verdict!r} "
+                f"(ADR-33: it derives none of its own), got: {entry!r}"
             )
             return
         time.sleep(2)
@@ -579,21 +663,51 @@ def step_then_contract_detail_shows_kpi(context, name, metric, value):
     )
 
 
-@then('the contract detail for "{name}" shows a KPI violation flag for "{metric}"')
-def step_then_contract_detail_shows_kpi_violation(context, name, metric):
+def recorded_kpi(context, name: str, metric: str) -> dict:
+    """The most recent KPI entry the contract detail carries for `metric`."""
     did, _ = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=manager_h)
     assert retrieve.status_code == 200, retrieve.text
-    body = retrieve.json()
-    kpis = _kpi_entries(body)
+    kpis = _kpi_entries(retrieve.json())
     matching = [k for k in kpis if str(k.get("metric")) == metric]
-    flagged_on_entry = any(bool(k.get("violation")) for k in matching)
-    flagged_top_level = metric in _kpi_violation_names(body)
-    assert flagged_on_entry or flagged_top_level, (
-        f"Expected a KPI violation flag/alert for metric '{metric}' on contract '{name}' after a "
-        f"reported KPI value crossed its contractually declared SLA threshold (odrl:Set "
-        f"rightOperand), got kpis: {kpis!r}, kpi_violations: {body.get('kpi_violations')!r}"
+    assert matching, (
+        f"Expected contract '{name}' detail to include a KPI entry for metric '{metric}' "
+        f"(FR-CWE-31/FR-CWE-09 dashboard), got kpis: {kpis!r}"
+    )
+    return matching[-1]
+
+
+@then('the contract detail for "{name}" records KPI "{metric}" with verdict "{verdict}"')
+def step_then_contract_detail_records_verdict(context, name, metric, verdict):
+    """The DCS reproduces the target's conclusion and reaches none of its own
+    (ADR-33). A report that stated nothing is recorded as not_evaluated, which
+    is neither a breach nor compliance."""
+    entry = recorded_kpi(context, name, metric)
+    assert str(entry.get("verdict")) == verdict, (
+        f"Expected KPI '{metric}' on contract '{name}' to carry the target's verdict {verdict!r}, got: {entry!r}"
+    )
+
+
+@then('the contract detail for "{name}" attributes KPI "{metric}" to the rule it deployed')
+def step_then_contract_detail_attributes_rule(context, name, metric):
+    """The verdict is traceable to one term of the signed contract: the rule
+    @id it names is the @id that travelled to the target in the deployment
+    envelope's odrl:policy, unchanged."""
+    entry = recorded_kpi(context, name, metric)
+    expected = sole_deployed_rule(context, name)
+    assert str(entry.get("rule")) == expected, (
+        f"Expected KPI '{metric}' on contract '{name}' to be attributed to the deployed ODRL rule "
+        f"{expected!r}, got: {entry!r}"
+    )
+
+
+@then('the contract detail for "{name}" attributes no rule to KPI "{metric}"')
+def step_then_contract_detail_attributes_no_rule(context, name, metric):
+    entry = recorded_kpi(context, name, metric)
+    assert not entry.get("rule"), (
+        f"Expected KPI '{metric}' on contract '{name}' to name no ODRL rule — the target concluded "
+        f"nothing about one — got: {entry!r}"
     )
 
 
@@ -685,8 +799,7 @@ def step_then_orce_acknowledges(context):
     assert ack.get("activated_at"), f"Expected a non-empty 'activated_at' in the ORCE ack: {ack!r}"
 
 
-@then('the semantic KPI observations for "{name}" record a violated "{metric}" observation')
-def step_then_semantic_kpi_observations(context, name, metric):
+def semantic_kpi_observations(context, name: str, metric: str) -> list:
     """GET /contract/kpis/{did} (DCS-FR-CWE-09/-31): the reported KPIs as a
     JSON-LD observation set — dcs:KPIObservation nodes anchored to the
     Semantic Hub's versioned context, consumable by external tooling."""
@@ -707,12 +820,37 @@ def step_then_semantic_kpi_observations(context, name, metric):
     assert matching, (
         f"Expected a dcs:KPIObservation for metric {metric!r}, got: {observations}"
     )
-    assert any(node.get("dcs:violation") is True for node in matching), (
-        f"Expected a violated {metric!r} observation, got: {matching}"
-    )
     # The observation references the contract's dereferenceable resource IRI,
     # whose last path segment is the system key.
     assert all(
         str(node.get("dcs:aboutContract", {}).get("@id", "")).rstrip("/").rsplit("/", 1)[-1] == did
         for node in matching
     ), f"Expected every observation to reference contract {did}, got: {matching}"
+    return matching
+
+
+@then('the semantic KPI observations for "{name}" record "{metric}" as "{verdict}" against the rule it deployed')
+def step_then_semantic_kpi_observations(context, name, metric, verdict):
+    """The machine-readable side carries the same two facts as the detail: the
+    target's verdict, and the ODRL rule @id it concerns (dcs:aboutRule), so a
+    consumer can join an observation to the term of the contract it judges."""
+    matching = semantic_kpi_observations(context, name, metric)
+    expected_rule = sole_deployed_rule(context, name)
+    assert any(
+        node.get("dcs:verdict") == verdict
+        and str((node.get("dcs:aboutRule") or {}).get("@id") or "") == expected_rule
+        for node in matching
+    ), (
+        f"Expected a {verdict!r} {metric!r} observation naming rule {expected_rule!r}, got: {matching}"
+    )
+
+
+@then('the semantic KPI observations for "{name}" record "{metric}" as "{verdict}" naming no rule')
+def step_then_semantic_kpi_observations_without_rule(context, name, metric, verdict):
+    matching = semantic_kpi_observations(context, name, metric)
+    assert any(
+        node.get("dcs:verdict") == verdict and "dcs:aboutRule" not in node for node in matching
+    ), (
+        f"Expected a {verdict!r} {metric!r} observation with no dcs:aboutRule — an unclassified "
+        f"measurement judges no term — got: {matching}"
+    )

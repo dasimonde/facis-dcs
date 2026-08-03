@@ -135,8 +135,6 @@ spec:
               containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
-            - name: DCS_SYSTEM_TOKEN
-              value: {{ .Values.systemToken | default "dcs-dev-system-token" | quote }}
             {{- if .Values.dss }}{{- if or .Values.dss.enabled .Values.dss.url }}
             # EU DSS for signature VALIDATION (DCS-FR-SM-18) and the
             # wallet-driven /signature/submit acceptance path (ADR-12). The DCS
@@ -241,10 +239,6 @@ spec:
             {{- if .Values.oid4vp.trust.enabled }}
             - name: OID4VP_TRUST_DATA_PATH
               value: {{ include "digital-contracting-service.oid4vpTrustDataPath" . | quote }}
-            {{- if .Values.oid4vp.trust.xfscAllowUnsignedFallback }}
-            - name: OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK
-              value: "true"
-            {{- end }}
             {{- if .Values.oid4vp.trust.x5cAnchorsPath }}
             - name: OID4VP_X5C_TRUST_ANCHORS_PATH
               value: {{ .Values.oid4vp.trust.x5cAnchorsPath | quote }}
@@ -387,16 +381,20 @@ spec:
               value: {{ include "digital-contracting-service.pdfCoreURL" . | quote }}
             - name: PDF_CORE_CONTEXT_IRI
               value: {{ include "digital-contracting-service.pdfCoreContextIRI" . | quote }}
-            # ---- Status List Service (DCS-OR-C2PA-005) --------------------------
-            {{- $statuslistURL := include "digital-contracting-service.statuslistServiceURL" . }}
-            {{- if $statuslistURL }}
-            - name: STATUSLIST_SERVICE_URL
-              value: {{ $statuslistURL | quote }}
+            # ---- Status list this deployment serves (DCS-OR-C2PA-005, ADR-34) ----
+            # The certificate chain that publishes this deployment's signing key.
+            # The status list it serves carries it as x5c, and its own trust
+            # anchor is read back out of it, since a deployment verifies its own
+            # list through exactly the path it verifies anyone else's.
+            {{- $issuerChain := include "digital-contracting-service.issuerX5ChainPath" . }}
+            {{- if $issuerChain }}
+            - name: DCS_ISSUER_X5CHAIN_PATH
+              value: {{ $issuerChain | quote }}
             {{- end }}
-            {{- if .Values.statuslistService.tenantID }}
-            - name: STATUSLIST_TENANT_ID
-              value: {{ .Values.statuslistService.tenantID | quote }}
-            {{- end }}
+            # The XFSC statuslist-service is no longer wired in: the credentials
+            # this deployment issues name its OWN list above (ADR-34), and it is
+            # the only thing that ever pointed there. The subchart is still
+            # deployed, with nothing consuming it, while its removal is staged.
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

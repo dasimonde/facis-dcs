@@ -10,7 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	tpldb "digital-contracting-service/internal/templaterepository/db"
@@ -21,12 +21,18 @@ type VerifyTemplatePdfQry struct {
 }
 
 type VerifyTemplatePdfHandler struct {
-	DB         *sqlx.DB
-	TRepo      tpldb.ContractTemplateRepo
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
-	VCIssuer   provenance.VCIssuer
-	IssuerDID  string
+	DB        *sqlx.DB
+	TRepo     tpldb.ContractTemplateRepo
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
+	VCIssuer  provenance.VCIssuer
+	IssuerDID string
+	// Credentials verifies the lifecycle credential embedded in the PDF against
+	// the key its issuer publishes for assertions.
+	Credentials *provenance.CredentialVerifier
+	// CredentialStatus resolves that credential's revocation entry against the
+	// signed status list it names.
+	CredentialStatus *provenance.CredentialStatusVerifier
 }
 
 func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplatePdfQry) (*pdfgen.PDFVerifyResult, error) {
@@ -66,8 +72,11 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 			jsonldBytes = []byte(*tpl.TemplateData)
 		}
 
-		r, err := h.IPFSClient.FetchFile(pdfState.IPFSCID)
-		if err != nil || len(r.Data) == 0 {
+		pdf, err := h.Artifacts.Get(ctx, artifactstore.TemplateScope(qry.DID), pdfState.IPFSCID)
+		if artifactstore.IsTampered(err) {
+			return tamperedVerifyResult(currentC2PAState), nil
+		}
+		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch cached template PDF %s from IPFS for verify append: %w", qry.DID, err)
 		}
 
@@ -80,8 +89,8 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 			})
 		}
 
-		updatedPDF, err := appendAndCache(ctx, tx, qry.DID, tpl.State, jsonldBytes, r.Data,
-			h.IPFSClient, h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
+		updatedPDF, err := appendAndCache(ctx, tx, qry.DID, tpl.State, jsonldBytes, pdf,
+			h.Artifacts, artifactstore.TemplateScope(qry.DID), h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
 		if err != nil {
 			return nil, fmt.Errorf("append template C2PA assertion before verify for %s: %w", qry.DID, err)
 		}
@@ -89,17 +98,20 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 			return nil, fmt.Errorf("commit pre-verify append tx for template %s: %w", qry.DID, err)
 		}
 
-		return runVerify(ctx, updatedPDF, h.PDFCore, currentC2PAState)
+		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
 	}
 
 	if latestCID == "" {
 		return nil, fmt.Errorf("no cached PDF for template %s; call export first", qry.DID)
 	}
 
-	r, err := h.IPFSClient.FetchFile(latestCID)
-	if err != nil || len(r.Data) == 0 {
+	pdf, err := h.Artifacts.Get(ctx, artifactstore.TemplateScope(qry.DID), latestCID)
+	if artifactstore.IsTampered(err) {
+		return tamperedVerifyResult(currentC2PAState), nil
+	}
+	if err != nil || len(pdf) == 0 {
 		return nil, fmt.Errorf("fetch template PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
 
-	return runVerify(ctx, r.Data, h.PDFCore, currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
 }

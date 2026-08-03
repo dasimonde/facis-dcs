@@ -12,7 +12,10 @@ var coseAlgES256 = []byte{0x01, 0x26}
 var coseAlgEdDSA = []byte{0x01, 0x27}
 
 func TestCOSEProtectedHeaderDeclaresES256(t *testing.T) {
-	header := buildCoseProtectedHeadersWithX5Chain()
+	header, err := buildCoseProtectedHeadersWithX5Chain(testSigningContext())
+	if err != nil {
+		t.Fatalf("buildCoseProtectedHeadersWithX5Chain: %v", err)
+	}
 	if !bytes.Contains(header, coseAlgES256) {
 		t.Fatalf("protected header does not declare alg ES256(-7): % x", header)
 	}

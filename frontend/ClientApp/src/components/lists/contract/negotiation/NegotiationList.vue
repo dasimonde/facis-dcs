@@ -3,34 +3,37 @@ import { computed, ref, useTemplateRef } from 'vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
-import { useAuthStore } from '@/stores/auth-store'
+import { activeNegotiations } from '@/utils/contract-negotiations'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 import type { ContractNegotiationDecision } from '@/models/contract/contract-negotiation-decision'
 
 const props = defineProps<{
   contract: Contract
+  // This party's DCS instance did:web. Decision rows are keyed by it, not by
+  // the logged-in user's issuer — that is the signatory's organization and
+  // never matches a negotiator.
+  localInstanceDid: string
   disabled?: boolean
 }>()
 
-const authStore = useAuthStore()
-const issuer = computed(() => authStore.user?.issuer)
+const { isCreator, isReviewer, isManager, isNegotiator } = useContractPermissions()
 
-const { isCreator, isReviewer } = useContractPermissions()
+// design/contract_workflow_engine.go respond(): Contract Creator, Contract
+// Negotiator, Contract Reviewer, Contract Manager.
+const mayRespond = computed(() => isCreator.value || isNegotiator.value || isReviewer.value || isManager.value)
+
+const ownDecision = (negotiation: ContractNegotiation) =>
+  negotiation.negotiation_decisions.find((decision) => decision.negotiator === props.localInstanceDid)
 
 const emit = defineEmits<{ selectedNegotiation: [negotiation: ContractNegotiation | null] }>()
 
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
-const negotiations = computed(() => {
-  const activeNegotiations = props.contract.negotiations?.filter(
-    (negotiation) => negotiation.contract_version === props.contract.contract_version,
-  )
-  return activeNegotiations ?? []
-})
-
 const sortedNegotiations = computed(() =>
-  negotiations.value.slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+  activeNegotiations(props.contract)
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
 )
 
 const sortedDecisions = (decisions: ContractNegotiationDecision[]) => {
@@ -51,7 +54,7 @@ const acceptNegotiation = async (negotiation: ContractNegotiation) => {
         action_flag: 'ACCEPTING',
       })
       if (response.id) {
-        const decision = negotiation.negotiation_decisions.find((decision) => decision.negotiator === issuer.value)
+        const decision = ownDecision(negotiation)
         if (decision) decision.decision = 'ACCEPTED'
       }
     }
@@ -79,7 +82,7 @@ const rejectNegotiation = async (negotiation: ContractNegotiation) => {
       })
       if (response.id) {
         negotiation.negotiation_decisions.forEach((decision) => {
-          if (decision.negotiator === issuer.value) {
+          if (decision.negotiator === props.localInstanceDid) {
             decision.decision = 'REJECTED'
             decision.rejection_reason = rejectResult.data
           } else {
@@ -96,7 +99,7 @@ const rejectNegotiation = async (negotiation: ContractNegotiation) => {
 }
 
 const isBtnDisabled = (negotiation: ContractNegotiation) => {
-  const decision = negotiation.negotiation_decisions.find((decision) => decision.negotiator === issuer.value)
+  const decision = ownDecision(negotiation)
   // Disable only once THIS negotiator has actually decided. A pending decision
   // carries a null decision, and `!== undefined` classed that as decided — so
   // the very decision the user still owes disabled its own Accept/Reject, and
@@ -124,6 +127,13 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
       <div class="card border-base-content/10 bg-base-100 shadow-sm card-border">
         <div class="card-body">
           <h2 class="card-title">Change proposal by: {{ negotiation.created_by }}</h2>
+          <div v-if="negotiation.superseded?.length" class="text-sm">
+            <div class="badge badge-sm badge-warning">SUPERSEDED</div>
+            <div v-for="discard in negotiation.superseded" :key="discard.superseded_by">
+              Accepted, but the merged contract does not carry its {{ discard.fields.join(', ') }} — a later accepted
+              change request ({{ discard.superseded_by }}) set the same.
+            </div>
+          </div>
           <ul class="list">
             <li
               v-for="decision in sortedDecisions(negotiation.negotiation_decisions)"
@@ -143,7 +153,7 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
             <button
               v-if="!disabled && isNegotiationShown.get(negotiation.id)"
               class="btn btn-sm btn-primary"
-              :disabled="(!isCreator && !isReviewer) || isSubmitting || isBtnDisabled(negotiation)"
+              :disabled="!mayRespond || isSubmitting || isBtnDisabled(negotiation)"
               @click="acceptNegotiation(negotiation)"
             >
               <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -152,7 +162,7 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
             <button
               v-if="!disabled && isNegotiationShown.get(negotiation.id)"
               class="btn btn-sm btn-primary"
-              :disabled="(!isCreator && !isReviewer) || isSubmitting || isBtnDisabled(negotiation)"
+              :disabled="!mayRespond || isSubmitting || isBtnDisabled(negotiation)"
               @click="rejectNegotiation(negotiation)"
             >
               <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>

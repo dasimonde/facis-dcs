@@ -24,12 +24,14 @@ import (
 	contractworkflowenginesvr "digital-contracting-service/gen/http/contract_workflow_engine/server"
 	dcstodcssvr "digital-contracting-service/gen/http/dcs_to_dcs/server"
 	didsvr "digital-contracting-service/gen/http/did_service/server"
+	keyinventorysvr "digital-contracting-service/gen/http/key_inventory/server"
 	pdfgenerationsvr "digital-contracting-service/gen/http/pdf_generation/server"
 	processauditandcompliancesvr "digital-contracting-service/gen/http/process_audit_and_compliance/server"
 	semantichubsvr "digital-contracting-service/gen/http/semantic_hub/server"
 	signaturemanagementsvr "digital-contracting-service/gen/http/signature_management/server"
 	templatecatalogueintegrationsvr "digital-contracting-service/gen/http/template_catalogue_integration/server"
 	templaterepositorysvr "digital-contracting-service/gen/http/template_repository/server"
+	keyinventory "digital-contracting-service/gen/key_inventory"
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	semantichubgen "digital-contracting-service/gen/semantic_hub"
@@ -38,6 +40,7 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/service"
 	"digital-contracting-service/internal/webhookplatform"
@@ -137,13 +140,9 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	contractStorageArchiveEndpoints *contractstoragearchive.Endpoints, contractWorkflowEngineEndpoints *contractworkflowengine.Endpoints,
 	dcsToDcsEndpoints *dcstodcs.Endpoints, pdfGenerationEndpoints *pdfgeneration.Endpoints, processAuditAndComplianceEndpoints *processauditandcompliance.Endpoints,
 	signatureManagementEndpoints *signaturemanagement.Endpoints, templateCatalogueIntegrationEndpoints *templatecatalogueintegration.Endpoints,
-	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, webhookPlatform *webhookplatform.Platform, wg *sync.WaitGroup,
+	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, wg *sync.WaitGroup,
 	errc chan error, dbg bool) {
 
-	// Provide the transport specific request decoder and response encoder.
-	// The goa http package has built-in support for JSON, XML and gob.
-	// Other encodings can be used by providing the corresponding functions,
-	// see goa.design/implement/encoding.
 	var (
 		dec = requestDecoderWithForm
 		enc = responseEncoder
@@ -164,10 +163,6 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	apiPrefix := getAPIPathPrefix()
 	apiMux := newPrefixedMuxer(mux, apiPrefix)
 
-	// Wrap the endpoints with the transport specific layers. The generated
-	// server packages contains code generated from the design which maps
-	// the service input and output data structures to HTTP requests and
-	// responses.
 	var (
 		authServer                         *authsvr.Server
 		contractStorageArchiveServer       *contractstoragearchivesvr.Server
@@ -181,6 +176,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		didServer                          *didsvr.Server
 		c2paServer                         *c2pasvr.Server
 		semanticHubServer                  *semantichubsvr.Server
+		keyInventoryServer                 *keyinventorysvr.Server
 	)
 	{
 		eh := errorHandler(ctx)
@@ -197,12 +193,13 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		didServer = didsvr.New(didEnpoints, apiMux, dec, enc, eh, ef)
 		c2paServer = c2pasvr.New(c2paEndpoints, apiMux, dec, enc, eh, ef)
 		semanticHubServer = semantichubsvr.New(semanticHubEndpoints, apiMux, dec, enc, eh, ef)
+		keyInventoryServer = keyinventorysvr.New(keyInventoryEndpoints, apiMux, dec, enc, eh, ef)
 	}
 
+	// did.json is served at the origin root (did:web well-known path), outside
+	// the API prefix.
 	didsvr.Mount(mux, didServer)
 	c2pasvr.Mount(apiMux, c2paServer)
-
-	// Configure the mux.
 	authsvr.Mount(apiMux, authServer)
 	contractstoragearchivesvr.Mount(apiMux, contractStorageArchiveServer)
 	contractworkflowenginesvr.Mount(apiMux, contractWorkflowEngineServer)
@@ -213,6 +210,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	templatecatalogueintegrationsvr.Mount(apiMux, templateCatalogueIntegrationServer)
 	templaterepositorysvr.Mount(apiMux, templateRepositoryServer)
 	semantichubsvr.Mount(apiMux, semanticHubServer)
+	keyinventorysvr.Mount(apiMux, keyInventoryServer)
 
 	// Mount Swagger UI on /swagger and OpenAPI spec on /openapi3.json.
 	mountSwaggerUI(apiMux)
@@ -223,6 +221,13 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	// Outer mux: routes /orce/* to the webhook platform, everything else to Goa.
 	outerMux := http.NewServeMux()
 	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
+	// The status list for the credentials this deployment issues (ADR-34). It
+	// sits here rather than in the generated API surface for two reasons: it is
+	// served at the origin root, the way did.json is, so a verifier holding only
+	// a credential can reach it without knowing this deployment's API prefix; and
+	// its media type is the routing signal a verifier uses, which Goa's response
+	// encoder would renegotiate to application/json.
+	outerMux.Handle(provenance.StatusListPath, provenance.StatusListHandler(statusList))
 	outerMux.Handle("/metrics", promhttp.Handler())
 	mountReadinessEndpoint(outerMux)
 	outerMux.Handle("/", mux)
@@ -239,8 +244,6 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	}
 	handler = log.HTTP(ctx)(handler)
 
-	// Start HTTP server using default configuration, change the code to
-	// configure the server as required by your service.
 	srv := &http.Server{Addr: u.Host, Handler: handler, ReadHeaderTimeout: time.Second * 60}
 	for _, m := range authServer.Mounts {
 		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
@@ -276,6 +279,9 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
 	}
 	for _, m := range c2paServer.Mounts {
+		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
+	}
+	for _, m := range keyInventoryServer.Mounts {
 		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
 	}
 
@@ -353,10 +359,11 @@ type bundleExportRefusedResponse struct {
 func (e *bundleExportRefusedResponse) StatusCode() int { return http.StatusUnprocessableEntity }
 
 type workflowGateBlockedResponse struct {
-	Name      string `json:"name"`
-	Message   string `json:"message"`
-	GateRunID string `json:"gate_run_id,omitempty"`
-	Status    string `json:"status"`
+	Name      string   `json:"name"`
+	Message   string   `json:"message"`
+	GateRunID string   `json:"gate_run_id,omitempty"`
+	Status    string   `json:"status"`
+	Findings  []string `json:"findings,omitempty"`
 }
 
 func (e *workflowGateBlockedResponse) StatusCode() int {
@@ -371,10 +378,15 @@ func (e *workflowGateBlockedResponse) StatusCode() int {
 func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
 	var gateBlocked *workflowgate.BlockedError
 	if errors.As(err, &gateBlocked) {
-		return &workflowGateBlockedResponse{
+		response := &workflowGateBlockedResponse{
 			Name: "workflow_gate_blocked", Message: gateBlocked.Error(),
 			GateRunID: gateBlocked.RunID, Status: gateBlocked.Status,
 		}
+		var localBlocked *workflowgate.LocalEvaluationBlockedError
+		if errors.As(err, &localBlocked) {
+			response.Findings = localBlocked.Reasons()
+		}
+		return response
 	}
 
 	// A bundle-export refusal is its own error type (not a *goa.ServiceError),

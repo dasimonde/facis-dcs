@@ -14,6 +14,7 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,15 +63,118 @@ func BuildContractPayload(did string, contractVersion int, contractData []byte) 
 	return jcs.Transform(encoded)
 }
 
+// SettlementType is the @type of the settlement artifact a peer signs and
+// ships on reaching its own settled state.
+const SettlementType = "dcs:ContractSettlement"
+
+// Settlement is the peer's statement that it settled a contract: which
+// contract, which document (by digest — the load-bearing binding, since
+// contract_version is a per-instance counter), who settled, toward whom, and
+// when.
+type Settlement struct {
+	ContractDID     string
+	ContractVersion int
+	DocumentDigest  string
+	SettledBy       string
+	SettledWith     string
+	SettledAt       time.Time
+}
+
+// BuildSettlementPayload canonicalizes the settlement artifact with JCS
+// (RFC 8785), exactly as BuildContractPayload canonicalizes a signed
+// contract, so the receiver re-derives the bytes from the claimed fields
+// instead of trusting the sender's serialization.
+func BuildSettlementPayload(s Settlement) ([]byte, error) {
+	payload := map[string]any{
+		"@context":                   map[string]any{"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
+		"@type":                      SettlementType,
+		"dcs:contractDid":            s.ContractDID,
+		"dcs:contractVersion":        s.ContractVersion,
+		"dcs:contractDocumentDigest": s.DocumentDigest,
+		"dcs:settledBy":              s.SettledBy,
+		"dcs:settledWith":            s.SettledWith,
+		"dcs:settledAt":              s.SettledAt.UTC().Format(time.RFC3339Nano),
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return jcs.Transform(encoded)
+}
+
+// SettlementWithdrawalType is the @type of the artifact a peer signs and ships
+// when it takes back a settlement it previously shipped.
+const SettlementWithdrawalType = "dcs:ContractSettlementWithdrawal"
+
+// SettlementWithdrawal is the peer's statement that the settlement it made of
+// one named document version no longer stands. It names that document by the
+// same digest the settlement carried, which is what tells the receiver which
+// settlement is being taken back — a withdrawal that names a version the
+// receiver no longer holds a settlement for removes nothing.
+type SettlementWithdrawal struct {
+	ContractDID    string
+	DocumentDigest string
+	WithdrawnBy    string
+	WithdrawnFrom  string
+	WithdrawnAt    time.Time
+}
+
+// BuildSettlementWithdrawalPayload canonicalizes the withdrawal artifact with
+// JCS (RFC 8785), as BuildSettlementPayload does for the settlement it revokes.
+func BuildSettlementWithdrawalPayload(w SettlementWithdrawal) ([]byte, error) {
+	payload := map[string]any{
+		"@context":                   map[string]any{"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
+		"@type":                      SettlementWithdrawalType,
+		"dcs:contractDid":            w.ContractDID,
+		"dcs:contractDocumentDigest": w.DocumentDigest,
+		"dcs:withdrawnBy":            w.WithdrawnBy,
+		"dcs:withdrawnFrom":          w.WithdrawnFrom,
+		"dcs:withdrawnAt":            w.WithdrawnAt.UTC().Format(time.RFC3339Nano),
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return jcs.Transform(encoded)
+}
+
+// ContractDocumentDigest is the version identity of a contract document that
+// both instances can compute from their own copy: the SHA-256 of its JCS
+// canonicalization. Canonicalizing first is what makes it survive the
+// serialization each side's jsonb column applies to the same document.
+func ContractDocumentDigest(contractData []byte) (string, error) {
+	if len(contractData) == 0 {
+		contractData = []byte(`{}`)
+	}
+	var document any
+	if err := json.Unmarshal(contractData, &document); err != nil {
+		return "", fmt.Errorf("decode contract document: %w", err)
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return "", err
+	}
+	canonical, err := jcs.Transform(encoded)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
 // Sign produces a JAdES baseline-B compact JWS over payload using the DID
 // document's HSM-backed P-256 key and its x5c certificate chain.
 func Sign(d *identity.DIDDocument, payload []byte) (string, error) {
-	if len(d.VerificationMethod) == 0 {
-		return "", errors.New("jades: DID document has no verification method")
+	// The chain that travels is the one belonging to the key that signs, which
+	// the document publishes for this instance's signer — not whichever method
+	// happens to come first.
+	method := d.SigningMethod()
+	if method == nil {
+		return "", errors.New("jades: DID document is not bound to a signer")
 	}
-	x5c := d.VerificationMethod[0].PublicKeyJWK.X5C
+	x5c := method.PublicKeyJWK.X5C
 	if len(x5c) == 0 {
-		return "", errors.New("jades: DID document carries no x5c certificate chain")
+		return "", fmt.Errorf("jades: verification method %q carries no x5c certificate chain", method.ID)
 	}
 
 	header := protectedHeader{

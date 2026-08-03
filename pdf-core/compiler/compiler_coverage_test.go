@@ -174,35 +174,57 @@ func TestReRenderingStableAfterVerification(t *testing.T) {
 	}
 }
 
-// TestManifestStreamContainingBTIsNotPageContent reproduces the intermittent
-// /sign panic "C2PA coverage invariant violated: page content stream [x, y)
-// overlaps C2PA exclusion [x, y)": the manifest's binary JUMBF payload can
-// incidentally contain the bytes "BT", which misclassified the manifest
-// stream itself as page content — making it "overlap" its own exclusion
-// window exactly. The object-dict classifier must exclude it.
-func TestManifestStreamContainingBTIsNotPageContent(t *testing.T) {
-	// A minimal PDF-shaped byte string: one real content stream and one C2PA
-	// manifest object whose binary payload happens to contain "BT".
-	pdf := []byte("%PDF-1.7\n" +
-		"4 0 obj\n<< /Length 20 >>\nstream\n" +
-		"BT (real text) ET ..\nendstream\nendobj\n" +
-		"9 0 obj\n<< /Type /EmbeddedFile /Subtype /application#2Fc2pa /Length 16 >>\nstream\n" +
-		"\x00\x01BT\x02jumbf\x03\x04\x05\x06\x07\x08\nendstream\nendobj\n")
+// The C2PA manifest stream must never be counted as page content: it is the one
+// permitted exclusion window, so counting it made it "overlap" its own window
+// exactly and panicked /sign under load. It used to be classified by scanning
+// the file for "stream\n" and testing each payload for "BT" — the manifest's
+// binary JUMBF incidentally contains those bytes. Pages are now reached through
+// the page tree, so nothing outside a page's /Contents can be classified as page
+// content whatever its bytes say. Clause text asserts the same for the other
+// half of that scan: a clause containing "endstream" no longer truncates a range.
+func TestOnlyThePageTreesContentStreamsCountAsPageContent(t *testing.T) {
+	doc := sectionDoc([]sectionData{
+		{Heading: "1. Markers", Clauses: []clauseData{
+			{Segments: []clauseSegment{{Type: "prose", Text: "This clause writes endstream and BT into the page."}}},
+		}},
+	})
+	pdf, err := renderPDF(testSigningContext(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ranges, err := ExtractPageContentByteRanges(pdf)
 	if err != nil {
 		t.Fatalf("ExtractPageContentByteRanges: %v", err)
 	}
-	if len(ranges) != 1 {
-		t.Fatalf("expected exactly 1 page content range (the manifest stream must be excluded), got %d: %v", len(ranges), ranges)
+	streams, err := pageContentStreamRanges(pdf)
+	if err != nil {
+		t.Fatalf("pageContentStreamRanges: %v", err)
+	}
+	if len(ranges) != len(streams) {
+		t.Fatalf("extracted %d ranges for %d pages", len(ranges), len(streams))
+	}
+	for i, r := range ranges {
+		if r[0] != streams[i].start || r[1] != streams[i].end {
+			t.Errorf("range %d is [%d,%d), but page %d's content stream is [%d,%d)",
+				i, r[0], r[1], i, streams[i].start, streams[i].end)
+		}
+		if !bytes.Contains(pdf[r[0]:r[1]], []byte("endstream")) {
+			t.Errorf("range %d stops short of the clause text that says \"endstream\"", i)
+		}
 	}
 
-	manifestStreamStart := bytes.Index(pdf, []byte("\x00\x01BT"))
-	if manifestStreamStart < 0 {
-		t.Fatal("test setup: manifest payload not found")
+	manifestStart, manifestLen, found := findLastObjectStreamRange(pdf, 9)
+	if !found {
+		t.Fatal("the compiled PDF carries no C2PA manifest stream")
 	}
-	exclusion := c2paExclusion{Start: manifestStreamStart, Length: 16}
-	if err := checkCoverageWithExclusions(pdf, []c2paExclusion{exclusion}); err != nil {
-		t.Fatalf("coverage check must not flag the manifest stream against its own exclusion: %v", err)
+	for i, r := range ranges {
+		if rangesOverlap(r[0], r[1], manifestStart, manifestStart+manifestLen) {
+			t.Errorf("page content range %d [%d,%d) covers the C2PA manifest stream [%d,%d)",
+				i, r[0], r[1], manifestStart, manifestStart+manifestLen)
+		}
+	}
+	if err := CheckPageContentC2PACoverage(pdf); err != nil {
+		t.Errorf("coverage check must not flag the manifest stream against its own exclusion: %v", err)
 	}
 }

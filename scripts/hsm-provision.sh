@@ -18,7 +18,7 @@ PIN="$3"
 SO_PIN="$4"
 MODULE="${5:-/usr/lib/softhsm/libsofthsm2.so}"
 
-KEY_LABELS=(dcs-did dcs-vc dcs-oid4vp-jar dcs-c2pa)
+KEY_LABELS=(dcs-did dcs-vc dcs-oid4vp-jar dcs-c2pa dcs-ecdh)
 
 # Install SoftHSM2 + OpenSC (pkcs11-tool) if missing.
 if ! command -v softhsm2-util >/dev/null 2>&1 || ! command -v pkcs11-tool >/dev/null 2>&1; then
@@ -53,8 +53,13 @@ for LABEL in "${KEY_LABELS[@]}"; do
   fi
   ID="$(printf '%s' "$LABEL" | md5sum | cut -c1-8)"
   echo "Generating EC P-256 key '$LABEL'..."
+  # dcs-ecdh is the key-agreement key (CEK wrapping): needs CKA_DERIVE usage.
+  USAGE=()
+  if [ "$LABEL" = "dcs-ecdh" ]; then
+    USAGE=(--usage-derive)
+  fi
   pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --login --pin "$PIN" \
-    --keypairgen --key-type EC:prime256v1 --label "$LABEL" --id "$ID"
+    --keypairgen --key-type EC:prime256v1 --label "$LABEL" --id "$ID" ${USAGE[@]+"${USAGE[@]}"}
 done
 
 echo "SoftHSM token '$TOKEN_LABEL' ready ($TOKEN_DIR)."

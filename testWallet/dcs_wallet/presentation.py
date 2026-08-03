@@ -23,7 +23,7 @@ VP_FORMAT = "dc+sd-jwt"
 _REQUIRED_EC_PUBLIC_FIELDS = ("kty", "crv", "x", "y")
 
 _DEFAULT_DISCLOSURE_CLAIMS_BY_VCT: dict[str, list[str]] = {
-    "urn:eudi:pid:de:1": ["given_name", "family_name", "birthdate", "status"],
+    "urn:dcs:pid:demo:v1": ["given_name", "family_name", "birthdate", "status"],
     "urn:eudi:eaa:loyalty-card:1": ["given_name", "family_name", "birthdate", "status"],
     "urn:dcs:poa:v1": ["organization", "roles"],
 }

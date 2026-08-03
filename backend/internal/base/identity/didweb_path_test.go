@@ -68,6 +68,58 @@ func TestDIDWebPathRejectsMalformed(t *testing.T) {
 	}
 }
 
+// The authority decides which server is asked for a peer's key material, and
+// DIDWebBaseURL concatenates it into a URL unquoted. Decoding every escape
+// there let the identifier write the path as well as the host — "%2F..%2F.."
+// producing the authority "evil.example/../.." — so an identifier that passed
+// a host check earlier in the flow could still aim the fetch elsewhere. %3A,
+// the port separator, is the only escape did:web defines in an authority.
+func TestDIDWebPathRefusesAnAuthorityThatIsNotOne(t *testing.T) {
+	for _, did := range []string{
+		"did:web:evil.example%2F..%2F..",          // path traversal, escaped
+		"did:web:evil.example%2fadmin",            // same, lower-case escape
+		"did:web:evil.example/../..",              // same, not even escaped
+		"did:web:evil.example%3Fq=1",              // query
+		"did:web:evil.example%23fragment",         // fragment
+		"did:web:user%40evil.example",             // userinfo
+		"did:web:evil.example%3A8080%3A9090",      // two ports
+		"did:web:evil.example%20",                 // whitespace
+		"did:web:evil.example%",                   // truncated escape
+		"did:web:evil.example%3",                  // truncated escape
+		"did:web:[::1]%3A8080",                    // bracketed literal
+		"did:web:good.example%2f..%2fbad.example", // host swap
+	} {
+		host, segments, err := DIDWebPath(did)
+		if err == nil {
+			t.Errorf("%q resolved to authority %q (segments %v); an authority that is not a hostname must be refused", did, host, segments)
+		}
+	}
+
+	// The one legitimate escape still works, in either case.
+	for _, did := range []string{"did:web:example.com%3A8991", "did:web:example.com%3a8991"} {
+		host, _, err := DIDWebPath(did)
+		if err != nil || host != "example.com:8991" {
+			t.Errorf("%q → %q, %v; the port separator must still decode", did, host, err)
+		}
+	}
+}
+
+// A path segment names a tenant; it does not get to rewrite the path it sits
+// in, or two instances on one host stop being distinguishable.
+func TestDIDWebPathRefusesSegmentsThatRewriteThePath(t *testing.T) {
+	for _, did := range []string{
+		"did:web:example.com:%2F..%2Fother",
+		"did:web:example.com:..",
+		"did:web:example.com:.",
+		"did:web:example.com:a%2Fb",
+		"did:web:example.com:a%23b",
+	} {
+		if host, segments, err := DIDWebPath(did); err == nil {
+			t.Errorf("%q resolved to %q %v; a segment must not carry a separator", did, host, segments)
+		}
+	}
+}
+
 // DIDWebToHostname stays authority-only: certificate hostname verification
 // checks the authority, not the path.
 func TestDIDWebToHostnameIgnoresSegments(t *testing.T) {

@@ -31,13 +31,14 @@ const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT ?? 5199)
 export const E2E_API_BASE = process.env.E2E_DCS_API_BASE ?? 'http://localhost:18080/digital-contracting-service/api'
 
 /**
- * The status-list service the minted credentials embed. In the BDD kind
- * stack this is reachable ONLY at the "localhost" public origin — in-cluster
- * the DCS resolves it through the statusListLocalhostProxy, host-side
- * through the Traefik port-forward — so it is NOT derived from the API
- * origin (dcs-a.localhost has no /statuslist route).
+ * The credential issuer (ADR-34). Every credential these tests mint names this
+ * issuer's status list, and the verifier requires the served token's `sub` to
+ * equal that URI exactly — so this must be the URL the DCS itself fetches, which
+ * on the kind stack is the "localhost" public origin behind /issuer (in-cluster
+ * via statusListLocalhostProxy, host-side via the Traefik port-forward). Not
+ * derived from the API origin: dcs-a.localhost has no /issuer route.
  */
-export const E2E_STATUSLIST_URL = process.env.E2E_STATUSLIST_URL ?? 'http://localhost:18080/statuslist'
+export const E2E_ISSUER_BASE_URL = process.env.E2E_ISSUER_BASE_URL ?? 'http://localhost:18080/issuer'
 
 // The EU DSS the test wallet drives as its external SCA to sign the prepared
 // contract PDF with the signatory's own key (ADR-12). The DCS holds no key.

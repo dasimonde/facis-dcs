@@ -74,7 +74,6 @@ var _ = Service("SemanticHub", func() {
 	Method("register", func() {
 		Description("Register a new version of a schema (context/shapes/profile). Versions are immutable and monotonic per name+kind; when activate is set the new version becomes the one all newly produced documents anchor to.")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
@@ -88,7 +87,8 @@ var _ = Service("SemanticHub", func() {
 			})
 			Attribute("media_type", String, "Media type of the content")
 			Attribute("content", String, "The schema document, verbatim (omit when source_url is given)")
-			Attribute("source_url", String, "Fetch the schema from this URL (http/https, follows redirects) instead of inline content; the fetched bytes are snapshotted as the new immutable version")
+			Attribute("source_url", String, "Fetch the schema from this URL (http/https, follows redirects) instead of inline content; the fetched bytes are snapshotted as the new immutable version. A DCS hub anchor (/semantic/shapes/{name}?version=N) is unwrapped to the schema document it serves, so a library another instance published can be installed from the anchor a template declares")
+			Attribute("version", Int, "Register at exactly this version instead of the next one — how a shape library another instance published is installed here under the number that instance assigned it, so a document pinning ?version=N resolves the same graph on both hubs. Refused when this hub already holds that version")
 			Attribute("activate", Boolean, "Make the new version active immediately")
 			Required("name", "kind", "media_type")
 		})
@@ -108,7 +108,6 @@ var _ = Service("SemanticHub", func() {
 	Method("rollback", func() {
 		Description("Make a previously registered version the active one again (UC-02-08: schema versioning and rollback).")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
@@ -241,7 +240,7 @@ var _ = Service("SemanticHub", func() {
 	})
 
 	Method("resolve_ontology", func() {
-		Description("Serve a registered ontology version — the dereference target of the dcs: term IRIs (via the w3id.org redirect) and of /semantic/ontology/{name} directly.")
+		Description("Serve a registered ontology version — the dereference target of the dcst: taxonomy IRIs (via the w3id.org redirect) and of /semantic/ontology/{name} directly. Ontology entries are parsed configuration (the domain-field index, the ODRL operator vocabulary), not axioms: what constrains a dcs: envelope term is the shapes graph, served by resolve_shapes.")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
 		NoSecurity()
 
@@ -291,7 +290,6 @@ var _ = Service("SemanticHub", func() {
 	Method("list", func() {
 		Description("List every (name, kind) entry the hub holds, with active/latest version summary. Public like retrieve: the hub's inventory is not more sensitive than its content.")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
-		Meta("dcs:ui", "Semantic Hub Dashboard")
 		NoSecurity()
 
 		Result(ArrayOf(SemanticSchemaListEntry))
@@ -308,7 +306,6 @@ var _ = Service("SemanticHub", func() {
 	Method("clauses", func() {
 		Description("List the active clause catalog (DCS-FR-TR-03/TR-04, Phase 3, ADR-10): typed clause NodeShapes the template builder's palette generates a form from, pre-digested into a JSON form-schema server-side (each clause type's target class, label, and properties with their datatype/sh:in/min-max constraints) plus the raw SHACL Turtle for a future shacl-form-style client. Public, like resolve_context: a produced contract's typed clauses are validated against these same shapes (validateAgainstHubShapes), and an external verifier resolving sh:shapesGraph needs to read them too.")
 		Meta("dcs:requirements", "DCS-FR-TR-03", "DCS-FR-TR-04")
-		Meta("dcs:ui", "Template Management Dashboard")
 		NoSecurity()
 
 		Result(ClauseCatalogResponse)
