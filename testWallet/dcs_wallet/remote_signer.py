@@ -23,7 +23,7 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 
-from dcs_wallet.signer import ensure_signing_material, sign_dtbs
+from dcs_wallet.signer import _SIGNING_DIR, ensure_signing_material, sign_dtbs
 
 _FONT_PATH = Path(__file__).resolve().parent / "fonts" / "Arimo-Regular.ttf"
 

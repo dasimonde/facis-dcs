@@ -41,16 +41,16 @@ const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const isAuditingAuthorized = computed(
   () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
-      authStore.user?.roles?.includes(role),
-    ) ?? false,
+    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft).filter((tab) => {
-    // Don't show diff tab in the contract view.
-    return tab.id !== 'diff'
-  }),
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
+    'details',
+    'content',
+    'audit',
+    'structure',
+  ]),
 )
 
 // The view holds its own copy from retrieve-by-id rather than the contracts

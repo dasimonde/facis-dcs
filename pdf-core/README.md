@@ -220,16 +220,17 @@ curl -X POST http://localhost:8080/claim \
 |----------|---------|-------------|
 | `DCS_PDF_CORE_ADDR` | `0.0.0.0:8080` | Listen address |
 | `DCS_PDF_CORE_ONTOLOGY_BASE_URL` | `http://127.0.0.1:8080` | Base URL for ontology IRIs in payloads and served context |
-| `DCS_PDF_CORE_C2PA_X5CHAIN_PEM` | — | X.509 certificate chain PEM (inline) whose leaf public key is the dcs-c2pa token key |
-| `DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE` | — | Path to the x5chain PEM file |
 
 C2PA manifest signing is a two-step prepare/embed flow, and pdf-core holds no
-key material: the render endpoints return the compiled PDF with zeroed 64-byte
-COSE signature slots plus the COSE Sig_structures to be signed. The DCS backend
-signs those Sig_structures in-process with its PKCS#11 dcs-c2pa key (ES256, COSE
-alg -7) and posts the 64-byte r||s signatures back to `POST /c2pa/embed`, which
-only fills the slots. pdf-core needs the x5chain because the public certificate
-chain goes into the COSE protected header.
+signing material at all — no key and no certificate: the render endpoints return
+the compiled PDF with zeroed 64-byte COSE signature slots plus the COSE
+Sig_structures to be signed. The DCS backend signs those Sig_structures
+in-process with its PKCS#11 dcs-c2pa key (ES256, COSE alg -7) and posts the
+64-byte r||s signatures back to `POST /c2pa/embed`, which only fills the slots.
+
+The certificate chain that goes into the COSE protected header is supplied by
+the caller on every request in the `X-DCS-C2PA-X5Chain` header, base64-encoded
+PEM. It is not configured on pdf-core.
 
 ### Ontology IRI configuration
 
@@ -260,8 +261,6 @@ docker build -t dcs-pdf-core .
 
 docker run -p 8080:8080 \
   -e DCS_PDF_CORE_ONTOLOGY_BASE_URL=https://docs.example.com \
-  -e DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE=/secrets/chain.pem \
-  -v /host/secrets:/secrets:ro \
   dcs-pdf-core
 ```
 

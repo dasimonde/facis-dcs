@@ -65,7 +65,7 @@ import time
 import requests as _requests
 from behave import given, then
 
-from steps.support.api_client import pac_audit_url, post_json
+from steps.support.api_client import pac_audit_timeline, pac_audit_url, post_json
 from steps.support.services.auth_service import AuthService
 
 
@@ -241,13 +241,7 @@ def _pac_audit_entries(context, scope="PROCESS_AUDIT_AND_COMPLIANCE", api_base=N
         url = pac_audit_url(context)
     resp = post_json(context, url, {"scope": scope, "justification": "BDD PDP-gate audit re-trigger"}, headers=headers)
     assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
-    body = resp.json()
-    return [
-        entry
-        for scope_result in body
-        for entry in (scope_result.get("audit_trail") or [])
-        if isinstance(entry, dict)
-    ]
+    return pac_audit_timeline(resp)
 
 
 def _count_trust_gate_incidents(context, peer_did=None, contract_did=None, api_base=None):

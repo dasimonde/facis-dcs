@@ -1,4 +1,10 @@
-# Example values for a DCS instance's credential issuer.
+# Example values for a DCS instance's credential issuer — the overlay half.
+# Layer it on values.issuer-base.yml, which carries the flow set, the admin
+# endpoint, the volume and the reasons this is a release of its own:
+#
+#   helm upgrade --install dcs-issuer deployment/helm/charts/orce \
+#     -f deployment/helm/values.issuer-base.yml \
+#     -f deployment/helm/values.issuer.yml
 #
 # The issuer is an OID4VCI credential issuer running the ORCE subchart's
 # `flows-issuer` flow set. It mints the Power of Attorney credential a
@@ -20,8 +26,6 @@
 # pki/jwks.json and /issuer/.well-known/did.json. The repo gives you the shape
 # of an issuer, never an identity.
 
-flowsDir: flows-issuer
-
 # The flows build every URL they publish (DID, credential offers, status list)
 # from this prefix, so it must match the path the ingress routes.
 extraEnv:
@@ -42,9 +46,8 @@ ingress:
   pathType: ImplementationSpecific
   tls: []
 
-# No flowImport block: the chart's flowsFile default mounts the chart's flows as
-# Node-RED's startup flows, and the import hook is not rendered at all. Its
-# credentials therefore need no deployment-specific value; the chart's defaults
-# (charts/orce/values.yaml, flowImport.auth) are the upstream image's own admin
-# user. Only if you turn flowsFile off do they matter, and then the token URL
-# has to name this release: http://<release>-orce:1880/auth/token.
+# No flowImport block: the base file turns it off, because the chart's flowsFile
+# default mounts the chart's flows as Node-RED's startup flows and the import
+# hook is not rendered at all. Only if you turn flowsFile off does it matter,
+# and then the token URL has to name this release:
+# http://<release>-orce:1880/auth/token.

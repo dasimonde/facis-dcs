@@ -14,6 +14,7 @@ import DataObjectsEditor from '@template-repository/components/data-objects/Data
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { CONTRACT_PARTY_ROLE_OPTIONS } from '@template-repository/utils/ontology-domain-fields'
 import ViewContractTemplateView from '@template-repository/views/ViewContractTemplateView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
@@ -29,11 +30,11 @@ import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
+import { declaredPartyRoles, type ParticipantSelection } from '@/utils/participant-selection'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractData } from '@/models/contract/contract-data'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
-import type { ParticipantSelection } from '@/utils/participant-selection'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -55,6 +56,7 @@ const did = ref<string | null>(null)
 const isEditMode = computed(() => !!route.params.did || !!did.value)
 const isSubmitting = ref(false)
 const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
+const templateLoadState = ref<'loading' | 'loaded' | 'error'>('loading')
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 const detailsValidationAttempted = ref(false)
 const nameError = computed(() =>
@@ -88,7 +90,7 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 })
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft).filter((tab) => tab.id !== 'audit'),
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content']),
 )
 
 const story = computed(() =>
@@ -166,13 +168,26 @@ async function verifyContractDetails(): Promise<boolean> {
   return false
 }
 
-const createContract = async ({ counterparty }: ParticipantSelection) => {
+const createContract = async ({ counterparty, originatorRole, parties }: ParticipantSelection) => {
+  if (
+    templateRoleState.value !== 'ready' ||
+    !originatorRole ||
+    !templatePartyRoles.value.some((role) => role.value === originatorRole)
+  ) {
+    reportActionError(
+      new Error('Select one of the two catalogued roles declared by the loaded template.'),
+      'Create contract',
+    )
+    return
+  }
   isSubmitting.value = true
   try {
     if (selectedTemplate.value) {
       const response = await contractWorkflowService.create({
         template_did: selectedTemplate.value.did,
         counterparty,
+        originator_role: originatorRole,
+        parties,
       })
       did.value = response.did
       if (selectedParentContractDid.value) {
@@ -292,11 +307,16 @@ onMounted(async () => {
 })
 
 watch(
-  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions],
+  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions, dcsDraftStore.contractData],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
-        !hasConditionParameterForValue(conditionValue, dcsDraftStore.blocks, dcsDraftStore.semanticConditions),
+        !hasConditionParameterForValue(
+          conditionValue,
+          dcsDraftStore.blocks,
+          dcsDraftStore.semanticConditions,
+          dcsDraftStore.contractData,
+        ),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },
@@ -342,9 +362,33 @@ function applyContractDataToDraft(contractData?: unknown) {
   verificationResult.value = null
 }
 
+// Only the fully retrieved template in the draft store is authoritative. The
+// list entry selected above may omit template_data or contain a stale summary.
+const loadedTemplatePartyRoles = computed(() =>
+  dcsDraftStore.did === selectedTemplate.value?.did
+    ? declaredPartyRoles({ 'dcs:policies': dcsDraftStore.policies })
+    : [],
+)
+const templatePartyRoles = computed(() => {
+  const roles = loadedTemplatePartyRoles.value
+  if (roles.length !== 2) return []
+  const options = roles.map((role) => CONTRACT_PARTY_ROLE_OPTIONS.find((option) => option.value === role))
+  return options.every((option) => option !== undefined) ? options : []
+})
+const templateRoleState = computed<'loading' | 'ready' | 'empty' | 'error'>(() => {
+  if (templateLoadState.value === 'loading') return 'loading'
+  if (templateLoadState.value === 'error') return 'error'
+  return templatePartyRoles.value.length === 2 ? 'ready' : 'empty'
+})
+
+function onTemplateLoadState(value: { did: string; state: 'loading' | 'loaded' | 'error' }) {
+  if (value.did === selectedTemplate.value?.did) templateLoadState.value = value.state
+}
+
 const scrollStore = useScrollStore()
 
 watch(selectedTemplate, (value) => {
+  templateLoadState.value = 'loading'
   if (!!value?.did) {
     scrollStore.addGutter()
   } else {
@@ -377,7 +421,7 @@ onBeforeRouteLeave(() => {
           </option>
         </select>
       </div>
-      <ViewContractTemplateView v-else :did="selectedTemplate.did" :embedded="true">
+      <ViewContractTemplateView v-else :did="selectedTemplate.did" :embedded="true" @load-state="onTemplateLoadState">
         <template #before-tabs>
           <div class="flex items-end gap-4">
             <div class="flex-1">
@@ -402,7 +446,7 @@ onBeforeRouteLeave(() => {
                 :aria-labelledby="parentContractPickerLabelId"
                 class="select w-full select-sm"
               >
-                <option :value="null">— none —</option>
+                <option :value="null">None</option>
                 <option v-for="c in draftContracts" :key="c.did" :value="c.did">
                   {{ c.name ?? c.did }}
                 </option>
@@ -516,6 +560,8 @@ onBeforeRouteLeave(() => {
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
         <ParticipantSelectionDialog
           v-if="!isEditMode"
+          :party-roles="templatePartyRoles"
+          :role-state="templateRoleState"
           :disabled="isSubmitting || !canSubmit"
           class="btn flex-1 btn-primary"
           @submit="createContract"

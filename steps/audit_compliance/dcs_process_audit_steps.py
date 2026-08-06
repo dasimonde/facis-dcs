@@ -10,6 +10,7 @@ from behave import given, then, when
 from steps.support.api_client import (
     contract_retrieve_url,
     get_with_headers,
+    pac_audit_timeline,
     pac_audit_url,
     pac_monitor_url,
     pac_report_url,
@@ -36,10 +37,44 @@ def _observed_audit_entries(context, evidence_scope: str) -> list[dict]:
 
 @when('the Auditor triggers a process audit with scope "{scope}"')
 def step_when_auditor_triggers_audit(context, scope):
+    import requests as _requests  # noqa: PLC0415
+
     headers = AuthService.get_headers_for_roles(["Auditor"])
     OrceAuditControlService.reset(context, "audit")
     OrceAuditControlService.set_mode(context, "audit", "success")
-    context.requests_response = post_json(context, pac_audit_url(context), {"scope": scope, "justification": "BDD process audit"}, headers=headers)
+    # A process audit sweeps every contract the run has accumulated, so late in
+    # the suite it legitimately outlives the per-request timeout the other
+    # steps use. The scope of this step is the sweep completing, not completing
+    # fast, so it gets a deadline sized to the whole run's state.
+    context.requests_response = _requests.post(
+        pac_audit_url(context),
+        json={"scope": scope, "justification": "BDD process audit"},
+        headers=headers,
+        timeout=max(context.http_timeout_seconds * 4, 240),
+    )
+
+
+@when('the Auditor triggers a process audit for contract "{name}"')
+def step_when_auditor_audits_one_contract(context, name):
+    """Audit one named contract, via the endpoint's own `did` filter.
+
+    A scope-wide audit gathers every contract the instance holds, so a scenario
+    asserting on its own contract silently depended on how many others every
+    preceding feature had created: with 62 contracts the target was already
+    missing from the returned set, and in a full CI run the call ran past the
+    60s client timeout. The filter narrows the query itself, not just the
+    response, so the assertion stays about this contract at any suite size.
+    """
+    did, _ = ContractService._contract_data(context, name)
+    headers = AuthService.get_headers_for_roles(["Auditor"])
+    OrceAuditControlService.reset(context, "audit")
+    OrceAuditControlService.set_mode(context, "audit", "success")
+    context.requests_response = post_json(
+        context,
+        pac_audit_url(context),
+        {"scope": "contracts", "did": did, "justification": "BDD process audit"},
+        headers=headers,
+    )
 
 
 @when('I attempt to trigger a process audit with scope "{scope}"')
@@ -223,10 +258,8 @@ def step_then_risk_audited_once(context, risk_type, name):
         assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
         return [
             entry
-            for scope_result in resp.json()
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict)
-            and entry.get("event_type") == "PAC_COMPLIANCE_RISK"
+            for entry in pac_audit_timeline(resp)
+            if entry.get("event_type") == "PAC_COMPLIANCE_RISK"
             and entry.get("did") == did
             and (entry.get("event_data") or {}).get("risk_type") == risk_type
         ]

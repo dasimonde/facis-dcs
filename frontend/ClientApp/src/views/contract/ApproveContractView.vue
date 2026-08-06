@@ -54,12 +54,12 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 
 const isAuditingAuthorized = computed(
   () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
-      authStore.user?.roles?.includes(role),
-    ) ?? false,
+    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
-const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
+const tabs = computed(() =>
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content', 'audit']),
+)
 
 const story = computed(() =>
   contractStory(contract.value?.state, { extrinsicLifecycle: contract.value?.extrinsic_lifecycle }),
@@ -89,11 +89,16 @@ watch(
 )
 
 watch(
-  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions],
+  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions, dcsDraftStore.contractData],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
-        !hasConditionParameterForValue(conditionValue, dcsDraftStore.blocks, dcsDraftStore.semanticConditions),
+        !hasConditionParameterForValue(
+          conditionValue,
+          dcsDraftStore.blocks,
+          dcsDraftStore.semanticConditions,
+          dcsDraftStore.contractData,
+        ),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },

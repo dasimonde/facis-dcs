@@ -11,6 +11,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/identity"
 
 	db2 "digital-contracting-service/internal/dcstodcs/db"
@@ -81,9 +82,9 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// updated_at without changing content and would otherwise false-trip this.
 	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
-			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+			return fmt.Errorf("contract %w, please force synchronisation and reload", base.ErrUpdatedElsewhere)
 		}
-		return errors.New("contract was updated elsewhere, please reload")
+		return fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventNegotiate); err != nil {
@@ -98,12 +99,21 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// assignment. Local negotiator RBAC governs only contracts this instance
 	// itself authored (Origin == localPeer).
 	if processData.Origin == localPeer {
-		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID)
+		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID, processData.ContractVersion)
 		if err != nil {
 			return fmt.Errorf("could not validate negotiator: %w", err)
 		}
 		if !isValidNegotiator {
 			return ErrNotAParty
+		}
+	} else {
+		// Proposing a redline on an inbound offer is engaging with the round just
+		// as accepting it is, and it may be the counterparty's first act on a
+		// contract whose receipt minted nothing. Without the task, the decision
+		// rows created below name no negotiator and this instance's own submit
+		// has no evidence that it ever took part.
+		if err := mintNegotiationTask(ctx, tx, h.NTRepo, cmd.DID, localPeer, cmd.NegotiatedBy, processData.ContractVersion); err != nil {
+			return err
 		}
 	}
 
@@ -134,16 +144,19 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// ChangeRequest carrying a contract_data redline. Only a structured redline
 	// is applied immediately and re-shipped as a PDF; a free-text note (which
 	// does not decode into the struct) has nothing to apply, so it is skipped.
+	roundVersion := processData.ContractVersion
 	if cmd.ChangeRequest != nil {
 		var change negotiationmerging.ChangeRequest
 		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
 			// A redline on a settled agreement is the wedge: the document changes
 			// but the artifact is the peer's signed PDF and cannot be re-rendered,
 			// so the proposal would ship the OLD signed bytes while this copy's own
-			// document moved on. Refuse it here — a free-text note (no
+			// document moved on. Before any signature exists the same redline is
+			// this instance rewriting the version it told the counterparty it
+			// agreed to. Refuse both here — a free-text note (no
 			// change.ContractData) leaves the document alone and still carries this
 			// copy out of OFFERED towards its own countersignature.
-			if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			if err := requireUnsettledAgreement(ctx, tx, h.CRepo, h.SRepo, localPeer, cmd.DID); err != nil {
 				return err
 			}
 			proposed := datatype.JSON(*change.ContractData)
@@ -162,6 +175,15 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 			if err != nil {
 				return fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
 			}
+			// The redline replaces the document, and the negotiation row recorded
+			// above keys on the version it replaces. Snapshot that version to
+			// contract_history first, exactly as the merge on accept does
+			// (submit.go), so the superseded document stays retrievable: it is the
+			// "from" side a reviewer is asked to change, and without it the
+			// proposal comparison has the proposed document on both sides.
+			if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID); err != nil {
+				return fmt.Errorf("could not snapshot the superseded contract version: %w", err)
+			}
 			if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
 				DID:             cmd.DID,
 				ContractData:    normalized,
@@ -169,10 +191,18 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 			}); err != nil {
 				return fmt.Errorf("could not apply proposed change to contract data: %w", err)
 			}
+			roundVersion = processData.ContractVersion + 1
 		}
 	}
 
-	err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
+	// A redline replaces the document and bumps the version, which starts a new
+	// round; the tasks key on the round, so they move with it (and reopen). With
+	// no redline the round is unchanged and reopening is all that is owed.
+	if roundVersion != processData.ContractVersion {
+		err = h.NTRepo.RollForward(ctx, tx, cmd.DID, processData.ContractVersion, roundVersion)
+	} else {
+		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID, roundVersion)
+	}
 	if err != nil {
 		return fmt.Errorf("could not reopen negotiation: %w", err)
 	}

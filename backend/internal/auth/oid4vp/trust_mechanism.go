@@ -75,15 +75,12 @@ func resolverPolicy() safehttp.Policy {
 // issuer that publishes via certificates has not published a bare key.
 func (c *TrustConfig) resolveIssuerKeys(iss string) (json.RawMessage, error) {
 	iss = strings.TrimSpace(iss)
-	entry, ok := c.Issuers[iss]
+	entry, ok := c.Issuers[canonicalIssuerKey(iss)]
 	if !ok {
-		// A peer trusted dynamically has no entry by design; its key comes from
-		// its own DID document, which is the source of truth for it. Whether it
-		// IS trusted is the policy's answer, asked here rather than re-derived —
-		// a second copy of the rule is a second thing to keep in step.
-		if c.For(PurposePeer).IssuerTrusted(iss) {
-			return c.jwksFromDIDWeb(iss)
-		}
+		// An unlisted issuer resolves to no JWKS at all (ADR-35): its key comes
+		// from the certificate chain the anchored path validated, and there is
+		// nothing to look up. Resolving it from a document the issuer publishes
+		// about itself is what the anchor replaced.
 		return nil, fmt.Errorf("issuer %q is not trusted", iss)
 	}
 
@@ -264,15 +261,14 @@ func (c *TrustConfig) fetcher() KeyFetcher {
 func (c *TrustConfig) SetKeyFetcher(f KeyFetcher) { c.keyFetcher = f }
 
 // issuerUsesX5C reports whether the issuer publishes its key through a
-// certificate chain. A dynamically trusted peer does not: it publishes a DID
-// document, which is what makes it resolvable without an entry.
+// certificate chain.
+//
+// Only a listed issuer reaches this. An unlisted one has no declared mechanism
+// to report, and resolution never asks: it takes the anchored path, where the
+// chain is mandatory (sdjwt.anchoredIssuerVerificationKey).
 func (c *TrustConfig) issuerUsesX5C(iss string) (bool, error) {
-	iss = strings.TrimSpace(iss)
-	entry, ok := c.Issuers[iss]
+	entry, ok := c.Issuers[canonicalIssuerKey(iss)]
 	if !ok {
-		if c.For(PurposePeer).IssuerTrusted(iss) {
-			return false, nil
-		}
 		return false, fmt.Errorf("issuer %q is not trusted", iss)
 	}
 	return entry.Mechanism == MechanismX5C, nil

@@ -30,6 +30,9 @@ type VerifyTemplatePdfHandler struct {
 	// Credentials verifies the lifecycle credential embedded in the PDF against
 	// the key its issuer publishes for assertions.
 	Credentials *provenance.CredentialVerifier
+	// CredentialStatus resolves that credential's revocation entry against the
+	// signed status list it names.
+	CredentialStatus *provenance.CredentialStatusVerifier
 }
 
 func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplatePdfQry) (*pdfgen.PDFVerifyResult, error) {
@@ -95,7 +98,7 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 			return nil, fmt.Errorf("commit pre-verify append tx for template %s: %w", qry.DID, err)
 		}
 
-		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, currentC2PAState)
+		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
 	}
 
 	if latestCID == "" {
@@ -110,5 +113,5 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 		return nil, fmt.Errorf("fetch template PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
 
-	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
 }

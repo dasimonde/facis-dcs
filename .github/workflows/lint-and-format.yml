@@ -34,6 +34,12 @@ jobs:
       - name: Check Formatting (Prettier)
         run: npm run format:check
 
+      # The component and store tests. Without this step they run only on a
+      # developer's machine, and a half-updated expectation stays red for days
+      # without anyone noticing.
+      - name: Frontend unit tests (vitest)
+        run: npm test
+
       - name: Write frontend success summary
         if: success()
         run: |
@@ -110,3 +116,32 @@ jobs:
           echo "| Backend Verification | ❌ Failed | Check annotations or logs for tidy, generation, or lint errors. |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> 💡 **Hint:** If your local commit didn't catch this, make sure you ran \`go mod tidy\` and have \`npm install\` executed in the project root to initialize Husky hooks." >> $GITHUB_STEP_SUMMARY
+
+  go-tests:
+    name: Go unit tests (backend + pdf-core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'backend/go.mod'
+
+      # The generated transport is gitignored; tests build against it.
+      - name: Generate Goa transport
+        working-directory: backend
+        run: |
+          go install goa.design/goa/v3/cmd/goa@v3
+          goa gen digital-contracting-service/design
+
+      - name: Backend unit tests
+        working-directory: backend
+        run: go test ./...
+
+      # make test builds the ontology artefacts pdf-core embeds (requires
+      # python3), then runs the suite; works from a fresh checkout.
+      - name: pdf-core unit tests
+        run: make -C pdf-core test

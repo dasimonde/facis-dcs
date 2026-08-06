@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -197,11 +198,42 @@ func (s *service) version(w http.ResponseWriter, _ *http.Request) {
 // every dcs.lifecycle assertion the render writes.
 const lifecycleAuthorityHeader = "X-DCS-Lifecycle-Authority"
 
-// renderContext carries the request's signer and asserting authority into the
-// compiler.
-func renderContext(r *http.Request, signer compiler.Signer) context.Context {
+// signingChainHeader carries the RFC 9360 x5chain the caller signs under,
+// base64-encoded PEM (leaf first). pdf-core stores no chain of its own: it
+// already holds no private key, and holding the certificate that names one was
+// the last piece of signing material left behind — the piece that made a shared
+// pdf-core sign one instance's documents under another's identity.
+const signingChainHeader = "X-DCS-C2PA-X5Chain"
+
+// callerSigningChain decodes the chain the request signs under. Absence is a
+// refusal, not a fallback: a default chain is exactly how manifests came to be
+// signed under an identity nobody named.
+func callerSigningChain(r *http.Request) ([][]byte, error) {
+	encoded := strings.TrimSpace(r.Header.Get(signingChainHeader))
+	if encoded == "" {
+		return nil, errBadRequest(fmt.Errorf("%s is required: pdf-core signs under the caller's x5chain and holds none of its own", signingChainHeader))
+	}
+	pemBytes, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, errBadRequest(fmt.Errorf("%s must be base64-encoded PEM: %w", signingChainHeader, err))
+	}
+	chain, err := compiler.ParseSigningChainPEM(pemBytes)
+	if err != nil {
+		return nil, errBadRequest(fmt.Errorf("%s: %w", signingChainHeader, err))
+	}
+	return chain, nil
+}
+
+// renderContext carries the request's signer, asserting authority and signing
+// chain into the compiler.
+func renderContext(r *http.Request, signer compiler.Signer) (context.Context, error) {
+	chain, err := callerSigningChain(r)
+	if err != nil {
+		return nil, err
+	}
 	ctx := compiler.WithSigner(r.Context(), signer)
-	return compiler.WithLifecycleAuthority(ctx, strings.TrimSpace(r.Header.Get(lifecycleAuthorityHeader)))
+	ctx = compiler.WithLifecycleAuthority(ctx, strings.TrimSpace(r.Header.Get(lifecycleAuthorityHeader)))
+	return compiler.WithSigningChain(ctx, chain), nil
 }
 
 func (s *service) render(w http.ResponseWriter, r *http.Request) {
@@ -224,9 +256,14 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signer := compiler.NewCapturingSigner()
+	renderCtx, err := renderContext(r, signer)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	// Pass the verbatim raw payload: CompilePDF canonicalizes internally for the
 	// render model + graph hash, but embeds these exact bytes as the attachment.
-	pdf, err := compiler.CompilePDF(renderContext(r, signer), raw, compiler.CanonicalCompiledAt)
+	pdf, err := compiler.CompilePDF(renderCtx, raw, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -315,6 +352,50 @@ type verifyResponse struct {
 	// caller gets VCBytes and verifies them against the issuer itself.
 	VCPresent bool   `json:"vc_present"`
 	Artifact  string `json:"artifact"` // base64-encoded verification-witness PDF
+	// Signers names the certificate each manifest was signed under, in chain
+	// order. Match says the stored bytes reproduce from their embedded payloads
+	// under the certificates the artifact itself carries — self-consistency, which
+	// is silent about whose certificates those are. Signers answers the second
+	// question: each entry reports whether it is the chain the caller named, so a
+	// verdict is "reproduces, signed by us" or "reproduces, signed by someone
+	// else" rather than an unqualified match. A federated contract legitimately
+	// carries the peer's leaf on the hops the peer wrote, so a foreign signer is
+	// reported, not refused — deciding which peers are trusted is the caller's.
+	Signers []manifestSigner `json:"signers"`
+}
+
+// manifestSigner identifies the leaf one manifest's claim signature was made
+// under. The leaf is fingerprinted rather than inlined: a caller comparing
+// identities needs to tell them apart, not to re-parse the certificate.
+type manifestSigner struct {
+	Manifest   string `json:"manifest"`
+	Subject    string `json:"subject"`
+	LeafSHA256 string `json:"leaf_sha256"`
+	// Expected is true when this manifest was signed under the chain the request
+	// supplied — for a DCS verifying its own work, its own leaf.
+	Expected bool `json:"expected"`
+}
+
+// describeSigners fingerprints the leaf behind every manifest and marks the ones
+// signed under expectedLeaf.
+func describeSigners(pdf []byte, expectedLeaf []byte) ([]manifestSigner, error) {
+	found, err := compiler.ManifestSigners(pdf)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]manifestSigner, 0, len(found))
+	for _, signer := range found {
+		entry := manifestSigner{
+			Manifest:   signer.Manifest,
+			LeafSHA256: sha256Hex(signer.LeafDER),
+			Expected:   bytes.Equal(signer.LeafDER, expectedLeaf),
+		}
+		if leaf, parseErr := x509.ParseCertificate(signer.LeafDER); parseErr == nil {
+			entry.Subject = leaf.Subject.String()
+		}
+		out = append(out, entry)
+	}
+	return out, nil
 }
 
 // renderReanchor appends a provenance-only C2PA manifest binding the submitted
@@ -332,7 +413,12 @@ func (s *service) renderReanchor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signer := compiler.NewCapturingSigner()
-	updated, err := compiler.ReanchorProvenance(renderContext(r, signer), raw,
+	renderCtx, err := renderContext(r, signer)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	updated, err := compiler.ReanchorProvenance(renderCtx, raw,
 		strings.TrimSpace(r.URL.Query().Get("manifest_url")), compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
@@ -349,6 +435,15 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	raw, err := limitRead(r.Body, 32<<20)
 	if err != nil {
 		writeError(w, errBadRequest(err))
+		return
+	}
+	// The caller's own chain, for the two things a verify does under its own
+	// identity: witnessing the result, and naming the signer it expected. The
+	// replay below signs under the chain each stored manifest carries instead —
+	// those are two different questions and pdf-core answers both.
+	callerChain, err := callerSigningChain(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -388,7 +483,14 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, errBadRequest(fmt.Errorf("extract lifecycle authority: %w", err)))
 			return
 		}
-		verifyCtx := compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority)
+		chain, err := compiler.ExtractSigningChain(raw)
+		if err != nil {
+			writeError(w, errBadRequest(fmt.Errorf("extract signing chain: %w", err)))
+			return
+		}
+		verifyCtx := compiler.WithSigningChain(
+			compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority),
+			chain)
 		recompiled, err := compiler.CompilePDF(verifyCtx, payload, compiledAt)
 		if err != nil {
 			writeError(w, errUnprocessableEntity(err).withDigests(verifyDigests{JSONLDHash: sha256Hex(payload)}))
@@ -431,16 +533,26 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		c2paSignatureError = err.Error()
 	}
 
-	// Append a verification witness and embed the resulting PDF as artifact.
-	witness, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw, payload)
+	// Append a verification witness and embed the resulting PDF as artifact. The
+	// witness is this verifier's own assertion about the document, so it is signed
+	// under the caller's chain rather than the artifact's.
+	witnessCtx := compiler.WithSigningChain(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), callerChain)
+	witness, err := compiler.AppendVerificationWitness(witnessCtx, raw, payload)
 	if err != nil {
 		writeError(w, errBadRequest(fmt.Errorf("append verification witness: %w", err)))
+		return
+	}
+
+	signers, err := describeSigners(raw, callerChain[0])
+	if err != nil {
+		writeError(w, errBadRequest(fmt.Errorf("identify manifest signers: %w", err)))
 		return
 	}
 
 	resp := verifyResponse{
 		verifyDigests:      digests,
 		Match:              true,
+		Signers:            signers,
 		C2PASignatureValid: c2paSignatureError == "",
 		C2PASignatureError: c2paSignatureError,
 		PAdESSigned:        compiler.IsPAdESSigned(raw),
@@ -482,7 +594,13 @@ func (s *service) verifyContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(fmt.Errorf("extract lifecycle timestamp: %w", err)))
 		return
 	}
-	recompiled, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), payload, compiledAt)
+	chain, err := callerSigningChain(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	recompiled, err := compiler.CompilePDF(
+		compiler.WithSigningChain(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), chain), payload, compiledAt)
 	if err != nil {
 		writeError(w, errUnprocessableEntity(err))
 		return
@@ -608,8 +726,13 @@ func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
 	manifestURL := strings.TrimSpace(string(parts["manifest_url"]))
 
 	signer := compiler.NewCapturingSigner()
+	renderCtx, err := renderContext(r, signer)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	// Verbatim: the amended attachment is embedded exactly as submitted.
-	updated, err := compiler.UpdatePDFWithOptions(renderContext(r, signer), oldPDF, newPayload, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
+	updated, err := compiler.UpdatePDFWithOptions(renderCtx, oldPDF, newPayload, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
 	if err != nil {
 		if errors.Is(err, compiler.ErrNoChanges) {
 			writeError(w, errConflict(err))
@@ -726,17 +849,30 @@ func (s *service) extractEvidence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	evidence, found, err := compiler.ExtractSigningEvidence(raw)
+	attachments, err := compiler.ExtractSigningEvidence(raw)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	if !found {
+	if len(attachments) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	// One attachment per signing party, oldest first, spliced in VERBATIM: each
+	// element is the JSON document the backend embedded, and re-encoding it
+	// would change bytes that credential signatures cover.
+	var body bytes.Buffer
+	body.WriteByte('[')
+	for i, attachment := range attachments {
+		if i > 0 {
+			body.WriteByte(',')
+		}
+		body.Write(attachment)
+	}
+	body.WriteByte(']')
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(evidence)
+	_, _ = w.Write(body.Bytes())
 }
 
 func (s *service) claim(w http.ResponseWriter, r *http.Request) {
@@ -783,7 +919,13 @@ func (s *service) claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	referencePDF, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), payloadBytes, compiler.CanonicalCompiledAt)
+	chain, err := callerSigningChain(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	matchCtx := compiler.WithSigningChain(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), chain)
+	referencePDF, err := compiler.CompilePDF(matchCtx, payloadBytes, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -792,7 +934,7 @@ func (s *service) claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errConflict(err))
 		return
 	}
-	result, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), referencePDF, payloadBytes)
+	result, err := compiler.AppendVerificationWitness(matchCtx, referencePDF, payloadBytes)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return

@@ -109,9 +109,9 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	// older than what's stored (see command package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < oldData.UpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
-			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+			return fmt.Errorf("contract %w, please force synchronisation and reload", base.ErrUpdatedElsewhere)
 		}
-		return errors.New("contract was updated elsewhere, please reload")
+		return fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if err := contractstate.ValidateTransition(contractstate.ContractState(oldData.State), contractstate.EventUpdate); err != nil {

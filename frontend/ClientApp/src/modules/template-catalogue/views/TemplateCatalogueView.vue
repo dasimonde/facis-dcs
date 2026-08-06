@@ -2,9 +2,9 @@
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { TemplateType, type TemplateTypeValue } from '@template-repository/models/contract-template'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import CatalogueTemplateDetailsInfo from '@template-catalogue/components/catalogue-template/CatalogueTemplateDetailsInfo.vue'
 import CatalogueTemplateMetaDataInfo from '@template-catalogue/components/catalogue-template/CatalogueTemplateMetaDataInfo.vue'
 import CatalogueTemplatePreviewInfo from '@template-catalogue/components/catalogue-template/CatalogueTemplatePreviewInfo.vue'
@@ -47,7 +47,9 @@ const tabs: { id: CatalogueTabId; label: string }[] = [
 const templatesStore = useContractTemplatesStore()
 const { contractTemplates, loading: localTemplatesLoading } = storeToRefs(templatesStore)
 
-const { isManager } = useContractPermissions()
+// Taking a catalogue entry into this repository is the Template Manager's
+// action — the role this route is guarded by.
+const { isManager } = useTemplatePermissions()
 
 const isRegisterDisabled = computed(() => {
   if (!isManager.value) return true

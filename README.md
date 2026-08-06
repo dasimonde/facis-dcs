@@ -100,3 +100,6 @@ make help          # all targets
 make run_bdd_helm  # full run against a freshly deployed stack
 make run_bdd_fast  # iterate on scenarios against an already-running stack
 ```
+
+To run the suite against two DCS deployments you operate yourself instead of the
+ephemeral kind stack, see [tests/bdd/README.md](./tests/bdd/README.md).

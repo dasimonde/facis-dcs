@@ -12,7 +12,10 @@ jobs:
     secrets:
       HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
       HARBOR_CREDENTIALS: ${{ secrets.HARBOR_CREDENTIALS }}
-    with: 
+    with:
+      # amd64 only: the emulated arm64 leg has no build cache and is the
+      # dominant cost of this job. Deployments (IONOS, OSC, kind) are amd64.
+      platforms: "linux/amd64"
       dockerfile: "deployment/docker/Dockerfile"
       harbor_config: "deployment/harbor.config"
 
@@ -63,6 +66,7 @@ jobs:
       HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
       HARBOR_CREDENTIALS: ${{ secrets.HARBOR_CREDENTIALS }}
     with:
+      platforms: "linux/amd64"
       dockerfile: "pdf-core/Dockerfile"
       buildContext: "."
       service: "pdf-core"

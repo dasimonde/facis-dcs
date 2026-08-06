@@ -7,8 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +21,9 @@ import (
 const (
 	testPoAIssuer = "did:web:peer.example:issuer:poa"
 	testPoAParty  = "did:web:peer.example"
+	// testPoAStatusIndex is the index on the counterparty issuer's status list
+	// that the fixture PoA is issued against.
+	testPoAStatusIndex = 1
 )
 
 // poaFixture is a counterparty's Power of Attorney the way one arrives: a
@@ -33,7 +34,14 @@ type poaFixture struct {
 	SignatoryDID string
 }
 
-func mintPoA(t *testing.T, issuerKey *ecdsa.PrivateKey, holderKey *ecdsa.PrivateKey, iss, organization string, extraClaims map[string]any) poaFixture {
+func mintPoA(
+	t *testing.T,
+	issuerKey *ecdsa.PrivateKey,
+	holderKey *ecdsa.PrivateKey,
+	iss, organization string,
+	statusList *xfscStatusList,
+	extraClaims map[string]any,
+) poaFixture {
 	t.Helper()
 
 	holderJWK := publicJWK(holderKey)
@@ -55,9 +63,7 @@ func mintPoA(t *testing.T, issuerKey *ecdsa.PrivateKey, holderKey *ecdsa.Private
 		// A credential with no reachable status list is refused outright, so
 		// every fixture carries one: revocation is not an optional step this
 		// path can be exercised without.
-		"status": map[string]any{
-			"status_list": map[string]any{"uri": activeStatusList(t), "idx": 1},
-		},
+		"status": statusList.Entry(testPoAStatusIndex),
 	}
 	for name, value := range extraClaims {
 		claims[name] = value
@@ -83,17 +89,6 @@ func mintPoA(t *testing.T, issuerKey *ecdsa.PrivateKey, holderKey *ecdsa.Private
 		Presentation: issuerJWT + "~" + disclosure + "~" + kbJWT,
 		SignatoryDID: signatory,
 	}
-}
-
-// activeStatusList serves a status list on which nothing is revoked.
-func activeStatusList(t *testing.T) string {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(makeXFSCListBody(make([]byte, 16)))
-	}))
-	t.Cleanup(server.Close)
-	return server.URL
 }
 
 func publicJWK(key *ecdsa.PrivateKey) sdjwt.JWK {
@@ -129,12 +124,26 @@ func newECKey(t *testing.T) *ecdsa.PrivateKey {
 }
 
 // peerTrust is a receiving instance's trust configuration: it knows the
-// counterparty's issuer and what that issuer may speak for.
-func peerTrust(t *testing.T, issuerKey *ecdsa.PrivateKey, purposes []Purpose, organizations []string) *TrustConfig {
+// counterparty's issuer, what that issuer may speak for, and the anchors the
+// chain on that issuer's status list must verify against.
+//
+// It also wires the instance's status-list verifier off that same config, which
+// is what ConfigureStatusListVerification does at startup — a config the
+// verifier is not built from would leave the status list checked against
+// nothing.
+func peerTrust(
+	t *testing.T,
+	issuerKey *ecdsa.PrivateKey,
+	purposes []Purpose,
+	organizations []string,
+	statusList *xfscStatusList,
+) *TrustConfig {
 	t.Helper()
+
 	jwks, err := json.Marshal(map[string]any{"keys": []any{jwkMap(publicJWK(issuerKey))}})
 	require.NoError(t, err)
-	return &TrustConfig{
+
+	cfg := &TrustConfig{
 		VCTs: []string{PoAVCT},
 		Issuers: map[string]TrustedIssuer{
 			testPoAIssuer: {
@@ -145,12 +154,20 @@ func peerTrust(t *testing.T, issuerKey *ecdsa.PrivateKey, purposes []Purpose, or
 			},
 		},
 	}
+	cfg.SetX5CTrustRoots(PurposePeer, statusList.RootCerts)
+	cfg.SetX5CTrustRoots(PurposePID, statusList.RootCerts)
+
+	require.NoError(t, ConfigureStatusListVerification(cfg))
+	t.Cleanup(func() { _ = ConfigureStatusListVerification(nil) })
+
+	return cfg
 }
 
 func TestVerifyCounterpartyPoA_Valid(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, nil)
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty})
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	verified, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
 		Organization: testPoAParty,
@@ -166,24 +183,28 @@ func TestVerifyCounterpartyPoA_Valid(t *testing.T) {
 // A credential is only as good as the issuer behind it: one this instance never
 // configured verifies against nothing, whatever its signature says.
 func TestVerifyCounterpartyPoA_UnknownIssuerIsRefused(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, "did:web:stranger.example:issuer:poa", testPoAParty, nil)
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty})
+	poa := mintPoA(t, issuerKey, holderKey, "did:web:stranger.example:issuer:poa", testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
 		Organization: testPoAParty,
 		SignatoryDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not trusted")
+	// An unlisted issuer is refused for a specific reason now: it had no entry,
+	// and it presented no chain that could have stood in for one (ADR-35).
+	assert.Contains(t, err.Error(), "no trust entry")
 }
 
 // An issuer trusted to grant sessions here has not thereby been trusted to
 // attest a counterparty's authority to sign: the purposes are separate grants.
 func TestVerifyCounterpartyPoA_IssuerWithoutPeerPurposeIsRefused(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, nil)
-	trust := peerTrust(t, issuerKey, []Purpose{PurposeLogin}, []string{testPoAParty})
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposeLogin}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
 		Organization: testPoAParty,
@@ -196,9 +217,10 @@ func TestVerifyCounterpartyPoA_IssuerWithoutPeerPurposeIsRefused(t *testing.T) {
 // An issuer may only speak for the organizations its own entry names, so a
 // credential naming a party outside them is refused even though it verifies.
 func TestVerifyCounterpartyPoA_OrganizationOutsideIssuerEntitlementIsRefused(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, nil)
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{"did:web:someone-else.example"})
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{"did:web:someone-else.example"}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
 		Organization: testPoAParty,
@@ -211,9 +233,10 @@ func TestVerifyCounterpartyPoA_OrganizationOutsideIssuerEntitlementIsRefused(t *
 // The credential authorizes one party; a signature by another party is not
 // covered by it.
 func TestVerifyCounterpartyPoA_CredentialForAnotherPartyIsRefused(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, "did:web:other-party.example", nil)
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{OrganizationsAny})
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, "did:web:other-party.example", list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{OrganizationsAny}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
 		Organization: testPoAParty,
@@ -227,9 +250,10 @@ func TestVerifyCounterpartyPoA_CredentialForAnotherPartyIsRefused(t *testing.T) 
 // contract records, or a peer could authorize its signature with somebody
 // else's Power of Attorney.
 func TestVerifyCounterpartyPoA_HolderIsNotTheRecordedSignatoryIsRefused(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, nil)
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty})
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
 		Organization: testPoAParty,
@@ -242,37 +266,36 @@ func TestVerifyCounterpartyPoA_HolderIsNotTheRecordedSignatoryIsRefused(t *testi
 // A revoked Power of Attorney authorizes nothing, and the status list is
 // checked on this path like on every other.
 func TestVerifyCounterpartyPoA_RevokedCredentialIsRefused(t *testing.T) {
-	index := uint32(7)
-	bitstring := make([]byte, 16)
-	bitstring[index/8] |= 1 << (index % 8)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(makeXFSCListBody(bitstring))
-	}))
-	defer server.Close()
-
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, map[string]any{
-		"status": map[string]any{
-			"status_list": map[string]any{"uri": server.URL, "idx": index},
-		},
-	})
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty})
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
-	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
+	expectation := CounterpartyPoAExpectation{
 		Organization: testPoAParty,
 		SignatoryDID: poa.SignatoryDID,
-	})
+	}
+
+	// The same credential against the same list is accepted before the
+	// revocation, so what the refusal below reports is the bit and not a list
+	// that failed to load — with no unsigned fallback both look alike.
+	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, expectation)
+	require.NoError(t, err)
+
+	list.Revoke(testPoAStatusIndex)
+
+	_, err = VerifyCounterpartyPoA(poa.Presentation, trust, expectation)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "revoked")
 }
 
 func TestVerifyCounterpartyPoA_ExpiredCredentialIsRefused(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, map[string]any{
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, map[string]any{
 		"exp": time.Now().Add(-time.Hour).Unix(),
 	})
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty})
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
 		Organization: testPoAParty,
@@ -284,9 +307,10 @@ func TestVerifyCounterpartyPoA_ExpiredCredentialIsRefused(t *testing.T) {
 
 // Nothing to verify against is not an excuse to skip verification.
 func TestVerifyCounterpartyPoA_WithoutTrustConfigOrExpectationIsRefused(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
-	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, nil)
-	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty})
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, nil, CounterpartyPoAExpectation{
 		Organization: testPoAParty,

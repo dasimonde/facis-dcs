@@ -1,0 +1,32 @@
+# The credential issuer for the local development stack (dev-stack.sh).
+# Layered on values.issuer-base.yml, which carries everything that is not
+# specific to this cluster.
+#
+#   helm upgrade --install dcs-issuer deployment/helm/charts/orce \
+#     -f deployment/helm/values.issuer-base.yml \
+#     -f deployment/helm/values.issuer.dev.yml
+#
+# Reached at http://localhost:30181, so the status list is
+# http://localhost:30181/status-list/1 and the DID is
+# did:web:localhost%3A30181. The rest of the dev stack is exposed the same way
+# (values.dev.yml), and the backend runs on the host under `air`, so a NodePort
+# is the one address both the host and the cluster can use.
+#
+# This is the one thing dev does differently from CI and production, which reach
+# the issuer at <origin>/issuer through a prefix-stripping ingress. Adding an
+# ingress here would make dev-stack.sh depend on an ingress controller the dev
+# cluster is not guaranteed to have. The prefix path is not therefore untested:
+# CI runs it, and CI is what gates a merge.
+service:
+  type: NodePort
+  nodePort: 30181
+
+# A verifier cannot anchor a root that does not exist until the issuer has
+# booted, and every generated root carries the same subject, so it cannot pick
+# the right one by name either. This stack's verifier configuration is committed
+# (backend/config/oid4vp/x5c-trust-anchors.dev.pem), so the issuer is handed the
+# matching root instead of generating one. Its private half is in the
+# repository; the backend refuses it as an anchor unless DCS_ALLOW_DEV_TRUST
+# says this is a development stack.
+pkiRootCA:
+  devFixture: true

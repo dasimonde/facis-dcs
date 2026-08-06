@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/userrole"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
@@ -55,7 +56,7 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 
 	// Optimistic concurrency (see command package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
-		return errors.New("contract template was updated elsewhere, please reload")
+		return fmt.Errorf("contract template %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if processData.State != contracttemplatestate.Reviewed.String() {

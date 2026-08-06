@@ -1,4 +1,5 @@
-# Example values for the SECOND DCS instance's credential issuer.
+# Example values for the SECOND DCS instance's credential issuer — the overlay
+# half, layered on values.issuer-base.yml the same way values.issuer.yml is.
 #
 # Identical in shape to values.issuer.yml — each instance runs its own issuer,
 # because a Power of Attorney is an organization attesting who may sign for it,
@@ -10,8 +11,6 @@
 #   className         → your cluster's ingress class
 #   ingress.tls       → empty here; a reachable issuer needs a real certificate
 # The issuer generates its own key and DID on first boot; none is shipped here.
-
-flowsDir: flows-issuer
 
 extraEnv:
   - name: ISSUER_PATH_PREFIX

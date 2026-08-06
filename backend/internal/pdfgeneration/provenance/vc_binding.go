@@ -26,14 +26,15 @@ type VCBinding struct {
 	Issuer            string                 `json:"issuer"`
 	ValidFrom         string                 `json:"validFrom"`
 	CredentialSubject map[string]interface{} `json:"credentialSubject"`
-	// CredentialStatus links this VC to the XFSC status list entry so
-	// verifiers can check revocation (DCS-OR-C2PA-004, DCS-OR-C2PA-005).
+	// CredentialStatus links this VC to its entry in the status list this
+	// deployment serves, so verifiers can check revocation
+	// (DCS-OR-C2PA-004, DCS-OR-C2PA-005, ADR-34).
 	CredentialStatus map[string]interface{} `json:"credentialStatus,omitempty"`
 }
 
 // IssueLifecycleVC builds and signs a W3C VC recording the lifecycle event.
-// status is the contract's allocated entry in the XFSC status list; it is
-// embedded as credentialStatus so verifiers can check revocation
+// status is the contract's allocated entry in the status list this deployment
+// serves; it is embedded as credentialStatus so verifiers can check revocation
 // (DCS-OR-C2PA-004, DCS-OR-C2PA-005). It is passed in rather than derived here
 // so the entry a credential advertises is by construction the entry the
 // publisher allocated and will later flip.
@@ -97,27 +98,28 @@ func IssueLifecycleVC(ctx context.Context, signer VCSigner, issuerDID string, st
 	return signed, vcID, nil
 }
 
-// buildCredentialStatus constructs the credentialStatus object that links this
-// VC to its entry in the XFSC status list (DCS-OR-C2PA-005). Returns nil when
-// the status list credential is empty so the field is omitted from the VC.
+// buildCredentialStatus constructs the credentialStatus object that links a VC
+// to its entry in the status list this deployment serves (DCS-OR-C2PA-005,
+// ADR-34). Returns nil when the status list credential is empty so the field is
+// omitted from the VC.
 //
 // The entry belongs to the CONTRACT, so every lifecycle credential a
 // contract accumulates — the draft, the active one the signature commits to,
-// the terminated one — advertises the same index and one revocation invalidates
-// all of them. That is the scope on purpose: the bit says whether the contract
-// is still in force, the only thing that ever sets it is a terminal contract
-// state (OCMWStatusListPublisher.PublishStatus), and no per-credential revoke
-// exists to set anything else. Per-credential indices would leave a terminated
-// contract's superseded draft credential reading not-revoked forever, and a
-// reader holding only that credential would conclude the contract is live.
+// the terminated one, and the signing summaries beside them — advertises the
+// same index and one revocation invalidates all of them. That is the scope on
+// purpose: the bit says whether the contract is still in force, the only thing
+// that ever sets it is a terminal contract state
+// (DCSStatusListPublisher.PublishStatus), and no per-credential revoke exists to
+// set anything else. Per-credential indices would leave a terminated contract's
+// superseded draft credential reading not-revoked forever, and a reader holding
+// only that credential would conclude the contract is live.
 //
-// The type names a token status list because that is what the URI serves: the
-// XFSC statuslist-service answers {tenantId, listId, list} with an LSB-first
-// gzip bitstring (QueryStatusListStatus). Declaring the W3C
-// BitstringStatusListEntry told a verifier to expect a
-// BitstringStatusListCredential with credentialSubject.encodedList and MSB-first
-// bits — a document that is not there, and a bit order that reads a different
-// contract's entry where it is.
+// The type names a token status list because that is what the URI serves: a
+// signed statuslist+jwt whose status_list.lst is a zlib-compressed, LSB-first
+// bitstring. Declaring the W3C BitstringStatusListEntry would tell a verifier to
+// expect a BitstringStatusListCredential with credentialSubject.encodedList and
+// MSB-first bits — a document that is not there, and a bit order that reads a
+// different contract's entry where it is.
 func buildCredentialStatus(status CredentialStatusRef) map[string]interface{} {
 	if status.StatusListCredential == "" {
 		return nil

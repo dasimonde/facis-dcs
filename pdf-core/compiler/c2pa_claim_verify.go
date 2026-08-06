@@ -199,9 +199,9 @@ func decodeCOSESign1(data []byte) (protected, signature []byte, err error) {
 	return envelope.array[0].bytes, envelope.array[3].bytes, nil
 }
 
-// coseX5ChainLeafKey returns the P-256 public key of the x5chain leaf (RFC 9360
-// header 33) the protected headers carry, provided the headers declare ES256.
-func coseX5ChainLeafKey(protected []byte) (*ecdsa.PublicKey, error) {
+// coseX5Chain returns the DER certificates of the x5chain (RFC 9360 header 33)
+// the protected headers carry, leaf first, provided the headers declare ES256.
+func coseX5Chain(protected []byte) ([][]byte, error) {
 	headers, _, err := decodeCBOR(protected)
 	if err != nil {
 		return nil, fmt.Errorf("decode COSE protected headers: %w", err)
@@ -217,15 +217,34 @@ func coseX5ChainLeafKey(protected []byte) (*ecdsa.PublicKey, error) {
 	if !ok {
 		return nil, fmt.Errorf("COSE protected headers carry no x5chain (header 33)")
 	}
-	leafDER := chain.bytes
-	if chain.major == cborMajorArray {
-		if len(chain.array) == 0 || chain.array[0].major != cborMajorBytes {
+	switch chain.major {
+	case cborMajorBytes:
+		return [][]byte{chain.bytes}, nil
+	case cborMajorArray:
+		if len(chain.array) == 0 {
 			return nil, fmt.Errorf("x5chain is empty")
 		}
-		leafDER = chain.array[0].bytes
-	} else if chain.major != cborMajorBytes {
+		out := make([][]byte, 0, len(chain.array))
+		for _, cert := range chain.array {
+			if cert.major != cborMajorBytes {
+				return nil, fmt.Errorf("x5chain carries an entry that is not a certificate")
+			}
+			out = append(out, cert.bytes)
+		}
+		return out, nil
+	default:
 		return nil, fmt.Errorf("x5chain must be a certificate or an array of certificates")
 	}
+}
+
+// coseX5ChainLeafKey returns the P-256 public key of the x5chain leaf (RFC 9360
+// header 33) the protected headers carry, provided the headers declare ES256.
+func coseX5ChainLeafKey(protected []byte) (*ecdsa.PublicKey, error) {
+	chain, err := coseX5Chain(protected)
+	if err != nil {
+		return nil, err
+	}
+	leafDER := chain[0]
 	leaf, err := x509.ParseCertificate(leafDER)
 	if err != nil {
 		return nil, fmt.Errorf("parse x5chain leaf certificate: %w", err)

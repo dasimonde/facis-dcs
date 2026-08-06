@@ -58,32 +58,31 @@ python3 testWallet/scripts/issue_credentials.py \
 
 ## Issuer key resolution
 
-The issuer JWT header embeds only the issuer public key material:
+The issuer JWT header carries the issuer's certificate chain, leaf first —
+the same shape the ORCE credential issuer signs with:
 
 ```json
 {
   "alg": "ES256",
   "typ": "dc+sd-jwt",
-  "jwk": {
-    "kty": "EC",
-    "crv": "P-256",
-    "x": "...",
-    "y": "..."
-  }
+  "x5c": ["<leaf DER, base64>", "<dev root CA DER, base64>"]
 }
 ```
 
-DCS verifier logic should be:
+DCS verifier logic for a `login` credential is (ADR-35):
 
 ```text
-read issuer header.jwk
-check header.jwk matches the trusted issuer public key in trust.dev.json
-verify issuer signature with header.jwk
+read the issuer x5c chain, take its leaf
+check the leaf carries a key the trust entry for payload.iss pins
+check the leaf names payload.iss (SAN URI, SAN DNS authority, or exact CN)
+verify issuer signature with the leaf's key
 read payload.cnf.jwk
 verify Key Binding JWT with cnf.jwk
 ```
 
-`header.jwk` is not trusted by itself. It is only a public-key candidate and must match the trust list first.
+The chain is not trusted by itself, and for `login` no certificate authority is
+consulted at all: the leaf must carry the key the operator wrote down, or a CA
+in the trust list could introduce another login issuer.
 
 ## Claims shape
 
@@ -91,7 +90,7 @@ Visible issuer claims:
 
 ```json
 {
-  "iss": "did:web:dev.example:issuer:poa",
+  "iss": "http://localhost:30181",
   "sub": "did:jwk:...holder...",
   "vct": "urn:dcs:poa:v1",
   "iat": 1719129600,
@@ -132,7 +131,7 @@ python3 testWallet/scripts/issue_credentials.py
 ```bash
 python3 testWallet/scripts/verify_sdjwt_locally.py \
   testWallet/credentials/test.jwt \
-  --trust-path testWallet/trust.dev.json \
+  --trust-path backend/config/oid4vp/trust.dev.json \
   --aud dcs-client \
   --nonce test-nonce
 ```
@@ -140,7 +139,7 @@ python3 testWallet/scripts/verify_sdjwt_locally.py \
 Expected result:
 
 ```text
-issuer header.jwk trusted: OK
+issuer leaf pinned and names its issuer: OK
 issuer signature: OK
 key binding signature: OK
 key binding sd_hash: OK
@@ -152,7 +151,7 @@ Paste `testWallet/credentials/test.jwt` directly.
 
 For manual verification inputs:
 
-- `Signature(Input JWK to verify)`: `testWallet/keys/issuer-dev.public.jwk`
+- `Signature(Input JWK to verify)`: the public key of the leaf in the credential's `x5c` header (`deployment/helm/charts/orce/pki-dev/issuer.key`)
 - `Key Binding Signature(Input JWK to verify)`: `testWallet/keys/wallet.public.jwk`
 
 Do not use the demo key pre-filled by sdjwt.co.

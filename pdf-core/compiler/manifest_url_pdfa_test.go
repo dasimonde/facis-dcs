@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"testing"
 )
 
@@ -11,7 +10,7 @@ import (
 // C2PA-008) uses the non-predefined dcterms schema, so it must be declared as a
 // PDF/A extension schema (clause 6.6.2.3.2) or veraPDF PDF/A-3a validation fails.
 func TestManifestURLXMPDeclaresPDFAExtensionSchema(t *testing.T) {
-	ctx := WithSigner(context.Background(), NewCapturingSigner())
+	ctx := WithSigner(testChainContext(), NewCapturingSigner())
 	fresh, err := CompilePDF(ctx, []byte(filledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)

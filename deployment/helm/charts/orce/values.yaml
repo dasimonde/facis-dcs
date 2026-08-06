@@ -17,6 +17,12 @@ ingress:
   pathType: Prefix
   hosts: []
   tls: []
+  # Path prefix to strip before the request reaches Node-RED, for a release
+  # published under one (the issuer's /issuer). Traefik only: it renders a
+  # Middleware and references it from the Ingress. An nginx-class ingress does
+  # the same job through annotations (rewrite-target plus x-forwarded-prefix),
+  # which belong in `annotations` above.
+  stripPrefix: ""
 
 # Persistent storage for Node-RED /data (flows, credentials, settings)
 persistence:
@@ -81,6 +87,24 @@ jobResources: {}
 # issuer (did.json, VCI, status list, admin). They claim overlapping routes, so
 # a release serves one set, not both.
 flowsDir: flows
+
+# The root CA the issuer's certificates chain to (flowsDir: flows-issuer).
+#
+# Left alone, the issuer generates one on first boot and keeps it on its volume:
+# the right shape for a real deployment, where the root exists once and every
+# verifier is handed its fingerprint afterwards. Dev and CI stacks are rebuilt
+# from nothing and their verifier configuration is committed, so they hand the
+# issuer the fixture root shipped in this chart instead — the same certificate
+# the backend's committed trust anchors already name.
+#
+# Never identify one of these roots by subject: every runtime-generated one is
+# called "FACIS Demo Root CA" whatever key it holds, so a bundle assembled by
+# name rather than by fingerprint anchors the wrong issuer and refuses the rest.
+pkiRootCA:
+  # Mount pki-dev/root-ca.{crt,key}, whose private half is in the repository:
+  # anyone with a clone can issue under it. The backend refuses it as a trust
+  # anchor unless DCS_ALLOW_DEV_TRUST says the stack is a development one.
+  devFixture: false
 
 # The issuer admin tab (credential revoke / unrevoke) carries no authorization
 # of its own, and an issuer is published so wallets can reach /offer — which

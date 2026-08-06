@@ -14,6 +14,32 @@ Feature: Contract Creation
     And metadata is auto-filled
     And the creation is logged and traceable to the template version
 
+  # AC1 (the Semantic-Hub SKOS vocabulary and label projection) and AC3 (the
+  # UI's labeled, closed selection) are intentionally covered by focused
+  # frontend component tests/grep gates. This Behave harness has no browser
+  # automation, so an API scenario would not honestly verify those UI claims.
+  @clean_db @REQ-contract-party-role-taxonomy-uris-AC2 @REQ-contract-party-role-taxonomy-uris-AC4 @DCS-IR-CWE-01 @DCS-IR-CWE-02 @DCS-FR-CWE-13 @DCS-FR-TR-03
+  Scenario: Percent-encoded party fragments become URI-valued roles and bind only the selected originator
+    Given a registered bilateral template whose top-level ODRL rules repeat the percent-encoded role URIs "https://w3id.org/facis/dcs/taxonomy/v1#role-provider" and "https://w3id.org/facis/dcs/taxonomy/v1#role-customer" in both directions
+    When I create a contract from that template as originator role "https://w3id.org/facis/dcs/taxonomy/v1#role-provider"
+    Then the derived contract contains exactly the roles "https://w3id.org/facis/dcs/taxonomy/v1#role-provider,https://w3id.org/facis/dcs/taxonomy/v1#role-customer" once each
+    And every contractual role is stored as an absolute concept URI string
+    And each open party fragment percent-decodes to its identical dcs:role URI
+    And every top-level ODRL assigner and assignee still references the corresponding contractual party
+    And the originator is bound only to the "https://w3id.org/facis/dcs/taxonomy/v1#role-provider" contractual party
+    And the "https://w3id.org/facis/dcs/taxonomy/v1#role-customer" contractual party remains open for the counterparty
+
+  @clean_db @REQ-contract-party-role-taxonomy-uris-AC5 @DCS-IR-CWE-01 @DCS-IR-CWE-02 @DCS-FR-CWE-13 @DCS-FR-TR-03
+  Scenario Outline: The backend rejects short and unknown originator roles
+    Given a registered bilateral template whose top-level ODRL rules repeat the percent-encoded role URIs "https://w3id.org/facis/dcs/taxonomy/v1#role-provider" and "https://w3id.org/facis/dcs/taxonomy/v1#role-customer" in both directions
+    When I attempt to create a contract from that template as originator role "<originator_role>"
+    Then contract creation is rejected because originator_role is not a role declared by the template
+
+    Examples:
+      | originator_role                                                          |
+      | provider                                                                 |
+      | https://w3id.org/facis/dcs/taxonomy/v1#role-custom-broker               |
+
   @clean_db @REQ-contract-readonly-event-admin-diff-regressions-AC2 @DCS-FR-UC-09-2 @UC-09-02
   Scenario: Successful contract creation records an effective audit timestamp
     Given I am authenticated with roles: "Contract Creator"

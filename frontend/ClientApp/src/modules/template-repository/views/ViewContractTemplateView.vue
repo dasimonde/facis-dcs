@@ -20,6 +20,9 @@ const props = defineProps<{
   did: string
   embedded?: boolean
 }>()
+const emit = defineEmits<{
+  'load-state': [value: { did: string; state: 'loading' | 'loaded' | 'error' }]
+}>()
 
 const navStore = useNavStore()
 
@@ -43,11 +46,13 @@ watch(
 
     hasChosenType.value = true
     const did = `${props.did}`
+    emit('load-state', { did, state: 'loading' })
     contractTemplateService
       .retrieveById({ did })
       .then((template) => {
         if (!template) {
           draftStore.reset()
+          emit('load-state', { did, state: 'error' })
           return
         }
         templateEditorUiStore.setTemplateEditable(false)
@@ -64,8 +69,11 @@ watch(
           created_by: template.created_by,
           responsible: template.responsible ?? null,
         })
+        emit('load-state', { did, state: 'loaded' })
       })
       .catch((error: unknown) => {
+        draftStore.reset()
+        emit('load-state', { did, state: 'error' })
         reportActionError(error, 'Load template')
       })
   },

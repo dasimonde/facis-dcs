@@ -63,7 +63,7 @@ func (h *NegotiationRejector) Handle(ctx context.Context, cmd RejectNegotiationC
 		return err
 	}
 
-	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID)
+	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID, processData.ContractVersion)
 	if err != nil {
 		return fmt.Errorf("could not validate negotiator: %w", err)
 	}

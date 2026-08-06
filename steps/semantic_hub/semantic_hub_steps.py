@@ -14,6 +14,7 @@ from steps.support.api_client import (
     contract_retrieve_by_id_url,
     get_with_headers,
     hub_shapes_anchors,
+    pac_audit_timeline,
     post_json,
     template_create_url,
 )
@@ -420,14 +421,25 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
-    body = context.requests_response.json()
-    resource = next((r for r in body if r.get("did") == did), None)
-    assert resource is not None, (
-        f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-        f"got DIDs: {[r.get('did') for r in body]}"
+    # Positive proof this contract was AUDITED, which is what the caller needs
+    # before reading anything into an absent finding. The run echoes the
+    # resource it was scoped to (PACExternalAuditResponse.resource), so an
+    # audit that never looked at this contract cannot satisfy "reports no
+    # error for this rule".
+    #
+    # The previous precondition asserted a finding EXISTED, which proves
+    # something weaker and is unsatisfiable by exactly the contracts this is
+    # asked about: ADR-9 — SHACL reports only non-conformance, so a fully
+    # compliant document produces ZERO findings, not N conforming ones.
+    audited = (context.requests_response.json().get("resource") or {}).get("did")
+    assert audited == did, (
+        f"Expected the audit run to be scoped to '{name}' (did={did}) so an absent "
+        f"finding means something; got resource: {context.requests_response.json().get('resource')!r}"
     )
+    timeline = pac_audit_timeline(context.requests_response)
+    entries = [entry for entry in timeline if entry.get("did") == did]
     severities = []
-    for entry in resource.get("audit_trail") or []:
+    for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
             continue
         event_data = entry.get("event_data")
@@ -452,7 +464,9 @@ def step_then_content_audit_trail_no_error_for_rule(context, name, rule_id):
     # goRDFlib (ADR-9) only reports non-conformance — a fully compliant
     # contract has NO finding for a conformant rule at all (not an "info"
     # one), so this asserts absence-of-violation rather than a specific
-    # passing severity.
+    # passing severity. A contract clean on EVERY rule has no entry at all:
+    # under DCS-FR-PACM-02/-03 and UC-08 ("violations (if any)") that IS the
+    # compliant outcome, not a missing precondition.
     did, severities = _content_audit_trail_rule_severities(context, name, rule_id)
     assert "error" not in severities, (
         f"Expected contract '{name}' (did={did}) to report no error for rule {rule_id!r}, "

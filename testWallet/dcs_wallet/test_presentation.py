@@ -2,53 +2,120 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 
 import jwt
 from jwt.algorithms import ECAlgorithm
 
 from dcs_wallet.credential import decode_jwt_payload, load_credential_sd_jwt
 from dcs_wallet.issuer import issue_access_credential
+<<<<<<< HEAD
+from dcs_wallet.keys import did_jwk_from_public_jwk
+=======
+from dcs_wallet.issuer_pki import dev_issuer, leaf_public_jwk
+>>>>>>> feat/adr-35-anchored-peer-trust
 from dcs_wallet.presentation import build_vp_token, load_jwk
+from dcs_wallet.status_list import FIXTURE_INDEX, RESERVED_INDEX, role_credential_index
 from dcs_wallet.sdjwt import KB_JWT_TYP, decode_disclosure, sd_hash, split_sd_jwt
 
 
 class PresentationTest(unittest.TestCase):
-    def test_fresh_access_credential_uses_ceremony_specific_status_index(self) -> None:
-        issuer_private = load_jwk("issuer-dev.jwk")
-        wallet_private = load_jwk("wallet.jwk")
-        first = issue_access_credential(
-            organization="did:web:example:organization",
-            roles=["Contract Signer"],
-            issuer_private=issuer_private,
-            wallet_private=wallet_private,
-            nonce="ceremony-one",
-        )
-        second = issue_access_credential(
-            organization="did:web:example:organization",
-            roles=["Contract Signer"],
-            issuer_private=issuer_private,
-            wallet_private=wallet_private,
-            nonce="ceremony-two",
-        )
-        first_issuer, _, _ = split_sd_jwt(first)
-        second_issuer, _, _ = split_sd_jwt(second)
-        first_idx = decode_jwt_payload(first_issuer)["status"]["status_list"]["idx"]
-        second_idx = decode_jwt_payload(second_issuer)["status"]["status_list"]["idx"]
-        self.assertNotEqual(first_idx, second_idx)
+    def _status_claim(self, presentation: str) -> dict:
+        issuer_jwt, _, _ = split_sd_jwt(presentation)
+        return decode_jwt_payload(issuer_jwt)["status"]["status_list"]
 
-    def test_generated_credential_contains_issuer_header_jwk_and_holder_cnf(self) -> None:
+    def _access_credential(self, *, organization: str, roles: list[str], nonce: str) -> str:
+        return issue_access_credential(
+            organization=organization,
+            roles=roles,
+            wallet_private=load_jwk("wallet.jwk"),
+            status_index=role_credential_index(organization=organization, roles=roles),
+            nonce=nonce,
+        )
+
+    def test_access_credential_status_index_identifies_the_identity_not_the_ceremony(self) -> None:
+        first = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Signer"], nonce="ceremony-one"
+        )
+        second = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Signer"], nonce="ceremony-two"
+        )
+        self.assertEqual(self._status_claim(first)["idx"], self._status_claim(second)["idx"])
+
+    def test_a_different_identity_gets_a_different_bit(self) -> None:
+        signer = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Signer"], nonce="n"
+        )
+        approver = self._access_credential(
+            organization="did:web:example:organization", roles=["Contract Approver"], nonce="n"
+        )
+        other_org = self._access_credential(
+            organization="did:web:other:organization", roles=["Contract Signer"], nonce="n"
+        )
+        indices = {self._status_claim(c)["idx"] for c in (signer, approver, other_org)}
+        self.assertEqual(len(indices), 3)
+
+    def test_a_revoked_probe_organization_holds_a_reserved_bit(self) -> None:
+        # The scenario that revokes a login credential presents this
+        # organization; whatever roles it asks for, it must land on the bit
+        # reserved for it and on no other identity's.
+        organization = "BDD Revocation Probe Org"
+        for roles in (["Contract Signer"], ["Contract Manager", "Auditor"]):
+            self.assertEqual(
+                role_credential_index(organization=organization, roles=roles),
+                RESERVED_INDEX[organization],
+            )
+
+    def test_every_committed_credential_owns_its_own_bit(self) -> None:
+        self.assertEqual(len(set(FIXTURE_INDEX.values())), len(FIXTURE_INDEX))
+        credentials_dir = Path(__file__).resolve().parent.parent / "credentials"
+        for path in sorted(credentials_dir.glob("*.jwt")):
+            key = path.name.removesuffix(".jwt")
+            self.assertIn(key, FIXTURE_INDEX, f"{path.name} has no allocated status-list index")
+            issuer_jwt, _, _ = split_sd_jwt(path.read_text(encoding="utf-8").strip())
+            claim = decode_jwt_payload(issuer_jwt)["status"]["status_list"]
+            self.assertEqual(claim["idx"], FIXTURE_INDEX[key])
+            self.assertTrue(claim["uri"].endswith("/status-list/1"), claim["uri"])
+
+    def test_generated_credential_carries_its_issuers_chain_and_holder_cnf(self) -> None:
         issuer_jwt, _, _ = split_sd_jwt(load_credential_sd_jwt("johndoe"))
         header = jwt.get_unverified_header(issuer_jwt)
         self.assertEqual(header["typ"], "dc+sd-jwt")
+<<<<<<< HEAD
         self.assertIn("jwk", header)
-        self.assertNotIn("kid", header)
         self.assertEqual(set(header["jwk"].keys()), {"kty", "crv", "x", "y"})
+        # Der Header trägt beides: den Schlüssel selbst, gegen den ein Verifier
+        # die Signatur direkt prüfen kann, und den kid als did:jwk desselben
+        # Schlüssels. Beide müssen auf dieselbe Identität zeigen, sonst kann ein
+        # Verifier je nach gewähltem Pfad zu unterschiedlichen Ergebnissen kommen.
+        self.assertEqual(header["kid"], did_jwk_from_public_jwk(header["jwk"]))
 
         issuer_private = load_jwk("issuer-dev.jwk")
         expected_issuer_public = {k: issuer_private[k] for k in ("kty", "crv", "x", "y")}
         self.assertEqual(header["jwk"], expected_issuer_public)
+=======
+        # The issuer publishes its key through a certificate chain, so a bare
+        # header jwk would be a key from somewhere its trust entry never named
+        # (backend/internal/auth/oid4vp/sdjwt/keys.go).
+        self.assertIn("x5c", header)
+        self.assertNotIn("jwk", header)
+        self.assertNotIn("kid", header)
+>>>>>>> feat/adr-35-anchored-peer-trust
 
         payload = decode_jwt_payload(issuer_jwt)
+        # The leaf carries the key of the issuer this credential names —
+        # resolved from the credential rather than from the environment, so the
+        # assertion reads the same whether or not ISSUER_BASE_URL is exported.
+        # The certificate's own bytes are not compared: a leaf is re-minted
+        # whenever one is needed and an ECDSA signature is randomized, so two
+        # certificates for the same issuer differ while stating the same thing.
+        issuer = dev_issuer(payload["iss"])
+        self.assertEqual(len(header["x5c"]), 2, "leaf and the root it chains to")
+        self.assertEqual(
+            leaf_public_jwk(header["x5c"][0]),
+            {k: issuer.private_jwk[k] for k in ("kty", "crv", "x", "y")},
+        )
+
         self.assertIn("cnf", payload)
         self.assertIn("jwk", payload["cnf"])
         cnf_jwk = payload["cnf"]["jwk"]
@@ -72,7 +139,7 @@ class PresentationTest(unittest.TestCase):
         issuer_header = jwt.get_unverified_header(issuer_jwt)
         issuer_payload = jwt.decode(
             issuer_jwt,
-            ECAlgorithm.from_jwk(json.dumps(issuer_header["jwk"])),
+            ECAlgorithm.from_jwk(json.dumps(leaf_public_jwk(issuer_header["x5c"][0]))),
             algorithms=["ES256"],
             options={"verify_exp": False, "verify_iat": False},
         )

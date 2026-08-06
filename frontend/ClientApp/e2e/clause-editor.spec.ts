@@ -13,6 +13,21 @@ async function fillRequiredTemplateDetails(page: Page, name: string): Promise<vo
   await page.getByTestId('template-base-description').fill('Playwright clause-editor fixture.')
 }
 
+async function selectBilateralRoles(editor: ReturnType<Page['getByTestId']>): Promise<void> {
+  const roleSelect = (label: string) =>
+    editor.locator('label.form-control').filter({ hasText: label }).locator('select')
+  const assigner = roleSelect('Granted by')
+  const assignee = roleSelect('Applies to')
+  const values = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  expect(values.length, 'the role catalog exposes a bilateral choice').toBeGreaterThanOrEqual(2)
+  const [assignerRole, assigneeRole] = values
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
+}
+
 interface Ref {
   '@id': string
 }
@@ -64,9 +79,21 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
-  await ruleSelect('Applies to').selectOption({ label: 'The counterparty' })
+  // Party roles are supplied by the Semantic Hub catalog. Pick two distinct
+  // enabled catalog entries without coupling this test to a particular role
+  // vocabulary or its ordering labels.
+  const assigner = ruleSelect('Granted by')
+  const assignee = ruleSelect('Applies to')
+  const partyRoleValues = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  expect(partyRoleValues.length, 'the role catalog exposes a bilateral choice').toBeGreaterThanOrEqual(2)
+  const [assignerRole, assigneeRole] = partyRoleValues
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
   // The target is the accessed asset — a declared object, not the contract.
   await ruleSelect('Toward').selectOption({ label: 'Service Description' })
 
@@ -144,8 +171,9 @@ test('the builder emits a logical (or) constraint when constraints are combined 
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   const addSpatial = async (value: string) => {
     await editor.getByRole('button', { name: '+ constraint' }).click()
@@ -189,8 +217,9 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   // Attach a duty: the assignee MUST delete, bounded by two of the duty's own
   // constraints combined with ANY — a duty is as expressive as a rule.
@@ -260,8 +289,9 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   // A top-level atomic constraint (purpose), then a nested group of two spatial
   // constraints combined with ANY — while the top level stays ALL.
@@ -324,8 +354,9 @@ test('a duty can carry a consequence duty', async ({ page, loginAs }) => {
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralRoles(editor)
 
   await editor.getByRole('button', { name: '+ duty' }).click()
   const duty = editor.getByTestId('odrl-duty').last()

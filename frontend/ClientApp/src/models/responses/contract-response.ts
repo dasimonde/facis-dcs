@@ -94,6 +94,10 @@ interface ContractSearchResponseItem {
 
 export type ContractSearchResponse = ContractSearchResponseItem[]
 
+export interface ContractOfferAcceptResponse {
+  did: string
+}
+
 export interface ContractNegotiationResponse {
   did: string
 }
@@ -117,8 +121,15 @@ export interface ContractRejectResponse {
   did: string
 }
 
-export interface ContractStoreResponse {
+export interface ContractWithdrawResponse {
   did: string
+}
+
+export interface ContractRenewResponse {
+  /** The newly minted renewal contract. */
+  did: string
+  renews_did: string
+  renews_contract_version: number
 }
 
 export interface ContractTerminateResponse {

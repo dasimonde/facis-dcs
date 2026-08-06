@@ -1,6 +1,7 @@
 {
   "@context": {
     "@version": 1.1,
+    "@vocab": "https://w3id.org/facis/dcs/ontology/v1#",
     "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
     "dcst": "https://w3id.org/facis/dcs/taxonomy/v1#",
     "odrl": "http://www.w3.org/ns/odrl/2/",
@@ -13,6 +14,61 @@
       "@id": "dcs:derivedFromTemplate",
       "@type": "@id"
     },
-    "version": "dcs:version"
+    "version": "dcs:version",
+    "LayoutNode": "dcs:LayoutNode",
+    "DocumentStructure": "dcs:DocumentStructure",
+    "ContractTemplate": "dcs:ContractTemplate",
+    "Contract": "dcs:Contract",
+    "TemplateMetadata": "dcs:TemplateMetadata",
+    "ContractMetadata": "dcs:ContractMetadata",
+    "Section": "dcs:Section",
+    "Clause": "dcs:Clause",
+    "TextBlock": "dcs:TextBlock",
+    "ContractField": "dcs:ContractField",
+    "SignatureField": "dcs:SignatureField",
+    "layout": {
+      "@id": "dcs:layout",
+      "@container": "@list"
+    },
+    "blocks": {
+      "@id": "dcs:blocks",
+      "@container": "@list"
+    },
+    "children": {
+      "@id": "dcs:children",
+      "@type": "@id",
+      "@container": "@list"
+    },
+    "content": {
+      "@id": "dcs:content",
+      "@container": "@list"
+    },
+    "signatureFields": {
+      "@id": "dcs:signatureFields",
+      "@type": "@id",
+      "@container": "@set"
+    },
+    "dcs:layout": {
+      "@id": "dcs:layout",
+      "@container": "@list"
+    },
+    "dcs:blocks": {
+      "@id": "dcs:blocks",
+      "@container": "@list"
+    },
+    "dcs:children": {
+      "@id": "dcs:children",
+      "@type": "@id",
+      "@container": "@list"
+    },
+    "dcs:content": {
+      "@id": "dcs:content",
+      "@container": "@list"
+    },
+    "dcs:signatureFields": {
+      "@id": "dcs:signatureFields",
+      "@type": "@id",
+      "@container": "@set"
+    }
   }
 }

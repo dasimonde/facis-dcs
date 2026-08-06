@@ -183,6 +183,6 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     })
     await page.getByRole('button', { name: 'Export PDF' }).click()
     await exported
-    await expect(page.getByText('Content erased — encryption keys destroyed')).toHaveCount(0)
+    await expect(page.getByText('Content erased. Encryption keys destroyed.')).toHaveCount(0)
   })
 })

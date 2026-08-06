@@ -22,7 +22,7 @@ spec:
         app.kubernetes.io/name: ipfs
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      {{- if .Values.api.cors.enabled }}
+      {{- if or .Values.api.cors.enabled .Values.config.routingType .Values.config.noSync }}
       initContainers:
         - name: ipfs-config
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -38,10 +38,18 @@ spec:
               fi
               ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001
               ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080
+              {{- if .Values.api.cors.enabled }}
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '{{ toJson .Values.api.cors.allowOrigins }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '{{ toJson .Values.api.cors.allowMethods }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '{{ toJson .Values.api.cors.allowHeaders }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Credentials '["{{ .Values.api.cors.allowCredentials }}"]'
+              {{- end }}
+              {{- if .Values.config.routingType }}
+              ipfs config Routing.Type {{ .Values.config.routingType }}
+              {{- end }}
+              {{- if .Values.config.noSync }}
+              ipfs config --json Datastore.NoSync true
+              {{- end }}
               chown -R 1000:100 /data/ipfs
           {{- with .Values.resources }}
           # A pod's effective limit is max(sum of containers, max of init

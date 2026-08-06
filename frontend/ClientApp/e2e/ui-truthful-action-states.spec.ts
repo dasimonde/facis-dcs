@@ -1,5 +1,20 @@
 import { expect, type Page, type Route, test } from '@playwright/test'
 
+// The app refuses to boot without a parsable ODRL profile from the Semantic
+// Hub, so every page under test needs one served.
+const odrlProfileFixture = `
+  @prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
+  @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+  @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+  <https://w3id.org/facis/dcs/ontology/v1/odrl-profile>
+    a odrl:Profile ;
+    dcs:defaultConstraintAction dcs:provideCompliantValue .
+  odrl:eq
+    a odrl:Operator ;
+    rdfs:label "Must equal" ;
+    dcs:appliesToParameterType "string" .
+`
+
 function jwt(roles: string[]): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url')
   return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
@@ -21,7 +36,7 @@ async function authenticate(page: Page, roles: string[]): Promise<void> {
   )
   await page.route('**/auth/refresh', (route) => json(route, { token_type: 'Bearer', access_token: accessToken }))
   await page.route('**/semantic/schema/list', (route) => json(route, []))
-  await page.route('**/semantic/ontology/dcs-odrl-profile', (route) => json(route, { content: '' }))
+  await page.route('**/semantic/ontology/dcs-odrl-profile', (route) => json(route, { content: odrlProfileFixture }))
 }
 
 async function json(route: Route, body: unknown, status = 200): Promise<void> {
@@ -41,7 +56,9 @@ test('Non-compliance monitoring renders mutually exclusive idle, loading, error,
   await expect(page.getByTestId('monitor-empty-state')).toHaveCount(0)
 
   await page.getByTestId('run-monitoring-sweep').click()
-  await expect(page.getByRole('status', { name: /running monitoring sweep/i })).toBeVisible()
+  // `status` is not a name-from-content role, so a live region carrying only
+  // visible text has no accessible name to match on — assert its text.
+  await expect(page.getByRole('status')).toContainText(/running monitoring sweep/i)
   await json(monitor!, { message: 'monitor unavailable' }, 500)
   await expect(page.getByRole('alert')).toContainText(/monitor unavailable/i)
   await expect(page.getByTestId('monitor-empty-state')).toHaveCount(0)

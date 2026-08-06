@@ -46,6 +46,35 @@ func NewHTTPArchiveNotaryClient(url, bearerToken string) *HTTPArchiveNotaryClien
 	}
 }
 
+// ValidateArchiveNotaryConfig reports a notary that is addressed but cannot
+// authenticate. The two settings come from different places — the URL is
+// derived from the bundled ORCE release whenever it is enabled, the token is an
+// operator secret that defaults to empty — so the combination "URL set, token
+// missing" is what a deployment reaches by configuring nothing at all.
+//
+// It is checked at startup because of where it would otherwise surface: the
+// notary receipt is taken while the applied signature is being archived, which
+// is the last step of the whole contract lifecycle. The deployment comes up
+// healthy, every screen works, a signer completes the wallet ceremony, and only
+// the upload of the signed document is refused — after the signature exists.
+// The endpoint answering 401 to an empty bearer is the same verdict either way
+// (charts/orce archive-flow.json refuses an empty configured token), so nothing
+// is lost by saying it while the pod is starting.
+func ValidateArchiveNotaryConfig(url, bearerToken string) error {
+	if strings.TrimSpace(url) == "" {
+		return nil
+	}
+	if strings.TrimSpace(bearerToken) == "" {
+		return fmt.Errorf(
+			"archive notary is configured at %q but its bearer token is empty: set global.archiveAuditToken "+
+				"(or global.archiveAuditTokenSecretRef) — the same value authorizes the DCS and the ORCE "+
+				"archive flow, and without it every signature is refused when its archive entry is notarized",
+			strings.TrimSpace(url),
+		)
+	}
+	return nil
+}
+
 func (c *HTTPArchiveNotaryClient) NotarizeArchiveEntry(ctx context.Context, payload ArchiveNotaryPayload) (*ArchiveNotaryReceipt, error) {
 	if c == nil || c.url == "" {
 		return nil, fmt.Errorf("archive notary URL is empty")

@@ -32,6 +32,9 @@ type GetContractContentTrailQry struct {
 	RetrievedBy string
 	HolderDID   string
 	UserRoles   userrole.UserRoles
+	// DID restricts the trail to one contract. Empty means the whole
+	// auditable corpus.
+	DID string
 }
 
 type ContractContentTrailAuditor struct {
@@ -40,7 +43,7 @@ type ContractContentTrailAuditor struct {
 }
 
 func (h *ContractContentTrailAuditor) Handle(ctx context.Context, query GetContractContentTrailQry) (map[string][]datatype.AuditLogEntry, error) {
-	contracts, err := h.readAuditableContracts(ctx)
+	contracts, err := h.readAuditableContracts(ctx, query.DID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +97,11 @@ func (h *ContractContentTrailAuditor) Handle(ctx context.Context, query GetContr
 	return result, nil
 }
 
-func (h *ContractContentTrailAuditor) readAuditableContracts(ctx context.Context) ([]db.Contract, error) {
+// readAuditableContracts loads the contracts whose content the trail covers:
+// just did when one is named, the whole corpus otherwise. Revalidating every
+// stored contract is the dominant cost of an unfiltered audit, so a
+// single-resource request must not pay it.
+func (h *ContractContentTrailAuditor) readAuditableContracts(ctx context.Context, did string) ([]db.Contract, error) {
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -105,14 +112,32 @@ func (h *ContractContentTrailAuditor) readAuditableContracts(ctx context.Context
 		}
 	}(tx)
 
-	metadata, err := h.CRepo.ReadAllMetaData(ctx, tx, datatype.Pagination{})
-	if err != nil {
-		return nil, fmt.Errorf("could not read all metadata: %w", err)
+	var dids []string
+	if did != "" {
+		// An audit may name a resource this instance holds no contract for (a
+		// template, a peer-side DID). That is an empty content trail, not an
+		// error.
+		exists, err := h.CRepo.ExistsByDID(ctx, tx, did)
+		if err != nil {
+			return nil, fmt.Errorf("could not look up contract: %w", err)
+		}
+		if exists {
+			dids = []string{did}
+		}
+	} else {
+		metadata, err := h.CRepo.ReadAllMetaData(ctx, tx, datatype.Pagination{})
+		if err != nil {
+			return nil, fmt.Errorf("could not read all metadata: %w", err)
+		}
+		dids = make([]string, 0, len(metadata))
+		for _, meta := range metadata {
+			dids = append(dids, meta.DID)
+		}
 	}
 
-	contracts := make([]db.Contract, 0, len(metadata))
-	for _, meta := range metadata {
-		contract, err := h.CRepo.ReadDataByDID(ctx, tx, meta.DID)
+	contracts := make([]db.Contract, 0, len(dids))
+	for _, contractDID := range dids {
+		contract, err := h.CRepo.ReadDataByDID(ctx, tx, contractDID)
 		if err != nil {
 			return nil, fmt.Errorf("could not read data: %w", err)
 		}

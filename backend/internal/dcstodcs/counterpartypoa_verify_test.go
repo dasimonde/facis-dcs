@@ -12,30 +12,26 @@ import (
 	"digital-contracting-service/internal/auth/oid4vp"
 )
 
-func proofedPoA(proofMethod, proofPurpose string) SignatoryPoA {
-	return SignatoryPoA{
-		Party:        testSignedParty,
-		Presentation: "p",
-		Summary: `{
+func proofedEvidence(proofMethod, proofPurpose string) json.RawMessage {
+	return attachment(`{
 	  "type": ["VerifiableCredential", "ContractSigningSummaryCredential"],
-	  "credentialSubject": {"id": "` + testSignedSignatory + `", "field_name": "` + testSignedParty + `", "contract_id": "` + testContract + `"},
-	  "proof": {"type": "DataIntegrityProof", "verificationMethod": "` + proofMethod + `", "proofPurpose": "` + proofPurpose + `"}
-	}`,
-	}
+	  "credentialSubject": {"id": "`+testSignedSignatory+`", "field_name": "`+testSignedParty+`", "contract_id": "`+testContract+`"},
+	  "proof": {"type": "DataIntegrityProof", "verificationMethod": "`+proofMethod+`", "proofPurpose": "`+proofPurpose+`"}
+	}`, "p")
 }
 
 // The one security control this gate rests on had no test at all: every case
 // ran the branch where no verifier is configured.
 func TestSigningEvidenceMustBeVerifiable(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: &oid4vp.TrustConfig{}}
-	err := gate.Check(testSignedParty, testContract, ShippedSignatures{}, []SignatoryPoA{poaFor(testSignedParty)})
+	err := gate.Check(testSignedParty, testLocalParty, testContract, ShippedSignatures{}, []json.RawMessage{evidenceFor(testSignedParty)})
 	require.Error(t, err, "evidence with no means to verify it must be refused, not believed")
 	assert.Contains(t, gateError(t, err).Error(), "no means to verify")
 }
 
-// The key is resolved from the method the PROOF names, and a peer that does not
-// publish that method as one which may make assertions is refused. Deriving the
-// id from our own key label instead only worked while every peer ran this
+// The key is resolved from the method the PROOF names, and an issuer that does
+// not publish that method as one which may make assertions is refused. Deriving
+// the id from our own key label instead only worked while every peer ran this
 // software: DID Core puts no meaning in the fragment.
 func TestSigningEvidenceKeyComesFromTheProofAndMustBeAuthorized(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
@@ -43,12 +39,13 @@ func TestSigningEvidenceKeyComesFromTheProofAndMustBeAuthorized(t *testing.T) {
 
 	shipped := verifier()
 	var asked string
-	shipped.ResolveKey = func(id string) (*ecdsa.PublicKey, error) {
+	shipped.ResolveKey = func(_, id string) (*ecdsa.PublicKey, error) {
 		asked = id
 		return nil, assertErr("not listed as an assertionMethod")
 	}
 
-	err := gate.Check(testSignedParty, testContract, shipped, []SignatoryPoA{proofedPoA(testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")})
+	err := gate.Check(testSignedParty, testLocalParty, testContract, shipped,
+		[]json.RawMessage{proofedEvidence(testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")})
 
 	require.Error(t, err)
 	assert.Equal(t, testSignedParty+"#whatever-this-peer-calls-it", asked,
@@ -63,7 +60,8 @@ func TestSigningEvidenceMustProveAnAssertion(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	err := gate.Check(testSignedParty, testContract, verifier(), []SignatoryPoA{proofedPoA(testSignedParty+"#dcs-vc", "authentication")})
+	err := gate.Check(testSignedParty, testLocalParty, testContract, verifier(),
+		[]json.RawMessage{proofedEvidence(testSignedParty+"#dcs-vc", "authentication")})
 
 	require.Error(t, err)
 	assert.Contains(t, gateError(t, err).Error(), "not assertionMethod")
@@ -79,7 +77,8 @@ func TestUnverifiableSigningEvidenceIsRefusedBeforeItsClaimsAreUsed(t *testing.T
 	shipped := verifier()
 	shipped.VerifyVC = func(json.RawMessage, *ecdsa.PublicKey) error { return assertErr("bad signature") }
 
-	err := gate.Check(testSignedParty, testContract, shipped, []SignatoryPoA{proofedPoA(testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")})
+	err := gate.Check(testSignedParty, testLocalParty, testContract, shipped,
+		[]json.RawMessage{proofedEvidence(testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")})
 
 	require.Error(t, err)
 	assert.True(t, strings.Contains(gateError(t, err).Error(), "does not verify"))
@@ -99,7 +98,8 @@ func TestVerifiedSigningEvidenceIsAccepted(t *testing.T) {
 		return &oid4vp.CounterpartyPoA{}, nil
 	}
 
-	require.NoError(t, gate.Check(testSignedParty, testContract, verifier(), []SignatoryPoA{proofedPoA(testSignedParty+"#dcs-vc", "assertionMethod")}))
+	require.NoError(t, gate.Check(testSignedParty, testLocalParty, testContract, verifier(),
+		[]json.RawMessage{proofedEvidence(testSignedParty+"#dcs-vc", "assertionMethod")}))
 	require.Len(t, seen, 1)
 	assert.Equal(t, testSignedSignatory, seen[0].SignatoryDID)
 }

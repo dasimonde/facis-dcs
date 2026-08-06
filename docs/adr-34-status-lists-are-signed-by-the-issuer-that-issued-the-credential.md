@@ -152,3 +152,58 @@ production's behaviour, and the difference surfaces where it is most expensive.
 key and could sign them. Rejected: a status list is the issuer's statement about
 credentials it issued, and the relying party issuing it is the same conflation
 ADR-31 removed for PID issuance. The issuer signs its own.
+
+## Scope note: the demo issuers
+
+The ORCE issuers this project deploys are stand-ins. They mint their own root at
+runtime, hold no legally meaningful key, and a real deployment replaces them with
+the counterparty's own credential issuance — the DCS decides whether to trust an
+issuer (ADR-31), it does not operate one.
+
+Properties of those stand-ins are therefore out of scope here and are not
+defects to fix: the unauthenticated /pki/reissue endpoint, the unauthenticated
+/admin revocation endpoints enabled in the shared values base, and the issuer
+minting a leaf for whatever base URL a request carries. None survives contact
+with a real issuer, and the guard that stops a real deployment inheriting demo
+material already exists — DCS_ALLOW_DEV_TRUST is set in values.bdd.yml alone.
+
+What is NOT in that category, and remains a defect: no status-list handler binds
+the list's issuer to the issuer of the credential it governs. All three discard
+the credential argument (handler.IETFToken, handler.XFSC, handler.W3CBitstring
+take `_ status.VerifiedCredential`). That is this project's verification logic,
+not the stand-in's key hygiene: it lets any trusted issuer publish revocation
+status for any other issuer's credential, and it is the sentence this ADR is
+named after. Replacing the demo issuers does not fix it.
+
+## Amendment: the DCS serves the status lists for the credentials it issues
+
+The decision above is a rule about WHO signs, and applying it consistently means
+the DCS hosts a status list of its own.
+
+The ORCE issuer issues PID and PoA credentials, so it serves their status list.
+The DCS issues the contract lifecycle credential embedded in every generated PDF
+and the signature evidence / signing summary VC embedded in a contract's PDF —
+it mints them, embeds them, and asserts them. By the same rule, the DCS serves
+their status list, signed with its own HSM key and carrying its own certificate
+chain (the hsm-provision job already produces c2pa-x5chain.pem beside the signing
+key, so this needs no new key ceremony).
+
+This is NOT a reversal of the alternative rejected above. That rejection is about
+the DCS serving status lists for the ORCE ISSUERS' credentials — a relying party
+publishing revocation for credentials it did not issue, which is the
+attests-to-itself conflation ADR-31 removed. Serving lists for credentials the
+DCS itself issued is that same principle applied, not an exception to it.
+
+Consequence, and the reason this is written down now: the XFSC statuslist-service
+CANNOT be removed until this lands. The contract lifecycle credential still
+allocates against it (OCMWStatusListPublisher, /v1/tenants/<tenant>/status/<n>)
+and its revocation status is read back UNSIGNED by ReadUnsignedStatusList
+(pdfgeneration/provenance/status_list.go), consumed by
+signingmanagement/query/verify.go and pdfgeneration/query/common.go — the C2PA
+provenance verification path. Deleting the subchart first would pass every unit
+test and break PDF verification, because nothing asserts that credential's
+revocation status end to end.
+
+Order is therefore: DCS serves its own signed list -> lifecycle and signature
+evidence credentials point at it -> the XFSC service has no consumers -> the
+subchart, its database, ingress and seeding are deleted.

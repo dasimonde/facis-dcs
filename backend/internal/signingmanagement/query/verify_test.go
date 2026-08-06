@@ -1,10 +1,50 @@
 package query
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 )
+
+// A refused /verify returns no body, so no credential bytes come back and the
+// credential check never runs. Reporting that as "missing from the PDF" states
+// something about the document that nothing established — it sent a federated
+// contract's reader hunting for an embedding regression that was not there,
+// while the actual refusal reason was dropped on the floor.
+func TestVerifyFindingsDoNotInventADefectFromARefusedCheck(t *testing.T) {
+	findings := verifyFindings(verifyFindingInputs{
+		VerifyErr:           errors.New("pdf-core /verify: status 409: content mismatch"),
+		C2PAManifestFound:   true,
+		C2PASignatureStatus: provenance.CheckNotAvailable,
+		VCProofStatus:       provenance.CheckNotAvailable,
+	})
+
+	joined := strings.Join(findings, " | ")
+	if strings.Contains(joined, "Contract lifecycle credential missing from the PDF") {
+		t.Errorf("a refused check must not be reported as a missing credential: %s", joined)
+	}
+	if !strings.Contains(joined, "status 409: content mismatch") {
+		t.Errorf("the reason pdf-core refused must be reported: %s", joined)
+	}
+}
+
+// The finding stays for the case it was written for: pdf-core answered, and the
+// document it read carried no lifecycle credential.
+func TestVerifyFindingsReportAGenuinelyMissingCredential(t *testing.T) {
+	findings := verifyFindings(verifyFindingInputs{
+		C2PAManifestFound:   true,
+		C2PASignatureStatus: provenance.CheckValid,
+		VCProofStatus:       provenance.CheckNotAvailable,
+	})
+
+	joined := strings.Join(findings, " | ")
+	if !strings.Contains(joined, "Contract lifecycle credential missing from the PDF") {
+		t.Errorf("a credential absent from a PDF pdf-core accepted must be reported: %s", joined)
+	}
+}
 
 // jsonld_hash and base_pdf_hash on the contract-verify response were left nil
 // because nothing in the repo computed a base-PDF hash from a re-render. pdf-core

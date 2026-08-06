@@ -22,6 +22,16 @@ trap cleanup EXIT INT TERM
 HELM_RELEASE="dcs"
 HELM_CHART_PATH="deployment/helm"
 HELM_VALUES_FILE="deployment/helm/values.dev.yml"
+# The credential issuer is a release of its own, installed from the same chart
+# and the same values base production uses (ADR-34, values.issuer-base.yml).
+ISSUER_RELEASE="dcs-issuer"
+ISSUER_CHART_PATH="deployment/helm/charts/orce"
+ISSUER_VALUES_BASE="deployment/helm/values.issuer-base.yml"
+ISSUER_VALUES_FILE="deployment/helm/values.issuer.dev.yml"
+# Every credential this stack issues names this issuer's status list, and the
+# verifier refuses a list whose `sub` is not the URI the credential names — so
+# this is the URL the backend must reach it on, not merely one that works.
+export ISSUER_BASE_URL="${ISSUER_BASE_URL:-http://localhost:30181}"
 PDF_CORE_DIR="pdf-core"
 PDF_CORE_DEV_ENV="$PDF_CORE_DIR/.dev.env"
 PDF_CORE_ENV="$PDF_CORE_DIR/.env"
@@ -35,6 +45,14 @@ echo "=== Setting up dev environment ==="
 echo "Building locked Helm dependencies and deploying to Kubernetes..."
 helm dependency build --skip-refresh "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
+
+# The issuer first: the backend verifies its status list against anchors, and
+# the login credential a developer presents names that list. Installed exactly
+# as production installs it — same chart, same release name, same values base.
+echo "Deploying the credential issuer ($ISSUER_RELEASE)..."
+helm upgrade --install "$ISSUER_RELEASE" "$ISSUER_CHART_PATH" \
+  -f "$ISSUER_VALUES_BASE" -f "$ISSUER_VALUES_FILE"
+kubectl rollout status "deployment/${ISSUER_RELEASE}-orce" --timeout=5m
 
 # The backend's catalogue readiness gate makes exactly one verification call and
 # exits if it fails — deliberately, so a broken catalogue is not papered over by
@@ -61,6 +79,9 @@ kubectl get secret "$TSA_TRUST_SECRET" \
   -o jsonpath='{.data.tsa-cert\.pem}' | base64 --decode > "$TSA_TRUST_CERT_FILE"
 echo "✓ ORCE TSA trust certificate exported"
 
+# Still deployed, but nothing reads it: the C2PA provenance credentials the DCS
+# issues now name the DCS's own signed list, served at /status-list/1 by the
+# backend below (ADR-34). Removing the subchart is a separate step.
 echo "Waiting for statuslist-service..."
 kubectl wait --for=condition=ready pod \
   -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
@@ -69,8 +90,14 @@ kubectl wait --for=condition=ready pod \
 echo "Installing testWallet dependencies..."
 make -C testWallet install
 
-echo "Initializing statuslist for dev (NATS create when list is empty)..."
-make -C testWallet ensure-statuslist
+# The issuer serves and signs its own status list (ADR-34); nothing to create.
+# What this checks is that the backend will be able to USE it: the URL the
+# issuer answers under is the one the committed credentials name, its chain ends
+# at a root the committed anchor bundle holds (by fingerprint — every ORCE root
+# is called "FACIS Demo Root CA"), and its leaf names the issuer. Each of those
+# refuses a login with the list unread, which reads as a revoked credential.
+echo "Checking the issuer status list credentials point at..."
+make -C testWallet check-status-list
 
 # Setup backend .env
 cp backend/.env.dev1 backend/.env
@@ -91,11 +118,18 @@ echo "SOFTHSM2_CONF=$HSM_TOKEN_DIR/softhsm2.conf" >> backend/.env
 )
 echo "✓ HSM token provisioned and did-8991.json regenerated"
 
-# Issue the C2PA x5chain binding the dcs-c2pa token key so pdf-core can embed it
-# in the COSE_Sign1 protected header (the signing itself runs in the backend).
+# Issue the C2PA x5chain binding the dcs-c2pa token key. The backend reads it
+# from DCS_ISSUER_X5CHAIN_PATH, signs the COSE_Sign1 with the token key and
+# sends the chain to pdf-core per request for the protected header. The same
+# chain publishes the key the backend signs its own status list with, so the
+# leaf carries this instance's origin and did:web as SANs — a verifier refuses
+# a list whose leaf does not name the issuer the token claims to be.
 bash scripts/c2pa-cert-provision.sh "$HSM_TOKEN_DIR" dcs 1234 \
-  "$PDF_CORE_DIR/certs/dev/c2pa-x5chain-8991.pem"
-echo "✓ C2PA x5chain provisioned for pdf-core"
+  "$PDF_CORE_DIR/certs/dev/c2pa-x5chain-8991.pem" \
+  /usr/lib/softhsm/libsofthsm2.so \
+  "http://localhost:8991/crl/dcs-c2pa.crl" \
+  "http://localhost:8991" "did:web:localhost%3A8991"
+echo "✓ C2PA x5chain provisioned"
 
 # Publish an initial (empty) CRL for the dev signing CA so the leaf's
 # crlDistributionPoints resolves to a fresh, valid list. crlcheck (ops) or the

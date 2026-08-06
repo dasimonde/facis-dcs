@@ -129,8 +129,8 @@ async function pollStatusOnce(state: string, generation: number): Promise<'conti
   if (isPidPresentationPollError(status)) {
     const reason =
       status === PID_POLL_ERROR.NOT_FOUND
-        ? 'PID session not found — starting a new session…'
-        : 'PID status timed out — starting a new session…'
+        ? 'PID session not found. Starting a new session…'
+        : 'PID status timed out. Starting a new session…'
     await restartPresentation(reason)
     return 'done'
   }
@@ -145,7 +145,7 @@ async function pollStatusOnce(state: string, generation: number): Promise<'conti
     return 'done'
   }
   if (status.status === 'expired') {
-    await refreshPresentationLink('PID session expired — presentation link refreshed.')
+    await refreshPresentationLink('PID session expired. Presentation link refreshed.')
     return 'done'
   }
   if (status.status === 'pending' && status.expires_in > 0) {
@@ -177,7 +177,7 @@ async function startPresentation() {
     if (generation !== pollGeneration) return
     if (isPidPresentationStatusResponse(existing)) {
       if (existing.status === 'expired') {
-        await refreshPresentationLink('PID session expired — presentation link refreshed.')
+        await refreshPresentationLink('PID session expired. Presentation link refreshed.')
         return
       }
       if (existing.status === 'complete') {
@@ -193,7 +193,7 @@ async function startPresentation() {
         presentationUrl.value = ''
       }
     } else if (existing === PID_POLL_ERROR.NOT_FOUND) {
-      await refreshPresentationLink('PID session not found — presentation link refreshed.')
+      await refreshPresentationLink('PID session not found. Presentation link refreshed.')
       return
     } else if (existing === PID_POLL_ERROR.TIMEOUT) {
       clearPidPresentationSession()
@@ -208,7 +208,7 @@ async function startPresentation() {
     if (generation !== pollGeneration) return
     if (!initiated) {
       clearPidPresentationSession()
-      copyHint.value = 'Could not start PID presentation — check backend and database.'
+      copyHint.value = 'Could not start PID presentation. Check the backend and database.'
       return
     }
     persistSession(initiated.state, initiated.presentationUrl, initiated.expiresIn)
@@ -253,8 +253,8 @@ async function copyPresentationUrl() {
       <button type="button" class="btn btn-sm btn-primary" @click="copyPresentationUrl">Copy link</button>
       <p v-if="copyHint" class="text-sm text-warning">{{ copyHint }}</p>
       <p class="text-xs opacity-70">
-        Keep this tab open — the QR / link refreshes automatically before it expires. This is a one-time identity check
-        (no login session is created).
+        Keep this tab open. The QR code and link refresh automatically before they expire. This is a one-time identity
+        check (no login session is created).
       </p>
     </div>
   </div>

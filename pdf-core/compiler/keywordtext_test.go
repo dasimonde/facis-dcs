@@ -123,15 +123,15 @@ func TestSigningEvidenceIsByteExactWithKeywordsInIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EmbedSigningEvidence: %v", err)
 	}
-	got, found, err := ExtractSigningEvidence(embedded)
+	got, err := ExtractSigningEvidence(embedded)
 	if err != nil {
 		t.Fatalf("ExtractSigningEvidence: %v", err)
 	}
-	if !found {
-		t.Fatal("evidence attachment not found")
+	if len(got) != 1 {
+		t.Fatalf("extracted %d evidence attachments, want 1", len(got))
 	}
-	if !bytes.Equal(got, evidence) {
-		t.Fatalf("extracted %d of %d evidence bytes: %q", len(got), len(evidence), got)
+	if !bytes.Equal(got[0], evidence) {
+		t.Fatalf("extracted %d of %d evidence bytes: %q", len(got[0]), len(evidence), got[0])
 	}
 }
 

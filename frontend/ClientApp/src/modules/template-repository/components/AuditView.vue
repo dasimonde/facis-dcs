@@ -11,6 +11,7 @@ const editorStore = useTemplateEditorUiStore()
 const data: Ref<ContractTemplateAuditResponse> = ref([])
 
 const isLoading = ref(false)
+const loadError = ref('')
 
 const loadAudit = async () => {
   const did = store.did
@@ -21,7 +22,7 @@ const loadAudit = async () => {
     isLoading.value = true
     data.value = await contractTemplateService.audit({ did, updated_at })
   } catch (err) {
-    console.error('Audit failed', err)
+    loadError.value = err instanceof Error ? err.message : 'The audit trail could not be loaded'
   } finally {
     isLoading.value = false
   }
@@ -31,7 +32,10 @@ watch(
   () => editorStore.activeTab === 'audit',
   async (value) => {
     if (value) await loadAudit()
-    else data.value = []
+    else {
+      data.value = []
+      loadError.value = ''
+    }
   },
   { immediate: true },
 )
@@ -39,6 +43,7 @@ watch(
 
 <template>
   <div v-if="isLoading" class="loading loading-sm loading-spinner"></div>
+  <div v-else-if="loadError" role="alert" class="alert alert-error">{{ loadError }}</div>
   <div v-else-if="data.length < 1">No audit data</div>
   <TemplateAuditList v-else :audits="data" />
 </template>

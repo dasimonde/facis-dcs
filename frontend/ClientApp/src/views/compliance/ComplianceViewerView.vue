@@ -12,6 +12,7 @@ import {
 } from '@/services/signature-management-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob } from '@/utils/download-blob'
+import { claimReportedHttpError } from '@/utils/report-action-error'
 import {
   dssIndicator,
   findingIndicator,
@@ -92,7 +93,8 @@ onMounted(async () => {
   try {
     contracts.value = await signatureManagementService.retrieveContracts()
     contractsLoaded.value = true
-  } catch {
+  } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = 'Failed to load contracts.'
   } finally {
     loadingContracts.value = false
@@ -116,6 +118,7 @@ async function selectContract(contract: SignatureContract) {
     view.value = loadedView
     viewLoaded.value = true
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
     error.value = `Failed to load signature data: ${e instanceof Error ? e.message : String(e)}`
   } finally {
@@ -130,6 +133,7 @@ async function runValidate() {
   try {
     validateResult.value = await signatureManagementService.validateSignature(selected.value.did)
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = `Validation failed: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = false
@@ -143,6 +147,7 @@ async function runCompliance() {
   try {
     complianceResult.value = await signatureManagementService.complianceCheck(selected.value.did)
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = `Compliance check failed: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = false
@@ -179,6 +184,7 @@ async function revoke(sig: SignatureViewItem) {
       if (requestSequence === viewRequestSequence) loadingView.value = false
     }
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     if (selected.value?.did === contractDid) {
       error.value = `Revocation failed: ${e instanceof Error ? e.message : String(e)}`
     }
@@ -200,6 +206,7 @@ async function loadAudit() {
   try {
     auditEntries.value = await signatureManagementService.getAudit(selected.value.did)
   } catch (e: unknown) {
+    claimReportedHttpError(e)
     error.value = `Failed to load audit report: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     busy.value = false
@@ -347,7 +354,7 @@ function exportPdf() {
     </body></html>`
   const win = window.open('', '_blank')
   if (!win) {
-    error.value = 'Could not open the print window — allow pop-ups to export the PDF report.'
+    error.value = 'Could not open the print window. Allow pop-ups to export the PDF report.'
     return
   }
   win.document.write(html)

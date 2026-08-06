@@ -852,7 +852,16 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("extract original lifecycle authority: %w", err)
 	}
-	freshOriginal, err := CompilePDF(WithLifecycleAuthority(ctx, originalAuthority), oldPayload, originalCompiledAt)
+	// Same reasoning as the authority above, applied to the signing leaf: the
+	// x5chain sits in the signed COSE headers, and this process's configured
+	// chain is its own instance's. Substituting it could never reproduce a
+	// document compiled by a federation peer.
+	originalChain, err := extractManifestX5Chain(originalC2PA, 0)
+	if err != nil {
+		return nil, fmt.Errorf("extract original signing chain: %w", err)
+	}
+	originalCtx := WithSigningChain(WithLifecycleAuthority(ctx, originalAuthority), originalChain)
+	freshOriginal, err := CompilePDF(originalCtx, oldPayload, originalCompiledAt)
 	if err != nil {
 		return nil, fmt.Errorf("recompile original payload: %w", err)
 	}
@@ -885,7 +894,11 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("extract lifecycle authority for update %d: %w", hop, err)
 		}
-		hopCtx := WithLifecycleAuthority(ctx, hopAuthority)
+		hopChain, err := extractManifestX5Chain(hopC2PA, hop)
+		if err != nil {
+			return nil, fmt.Errorf("extract signing chain for update %d: %w", hop, err)
+		}
+		hopCtx := WithSigningChain(WithLifecycleAuthority(ctx, hopAuthority), hopChain)
 
 		// Re-apply this hop's amendment to the bytes preceding it (which may
 		// themselves embed a PAdES signature or signing-evidence attachment —

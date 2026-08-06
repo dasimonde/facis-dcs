@@ -8,9 +8,19 @@ metadata:
   name: {{ include "digital-contracting-service.fullname" . }}
   labels:
     {{- include "digital-contracting-service.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- if or .Values.ingress.annotations .Values.ingress.tlsOptions.enabled }}
   annotations:
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.ingress.tlsOptions.enabled }}
+    {{/*
+    Die TLSOption gilt erst, wenn der Router sie nennt. Ohne diese Annotation
+    liegt die Ressource im Cluster und Traefik handelt trotzdem TLS 1.2 aus —
+    deshalb wird sie hier gesetzt und nicht dem Betreiber ueberlassen.
+    */}}
+    traefik.ingress.kubernetes.io/router.tls.options: {{ printf "%s-%s-tls13@kubernetescrd" .Release.Namespace (include "digital-contracting-service.fullname" .) | quote }}
+    {{- end }}
   {{- end }}
 spec:
   {{- with .Values.ingress.className }}
@@ -82,6 +92,30 @@ spec:
                 port:
                   number: {{ $.Values.service.port | int }}
           {{- end }}
+          {{- /* The status list this instance serves for the credentials it issues
+               (ADR-34). Root-mounted for the same reason the documents above are: a
+               verifier holding one of those credentials has the URL the credential
+               names and nothing else, so reaching the list cannot depend on knowing
+               this instance's API prefix. A prefix rather than an exact path because
+               the list id is part of it. */}}
+          {{- /* The public C2PA manifest store (ADR-4, DCS-OR-C2PA-008): the
+               "public sibling of did.json". Root-mounted like the status list
+               and for the same reason: an external verifier resolving a
+               contract's provenance has the manifest URL and nothing else. */}}
+          - path: /c2pa/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "digital-contracting-service.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port | int }}
+          - path: /status-list/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "digital-contracting-service.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port | int }}
           {{- /* Hydra public OAuth2/OIDC routes — keeps Hydra off the edge; browser traffic
                proxied through this ingress. selfIssuerURL must match the ingress host. */}}
           {{- if and $.Values.hydra.enabled $.Values.hydra.route.paths }}

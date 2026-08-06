@@ -38,6 +38,7 @@ from steps.support.api_client import (
     delete_with_params,
     did_document_url,
     get_with_headers,
+    pac_audit_timeline,
     pac_audit_url,
     pac_checkpoint_proof_url,
     post_json,
@@ -113,15 +114,7 @@ def _pac_audit_entries(context, base_url, scope, did):
         f"POST /pac/audit scope={scope} did={did} on {base_url} failed: "
         f"{resp.status_code} {resp.text}"
     )
-    body = resp.json()
-    assert isinstance(body, list), f"expected a list of audit scopes, got: {body}"
-    return [
-        entry
-        for scope_result in body
-        if isinstance(scope_result, dict)
-        for entry in (scope_result.get("audit_trail") or [])
-        if isinstance(entry, dict) and entry.get("did") == did
-    ]
+    return [entry for entry in pac_audit_timeline(resp) if entry.get("did") == did]
 
 
 def _merkle_node(left: bytes, right: bytes) -> bytes:
@@ -538,7 +531,17 @@ def step_then_audit_bodies_erased(context):
         entries = _pac_audit_entries(
             context, context.base_url_a, "CONTRACT_WORKFLOW_ENGINE", did
         )
-        timeline = [e for e in entries if str(e.get("kind", "TIMELINE")).upper() != "CHECK"]
+        # The "contracts" scope answers with the workflow-engine trail PLUS the
+        # PAC access trail anchored on the same DID, and each poll's own
+        # POST /pac/audit appends one such access record. Those are new events
+        # written after the shred, not contract bodies it was meant to erase —
+        # counting them makes this loop chase its own tail forever.
+        timeline = [
+            e
+            for e in entries
+            if str(e.get("kind", "TIMELINE")).upper() != "CHECK"
+            and str(e.get("component", "")).upper() != "PROCESS_AUDIT_AND_COMPLIANCE"
+        ]
         if timeline:
             not_erased = [
                 e for e in timeline if e.get("event_data") != {"erased": True}

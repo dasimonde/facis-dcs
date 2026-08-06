@@ -29,6 +29,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
+	dcsdb "digital-contracting-service/internal/dcstodcs/db"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/signingmanagement/db"
@@ -52,6 +53,18 @@ var ErrCeremonyRequired = errors.New("a completed PID presentation ceremony is r
 // into the PDF before any PAdES signature freezes it (embedding an
 // attachment after a signature trips standards-compliant diff analysis).
 var ErrCeremoniesIncomplete = errors.New("all declared signature fields need a completed PID presentation ceremony before the first signature")
+
+// ErrCounterpartyNotSettled refuses a signature while this instance holds no
+// verified evidence that the OTHER party agreed to the version about to be
+// signed (the settlement artifact the peer ships over the DCS-to-DCS channel,
+// internal/dcstodcs/settlement.go).
+//
+// It is deliberately distinct from contractstate.ErrInvalidTransition: that
+// one says the signer may not sign, this one says nobody may sign yet. The
+// contract is waiting for the counterparty, and the wait ends without anyone
+// here doing anything — which is what a viewer must be able to tell a signer
+// instead of showing them a dead button.
+var ErrCounterpartyNotSettled = errors.New("the counterparty has not settled the version of the contract about to be signed")
 
 // ErrUnknownSignatureField rejects a ceremony/signature for a field the
 // contract document does not declare.
@@ -286,6 +299,90 @@ func assertPreparedPayload(ctx context.Context, extractor PayloadExtractor, subm
 	return nil
 }
 
+// PeerSettlements reads the settlement artifact a counterparty instance ships
+// on reaching its own settled state (NEGOTIATION -> SUBMITTED): a JAdES naming
+// the contract and the digest of the document that party agreed to, verified
+// against the peer's published assertion key before it is stored
+// (internal/dcstodcs/settlement.go, internal/service/dcs_to_dcs_settlement.go).
+// The same store holds the settlements this instance produced, keyed by its own
+// did:web, which is how the gate below knows which version WE agreed to.
+type PeerSettlements interface {
+	GetSettlement(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) (*dcsdb.Settlement, error)
+}
+
+// assertCounterpartiesSettled refuses to sign until this instance holds, for
+// every other party the contract declares a signature slot for, that party's
+// verified settlement artifact naming the same document this instance itself
+// settled.
+//
+// Deployment already refuses without the peer's shipped SIGNATURE
+// (contractworkflowengine/command/deploy.go). That gate sits one step later
+// than the one that matters: a signature binds the moment it is made, so
+// refusing to deploy afterwards does not undo a commitment to a version the
+// counterparty never agreed to. Local state cannot stand in for the peer's —
+// ADR-13 keeps intrinsic state local, so this instance can run its own
+// submit/review/approve to APPROVED while the peer is still negotiating, which
+// is exactly what the live demo instances did.
+//
+// The version binding is the settlement's document digest, never
+// contract_version: that counter is per-instance (the sender bumps it when it
+// merges a redline, the receiver on every inbound ship) and says nothing across
+// the boundary. The reference digest is the one in THIS instance's own
+// settlement row rather than the digest of the contract as it stands now,
+// because the first signature seals the offer into an odrl:Agreement — from
+// prepare onwards the stored document is no longer the negotiated one, while
+// both settlement rows go on naming it. That also keeps the answer stable
+// across a second prepare and identical at prepare and at submit.
+//
+// A contract that declares no remote party's slot has no peer to wait for and
+// passes untouched: that is the single-instance multi-signer flow, whose fields
+// are named per signatory rather than per party (contractstate.IsRemotePartyField).
+func assertCounterpartiesSettled(
+	ctx context.Context, tx *sqlx.Tx, settlements PeerSettlements,
+	did, localPeer string, resp *db.Responsible, declaredFields []string,
+) error {
+	var remote []string
+	for _, field := range declaredFields {
+		if contractstate.IsRemotePartyField(partyDIDs(resp), localPeer, field) {
+			remote = append(remote, field)
+		}
+	}
+	if len(remote) == 0 {
+		return nil
+	}
+	if settlements == nil {
+		return fmt.Errorf("could not check the counterparty settlement of %s: no settlement store is configured", did)
+	}
+
+	own, err := settlements.GetSettlement(ctx, tx, did, localPeer)
+	if err != nil {
+		return fmt.Errorf("could not read this instance's settlement of %s: %w", did, err)
+	}
+	// No own settlement means this instance never stated which version it
+	// agreed to, and never shipped that statement — so the counterparty's own
+	// gate is refusing it in the same way. Refusing here adds no new stuck
+	// contract; it just says so at the party that can act on it.
+	if own == nil {
+		return fmt.Errorf("%w: this instance has not settled %s as %s, so it holds no agreed version to hold %s to",
+			ErrCounterpartyNotSettled, did, localPeer, strings.Join(remote, ", "))
+	}
+
+	for _, party := range remote {
+		settlement, err := settlements.GetSettlement(ctx, tx, did, party)
+		if err != nil {
+			return fmt.Errorf("could not read the settlement of %s by %s: %w", did, party, err)
+		}
+		if settlement == nil {
+			return fmt.Errorf("%w: no settlement from %s is held", ErrCounterpartyNotSettled, party)
+		}
+		if settlement.DocumentDigest != own.DocumentDigest {
+			return fmt.Errorf("%w: %s settled document %s, this instance settled %s",
+				ErrCounterpartyNotSettled, party, settlement.DocumentDigest, own.DocumentDigest)
+		}
+	}
+	return nil
+}
+
 // Applier runs the signing command flow: prepare the to-be-signed document,
 // and — after the signatory signs it externally (ADR-12) — validate and
 // finalize. The DCS holds no contract-signing key.
@@ -300,6 +397,21 @@ type Applier struct {
 	// PDF before signing (DCS-OR-C2PA-004) — see stampActiveLifecycle below.
 	VCIssuer  provenance.VCIssuer
 	IssuerDID string
+	// StatusEntries hands out the contract's entry in the status list this
+	// deployment serves, so the signing summary credentials issued here name the
+	// same entry the contract's lifecycle credentials do.
+	StatusEntries provenance.StatusListEntries
+	// LocalPeer is this instance's own did:web, read from the DID document.
+	// It is the identity the DCS-to-DCS channel writes into the settlement
+	// artifacts, and the one that tells a counterparty's signature slot from
+	// ours — not the separately configured ISSUER_DID, which names the
+	// credential issuer and would silently disable both when left unset.
+	LocalPeer string
+	// Settlements holds the counterparty-settlement evidence the signing gate
+	// requires (assertCounterpartiesSettled). Required for a federated
+	// contract: without it an instance cannot tell a peer that agreed to this
+	// version from one still negotiating.
+	Settlements PeerSettlements
 	// ArchiveRepo, IPFSStorer, ArchiveNotary, and ArchiveTSA back the
 	// archive-entry creation that now happens on reaching SIGNED (DCS-FR-
 	// CWE-20), not on APPROVED. ArchiveRepo is the contractworkflowengine
@@ -343,12 +455,9 @@ func (h *Applier) Prepare(ctx context.Context, cmd ApplyCmd) ([]byte, error) {
 		return nil, err
 	}
 
-	toBeSigned := prepared.basePDF
-	if len(prepared.evidence) > 0 {
-		toBeSigned, err = h.PDFCore.EmbedEvidence(ctx, prepared.basePDF, prepared.evidence)
-		if err != nil {
-			return nil, fmt.Errorf("embed signing evidence: %w", err)
-		}
+	toBeSigned, err := h.PDFCore.EmbedEvidence(ctx, prepared.basePDF, prepared.evidence)
+	if err != nil {
+		return nil, fmt.Errorf("embed signing evidence: %w", err)
 	}
 
 	// Pin the exact to-be-signed bytes and the finalize metadata derived
@@ -443,14 +552,26 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	}
 
 	// Safety net against staleness between prepare and submit: the contract
-	// must still be in a state signing is valid from, and this field must
+	// must still be in a state signing is valid from, the counterparty must
+	// still be settled on the version this instance agreed, and this field must
 	// still be unsigned. Re-checking is a cheap read, not a re-derivation of
 	// prepare's business logic (sealing, evidence, SHACL/policy gates).
-	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
+	data, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
-		return fmt.Errorf("could not read process data: %w", err)
+		return fmt.Errorf("could not read contract %s: %w", cmd.DID, err)
 	}
-	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventSign); err != nil {
+	if err := contractstate.ValidateTransition(contractstate.ContractState(data.State), contractstate.EventSign); err != nil {
+		return err
+	}
+	// A settlement the peer replaced between prepare and submit — because it
+	// reopened the negotiation and settled a different document — leaves the
+	// pinned bytes covering a version nobody agreed to any more. The digest
+	// comparison catches that; it is not a repeat of prepare's answer.
+	var declaredFields []string
+	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
+		declaredFields = validation.RequiredSignatureFields(*data.ContractData)
+	}
+	if err := assertCounterpartiesSettled(ctx, tx, h.Settlements, cmd.DID, h.LocalPeer, data.Responsible, declaredFields); err != nil {
 		return err
 	}
 	existingRecords, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
@@ -698,6 +819,18 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	return tx.Commit()
 }
 
+// signingEvidenceAttachment packages ONE ceremony's authorization for embedding:
+// the summary this instance issued for it and the Power of Attorney the
+// signatory presented at it. A ceremony that presented none carries no field, so
+// the receiver reads absence as absence rather than as an empty credential.
+func signingEvidenceAttachment(summary json.RawMessage, poaVPToken *string) ([]byte, error) {
+	presentation := ""
+	if poaVPToken != nil {
+		presentation = *poaVPToken
+	}
+	return json.Marshal(provenance.SigningEvidenceAttachment{Summary: summary, PoAPresentation: presentation})
+}
+
 // preparedSignature is the to-be-signed material the prepare phase yields: the
 // base PDF (AcroForm signature field placed, lifecycle-stamped, NOT yet
 // evidence-embedded or signed), the signing-summary evidence to embed, and the
@@ -705,9 +838,11 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 // wallet-driven ceremony (ADR-12) the base PDF is evidence-embedded and handed
 // to the signatory's wallet/QTSP to sign; the DCS applies no signature here.
 type preparedSignature struct {
-	ceremony        *db.SignatureCeremony
-	basePDF         []byte
-	basePDFHash     string
+	ceremony    *db.SignatureCeremony
+	basePDF     []byte
+	basePDFHash string
+	// evidence is this ceremony's own signing evidence attachment: its summary
+	// credential and the Power of Attorney presented at it.
 	evidence        []byte
 	jadesPayload    []byte
 	contentHash     string
@@ -799,6 +934,14 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// completed BEFORE the first signature so all signers' evidence is
 	// embedded ahead of the signature that freezes the document.
 	requiredFields := validation.RequiredSignatureFields(*data.ContractData)
+
+	// Signing is a mutual milestone: it claims both parties settled this
+	// version. Checked before anything below mutates or persists, so a contract
+	// the counterparty has not settled leaves prepare with no trace.
+	if err := assertCounterpartiesSettled(ctx, tx, h.Settlements, cmd.DID, h.LocalPeer, data.Responsible, requiredFields); err != nil {
+		return nil, err
+	}
+
 	existingRecords, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not load existing signatures: %w", err)
@@ -813,7 +956,6 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 			return nil, fmt.Errorf("%w: %s", ErrFieldAlreadySigned, ceremony.FieldName)
 		}
 	}
-	fieldCeremonies := map[string]*db.SignatureCeremony{ceremony.FieldName: ceremony}
 	if len(requiredFields) > 0 {
 		declared := false
 		for _, f := range requiredFields {
@@ -842,7 +984,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				// shipped signature for it. Here there is nothing to demand:
 				// a peer ships that signature only once its copy is SIGNED,
 				// which is after this point, not before it.
-				if contractstate.IsRemotePartyField(partyDIDs(data.Responsible), h.IssuerDID, f) {
+				if contractstate.IsRemotePartyField(partyDIDs(data.Responsible), h.LocalPeer, f) {
 					continue
 				}
 				c, err := h.CeremonyRepo.FindVerifiedCeremonyByField(ctx, tx, cmd.DID, f)
@@ -851,28 +993,18 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				}
 				if c == nil {
 					missing = append(missing, f)
-					continue
 				}
-				fieldCeremonies[f] = c
 			}
-			// The ceremony being consumed wins for its own field, unconditionally.
-			// The loop above resolves each field by FindVerifiedCeremonyByField,
-			// which returns the most recently verified ceremony — so when a field
-			// has been verified twice it overwrote the pinned one, and the summary
-			// was then retained against a ceremony that never signed. Its own row
-			// kept none, and the peer refused every ship of that contract.
-			fieldCeremonies[ceremony.FieldName] = ceremony
 			if len(missing) > 0 {
 				return nil, fmt.Errorf("%w: missing ceremonies for %v", ErrCeremoniesIncomplete, missing)
 			}
 		}
 	}
 
-	// The stored artifact is read ONCE, here, because three decisions below hang
-	// on the same question — may this signature still change the machine-readable
-	// contract, does the lifecycle stamp re-embed it, and do the signing
-	// summaries go inside the artifact or on the wire — and they must not be able
-	// to answer it differently. It is also the base PDF the signature covers.
+	// The stored artifact is read ONCE, here, because two decisions below hang on
+	// the same question — may this signature still change the machine-readable
+	// contract, and does the lifecycle stamp re-embed it — and they must not be
+	// able to answer it differently. It is also the base PDF the signature covers.
 	storedPDF, err := h.CRepo.FetchContractPDFBytes(ctx, tx, cmd.DID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch contract PDF: %w", err)
@@ -995,131 +1127,53 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		kbSDHash = *ceremony.KbSdHash
 	}
 	signedAt := time.Now().UTC()
-	var evidence []byte
-	switch {
-	case len(requiredFields) == 0:
-		// Single-signature contract: one summary VC, the established shape.
-		evidence, _, err = provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
-			ContractID:           cmd.DID,
-			SignerDID:            cmd.SignerDID,
-			CeremonyID:           ceremony.ID,
-			FieldName:            ceremony.FieldName,
-			ContentHash:          contentHash,
-			PDFHash:              basePDFHash,
-			CredentialType:       cmd.CredentialType,
-			KBSDHash:             kbSDHash,
-			SignedAt:             signedAt,
-			SchemaVersion:        schemaVersion,
-			ValidationReportHash: validationReportHash,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("issue signing-summary VC: %w", err)
-		}
-		// Retained as well as embedded: the embedded copy cannot travel (only the
-		// last attachment survives, and a second one would mutate a signed PDF),
-		// so the peer gets this one on the wire.
-		if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, evidence); err != nil {
-			return nil, err
-		}
-	case !artifactFrozen:
-		// First signature on a multi-signer contract: embed EVERY declared
-		// field's summary VC as a JSON array, so no later signer needs a
-		// post-signature attachment (all-ceremonies-before-first-signature).
-		summaries := make([]json.RawMessage, 0, len(requiredFields))
-		for _, f := range requiredFields {
-			c := fieldCeremonies[f]
-			if c == nil {
-				// A peer DCS's field: its ceremony evidence lives in the peer's
-				// own deployment, which embeds that field's summary when it
-				// signs its own copy. We can only summarise ceremonies we hold.
-				continue
-			}
-			fieldKB := ""
-			if c.KbSdHash != nil {
-				fieldKB = *c.KbSdHash
-			}
-			fieldSigner := ""
-			if c.SignerDID != nil {
-				fieldSigner = *c.SignerDID
-			}
-			credentialType := cmd.CredentialType
-			if f != ceremony.FieldName {
-				// This field belongs to a signatory who has not signed yet, so
-				// this instance knows nothing about the level they will reach.
-				// Writing a placeholder here put an eIDAS level into an
-				// ISSUER-SIGNED credential, sealed inside a PAdES byte range
-				// that can never be corrected, attesting a signature that does
-				// not exist. An absent claim is honest; a guess is a false
-				// attestation.
-				credentialType = ""
-			}
-			vc, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
-				ContractID:           cmd.DID,
-				SignerDID:            fieldSigner,
-				CeremonyID:           c.ID,
-				FieldName:            f,
-				ContentHash:          contentHash,
-				PDFHash:              basePDFHash,
-				CredentialType:       credentialType,
-				KBSDHash:             fieldKB,
-				SignedAt:             signedAt,
-				SchemaVersion:        schemaVersion,
-				ValidationReportHash: validationReportHash,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", f, err)
-			}
-			summaries = append(summaries, vc)
-			// Each field's summary is retained against the ceremony that produced
-			// it, so a later ship carries the same attestation the PDF embedded.
-			if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, c.ID, vc); err != nil {
-				return nil, err
-			}
-		}
-		evidence, err = json.Marshal(summaries)
-		if err != nil {
-			return nil, fmt.Errorf("encode signing-summary evidence bundle: %w", err)
-		}
-	default:
-		// A later signature on a multi-signer contract embeds nothing. Adding a
-		// second evidence attachment here mutates a document that already carries
-		// a PAdES signature — diff analysis reads that as an unexplained
-		// modification and it breaks PDF/A-3 conformance — and pdf-core's
-		// extractor returns only the LAST attachment, so the countersigner's
-		// summary would hide the first signer's from every later ship, including
-		// the revocation one.
-		//
-		// The countersignature still needs an attestation the peer can verify.
-		// That belongs on the wire beside the Power of Attorney, not inside a
-		// signed artefact that must not change again — so it is issued and
-		// retained here, and shipped by the synchronizer.
-		//
-		// This summary is ALSO where the signatory and the authority behind this
-		// signature are recorded: the document is frozen on this path, so
-		// contractDocumentForSignature left dcs:parties alone and the party node
-		// carries neither. The receiver reads both from here
-		// (dcstodcs/counterpartypoa.go signedPartyOf), and this instance's own
-		// compliance viewer from the ceremony the summary was retained against.
-		evidence = nil
-		vc, _, vcErr := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
-			ContractID:           cmd.DID,
-			SignerDID:            cmd.SignerDID,
-			CeremonyID:           ceremony.ID,
-			FieldName:            ceremony.FieldName,
-			ContentHash:          contentHash,
-			PDFHash:              basePDFHash,
-			CredentialType:       cmd.CredentialType,
-			KBSDHash:             kbSDHash,
-			SignedAt:             signedAt,
-			SchemaVersion:        schemaVersion,
-			ValidationReportHash: validationReportHash,
-		})
-		if vcErr != nil {
-			return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", ceremony.FieldName, vcErr)
-		}
-		if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, vc); err != nil {
-			return nil, err
-		}
+
+	// The contract's entry in the status list this deployment serves. Read back
+	// rather than derived, so every summary credential this ceremony issues names
+	// the entry the contract's lifecycle credentials already advertise and one
+	// revocation covers all of them (ADR-34).
+	if h.StatusEntries == nil {
+		return nil, fmt.Errorf("no status list entries source: the signing summary for %s would carry no revocation entry", cmd.DID)
+	}
+	statusEntry, err := h.StatusEntries.EntryFor(ctx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("status list entry for %s: %w", cmd.DID, err)
+	}
+
+	// Every signature carries its OWN authorization inside the artifact it signs
+	// (ADR-13, ADR-35): one attachment per signing event, holding the summary
+	// this ceremony produced and the Power of Attorney the signatory presented
+	// at it, embedded before this signature is applied so this signature covers
+	// it. On a frozen inbound artifact the embed is an append-only incremental
+	// update, which leaves the signatures already there valid
+	// (DCS-OR-C2PA-002) — the countersignature and the ADR-26 reanchor append
+	// to the same document.
+	summary, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, statusEntry, provenance.SigningSummary{
+		ContractID:           cmd.DID,
+		SignerDID:            cmd.SignerDID,
+		CeremonyID:           ceremony.ID,
+		FieldName:            ceremony.FieldName,
+		ContentHash:          contentHash,
+		PDFHash:              basePDFHash,
+		CredentialType:       cmd.CredentialType,
+		KBSDHash:             kbSDHash,
+		SignedAt:             signedAt,
+		SchemaVersion:        schemaVersion,
+		ValidationReportHash: validationReportHash,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", ceremony.FieldName, err)
+	}
+	// Retained as well as embedded: the compliance viewer reads the attestation
+	// per ceremony, and on a frozen document this summary is also where the
+	// signatory and the authority behind this signature are recorded, since
+	// contractDocumentForSignature left dcs:parties alone.
+	if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, summary); err != nil {
+		return nil, err
+	}
+	evidence, err := signingEvidenceAttachment(summary, ceremony.PoAVpToken)
+	if err != nil {
+		return nil, fmt.Errorf("encode signing evidence for field %q: %w", ceremony.FieldName, err)
 	}
 
 	// The JAdES payload over the machine-readable JSON-LD, the counterpart to
@@ -1484,9 +1538,10 @@ func stampLifecycleForSigning(
 // against a renegotiation, applied to the signing path it exempts.
 //
 // On the frozen path the signatory and the Power of Attorney behind this
-// signature travel in the signing summary credential instead, beside the
-// contract rather than inside it — the shape the receiver already reads them in
-// (dcstodcs/counterpartypoa.go) and the only one available to a countersignature.
+// signature travel in the signing summary credential instead, embedded as one
+// more associated file before the countersignature is applied — the shape the
+// receiver already reads them in (dcstodcs/counterpartypoa.go) and the only one
+// available to a countersignature.
 func contractDocumentForSignature(
 	raw datatype.JSON, responsible *db.Responsible, signerDID, poaOrganization, signingParty string, artifactFrozen bool,
 ) (datatype.JSON, bool, error) {

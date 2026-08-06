@@ -17,11 +17,7 @@ rules:
       "@type": "https://w3id.org/facis/dcs/ontology/v1#CompanyParty"
     target: role
     values:
-      - provider
-      - customer
-      - assigner
-      - assignee
       - "https://w3id.org/facis/dcs/taxonomy/v1#role-provider"
       - "https://w3id.org/facis/dcs/taxonomy/v1#role-customer"
-      - "https://w3id.org/facis/dcs/taxonomy/v1#role-assigner"
-      - "https://w3id.org/facis/dcs/taxonomy/v1#role-assignee"
+      - "https://w3id.org/facis/dcs/taxonomy/v1#role-supplier"
+      - "https://w3id.org/facis/dcs/taxonomy/v1#role-client"

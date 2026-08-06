@@ -78,6 +78,7 @@ vi.mock('@/services/contract-workflow-service', () => ({
         contract_data: contractDocument,
         negotiations: [],
       }),
+    retrieveHistoryByDid: () => Promise.resolve([]),
     retrieveNegotiationDraft: () => Promise.resolve(null),
     negotiate: (...args: unknown[]) => negotiate(...(args as [])),
   },
@@ -87,7 +88,7 @@ async function mountNegotiateView() {
   const pinia = createPinia()
   const wrapper = shallowMount(NegotiateContractView, { global: { plugins: [pinia] } })
   setActivePinia(pinia)
-  useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles: [] }
+  useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles: ['CONTRACT_NEGOTIATOR'] }
   await nextTick()
   await nextTick()
   await nextTick()

@@ -28,7 +28,7 @@ func (h *IETFToken) Mechanism() status.Mechanism {
 
 func (h *IETFToken) Check(
 	ctx context.Context,
-	_ status.VerifiedCredential,
+	credential status.VerifiedCredential,
 	ref status.Reference,
 ) (status.Result, error) {
 	if err := requireStatusTrust(h.Trust); err != nil {
@@ -78,6 +78,14 @@ func (h *IETFToken) Check(
 	subject, _ := claims["sub"].(string)
 	if subject != ref.URI {
 		return status.Result{}, status.ErrStatusURIMismatch
+	}
+
+	// Whose revocation statement this is (ADR-34). The signature and the subject
+	// together still allow any trusted issuer to publish a list at another
+	// issuer's URI.
+	listIssuer, _ := claims["iss"].(string)
+	if err := status.RequireCredentialIssuer(credential, listIssuer); err != nil {
+		return status.Result{}, err
 	}
 
 	if err := h.validateTimeClaims(claims); err != nil {

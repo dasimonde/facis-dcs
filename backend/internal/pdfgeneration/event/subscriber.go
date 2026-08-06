@@ -24,7 +24,6 @@ import (
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
-	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	tplevttype "digital-contracting-service/internal/templaterepository/datatype/eventtype"
@@ -126,12 +125,11 @@ func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
 	})
 }
 
-// regenerationContext is the context every regeneration attempt runs under. The
-// regenerator has no user JWT, so it presents the in-cluster system credential
-// for pdf-core's internal signing primitives.
+// regenerationContext is the context every regeneration attempt runs under. It
+// carries no credential: pdf-core holds no key and never calls back, so the
+// regenerator reaches nothing that authenticates it.
 func (s *Subscriber) regenerationContext() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), regenerationTimeout)
-	return middleware.InjectBearerToken(ctx, conf.SystemToken()), cancel
+	return context.WithTimeout(context.Background(), regenerationTimeout)
 }
 
 // retryPendingRegenerations re-runs regeneration for entities whose stored PDF

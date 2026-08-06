@@ -90,7 +90,13 @@ func evidenceIssuerDocument(t *testing.T, credentialKey *ecdsa.PublicKey) *ident
 func signingSummary(t *testing.T, key *ecdsa.PrivateKey, signerDID, reportHash string) json.RawMessage {
 	t.Helper()
 	vc, _, err := provenance.IssueSigningSummaryVC(context.Background(),
-		provenance.NewHSMVCSigner(key, "dcs-vc"), evidenceIssuerDID, provenance.SigningSummary{
+		provenance.NewHSMVCSigner(key, "dcs-vc"), evidenceIssuerDID,
+		// The contract's entry in the list this deployment serves — the same one
+		// its lifecycle credentials name, so one revocation covers both.
+		provenance.CredentialStatusRef{
+			StatusListCredential: "https://dcs.example.org/status-list/1", Index: 3,
+		},
+		provenance.SigningSummary{
 			ContractID:           "did:example:contract-1",
 			SignerDID:            signerDID,
 			CeremonyID:           "ceremony-1",
@@ -107,21 +113,33 @@ func signingSummary(t *testing.T, key *ecdsa.PrivateKey, signerDID, reportHash s
 	return vc
 }
 
-// evidenceValidator wires a Validator whose pdf-core stub returns the given
-// evidence attachment for the stored PDF.
-func evidenceValidator(t *testing.T, attachment []byte, verifier *provenance.CredentialVerifier) *Validator {
+// evidenceAttachment is one embedded associated file: a signing summary and the
+// Power of Attorney presented at the ceremony that produced it.
+func evidenceAttachment(t *testing.T, summary json.RawMessage, presentation string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(provenance.SigningEvidenceAttachment{Summary: summary, PoAPresentation: presentation})
+	if err != nil {
+		t.Fatalf("marshal evidence attachment: %v", err)
+	}
+	return raw
+}
+
+// evidenceValidator wires a Validator whose pdf-core stub serves the given
+// attachments, oldest first, exactly as POST /evidence/extract does. A nil body
+// is the 204 an unsigned contract yields.
+func evidenceValidator(t *testing.T, body []byte, verifier *provenance.CredentialVerifier) *Validator {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/evidence/extract" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if len(attachment) == 0 {
+		if len(body) == 0 {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(attachment)
+		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -132,10 +150,20 @@ func evidenceValidator(t *testing.T, attachment []byte, verifier *provenance.Cre
 	}
 }
 
+// extracted serves the attachments as pdf-core's extract-all response.
+func extracted(t *testing.T, attachments ...json.RawMessage) []byte {
+	t.Helper()
+	body, err := json.Marshal(attachments)
+	if err != nil {
+		t.Fatalf("marshal extract response: %v", err)
+	}
+	return body
+}
+
 func TestSigningEvidenceIsUsedOnlyAfterItsProofVerifies(t *testing.T) {
 	key := evidenceTestKey(t)
 	summary := signingSummary(t, key, "did:example:signer-1", "report-hash")
-	validator := evidenceValidator(t, summary, &provenance.CredentialVerifier{
+	validator := evidenceValidator(t, extracted(t, evidenceAttachment(t, summary, "")), &provenance.CredentialVerifier{
 		Resolve: func(string) (*identity.DIDDocument, error) { return evidenceIssuerDocument(t, &key.PublicKey), nil },
 	})
 
@@ -159,7 +187,7 @@ func TestSigningEvidenceSignedByAForeignKeyIsRefusedAndReported(t *testing.T) {
 	published := evidenceTestKey(t)
 	foreign := evidenceTestKey(t)
 	summary := signingSummary(t, foreign, "did:example:attacker", "forged-hash")
-	validator := evidenceValidator(t, summary, &provenance.CredentialVerifier{
+	validator := evidenceValidator(t, extracted(t, evidenceAttachment(t, summary, "")), &provenance.CredentialVerifier{
 		Resolve: func(string) (*identity.DIDDocument, error) {
 			return evidenceIssuerDocument(t, &published.PublicKey), nil
 		},
@@ -189,7 +217,7 @@ func TestSigningEvidenceSignedByAForeignKeyIsRefusedAndReported(t *testing.T) {
 func TestSigningEvidenceWithAnUnresolvableIssuerIsIndeterminate(t *testing.T) {
 	key := evidenceTestKey(t)
 	summary := signingSummary(t, key, "did:example:signer-1", "report-hash")
-	validator := evidenceValidator(t, summary, &provenance.CredentialVerifier{
+	validator := evidenceValidator(t, extracted(t, evidenceAttachment(t, summary, "")), &provenance.CredentialVerifier{
 		Resolve: func(string) (*identity.DIDDocument, error) { return nil, errors.New("dial tcp: connection refused") },
 	})
 
@@ -202,17 +230,15 @@ func TestSigningEvidenceWithAnUnresolvableIssuerIsIndeterminate(t *testing.T) {
 	}
 }
 
-// A bundle: only the members that verify survive, and the rest are named.
-func TestSigningEvidenceBundleKeepsOnlyVerifiedMembers(t *testing.T) {
+// A countersigned contract carries one attachment per signing event: only the
+// members that verify survive, and the rest are named.
+func TestEveryEmbeddedAttachmentIsVerifiedAndOnlyVerifiedOnesSurvive(t *testing.T) {
 	key := evidenceTestKey(t)
 	foreign := evidenceTestKey(t)
-	bundle, err := json.Marshal([]json.RawMessage{
-		signingSummary(t, key, "did:example:signer-1", "report-hash"),
-		signingSummary(t, foreign, "did:example:attacker", "forged-hash"),
-	})
-	if err != nil {
-		t.Fatalf("marshal bundle: %v", err)
-	}
+	bundle := extracted(t,
+		evidenceAttachment(t, signingSummary(t, key, "did:example:signer-1", "report-hash"), ""),
+		evidenceAttachment(t, signingSummary(t, foreign, "did:example:attacker", "forged-hash"), ""),
+	)
 	validator := evidenceValidator(t, bundle, &provenance.CredentialVerifier{
 		Resolve: func(string) (*identity.DIDDocument, error) { return evidenceIssuerDocument(t, &key.PublicKey), nil },
 	})
@@ -245,6 +271,65 @@ func TestCorruptedSigningEvidenceIsReported(t *testing.T) {
 	}
 	if joined := strings.ToLower(fmt.Sprint(evidence.Findings)); !strings.Contains(joined, "evidence") {
 		t.Fatalf("the finding must name the evidence, got %v", evidence.Findings)
+	}
+}
+
+// signingSummaryForField issues a summary attesting a signature for a named
+// did:web party, the shape a two-instance contract's auto-seeded fields carry.
+func signingSummaryForField(t *testing.T, key *ecdsa.PrivateKey, field string) json.RawMessage {
+	t.Helper()
+	vc, _, err := provenance.IssueSigningSummaryVC(context.Background(),
+		provenance.NewHSMVCSigner(key, "dcs-vc"), evidenceIssuerDID,
+		provenance.CredentialStatusRef{StatusListCredential: "https://dcs.example.org/status-list/1", Index: 3},
+		provenance.SigningSummary{
+			ContractID: "did:example:contract-1",
+			SignerDID:  "did:example:signer-1",
+			CeremonyID: "ceremony-1",
+			FieldName:  field,
+			KBSDHash:   "cc",
+		})
+	if err != nil {
+		t.Fatalf("issue signing summary: %v", err)
+	}
+	return vc
+}
+
+// Downloading or inspecting a contract has to answer whether the counterparty
+// was authorized to sign it, from the artifact alone — so a peer's embedded
+// Power of Attorney this instance has no way to check is a finding, not silence.
+func TestAPeersEmbeddedPowerOfAttorneyIsCheckedOnInspection(t *testing.T) {
+	key := evidenceTestKey(t)
+	summary := signingSummaryForField(t, key, "did:web:peer.example")
+	validator := evidenceValidator(t, extracted(t, evidenceAttachment(t, summary, "a-presentation")),
+		&provenance.CredentialVerifier{
+			Resolve: func(string) (*identity.DIDDocument, error) { return evidenceIssuerDocument(t, &key.PublicKey), nil },
+		})
+	validator.LocalPeer = "did:web:us.example"
+
+	evidence := validator.readSigningEvidence(context.Background(), nil, "did:example:contract-1")
+	if len(evidence.Documents) != 1 {
+		t.Fatalf("the summary itself still verifies, got %d documents", len(evidence.Documents))
+	}
+	if len(evidence.Findings) != 1 || !strings.Contains(evidence.Findings[0], "Power of Attorney") {
+		t.Fatalf("the peer's Power of Attorney must be reported, got %v", evidence.Findings)
+	}
+}
+
+// Our own signature's Power of Attorney was a `login` question our own ceremony
+// already answered (ADR-35); re-judging it here as peer evidence would report a
+// finding against every contract this instance signed.
+func TestOurOwnEmbeddedPowerOfAttorneyIsNotRejudged(t *testing.T) {
+	key := evidenceTestKey(t)
+	summary := signingSummaryForField(t, key, "did:web:us.example")
+	validator := evidenceValidator(t, extracted(t, evidenceAttachment(t, summary, "a-presentation")),
+		&provenance.CredentialVerifier{
+			Resolve: func(string) (*identity.DIDDocument, error) { return evidenceIssuerDocument(t, &key.PublicKey), nil },
+		})
+	validator.LocalPeer = "did:web:us.example"
+
+	evidence := validator.readSigningEvidence(context.Background(), nil, "did:example:contract-1")
+	if len(evidence.Findings) != 0 {
+		t.Fatalf("our own ceremony's credential must not be re-judged as peer evidence, got %v", evidence.Findings)
 	}
 }
 

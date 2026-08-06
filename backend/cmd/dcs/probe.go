@@ -42,19 +42,3 @@ func probeHTTPUntilReady(timeout time.Duration, probe func() error) error {
 		time.Sleep(2 * time.Second)
 	}
 }
-
-// probeHTTPAny tries multiple URLs and returns nil on first success.
-func probeHTTPAny(urls ...string) error {
-	if len(urls) == 0 {
-		return fmt.Errorf("no URLs provided")
-	}
-	var lastErr error
-	for _, rawURL := range urls {
-		if err := probeHTTP(rawURL); err == nil {
-			return nil
-		} else {
-			lastErr = err
-		}
-	}
-	return lastErr
-}

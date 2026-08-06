@@ -5,6 +5,10 @@ SCHEMA      ?= linkml.yaml
 
 VENV_PYTHON := $(VENV_PATH)/bin/python
 VENV_PIP    := $(VENV_PATH)/bin/pip
+# Fertigmeldung des venv. Nicht activate: die Datei entsteht schon beim Anlegen
+# des venv, also bevor die Pakete drin sind. Bricht pip danach ab, gilt das
+# venv fuer make trotzdem als fertig, und die Generatoren fehlen fuer immer.
+VENV_STAMP  := $(VENV_PATH)/.install-stamp
 GEN_SHACL          := $(VENV_PATH)/bin/gen-shacl
 GEN_JSONLD_CONTEXT := $(VENV_PATH)/bin/gen-jsonld-context
 PYSHACL            := $(VENV_PATH)/bin/pyshacl
@@ -26,24 +30,36 @@ INVALID_TESTS := $(wildcard tests/invalid/*.jsonld)
 
 all: $(SHAPES_MERGED) $(OUTPUT_PATH)/$(SCHEMA).context.jsonld
 
-setup_venv: $(VENV_PATH)/bin/activate
+setup_venv: $(VENV_STAMP)
 
-$(VENV_PATH)/bin/activate:
+$(VENV_STAMP):
 	$(PYTHON) -m venv $(VENV_PATH)
 	$(VENV_PIP) install --upgrade pip
 	$(VENV_PIP) install linkml pyshacl
+	touch $@
 
 $(OUTPUT_PATH):
 	mkdir -p $(OUTPUT_PATH)
 
-$(OUTPUT_PATH)/$(SCHEMA).shacl.ttl: setup_venv $(OUTPUT_PATH) $(SCHEMA)
-	$(VENV_PYTHON) $(GEN_SHACL) --non-closed $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).shacl.ttl
+# Die Erzeugnisse haengen an ihrer Quelle, nicht am venv: sie liegen im
+# Repository, und wer nur baut, soll nicht die halbe LinkML-Toolchain
+# installieren muessen. Das venv wird erst im Rezept geholt, also nur dann,
+# wenn wirklich neu erzeugt wird.
+#
+# Geschrieben wird ueber eine Zwischendatei. Eine Umleitung direkt auf das Ziel
+# leert die versionierte Datei, bevor der Generator ueberhaupt laeuft — ein
+# Fehlschlag hinterliess so eine 0-Byte-Datei im Arbeitsverzeichnis.
+$(OUTPUT_PATH)/$(SCHEMA).shacl.ttl: $(SCHEMA) | $(OUTPUT_PATH)
+	$(MAKE) $(VENV_STAMP)
+	$(VENV_PYTHON) $(GEN_SHACL) --non-closed $(SCHEMA) > $@.tmp
+	mv $@.tmp $@
 
-$(OUTPUT_PATH)/$(SCHEMA).context.jsonld: setup_venv $(OUTPUT_PATH) $(SCHEMA)
-	$(VENV_PYTHON) $(GEN_JSONLD_CONTEXT) $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).context.jsonld
+$(OUTPUT_PATH)/$(SCHEMA).context.jsonld: $(SCHEMA) | $(OUTPUT_PATH)
+	$(MAKE) $(VENV_STAMP)
+	$(VENV_PYTHON) $(GEN_JSONLD_CONTEXT) $(SCHEMA) > $@.tmp
 	$(VENV_PYTHON) -c "\
 import json; \
-path = '$(OUTPUT_PATH)/$(SCHEMA).context.jsonld'; \
+path = '$(OUTPUT_PATH)/$(SCHEMA).context.jsonld.tmp'; \
 doc = json.load(open(path)); \
 ctx = doc['@context']; \
 ctx.pop('dcs', None); \
@@ -54,15 +70,17 @@ list(map(lambda p: ctx.get(p, {}).pop('@type', None), ('isRoot', 'required'))); 
 ctx.get('templateVersion', {}).pop('@type', None); \
 (ctx.__setitem__('schema', 'https://schema.org/') if ctx.get('schema') == 'http://schema.org/' else None); \
 json.dump(doc, open(path, 'w'), indent=3)"
+	mv $@.tmp $@
 
 $(SHAPES_MERGED): $(OUTPUT_PATH)/$(SCHEMA).shacl.ttl $(SHAPES_EXTRA)
-	cat $^ > $@
+	cat $^ > $@.tmp
+	mv $@.tmp $@
 
 GREEN := \033[0;32m
 RED   := \033[0;31m
 RESET := \033[0m
 
-validate: setup_venv $(SHAPES_MERGED)
+validate: $(VENV_STAMP) $(SHAPES_MERGED)
 	@failed=0; \
 	for f in $(VALID_TESTS); do \
 	    out=$$($(VENV_PYTHON) $(PYSHACL) -s $(SHAPES_MERGED) -df json-ld $$f 2>&1); \

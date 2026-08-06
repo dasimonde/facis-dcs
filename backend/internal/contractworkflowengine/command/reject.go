@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/identity"
 
 	db2 "digital-contracting-service/internal/dcstodcs/db"
@@ -68,9 +69,9 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 	// older than what's stored (see package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
-			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+			return fmt.Errorf("contract %w, please force synchronisation and reload", base.ErrUpdatedElsewhere)
 		}
-		return errors.New("contract was updated elsewhere, please reload")
+		return fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventReject); err != nil {
@@ -89,6 +90,15 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.CauserDID, approvaltaskstate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update approval task state: %w", err)
+	}
+
+	// REJECTED is the one state from which the creator may submit a new contract
+	// document (submit.go's canSubmitUpdatedContractData), so an approver
+	// rejecting is this instance taking back the agreement it settled on closing
+	// the negotiation round — otherwise the resubmission it invites is refused
+	// as a rewrite of a version this instance still stands behind.
+	if err := withdrawOwnSettlement(ctx, tx, h.SRepo, localPeer, cmd.DID); err != nil {
+		return err
 	}
 
 	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Rejected.String())

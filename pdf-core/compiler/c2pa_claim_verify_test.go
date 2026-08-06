@@ -151,7 +151,11 @@ func TestCOSEX5ChainLeafKeyRequiresES256(t *testing.T) {
 }
 
 func TestCOSEX5ChainLeafKeyReadsCompilerHeaders(t *testing.T) {
-	key, err := coseX5ChainLeafKey(buildCoseProtectedHeadersWithX5Chain())
+	protected, err := buildCoseProtectedHeadersWithX5Chain(testSigningContext())
+	if err != nil {
+		t.Fatalf("buildCoseProtectedHeadersWithX5Chain: %v", err)
+	}
+	key, err := coseX5ChainLeafKey(protected)
 	if err != nil {
 		t.Fatalf("coseX5ChainLeafKey: %v", err)
 	}

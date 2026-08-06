@@ -36,10 +36,21 @@ type Client struct {
 	// C2PA lifecycle assertion pdf-core writes for this client's renders. It is
 	// sent per request because pdf-core is stateless and may be shared.
 	authority string
+	// x5chainPEM is the certificate chain naming the dcs-c2pa key `sign` uses,
+	// leaf first. It travels with every request that renders a manifest, for the
+	// same reason the key never leaves this process: pdf-core is shared, and a
+	// chain it kept of its own would sign this instance's documents under
+	// whichever instance configured it.
+	x5chainPEM []byte
 }
 
 // lifecycleAuthorityHeader carries the asserting instance's DID to pdf-core.
 const lifecycleAuthorityHeader = "X-DCS-Lifecycle-Authority"
+
+// signingChainHeader carries this instance's C2PA x5chain to pdf-core as
+// base64-encoded PEM. pdf-core holds no signing material and refuses a render
+// that names none.
+const signingChainHeader = "X-DCS-C2PA-X5Chain"
 
 // New returns a Client pointed at baseURL. sign is the in-process dcs-c2pa
 // signer the two-step render flow uses; it must be non-nil.
@@ -58,11 +69,27 @@ func NewWithAuthority(baseURL string, sign C2PASignFunc, issuerDID string) *Clie
 	}
 }
 
+// WithSigningChain names the PEM certificate chain this client's renders are
+// signed under — the chain issued for the same dcs-c2pa key `sign` uses.
+func (c *Client) WithSigningChain(chainPEM []byte) *Client {
+	c.x5chainPEM = append([]byte(nil), chainPEM...)
+	return c
+}
+
 // setLifecycleAuthority tags a render request with this instance's DID, leaving
 // the header off entirely when none is configured.
 func (c *Client) setLifecycleAuthority(req *http.Request) {
 	if c.authority != "" {
 		req.Header.Set(lifecycleAuthorityHeader, c.authority)
+	}
+}
+
+// setSigningChain names the identity this request signs under. An unset chain
+// leaves the header off, which pdf-core refuses — a render that named no signer
+// must fail at the boundary rather than proceed under an assumed one.
+func (c *Client) setSigningChain(req *http.Request) {
+	if len(c.x5chainPEM) > 0 {
+		req.Header.Set(signingChainHeader, base64.StdEncoding.EncodeToString(c.x5chainPEM))
 	}
 }
 
@@ -155,6 +182,7 @@ func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, versi
 	}
 	req.Header.Set("Content-Type", "application/ld+json")
 	c.setLifecycleAuthority(req)
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -214,6 +242,7 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	c.setLifecycleAuthority(req)
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -251,6 +280,7 @@ func (c *Client) Reanchor(ctx context.Context, pdf []byte, manifestURL string) (
 	}
 	req.Header.Set("Content-Type", "application/pdf")
 	c.setLifecycleAuthority(req)
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -272,6 +302,10 @@ func (c *Client) Reanchor(ctx context.Context, pdf []byte, manifestURL string) (
 // an external PAdES signer (wallet/QTSP/DSS) produces the signature, so the
 // signature's /ByteRange covers the evidence (embed-first-sign-second,
 // DCS-FR-SM-08). pdf-core holds no key and never signs.
+//
+// Every call appends one more attachment under its own filename, including on a
+// PDF that already carries a signature: the append is an incremental update, so
+// the signatures already there stay valid (DCS-OR-C2PA-002).
 func (c *Client) EmbedEvidence(ctx context.Context, pdf, evidence []byte) (embedded []byte, err error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -306,33 +340,38 @@ func (c *Client) EmbedEvidence(ctx context.Context, pdf, evidence []byte) (embed
 	return embedded, nil
 }
 
-// ExtractEvidence posts pdf to POST /evidence/extract and returns the raw
-// signing-evidence attachment bytes embedded by Sign, plus whether it was
-// present.
-func (c *Client) ExtractEvidence(ctx context.Context, pdf []byte) ([]byte, bool, error) {
+// ExtractEvidence posts pdf to POST /evidence/extract and returns EVERY signing
+// evidence attachment the PDF carries, oldest first — one per signing event, so
+// a countersigned contract yields both parties' evidence. A PDF carrying none
+// yields an empty slice.
+func (c *Client) ExtractEvidence(ctx context.Context, pdf []byte) ([]json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/evidence/extract", bytes.NewReader(pdf))
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence request: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNoContent {
-		return nil, false, nil
+		return nil, nil
 	}
 	if err := checkStatus(resp); err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	evidence, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence read: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence read: %w", err)
 	}
-	return evidence, true, nil
+	var attachments []json.RawMessage
+	if err := json.Unmarshal(body, &attachments); err != nil {
+		return nil, fmt.Errorf("pdf-core extract-evidence decode: %w", err)
+	}
+	return attachments, nil
 }
 
 // VerifyResult is the structured response from pdf-core POST /verify.
@@ -385,6 +424,9 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 		return VerifyResult{}, fmt.Errorf("pdf-core verify request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
+	// The chain this instance signs under: pdf-core witnesses the result under it
+	// and reports, per manifest, whether it is what signed the artifact.
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -454,6 +496,7 @@ func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, string, e
 		return false, "", fmt.Errorf("pdf-core verify/content request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -497,6 +540,7 @@ func (c *Client) MatchContent(ctx context.Context, submitted, reference []byte) 
 		return false, "", fmt.Errorf("pdf-core verify/content-match request: %w", err)
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	c.setSigningChain(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

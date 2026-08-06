@@ -179,6 +179,7 @@ func doRequest(method, path string, body io.Reader, contentType string) *httptes
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+	req.Header.Set(signingChainHeader, base64.StdEncoding.EncodeToString(testMainX5ChainPEM))
 	rec := httptest.NewRecorder()
 	newServer().ServeHTTP(rec, req)
 	return rec
@@ -1029,13 +1030,102 @@ func TestEmbedEvidenceAttachesAndRoundTrips(t *testing.T) {
 		t.Error("/evidence/embed must NOT sign the PDF")
 	}
 
-	// Round-trips back out.
-	extractRec := doRequest(http.MethodPost, "/evidence/extract",
-		bytes.NewReader(rec.Body.Bytes()), "application/pdf")
-	if extractRec.Code != http.StatusOK {
-		t.Fatalf("extract expected 200, got %d: %s", extractRec.Code, extractRec.Body.String())
+	// Round-trips back out as a one-element array.
+	extracted := extractEvidenceArray(t, rec.Body.Bytes())
+	if len(extracted) != 1 {
+		t.Fatalf("extract returned %d attachments, want 1", len(extracted))
 	}
-	if !bytes.Equal(bytes.TrimSpace(extractRec.Body.Bytes()), evidence) {
-		t.Errorf("extracted evidence mismatch: got %q", extractRec.Body.String())
+	if !bytes.Equal(bytes.TrimSpace(extracted[0]), evidence) {
+		t.Errorf("extracted evidence mismatch: got %q", extracted[0])
+	}
+}
+
+// extractEvidenceArray posts a PDF to /evidence/extract and returns the raw
+// elements of the JSON array the endpoint answers with.
+func extractEvidenceArray(t *testing.T, pdf []byte) []json.RawMessage {
+	t.Helper()
+	rec := doRequest(http.MethodPost, "/evidence/extract", bytes.NewReader(pdf), "application/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("extract expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("extract Content-Type = %q, want application/json", ct)
+	}
+	var attachments []json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &attachments); err != nil {
+		t.Fatalf("extract response is not a JSON array: %v\nbody: %s", err, rec.Body.String())
+	}
+	return attachments
+}
+
+// embedEvidenceHTTP posts pdf + evidence to /evidence/embed and returns the PDF
+// the endpoint answers with.
+func embedEvidenceHTTP(t *testing.T, pdf, evidence []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	pdfPart, _ := mw.CreateFormField("pdf")
+	_, _ = pdfPart.Write(pdf)
+	evPart, _ := mw.CreateFormField("evidence")
+	_, _ = evPart.Write(evidence)
+	mw.Close()
+
+	rec := doRequest(http.MethodPost, "/evidence/embed", &buf, mw.FormDataContentType())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("embed expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	return rec.Body.Bytes()
+}
+
+// TestExtractEvidenceReturnsEveryAttachmentInEmbedOrder pins the federation
+// contract: each signing DCS embeds its own evidence before its signature, so
+// the endpoint answers with a JSON array of every attachment, oldest-first,
+// each element spliced in verbatim — the backend parses the elements as the
+// exact JSON documents it embedded, so re-marshalling would break signature
+// checks over those bytes.
+func TestExtractEvidenceReturnsEveryAttachmentInEmbedOrder(t *testing.T) {
+	baseRec := doRequest(http.MethodPost, "/render",
+		strings.NewReader(minimalPayload), "application/ld+json")
+	if baseRec.Code != http.StatusOK {
+		t.Fatalf("compile base PDF: %d", baseRec.Code)
+	}
+	pdf := signPrepared(t, baseRec)
+
+	evidences := [][]byte{
+		[]byte(`{"party":"a","type":["ContractSigningSummaryCredential"],"id":"urn:dcs:evidence:a"}`),
+		[]byte(`{"party":"b","type":["VerifiablePresentation"],"id":"urn:dcs:evidence:b"}`),
+	}
+	for _, evidence := range evidences {
+		pdf = embedEvidenceHTTP(t, pdf, evidence)
+	}
+
+	attachments := extractEvidenceArray(t, pdf)
+	if len(attachments) != len(evidences) {
+		t.Fatalf("extract returned %d attachments, want %d", len(attachments), len(evidences))
+	}
+	for i, want := range evidences {
+		if !bytes.Equal(bytes.TrimSpace(attachments[i]), want) {
+			t.Errorf("attachment %d (oldest-first): got %s, want %s", i, attachments[i], want)
+		}
+	}
+}
+
+// TestExtractEvidenceWithoutAttachmentsIsNoContent keeps 204 as the "nothing
+// embedded" answer, so the backend never has to distinguish an empty array from
+// an unsigned document.
+func TestExtractEvidenceWithoutAttachmentsIsNoContent(t *testing.T) {
+	baseRec := doRequest(http.MethodPost, "/render",
+		strings.NewReader(minimalPayload), "application/ld+json")
+	if baseRec.Code != http.StatusOK {
+		t.Fatalf("compile base PDF: %d", baseRec.Code)
+	}
+	pdf := signPrepared(t, baseRec)
+
+	rec := doRequest(http.MethodPost, "/evidence/extract", bytes.NewReader(pdf), "application/pdf")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for a PDF without evidence, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("204 must carry no body, got %q", rec.Body.String())
 	}
 }

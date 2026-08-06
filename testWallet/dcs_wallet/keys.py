@@ -118,10 +118,9 @@ def jwk_from_did_jwk(did: str) -> dict[str, Any]:
 
 def build_trust_json(
     *,
-    issuer_public: dict[str, Any],
-    issuer_dids: list[str],
+    issuer_bases: list[str],
+    leaf_key_der_b64: str,
     vcts: list[str],
-    x5c_issuers: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a trust document in the schema LoadTrustConfig accepts (ADR-31).
 
@@ -129,29 +128,34 @@ def build_trust_json(
     may attest, and how its key is resolved. Emitting the older bare-jwks form
     produces a document the backend refuses outright.
 
-    The dev fixture wildcards organizations because its issuers stand in for
-    every party the BDD suite invents; a real deployment names them. peer_dynamic
-    is off: `peer` is checked when a signing ceremony verifies a Power of
-    Attorney, so trusting an unlisted issuer there is self-attestation.
+    There is one entry per stack, and it is that stack's ORCE credential issuer,
+    identified by the base URL it publishes under — the same string it puts in
+    every credential's `iss` and in the `iss` of the status list those
+    credentials point at. Nothing else is listed because nothing else issues:
+    an issuer that publishes no status list can attest nothing a verifier will
+    accept, since a list is believed only from the issuer that publishes it.
+
+    The purposes are all three because in a dev stack this one issuer stands in
+    for all of them, including the identity issuer a real deployment runs
+    elsewhere (deployment/helm/values.pid-issuer.yml). Organizations are
+    wildcarded because it stands in for every party the suites invent; a real
+    deployment names them.
+
+    The mechanism is x5c — the key arrives in the credential's certificate chain
+    — and login additionally PINS the key that chain's leaf must carry (ADR-35),
+    because verifying a login issuer against a CA list would let that CA
+    introduce another one.
     """
-    issuer_key = public_key_material(issuer_public)
     issuers: dict[str, Any] = {}
-    for did in issuer_dids:
-        issuers[did] = {
+    for base in dict.fromkeys(issuer_bases):
+        issuers[base] = {
             "purposes": ["login", "peer", "pid"],
             "organizations": ["*"],
-            "mechanism": "jwks",
-            "jwks": {"keys": [issuer_key]},
+            "mechanism": "x5c",
+            "x5c_leaf_keys": [leaf_key_der_b64],
         }
-    # An x5c issuer publishes its key through its certificate chain, verified
-    # against the configured anchors, so it carries no jwks here. It is granted
-    # `pid` alone: an identity document must not grant access, and it names no
-    # organization because a PID attests a person rather than a party.
-    for did in x5c_issuers or []:
-        issuers[did] = {"purposes": ["pid"], "mechanism": "x5c"}
     return {
         "vcts": list(dict.fromkeys(vcts)),
-        "peer_dynamic": False,
         "issuers": issuers,
     }
 

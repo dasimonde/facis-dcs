@@ -28,8 +28,10 @@ type ContractContentPolicy struct {
 	// profile (the default disk policy document sets both; ad-hoc/test
 	// policies that want to exercise only ODRL evaluation leave them unset).
 	// "Enforce" here means "include in this audit's findings", not "block":
-	// AuditContractContent is only reached from the read-only audit-trail
-	// query. The blocking SHACL gate is RequireHubConformance, elsewhere.
+	// what a caller does with a finding is the caller's decision — the
+	// read-only audit-trail query reports them, the workflow gate blocks on
+	// the ones it is the enforcement point for (workflowgate.resultFromLocal).
+	// The blocking SHACL gate is RequireHubConformance, elsewhere.
 	// The hub is the only source for their content — there is no
 	// alternative/inline shape format anymore (ADR-8, ADR-9).
 	EnforceCanonicalShapes   bool `json:"enforceCanonicalShapes"`
@@ -105,7 +107,7 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 			return nil, fmt.Errorf("SHACL validation: %w", err)
 		}
 		policy.ShapesVersion = shapesVersion
-		findings = append(findings, shaclFindings...)
+		findings = append(findings, tagFindingSource(shaclFindings, SourceHubShapes)...)
 	}
 	root, err := expandForAudit(ctx, contract, source)
 	if err != nil {
@@ -113,13 +115,13 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	}
 
 	for _, profile := range policy.profiles {
-		findings = append(findings, auditContractValidationProfile(contract, root, profile)...)
+		findings = append(findings, tagFindingSource(auditContractValidationProfile(contract, root, profile), SourceValidationProfile)...)
 	}
 	embeddedFindings, err := auditExpandedODRLPolicies(ctx, root, expandedODRLPolicyRules(root))
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, embeddedFindings...)
+	findings = append(findings, tagFindingSource(embeddedFindings, SourceContractODRL)...)
 	externalRules, err := expandExternalODRLRules(ctx, externalODRLPolicies(policy.Policies), source)
 	if err != nil {
 		return nil, err
@@ -128,13 +130,20 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, externalFindings...)
+	findings = append(findings, tagFindingSource(externalFindings, SourcePolicySetODRL)...)
 
 	for i := range findings {
 		findings[i].PolicySetID = policy.PolicySetID
 		findings[i].PolicyVersion = policy.Version
 	}
 	return findings, nil
+}
+
+func tagFindingSource(findings []PolicyFinding, source string) []PolicyFinding {
+	for i := range findings {
+		findings[i].Source = source
+	}
+	return findings
 }
 
 type ContractPolicySatisfactionError struct {
@@ -186,6 +195,7 @@ func ValidateContractPolicySatisfaction(contractDocument any, metadata ContractC
 	blocking := make([]PolicyFinding, 0)
 	for _, finding := range findings {
 		if isBlockingContractPolicyFinding(finding) {
+			finding.Source = SourceContractODRL
 			finding.PolicySetID = defaultContractPolicySetID
 			finding.PolicyVersion = metadata.PolicyVersion
 			if strings.TrimSpace(finding.PolicyVersion) == "" {

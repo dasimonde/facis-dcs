@@ -1,6 +1,7 @@
 package dcstodcs
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,16 +11,16 @@ import (
 )
 
 // The summary carries the contract it attests. Without checking it, a genuine
-// summary and Power of Attorney from one contract could be attached to a ship
-// of another and recorded as a signature on it — the presentation itself has no
+// summary and Power of Attorney from one contract could be embedded in a PDF of
+// another and recorded as a signature on it — the presentation itself has no
 // audience or nonce this instance can check, so this is the only thing binding
 // the evidence to the exchange it arrived in.
 func TestSummaryMustAttestTheContractItIsShippedWith(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	err := gate.Check(testSignedParty, "urn:contract:a-different-one", verifier(),
-		[]SignatoryPoA{poaFor(testSignedParty)})
+	err := gate.Check(testSignedParty, testLocalParty, "urn:contract:a-different-one", verifier(),
+		[]json.RawMessage{evidenceFor(testSignedParty)})
 
 	require.Error(t, err)
 	assert.Contains(t, gateError(t, err).Error(), "attests a signature on contract")
@@ -31,7 +32,7 @@ func TestSummaryForThisContractIsAccepted(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	require.NoError(t, gate.Check(testSignedParty, testContract, verifier(),
-		[]SignatoryPoA{poaFor(testSignedParty)}))
+	require.NoError(t, gate.Check(testSignedParty, testLocalParty, testContract, verifier(),
+		[]json.RawMessage{evidenceFor(testSignedParty)}))
 	require.Len(t, seen, 1)
 }

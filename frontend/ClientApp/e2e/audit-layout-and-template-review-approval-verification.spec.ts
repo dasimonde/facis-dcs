@@ -130,19 +130,32 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()
 
     await page.getByRole('button', { name: 'Execute Audit' }).click()
+    // Unscoped on purpose: strict mode makes this assert that the failure holds
+    // exactly one live region — the view renders it in place and drops the
+    // interceptor's toast rather than announcing it twice.
     await expect(page.getByRole('alert')).toContainText(/executor unavailable/i)
     await expect(page.getByText('Failed Checks')).toHaveCount(0)
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()
 
     failAudit = false
     await page.getByRole('button', { name: 'Execute Audit' }).click()
-    await expect(page.getByText('Policy mismatch')).toBeVisible()
+    // A row states the finding's assertion and, beneath it, the verdict that
+    // assertion carries ("Failed: Policy mismatch"), so the reason appears
+    // twice — exact matching picks the assertion line the auditor clicks.
+    const failedRow = page.getByText('Policy mismatch', { exact: true })
+    await expect(failedRow).toBeVisible()
     await expect(page.getByText('Failed Checks').locator('..')).toContainText('1')
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeEnabled()
-    await page.getByText('Policy mismatch').click()
-    await expect(page.getByRole('heading', { name: 'Finding Details' }).locator('..')).toContainText('RULE-1')
+    await failedRow.click()
+    // The whole details panel — the heading's own parent is just the title bar
+    // it shares with Close, and the evidence rows are that bar's siblings.
+    const details = page.getByRole('complementary').filter({ hasText: 'Finding Details' })
+    await expect(details).toContainText('RULE-1')
 
-    await page.getByRole('button', { name: /Component/ }).click()
+    // A table filter opens from a <details>/<summary> disclosure, which carries
+    // no button role — unlike the template-type "Component" button other specs
+    // click by role.
+    await page.locator('summary').filter({ hasText: 'Component' }).click()
     await page.getByRole('button', { name: 'None' }).click()
     await expect(page.getByText('Select a row to inspect the corresponding audit evidence.')).toBeVisible()
 

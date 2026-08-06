@@ -12,6 +12,15 @@ import (
 
 var statusListVerifier *status.Verifier
 
+// StatusListVerifier returns the verifier ConfigureStatusListVerification wired,
+// for the paths outside OID4VP that also have to resolve a credential's status —
+// the C2PA provenance verification, whose lifecycle credential names this
+// deployment's own list (ADR-34). They share this one so an issuer trusted for a
+// presented credential and an issuer trusted for a provenance credential cannot
+// become two different sets. nil until configuration has run, which every caller
+// must treat as "the state is unknown", never as "not revoked".
+func StatusListVerifier() *status.Verifier { return statusListVerifier }
+
 // ConfigureStatusListVerification wires the status-list verifier used by
 // OID4VP, off the trust config already loaded rather than off a second read of
 // the same file. The status-list path used to re-parse the trust document with
@@ -33,7 +42,17 @@ func ConfigureStatusListVerification(trustCfg *TrustConfig) error {
 		// carries. Without the anchors here that chain verifies against
 		// nothing and the status list is refused, which is every status list
 		// an x5c issuer signs.
-		cfg.X5CRoots = trustCfg.X5CTrustRoots()
+		cfg.X5CRoots = trustCfg.unionX5CRoots()
+		// Neither a bundled key nor an anchor means every status list this
+		// deployment ever fetches resolves to no key and is refused. That is a
+		// misconfiguration to report at startup, not one to discover at the
+		// first login. Either alone is enough: our own issuers publish by
+		// certificate and bundle no key at all (ADR-34).
+		if len(cfg.Issuers) == 0 && cfg.X5CRoots == nil {
+			return fmt.Errorf(
+				"status list trust config: no issuer carries a bundled JWKS and no x5c trust anchors are configured, " +
+					"so no status list could be verified")
+		}
 		trust = cfg
 	}
 	statusListVerifier = handler.NewVerifier(trust, handler.Options{})

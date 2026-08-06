@@ -12,7 +12,9 @@ the certificate carries the issuer DID as a URI SAN: a did:web authority may
 hold a port, which decodes to host:port and can never equal a DNS name.
 
 The certificate is its own trust anchor, so the same bytes are written to both
-the wallet's key directory and the anchor bundle the BDD deployment mounts.
+the wallet's key directory and the anchor bundle the BDD deployment mounts. The
+bundle carries other issuers' roots as well, so this replaces its own entry and
+leaves the rest alone (scripts/x5c_anchor_bundle.py).
 Keeps an existing private key unless --regenerate is given, so reissuing the
 certificate does not invalidate credentials already minted with that key.
 """
@@ -32,8 +34,10 @@ from cryptography.x509.oid import NameOID
 WALLET_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = WALLET_ROOT.parent
 sys.path.insert(0, str(WALLET_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from dcs_wallet.keys import generate_ec_private_jwk, load_json, private_key_material, public_jwk, write_json  # noqa: E402
+from x5c_anchor_bundle import load_certificate, print_bundle, upsert_anchor  # noqa: E402
 
 ISSUER_DID = "did:web:dev.example:issuer:pid-x5c"
 SUBJECT_CN = "DCS Dev PID Issuer (x5c, DEV ONLY)"
@@ -97,14 +101,19 @@ def mint(*, keys_dir: Path, anchors_path: Path, regenerate: bool) -> None:
     )
 
     pem = certificate.public_bytes(serialization.Encoding.PEM)
+    cert_path = keys_dir / "issuer-dev-x5c.crt.pem"
+    # The anchor this script published last time, read before it is overwritten:
+    # it identifies our entry in the bundle by fingerprint, which is the only way
+    # to tell two issuers' roots apart when they share a subject.
+    previous = load_certificate(cert_path)
     write_json(jwk_path, issuer_jwk)
     write_json(keys_dir / "issuer-dev-x5c.public.jwk", public_jwk(issuer_jwk))
-    (keys_dir / "issuer-dev-x5c.crt.pem").write_bytes(pem)
-    anchors_path.write_bytes(pem)
+    cert_path.write_bytes(pem)
+    anchors = upsert_anchor(anchors_path, certificate, replacing=previous)
 
     print(f"issuer: {ISSUER_DID}")
-    print(f"cert:   {keys_dir / 'issuer-dev-x5c.crt.pem'}")
-    print(f"anchor: {anchors_path}")
+    print(f"cert:   {cert_path}")
+    print_bundle(anchors_path, anchors)
 
 
 def main() -> int:

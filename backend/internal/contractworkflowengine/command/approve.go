@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/identity"
@@ -80,9 +81,9 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	// caller to force a full peer re-sync first.
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
-			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+			return fmt.Errorf("contract %w, please force synchronisation and reload", base.ErrUpdatedElsewhere)
 		}
-		return errors.New("contract was updated elsewhere, please reload")
+		return fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventApprove); err != nil {

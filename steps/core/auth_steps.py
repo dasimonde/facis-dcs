@@ -8,7 +8,17 @@ import requests
 from behave import given, then, when
 
 from steps.support.services.template_service import TemplateService
-from support.api_client import get_with_headers, pac_audit_url, post_json, template_search_url
+from steps.support.status_list_probe import (
+    assert_refused_for_the_revoked_bit,
+    revoke_credential_bit,
+)
+from support.api_client import (
+    get_with_headers,
+    pac_audit_timeline,
+    pac_audit_url,
+    post_json,
+    template_search_url,
+)
 from support.services.auth_service import AuthService
 
 @given('I hold an expired credential with roles: "{roles}"')
@@ -200,10 +210,8 @@ def step_then_login_presentation_audited(context):
         )
         matches = [
             entry
-            for scope_result in response.json()
-            for entry in (scope_result.get("audit_trail") or [])
-            if isinstance(entry, dict)
-            and entry.get("event_type") == "OID4VP_PRESENTATION_SUCCEEDED"
+            for entry in pac_audit_timeline(response)
+            if entry.get("event_type") == "OID4VP_PRESENTATION_SUCCEEDED"
             and entry.get("did") == state
         ]
         if matches:
@@ -238,14 +246,13 @@ def step_when_present_revoked_wallet_credential(context, roles):
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.credential import decode_jwt_payload  # noqa: PLC0415
     from dcs_wallet.sdjwt import split_sd_jwt  # noqa: PLC0415
-    from dcs_wallet.status_list import credential_status_from_claims, revoke_status_index  # noqa: PLC0415
 
     timeout = _federated_timeout(context)
-    # A DEDICATED organization isolates this credential's deterministic
-    # status-list index (status_list_index_seed = sub+org+roles): revoking it
-    # must poison ONLY this probe identity, never the suite-shared login
-    # credentials that use the default organization — the status service
-    # keeps revocations for the whole run.
+    # A DEDICATED organization isolates this credential's status-list index:
+    # it holds a RESERVED_INDEX of its own (dcs_wallet.status_list), so
+    # revoking it can poison only this probe identity and never the
+    # suite-shared login credentials — the issuer keeps revocations for the
+    # whole run.
     credentials = AuthService.parse_auth_credentials(
         [role.strip() for role in roles.split(",")],
         organization="BDD Revocation Probe Org",
@@ -261,11 +268,7 @@ def step_when_present_revoked_wallet_credential(context, roles):
         client_id=auth_request.client_id,
     )
 
-    claims = decode_jwt_payload(split_sd_jwt(vp_token)[0])
-    idx_uri = credential_status_from_claims(claims)
-    assert idx_uri, f"login credential carries no status claim to revoke: {claims}"
-    idx, uri = idx_uri
-    revoke_status_index(idx, service_base=uri.split("/v1/")[0], tenant=uri.split("/tenants/")[1].split("/")[0])
+    revoke_credential_bit(context, decode_jwt_payload(split_sd_jwt(vp_token)[0]))
 
     context.requests_response = context.federated_session.post(
         auth_request.response_uri,
@@ -280,11 +283,4 @@ def step_when_present_revoked_wallet_credential(context, roles):
 
 @then("the login presentation is rejected for a revoked credential")
 def step_then_login_rejected_revoked(context):
-    resp = context.requests_response
-    assert resp.status_code >= 400, (
-        f"expected the revoked-credential login to be rejected, got {resp.status_code}: {resp.text}"
-    )
-    body = resp.text.lower()
-    assert "status" in body or "revoked" in body, (
-        f"expected the rejection to name the credential-status check, got: {resp.text}"
-    )
+    assert_refused_for_the_revoked_bit(context, context.requests_response, "the login presentation")

@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
@@ -66,7 +67,7 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 
 	// Optimistic concurrency (see command package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < oldData.UpdatedAt.Unix() {
-		return errors.New("contract template was updated elsewhere, please reload")
+		return fmt.Errorf("contract template %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if oldData.State == contracttemplatestate.Draft.String() || oldData.State == contracttemplatestate.Rejected.String() {

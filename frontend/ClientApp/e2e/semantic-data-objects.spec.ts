@@ -1,5 +1,11 @@
 import { expect, test } from './dcs-test'
-import { deriveLocalContract, gotoAs, registerContractTemplate, submitReviewApproveTemplate } from './lifecycle-helpers'
+import {
+  authorPaymentComponent,
+  deriveLocalContract,
+  gotoAs,
+  registerContractTemplate,
+  submitReviewApproveTemplate,
+} from './lifecycle-helpers'
 
 /**
  * Semantic data objects, clicked into existence (ADR-23 / DCS-FR-TR-25):
@@ -70,6 +76,12 @@ test('a LegalPerson data object is clicked into a template and filled in the con
     expect(registered.ok(), await registered.text()).toBeTruthy()
   })
 
+  const componentName = `Legal Roles Component ${stamp}`
+  await test.step('a role-bearing component is authored and approved for composition', async () => {
+    const componentDid = await authorPaymentComponent(page, loginAs, componentName, false)
+    await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
+  })
+
   let templateDid = ''
   await test.step('a LegalPerson with a nested Address is clicked into a contract template', async () => {
     await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
@@ -102,6 +114,21 @@ test('a LegalPerson data object is clicked into a template and filled in the con
     await expect(address).toBeVisible()
     await address.getByTestId('toggle-negotiable-countryName').check()
     await expect(address.getByTestId('negotiable-countryName')).toBeVisible()
+
+    // A contract binds its originator to one of the two catalogued roles its
+    // template's rules declare, and a parent template carries rules only by
+    // composing components — so the approved role-bearing component authored
+    // above is inlined beside the data object.
+    await page.getByRole('tab', { name: /Builder/ }).click()
+    await page
+      .getByRole('button', { name: /add.*block/i })
+      .first()
+      .click()
+    const composeModal = page.getByRole('dialog')
+    await expect(composeModal.getByText('Components (inlined on add):')).toBeVisible()
+    await composeModal.getByPlaceholder('Search components').fill(componentName)
+    await composeModal.getByRole('button', { name: new RegExp(componentName) }).click()
+    await expect(page.getByRole('dialog')).toBeHidden()
 
     const created = page.waitForRequest((r) => r.url().includes('/template/create') && r.method() === 'POST')
     const response = page.waitForResponse(

@@ -92,10 +92,13 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		Description("Retrieve templates via XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-SI-01")
 
+		// The Template Manager owns the Template Catalogue view and the register
+		// that follows it, and the catalogue pages load the local template
+		// repository (/template/retrieve, Template roles only) to tell an
+		// already-registered entry from a new one. A contract role draws its
+		// contract from the registered templates of /contract/templates, never
+		// from the catalogue, so the catalogue is a Template Manager surface.
 		Security(JWTAuth, func() {
-			// The Template Manager owns the Template Catalogue view and the
-			// register that follows it; the contract roles read the catalogue
-			// to pick a template to draw a contract from.
 			Scope("Template Manager")
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")

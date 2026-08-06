@@ -61,6 +61,27 @@ const (
 	ClauseCatalogName = "clause-catalog"
 )
 
+// ShapesKind is the kind every shapes graph THIS instance publishes carries.
+// PeerShapesKind is the separate namespace a graph shipped by a counterparty
+// is stored under (ADR-8). Nothing that answers "what does this instance
+// publish or enforce" — Seed's latest-version probe, ResolveEffectiveBundle,
+// ActiveShapeLibraryClasses, the /semantic/schema/* admin endpoints — reads
+// PeerShapesKind, so an inbound ship can neither write nor shadow an entry of
+// this instance's own.
+const (
+	ShapesKind     = "shapes"
+	PeerShapesKind = "peer-shapes"
+)
+
+// IsEnvelopeShapes reports whether a hub shapes entry is part of the DCS
+// envelope vocabulary: the canonical graph and the clause catalog that
+// constrains the envelope's own typed clauses. Every deployment seeds its own
+// (Seed), so these are this instance's invariants rather than evidence about a
+// contract, and they are resolved locally whatever a peer pins.
+func IsEnvelopeShapes(name string) bool {
+	return name == ShapesName || name == ClauseCatalogName
+}
+
 // Schema is one stored, versioned hub entry.
 type Schema struct {
 	Name      string `db:"name"`
@@ -73,15 +94,27 @@ type Schema struct {
 	CreatedAt string `db:"created_at"`
 }
 
+// EffectiveBundle is the active validation bundle a new artifact is pinned to.
+// Shapes holds the envelope graphs alone — what every DCS document is judged
+// against; Libraries holds the other active shapes entries, which an artifact
+// is pinned to only where it declares them in sh:shapesGraph (ADR-23).
 type EffectiveBundle struct {
 	ContextVersion int
 	ProfileVersion int
 	Shapes         []Schema
+	Libraries      []Schema
 }
 
 // ResolveEffectiveBundle selects the complete active validation bundle in a
 // deterministic order. The returned versions are immutable and can be pinned
 // into an artifact before the surrounding creation transaction commits.
+//
+// Envelope graphs and registered libraries are read separately because they are
+// pinned on different terms: an artifact is always judged against the envelope,
+// while a library governs it only where its own data declares that library.
+// Pinning every active library instead bound each contract to graphs it has no
+// relation to — including one another instance, or a concurrently running test,
+// had just published.
 func ResolveEffectiveBundle(ctx context.Context, tx *sqlx.Tx) (EffectiveBundle, error) {
 	var bundle EffectiveBundle
 	if err := tx.GetContext(ctx, &bundle.ContextVersion,
@@ -97,13 +130,21 @@ func ResolveEffectiveBundle(ctx context.Context, tx *sqlx.Tx) (EffectiveBundle, 
 	if err := tx.SelectContext(ctx, &bundle.Shapes, `
         SELECT name, version, kind, media_type, content, active, created_by, created_at::text
         FROM semantic_schemas
-        WHERE kind='shapes' AND active
-        ORDER BY CASE name WHEN $1 THEN 0 WHEN $2 THEN 1 ELSE 2 END, name`,
+        WHERE kind='shapes' AND active AND name IN ($1, $2)
+        ORDER BY CASE name WHEN $1 THEN 0 ELSE 1 END, name`,
 		ShapesName, ClauseCatalogName); err != nil {
 		return bundle, fmt.Errorf("semantic hub: active shapes bundle: %w", err)
 	}
 	if len(bundle.Shapes) == 0 || bundle.Shapes[0].Name != ShapesName {
 		return bundle, fmt.Errorf("semantic hub: canonical active shapes are unavailable")
+	}
+	if err := tx.SelectContext(ctx, &bundle.Libraries, `
+        SELECT name, version, kind, media_type, content, active, created_by, created_at::text
+        FROM semantic_schemas
+        WHERE kind='shapes' AND active AND name NOT IN ($1, $2)
+        ORDER BY name`,
+		ShapesName, ClauseCatalogName); err != nil {
+		return bundle, fmt.Errorf("semantic hub: active shape libraries: %w", err)
 	}
 	return bundle, nil
 }
@@ -243,7 +284,9 @@ type ListEntry struct {
 }
 
 // List returns every distinct (name, kind) entry with its active/latest
-// version summary, ordered by kind then name.
+// version summary, ordered by kind then name. The peer namespace is left out:
+// the management surface publishes, activates and rolls back, and none of that
+// applies to a graph a counterparty shipped as evidence for its own contract.
 func (Repo) List(ctx context.Context, tx *sqlx.Tx) ([]ListEntry, error) {
 	var out []ListEntry
 	err := tx.SelectContext(ctx, &out, `
@@ -253,8 +296,9 @@ func (Repo) List(ctx context.Context, tx *sqlx.Tx) ([]ListEntry, error) {
                MAX(s.created_at)::text AS updated_at,
                (ARRAY_AGG(s.media_type ORDER BY s.version DESC))[1] AS media_type
         FROM semantic_schemas s
+        WHERE s.kind <> $1
         GROUP BY s.name, s.kind
-        ORDER BY s.kind, s.name`)
+        ORDER BY s.kind, s.name`, PeerShapesKind)
 	if err != nil {
 		return nil, err
 	}

@@ -82,6 +82,9 @@ var _ = Service("PDFGeneration", func() {
 			Scope("Contract Creator")
 			Scope("Contract Approver")
 			Scope("Contract Observer")
+			// The negotiate view offers Export PDF alongside every other
+			// contract page, and a negotiator already reads the contract in full.
+			Scope("Contract Negotiator")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
@@ -131,6 +134,9 @@ var _ = Service("PDFGeneration", func() {
 			Scope("Contract Creator")
 			Scope("Contract Approver")
 			Scope("Contract Observer")
+			// The negotiate view offers Export PDF alongside every other
+			// contract page, and a negotiator already reads the contract in full.
+			Scope("Contract Negotiator")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")

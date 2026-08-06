@@ -37,7 +37,7 @@ Feature: Signing acceptance-path hardening
     Given contract "SAH Revoked PID Contract" has reached contract state "APPROVED"
     When I start a signing ceremony for contract "SAH Revoked PID Contract" field "SAHRevokedPidField" as "Contract Signer"
     And the PID for contract "SAH Revoked PID Contract"'s ceremony is revoked before it is presented
-    Then the ceremony presentation for contract "SAH Revoked PID Contract" is rejected
+    Then the ceremony presentation for contract "SAH Revoked PID Contract" is rejected for a revoked PID
 
   @ADR-20 @SM-01 @DCS-NFR-BR-03
   Scenario: An AES signature is rejected on a field requiring QES

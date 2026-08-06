@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RouteLocationRaw } from 'vue-router'
+import { type RouteLocationRaw, useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth-store'
 
 const props = defineProps<{
   steps: { key: string; label: string }[]
@@ -10,7 +11,22 @@ const props = defineProps<{
   actions?: { label: string; to?: RouteLocationRaw; onClick?: () => void }[]
 }>()
 
+const router = useRouter()
+const authStore = useAuthStore()
+
 const currentIndex = computed(() => props.steps.findIndex((step) => step.key === props.currentKey))
+
+// The narrative names the role that acts next, which is often not the reader's.
+// A CTA whose destination the router guard would bounce is dropped rather than
+// rendered: following it lands on the front page with no explanation.
+const canReach = (to: RouteLocationRaw): boolean => {
+  const resolved = router.resolve(to)
+  const roles = resolved.matched.at(-1)?.meta.roles
+  if (!roles) return true
+  return authStore.user?.roles?.some((role) => roles.includes(role)) ?? false
+}
+
+const reachableActions = computed(() => (props.actions ?? []).filter((action) => !action.to || canReach(action.to)))
 </script>
 
 <template>
@@ -29,8 +45,8 @@ const currentIndex = computed(() => props.steps.findIndex((step) => step.key ===
     </div>
     <p class="mt-3 font-semibold">{{ headline }}</p>
     <p class="mt-1 text-sm text-base-content/70">{{ narrative }}</p>
-    <div v-if="actions?.length" class="mt-3 flex flex-wrap gap-2">
-      <template v-for="(action, index) in actions" :key="action.label">
+    <div v-if="reachableActions.length" class="mt-3 flex flex-wrap gap-2">
+      <template v-for="(action, index) in reachableActions" :key="action.label">
         <RouterLink
           v-if="action.to"
           :to="action.to"

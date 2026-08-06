@@ -693,10 +693,10 @@
           "@id": "dcs:provideCompliantValue"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:constraint": [
           {
@@ -751,10 +751,10 @@
           "@id": "odrl:compensate"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:constraint": [
           {
@@ -809,10 +809,10 @@
           "@id": "odrl:inform"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:constraint": [
           {
@@ -855,10 +855,10 @@
           "@id": "dcs:provideCompliantValue"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:constraint": [
           {
@@ -892,10 +892,10 @@
           "@id": "odrl:execute"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:constraint": [
           {
@@ -1021,10 +1021,10 @@
           "@id": "odrl:modify"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:duty": [
           {
@@ -1071,10 +1071,10 @@
           "@id": "odrl:sell"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:constraint": [
           {
@@ -1111,10 +1111,10 @@
           "@id": "odrl:grantUse"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:constraint": [
           {
@@ -1151,10 +1151,10 @@
           "@id": "odrl:use"
         },
         "odrl:assignee": {
-          "@id": "did:web:example:template:sla-hosting#party-customer"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-customer"
         },
         "odrl:assigner": {
-          "@id": "did:web:example:template:sla-hosting#party-provider"
+          "@id": "did:web:example:template:sla-hosting#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"
         },
         "odrl:constraint": [
           {

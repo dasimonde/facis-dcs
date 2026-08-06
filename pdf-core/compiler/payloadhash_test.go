@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"testing"
 )
 
@@ -10,7 +9,7 @@ import (
 // of the EXACT verbatim embedded bytes, so A (render), B (recompile), and any
 // verifier compute the same value and it resolves the payload from IPFS.
 func TestRenderedBacklinkIsPayloadCID(t *testing.T) {
-	pdf, err := CompilePDF(WithSigner(context.Background(), NewCapturingSigner()), []byte(richFilledContractPayload), CanonicalCompiledAt)
+	pdf, err := CompilePDF(WithSigner(testChainContext(), NewCapturingSigner()), []byte(richFilledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)
 	}

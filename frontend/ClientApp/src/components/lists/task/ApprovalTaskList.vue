@@ -53,9 +53,7 @@ const filteredTasks = computed(() => {
   if (stateFilterStore.hasFilters) {
     return sortedTasks.value.filter((task) => stateFilterStore.hasFilter(task.state))
   }
-  return sortedTasks.value.filter(
-    (task) => !([ApprovalTaskState.approved, ApprovalTaskState.rejected] as ApprovalTaskState[]).includes(task.state),
-  )
+  return sortedTasks.value.filter(canApprove)
 })
 
 const getTemplateName = (task: ContractTemplateApprovalTask) => {
@@ -74,8 +72,11 @@ const getContractState = (task: ContractApprovalTask) => {
   return contractsStore.findContractByDid(task.did)?.state
 }
 
-const canApprove = (task: ContractTemplateApprovalTask) => {
-  return task.state === ApprovalTaskState.open && getTemplateState(task) === TemplateState.reviewed
+const canApprove = (task: ApprovalTask) => {
+  if (task.type === 'template') {
+    return task.state === ApprovalTaskState.open && getTemplateState(task) === TemplateState.reviewed
+  }
+  return task.state === ApprovalTaskState.open && getContractState(task) === ContractState.reviewed
 }
 
 const resolveViewRouteName = (task: ApprovalTask) => {
@@ -85,7 +86,7 @@ const resolveViewRouteName = (task: ApprovalTask) => {
     }
     return ROUTES.TEMPLATES.VIEW
   } else {
-    if (task.state === ApprovalTaskState.open && getContractState(task) === ContractState.reviewed) {
+    if (canApprove(task)) {
       return ROUTES.CONTRACTS.APPROVE
     }
     return ROUTES.CONTRACTS.VIEW

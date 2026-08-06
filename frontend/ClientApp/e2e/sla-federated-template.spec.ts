@@ -1,10 +1,11 @@
 import { expect, test } from './dcs-test'
+import { selectBilateralClauseRoles } from './lifecycle-helpers'
 import {
-  acceptPeerProposalOn,
+  acceptOfferOn,
   assertReceivedInState,
   authorContractTemplate,
+  awaitPeerRedlineOn,
   contractDocumentOn,
-  counterOffer,
   createContractViaUi,
   expectSubmitRefusedOn,
   fillContractValuesOn,
@@ -16,6 +17,7 @@ import {
   registerCatalogueTemplateOn,
   registerTemplateOn,
   resolveDidWeb,
+  stagedCounterOffer,
   submitReviewApproveTemplateOn,
 } from './multi-dcs-helpers'
 import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
@@ -316,8 +318,9 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
 
     const ruleSelect = (name: string) =>
       editor.locator('label.form-control').filter({ hasText: name }).locator('select')
-    await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+    await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
     await ruleSelect('Action').selectOption({ label: 'use' })
+    await selectBilateralClauseRoles(editor)
     // The permission targets the declared service object, not the contract —
     // an ODRL rule is about a thing (ADR-23).
     await ruleSelect('Toward').selectOption({ label: 'Managed Service' })
@@ -470,26 +473,41 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
   })
 
   // ---- Stage 9 [DCS-FR-CWE-18, DCS-IR-CWE-03]: one negotiation round. A
-  // redlines the fee on its received copy and ships it back; B accepts. What
-  // must hold afterwards is that negotiation moved a VALUE and left the policy
-  // structure exactly as authored.
+  // redlines the fee on its received copy and ships it back to B. What must
+  // hold afterwards is that negotiation moved a VALUE and left the policy
+  // structure exactly as authored — on both copies.
+  //
+  // The round ends at B holding the redline rather than at B pressing an
+  // Accept: under ADR-13 §2 the counter-offer IS the shipped document ("the
+  // counterparty receives it as a proposal"), and the change request A recorded
+  // for its own audit trail is local to A — nothing carries negotiation rows or
+  // their decisions across the boundary. Agreeing to the terms on the table is
+  // SETTLEMENT (ADR-13 §3: a ship of the same version stamped `agreed`), which
+  // the two-instance vertical covers; repeating it here would prove nothing
+  // this spec exists for.
   //
   // The redline is the inline fee rather than a service level: the negotiate
   // view renders only the clause preview, so a value that lives on a
   // dcs:contractData object has no input there (see the reported gap) — and
-  // the fee reuses the vertical's own counter-offer helper unchanged.
-  await test.step('Stage 9 [DCS-FR-CWE-18]: A counter-offers, B accepts, the policy is untouched', async () => {
+  // the fee reuses the vertical's own counter-offer helpers unchanged.
+  await test.step('Stage 9 [DCS-FR-CWE-18]: A counter-offers, B holds the redline, the policy is untouched', async () => {
     const before = policyShapeOf(await contractDocumentOn(a, contractDid))
-    await counterOffer(a, contractDid, { value: '18500' })
-    // B answers the inbound redline while its own copy is still OFFERED — a
-    // received proposal does not move the peer's intrinsic state.
-    await acceptPeerProposalOn(b, contractDid)
+    // A is the Responder here (B authored and offered), so it takes the offer
+    // into negotiation before it can redline it: receiving queues no task, and
+    // the Negotiations tab is the route the redline helper arrives by.
+    await acceptOfferOn(a, contractDid)
+    await stagedCounterOffer(a, contractDid, { value: '18500' })
+    // The counter travels back over the PDF exchange while B's own copy stays
+    // OFFERED — a received proposal does not move the peer's intrinsic state.
+    const onB = (await awaitPeerRedlineOn(b, contractDid, {
+      label: 'Payment Amount',
+      value: '18500',
+    })) as ContractDocument
 
     const onA = (await contractDocumentOn(a, contractDid)) as ContractDocument
-    const onB = (await contractDocumentOn(b, contractDid)) as ContractDocument
     expect(policyShapeOf(onA), 'the round moved a value, not the policy').toEqual(before)
     expect(policyShapeOf(onB), 'and both parties still hold the same policy').toEqual(before)
-    const fee = (onB['dcs:contractFields'] ?? []).find((field) => field['dcs:label'] === 'Payment Amount')
-    expect(JSON.stringify(fee?.['dcs:value']), 'the agreed fee is the redlined one').toContain('18500')
+    const fee = (onA['dcs:contractFields'] ?? []).find((field) => field['dcs:label'] === 'Payment Amount')
+    expect(JSON.stringify(fee?.['dcs:value']), 'the proposing party holds the redlined fee').toContain('18500')
   })
 })

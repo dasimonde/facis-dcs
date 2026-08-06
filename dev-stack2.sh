@@ -44,10 +44,21 @@ echo "Building locked Helm dependencies and deploying to Kubernetes..."
 helm dependency build --skip-refresh "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
 
+# Still deployed for the C2PA provenance credentials this instance issues
+# itself. The credentials a signatory presents name the shared issuer's own
+# signed list instead (ADR-34).
 echo "Waiting for statuslist-service..."
 kubectl wait --for=condition=ready pod \
   -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
   --timeout=5m
+
+# The credential issuer is shared with instance A, like the Federated Catalogue:
+# a Power of Attorney credential names one status list, and both instances must
+# resolve that one URL. Instance B installs no issuer of its own and verifies A's
+# against the same committed anchors (ADR-34).
+echo "Checking the credential issuer (started by dev-stack.sh) is reachable..."
+export ISSUER_BASE_URL="${ISSUER_BASE_URL:-http://localhost:30181}"
+make -C testWallet check-status-list
 
 # pdf-core is shared with instance A (same PDF_CORE_URL=http://localhost:8080
 # in both backend/.env.dev1 and backend/.env.dev2) — verify it's already up

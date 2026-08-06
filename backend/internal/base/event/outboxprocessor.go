@@ -486,32 +486,57 @@ func (j OutboxProcessor) scopeForEvent(event datatype.OutboxEvent) artifactstore
 // event_data is encrypted under the event's CEK scope before storage, so a later
 // shred erases the body without moving a single stored byte — the chain and the
 // checkpoint proofs keep verifying.
+// sealBody encrypts an event's body under its CEK scope and reports the body to
+// store plus the scope to name on the entry.
+//
+// An event still queued when its contract's CEK was shredded can never be
+// encrypted. It is stored under the erased marker instead — the same body a
+// reader gets for an entry shredded AFTER anchoring, and under no scope, since
+// there is no key. Failing here instead retried the event to its dead-letter
+// budget and then dropped it: a PAC_AUDIT_EXECUTED that happened to be in
+// flight at erasure time left the tamper-evident trail altogether, which is not
+// what erasing a body means. Erasure destroys the content, not the record that
+// something happened.
+func (j OutboxProcessor) sealBody(ctx context.Context, event datatype.OutboxEvent) (json.RawMessage, string, string, error) {
+	scope := j.scopeForEvent(event)
+	body, err := j.Artifacts.Encrypt(ctx, scope, event.EventData)
+	switch {
+	case err == nil:
+		encrypted, marshalErr := json.Marshal(body)
+		if marshalErr != nil {
+			return nil, "", "", fmt.Errorf("could not encode the body of event %d: %w", event.ID, marshalErr)
+		}
+		return encrypted, string(scope.Kind), scope.ID, nil
+	case artifactstore.IsShredded(err):
+		log.Printf("event %d (%s/%s) is anchored with an erased body: %v",
+			event.ID, event.Component, event.EventType, err)
+		return datatype.ErasedEventData, "", "", nil
+	default:
+		return nil, "", "", fmt.Errorf("could not encrypt the body of event %d: %w", event.ID, err)
+	}
+}
+
 func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEvent, predCID *string) (anchoredEntry, error) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
 		return anchoredEntry{}, fmt.Errorf("could not draw a blinding nonce for event %d: %w", event.ID, err)
 	}
 
-	scope := j.scopeForEvent(event)
-	body, err := j.Artifacts.Encrypt(ctx, scope, event.EventData)
+	entryBody, scopeKind, scopeID, err := j.sealBody(ctx, event)
 	if err != nil {
-		return anchoredEntry{}, fmt.Errorf("could not encrypt the body of event %d: %w", event.ID, err)
-	}
-	encryptedBody, err := json.Marshal(body)
-	if err != nil {
-		return anchoredEntry{}, fmt.Errorf("could not encode the body of event %d: %w", event.ID, err)
+		return anchoredEntry{}, err
 	}
 
 	entry := datatype.AuditLogEntry{
 		ID:            event.ID,
 		Component:     event.Component,
 		EventType:     event.EventType,
-		EventData:     encryptedBody,
+		EventData:     entryBody,
 		DID:           event.DID,
 		CreatedAt:     event.CreatedAt,
 		ResLogPredCID: predCID,
-		CEKScopeKind:  string(scope.Kind),
-		CEKScopeID:    scope.ID,
+		CEKScopeKind:  scopeKind,
+		CEKScopeID:    scopeID,
 		Nonce:         hex.EncodeToString(nonce),
 	}
 	raw, err := json.Marshal(entry)
@@ -519,7 +544,9 @@ func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEv
 		return anchoredEntry{}, fmt.Errorf("could not encode entry for event %d: %w", event.ID, err)
 	}
 
-	stored, err := j.IPFSClient.CreateFile(ctx, entry)
+	// A batch drains hundreds of queued events; the bulk variant keeps most of
+	// the write pool free for the stores a user is waiting on.
+	stored, err := j.IPFSClient.CreateFileBulk(ctx, entry)
 	if err != nil {
 		return anchoredEntry{}, fmt.Errorf("could not create IPFS file for event %d: %w", event.ID, err)
 	}

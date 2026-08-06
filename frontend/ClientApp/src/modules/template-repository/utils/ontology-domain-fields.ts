@@ -25,6 +25,8 @@ const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class'
 const SKOS = 'http://www.w3.org/2004/02/skos/core#'
 const DCS = 'https://w3id.org/facis/dcs/ontology/v1#'
 const SH = 'http://www.w3.org/ns/shacl#'
+const CONTRACT_PARTY_ROLE_CODE = `${DCS}ContractPartyRoleCode`
+const TECHNICAL_SHAPE = `${DCS}TechnicalShape`
 
 export class OntologyGraph {
   private bySubject = new Map<string, Quad[]>()
@@ -191,6 +193,27 @@ function parseValueConstraints(graph: OntologyGraph): ReadonlyMap<string, Semant
   return constraints
 }
 
+export interface ContractPartyRoleOption {
+  value: string
+  label: string
+}
+
+function parseContractPartyRoles(
+  graph: OntologyGraph,
+  constraints = parseValueConstraints(graph),
+): ContractPartyRoleOption[] {
+  const roles = new Map<string, ContractPartyRoleOption>()
+  for (const subject of graph.subjects()) {
+    if (graph.first(subject, `${RDFS}range`) !== CONTRACT_PARTY_ROLE_CODE) continue
+    const constraint = constraints.get(graph.first(subject, `${DCS}hasValueConstraint`))
+    for (const option of constraint?.valueOptions ?? []) {
+      if (!option.iri || !option.label) continue
+      roles.set(option.iri, { value: option.iri, label: option.label })
+    }
+  }
+  return [...roles.values()]
+}
+
 function parseClassLabels(graph: OntologyGraph): ReadonlyMap<string, string> {
   const labels = new Map<string, string>()
   for (const subject of [...graph.subjectsOfType(`${RDFS}Class`), ...graph.subjectsOfType(OWL_CLASS)]) {
@@ -338,15 +361,18 @@ function buildPropertyField(graph: OntologyGraph, propShape: string, path: strin
 }
 
 /**
- * Extracts assets from a SHACL shapes graph: every NodeShape with a
- * sh:targetClass becomes a pickable asset, its property shapes its fields.
+ * Extracts assets from a SHACL shapes graph: every non-technical NodeShape
+ * with a sh:targetClass becomes a pickable asset, its property shapes its
+ * fields. Shape authors opt out of the picker by typing an envelope or
+ * validation-only shape as dcs:TechnicalShape.
  */
 function parseShapesAssets(graph: OntologyGraph): HubAsset[] {
   const assets: HubAsset[] = []
   const seenClass = new Set<string>()
   for (const nodeShape of graph.subjectsOfType(`${SH}NodeShape`)) {
     const targetClass = graph.first(nodeShape, `${SH}targetClass`)
-    if (!targetClass || seenClass.has(targetClass)) continue
+    const isTechnicalShape = graph.values(nodeShape, RDF_TYPE).includes(TECHNICAL_SHAPE)
+    if (!targetClass || isTechnicalShape || seenClass.has(targetClass)) continue
     seenClass.add(targetClass)
     const label =
       graph.first(nodeShape, `${RDFS}label`) ||
@@ -368,14 +394,16 @@ function parseShapesAssets(graph: OntologyGraph): HubAsset[] {
 /**
  * The builder's pickable vocabulary, discovered from the whole Semantic Hub:
  * each registered ontology contributes its dcs:DomainField individuals (flat
- * data fields); each registered shapes graph contributes its NodeShapes as
- * assets. Registering a schema in the hub — including an imported Gaia-X
- * profile — makes its objects pickable, with no hardcoded schema name.
+ * data fields); each registered shapes graph contributes its non-technical
+ * targeted NodeShapes as assets. Registering a schema in the hub — including
+ * an imported Gaia-X profile — makes its objects pickable, with no hardcoded
+ * schema name.
  */
 async function loadHub(): Promise<{
   fields: DomainFieldDefinition[]
   assets: HubAsset[]
   constraints: SemanticValueConstraint[]
+  partyRoleOptions: ContractPartyRoleOption[]
 }> {
   const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
   hubFingerprint = fingerprintOf(inventory)
@@ -423,6 +451,7 @@ async function loadHub(): Promise<{
     fields: [...fieldsById.values()].sort((l, r) => bySource(l.source, r.source) || l.label.localeCompare(r.label)),
     assets: [...assetsById.values()].sort((l, r) => bySource(l.source, r.source) || l.label.localeCompare(r.label)),
     constraints: [...constraints.values()],
+    partyRoleOptions: parseContractPartyRoles(ontologyGraph, constraints),
   }
 }
 
@@ -441,7 +470,7 @@ type HubVocabulary = Awaited<ReturnType<typeof loadHub>>
 // shapes are ~2.4 MB), and this module re-parses them on every full page
 // load — so the parsed vocabulary rides sessionStorage, keyed by the hub
 // inventory fingerprint. A quota failure just means parsing again next load.
-const HUB_CACHE_KEY = 'dcs.hub.vocabulary.v1'
+const HUB_CACHE_KEY = 'dcs.hub.vocabulary.v4'
 
 function readHubCache(fingerprint: string): HubVocabulary | null {
   try {
@@ -480,10 +509,12 @@ const hub = await loadHubCached()
 const reactiveFields = shallowReactive<DomainFieldDefinition[]>(hub.fields)
 const reactiveAssets = shallowReactive<HubAsset[]>(hub.assets)
 const reactiveConstraints = shallowReactive<SemanticValueConstraint[]>(hub.constraints)
+const reactivePartyRoleOptions = shallowReactive<ContractPartyRoleOption[]>(hub.partyRoleOptions)
 
 export const ONTOLOGY_DOMAIN_FIELDS: readonly DomainFieldDefinition[] = reactiveFields
 export const ONTOLOGY_ASSETS: readonly HubAsset[] = reactiveAssets
 export const ONTOLOGY_VALUE_CONSTRAINTS: readonly SemanticValueConstraint[] = reactiveConstraints
+export const CONTRACT_PARTY_ROLE_OPTIONS: readonly ContractPartyRoleOption[] = reactivePartyRoleOptions
 
 let refreshInFlight: Promise<void> | null = null
 
@@ -502,6 +533,7 @@ export function refreshOntologyDomainFields(): Promise<void> {
     reactiveFields.splice(0, reactiveFields.length, ...fresh.fields)
     reactiveAssets.splice(0, reactiveAssets.length, ...fresh.assets)
     reactiveConstraints.splice(0, reactiveConstraints.length, ...fresh.constraints)
+    reactivePartyRoleOptions.splice(0, reactivePartyRoleOptions.length, ...fresh.partyRoleOptions)
   })().finally(() => {
     refreshInFlight = null
   })

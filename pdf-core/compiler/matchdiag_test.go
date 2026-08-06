@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -9,7 +8,7 @@ import (
 // The verify diagnostic must pinpoint WHERE two renders diverge: the page number
 // and a snippet of both sides around the first differing byte.
 func TestMatchPageContentReportsDivergence(t *testing.T) {
-	ctx := context.Background()
+	ctx := testChainContext()
 	a, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(richFilledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)

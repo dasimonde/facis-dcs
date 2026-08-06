@@ -46,6 +46,14 @@ def contract_negotiate_url(context) -> str:
     return f"{context.base_url}/contract/negotiate"
 
 
+def contract_accept_offer_url(context) -> str:
+    """Accepting an INBOUND offer as-is (backend/design/contract_workflow_engine.go
+    accept_offer): mints the accepting instance's negotiation task for the
+    offer's round and moves OFFERED -> NEGOTIATION. Distinct from
+    /contract/respond, which decides one already-proposed change request."""
+    return f"{context.base_url}/contract/accept-offer"
+
+
 def contract_negotiation_draft_url(context, did: str = None) -> str:
     """PUT saves to the bare path; GET/DELETE address the caller's draft by
     contract DID (backend/design/contract_workflow_engine.go
@@ -164,6 +172,23 @@ def pac_audit_url(context) -> str:
     return f"{context.base_url}/pac/audit"
 
 
+def pac_audit_timeline(response) -> list[dict]:
+    """The DCS-procured audit entries of one POST /pac/audit response.
+
+    /pac/audit answers with a single external-audit-executor run envelope
+    (backend/design/process_audit_and_compliance.go, PACExternalAuditResponse),
+    not with a list of per-scope trails: `findings` is the executor's verdict
+    and `timeline` is the evidence the DCS itself gathered and submitted.
+    Entries carry their own `did`, so the per-resource grouping the executor
+    request uses is not reproduced here.
+    """
+    body = response.json()
+    assert isinstance(body, dict) and body.get("audit_id"), (
+        f"Expected an executor-run audit envelope from /pac/audit, got: {body!r}"
+    )
+    return [entry for entry in (body.get("timeline") or []) if isinstance(entry, dict)]
+
+
 def pac_checkpoint_head_url(context) -> str:
     return f"{context.base_url}/pac/audit/checkpoint/head"
 
@@ -207,6 +232,13 @@ def contract_peer_pdf_url(context) -> str:
 
 def contract_peer_provenance_url(context) -> str:
     return f"{context.base_url}/peer/contracts/provenance"
+
+
+def contract_peer_settlement_url(context) -> str:
+    """POST /peer/contracts/settlement (post_settlement,
+    backend/design/dcs_to_dcs.go): where a peer deposits its signed statement
+    that it settled a named version of a contract this instance holds."""
+    return f"{context.base_url}/peer/contracts/settlement"
 
 
 def signature_prepare_url(context) -> str:

@@ -293,21 +293,3 @@ func GetParticipantID(ctx context.Context) string {
 func InjectAuthContext(ctx context.Context, roles []string, holderDID string, participantID string) context.Context {
 	return context.WithValue(ctx, authCtxKey{}, AuthContext{Roles: roles, HolderDID: holderDID, ParticipantID: participantID})
 }
-
-// unexported key type for the raw bearer token.
-type bearerTokenCtxKey struct{}
-
-// InjectBearerToken stores the raw JWT presented on the incoming request in the
-// request context.
-func InjectBearerToken(ctx context.Context, token string) context.Context {
-	return context.WithValue(ctx, bearerTokenCtxKey{}, token)
-}
-
-// GetBearerToken returns the raw JWT stored by InjectBearerToken, or "" when the
-// request carried no token (e.g. an internal, non-authenticated code path).
-func GetBearerToken(ctx context.Context) string {
-	if tok, ok := ctx.Value(bearerTokenCtxKey{}).(string); ok {
-		return tok
-	}
-	return ""
-}

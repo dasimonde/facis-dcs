@@ -30,23 +30,22 @@ WALLET_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WALLET_ROOT))
 
 from dcs_wallet.issuer import (
-    DEFAULT_ISSUER_DID,
     DEFAULT_KB_AUD,
     DEFAULT_KB_NONCE,
     issue_access_credential,
 )
 from dcs_wallet.keys import load_json, private_key_material
+from dcs_wallet.status_list import role_credential_index
 
 
-def _load_private_keys(keys_dir: Path) -> tuple[dict, dict]:
-    issuer_path = keys_dir / "issuer-dev.jwk"
+def _load_wallet_key(keys_dir: Path) -> dict:
     wallet_path = keys_dir / "wallet.jwk"
-    if not issuer_path.is_file() or not wallet_path.is_file():
+    if not wallet_path.is_file():
         raise FileNotFoundError(
-            f"missing issuer-dev.jwk or wallet.jwk in {keys_dir} — "
+            f"missing wallet.jwk in {keys_dir} — "
             "run: python3 testWallet/scripts/generate_keys.py --yes"
         )
-    return private_key_material(load_json(issuer_path)), private_key_material(load_json(wallet_path))
+    return private_key_material(load_json(wallet_path))
 
 
 def _parse_roles(raw: str) -> list[str]:
@@ -76,8 +75,12 @@ def main() -> int:
         required=True,
         help='comma-separated roles or JSON array, e.g. "Contract Manager,Auditor"',
     )
-    parser.add_argument("--issuer-did", default=DEFAULT_ISSUER_DID)
     parser.add_argument("--keys-dir", type=Path, default=WALLET_ROOT / "keys")
+    parser.add_argument(
+        "--issuer-base",
+        help="ORCE issuer this credential is issued as, serving /status-list/1 "
+        "(default: ISSUER_BASE_URL or the dev NodePort)",
+    )
     parser.add_argument(
         "--aud",
         default=DEFAULT_KB_AUD,
@@ -90,13 +93,14 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    issuer_private, wallet_private = _load_private_keys(args.keys_dir)
+    organization = args.organization.strip()
+    roles = _parse_roles(args.roles)
     token = issue_access_credential(
-        organization=args.organization.strip(),
-        roles=_parse_roles(args.roles),
-        issuer_private=issuer_private,
-        wallet_private=wallet_private,
-        issuer_did=args.issuer_did,
+        organization=organization,
+        roles=roles,
+        wallet_private=_load_wallet_key(args.keys_dir),
+        status_index=role_credential_index(organization=organization, roles=roles),
+        issuer_base=args.issuer_base,
         aud=args.aud,
         nonce=args.nonce,
     )

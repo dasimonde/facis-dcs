@@ -152,7 +152,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - New Template',
-      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -164,7 +164,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Edit Template',
-      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_APPROVER', 'TEMPLATE_MANAGER'],
+      roles: ['TEMPLATE_CREATOR', 'TEMPLATE_REVIEWER', 'TEMPLATE_MANAGER'],
     },
   },
   {
@@ -214,7 +214,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Review Tasks',
       order: 3.1,
-      roles: ['TEMPLATE_REVIEWER', 'CONTRACT_REVIEWER'],
+      roles: ['TEMPLATE_REVIEWER', 'TEMPLATE_MANAGER', 'CONTRACT_REVIEWER'],
     },
   },
   {
@@ -227,7 +227,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Approval Tasks',
       order: 3.2,
-      roles: ['TEMPLATE_APPROVER', 'CONTRACT_APPROVER'],
+      roles: ['TEMPLATE_APPROVER', 'TEMPLATE_MANAGER', 'CONTRACT_APPROVER'],
     },
   },
   {
@@ -437,7 +437,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Secure Contract Viewer',
-      roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER'],
+      roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER', 'CONTRACT_OBSERVER'],
     },
   },
   {

@@ -58,8 +58,16 @@ class OrceAuditControlService:
         cls.request(context, "/reset", {"channel": channel})
 
     @classmethod
-    def set_mode(cls, context, channel: str, mode: str) -> None:
-        cls.request(context, "/mode", {"channel": channel, "mode": mode})
+    def set_mode(cls, context, channel: str, mode: str, gate: str | None = None) -> None:
+        """Set the mode the executor answers with. A gate name scopes the mode
+        to that gate alone and leaves the channel-wide mode in place, so a
+        scenario whose transition dispatches one gate synchronously and a
+        second one asynchronously does not have to switch modes between them.
+        """
+        payload = {"channel": channel, "mode": mode}
+        if gate:
+            payload["gate"] = gate
+        cls.request(context, "/mode", payload)
 
     @classmethod
     def observations(cls, context, channel: str) -> list[dict]:

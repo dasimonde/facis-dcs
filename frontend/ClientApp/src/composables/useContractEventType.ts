@@ -4,6 +4,7 @@ import type {
   ContractAuditEvent,
   ContractCreateEvent,
   ContractIncreaseContractVersionEvent,
+  ContractNegotiationChangeSupersededEvent,
   ContractNegotiationEvent,
   ContractRecordEvidenceEvent,
   ContractRejectEvent,
@@ -122,6 +123,12 @@ export function useContractEventType() {
     return event.event_type === 'INCREASE_CONTRACT_VERSION'
   }
 
+  const isNegotiationChangeSupersededEvent = (
+    event: ContractAuditResponseItem,
+  ): event is ContractAuditResponseItem & { event_data: ContractNegotiationChangeSupersededEvent } => {
+    return event.event_type === 'NEGOTIATION_CHANGE_SUPERSEDED'
+  }
+
   return {
     isCreateEvent,
     isUpdateEvent,
@@ -140,5 +147,6 @@ export function useContractEventType() {
     isAuditEvent,
     isReviewEvent,
     isIncreaseContractVersionEvent,
+    isNegotiationChangeSupersededEvent,
   }
 }

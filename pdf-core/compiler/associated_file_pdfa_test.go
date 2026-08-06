@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"regexp"
 	"testing"
 )
@@ -13,7 +12,7 @@ import (
 // rejects it. Without the VC the catalog /AF lists two files (C2PA + JSON-LD);
 // with it, three.
 func TestVCAttachmentListedInCatalogAF(t *testing.T) {
-	ctx := WithSigner(context.Background(), NewCapturingSigner())
+	ctx := WithSigner(testChainContext(), NewCapturingSigner())
 	fresh, err := CompilePDF(ctx, []byte(filledContractPayload), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatal(err)

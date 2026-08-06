@@ -1,0 +1,38 @@
+{{- if .Values.ingress.tlsOptions.enabled }}
+{{/*
+DCS-IR-CI-01 / DCS-NFR-SEC-01: jede Verbindung zu einer DCS-Schnittstelle muss
+ueber TLS 1.3 laufen, SSL 3.0 sowie TLS 1.0 und 1.1 sind ausgeschlossen.
+
+Eine Mindestversion laesst sich nur dort erzwingen, wo TLS auch terminiert
+wird. In den Stacks, die Traefik aus diesem Chart mitbringen, ist das hier;
+terminiert dagegen der Ingress der Plattform (values.prod.yml laesst
+ingress.className leer und nutzt den Default des Clusters), gehoert die
+Einstellung dorthin — siehe den Abschnitt "TLS-Version erzwingen" im
+Deployment-Leitfaden.
+
+Ohne diese Ressource entscheidet die Voreinstellung des Controllers, welche
+Protokollversionen ausgehandelt werden. Traefik laesst ohne TLSOption auch
+TLS 1.2 zu, und das genuegt der Anforderung nicht.
+*/}}
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-tls13
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  minVersion: {{ .Values.ingress.tlsOptions.minVersion | quote }}
+  {{- with .Values.ingress.tlsOptions.maxVersion }}
+  maxVersion: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tlsOptions.cipherSuites }}
+  \ Nur fuer TLS 1.2 wirksam. Unter TLS 1.3 legt die Norm die Suiten fest und
+  # Go ignoriert die Liste; sie steht hier fuer den Fall, dass eine Umgebung
+  # minVersion voruebergehend absenken muss.
+  cipherSuites:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.ingress.tlsOptions.sniStrict }}
+  sniStrict: {{ . }}
+  {{- end }}
+{{- end }}

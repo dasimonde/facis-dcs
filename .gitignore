@@ -1,6 +1,8 @@
 tmp
 __debug_bin*
 
+/temp/
+
 .idea
 .vscode
 .DS_Store

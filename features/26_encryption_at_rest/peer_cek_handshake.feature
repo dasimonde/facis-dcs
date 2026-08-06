@@ -21,6 +21,11 @@
 #
 # Setup reuses the canonical cross-instance steps of 17_peer_trust; the
 # erasure-related reads run under this scenario's dedicated organization.
+# Both instances settle their own copy before A signs, because neither may
+# sign a version the other has not settled. B's settlement round folds into
+# B's copy before A's signed PDF arrives, and the export compared below is
+# still the same artifact on both sides: B adopts the inbound signed PDF
+# verbatim (prefer-inbound-PDF rule) rather than re-rendering its own.
 
 @DCS-NFR-SEC-14 @two-instance
 Feature: Peer CEK handshake — the shipped wrapped CEK lets the counterparty serve the identical contract
@@ -31,6 +36,7 @@ Feature: Peer CEK handshake — the shipped wrapped CEK lets the counterparty se
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
     When instance A drives the contract to APPROVED through its own local workflow
+    And instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance A applies a ceremony-backed signature to the contract
     Then the cross-instance contract's PDF export is byte-identical on instance A and instance B
     And the erasure status of the cross-instance contract reports local status "live" on instance A

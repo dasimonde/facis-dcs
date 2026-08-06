@@ -253,6 +253,72 @@ func TestLocalResultSeparatesDeferredFromPassed(t *testing.T) {
 	require.Equal(t, "SUCCESS", resultStatus("NOT_EVALUATED", Response{Result: "PASSED", Findings: []Finding{}}))
 }
 
+// The contract's own dcs:policies are enforced where the contract is
+// committed to — ValidateContractPolicySatisfaction at approve.go and
+// signingmanagement apply.go — not at every transition. A gate that blocked on
+// them refused submission, offer and negotiation-settle, which the SLA
+// federation vertical performs deliberately with an out-of-boundary
+// counter-offer, and replaced the rule-naming refusal with a generic one.
+func TestLocalResultLeavesContractODRLToItsOwnEnforcementPoint(t *testing.T) {
+	contractODRL := validation.PolicyFinding{
+		RuleID: "FACIS-CONTRACT-ODRL-POLICY", Severity: validation.SeverityError,
+		Source: validation.SourceContractODRL,
+	}
+	hubShapes := validation.PolicyFinding{
+		RuleID: "title-InConstraintComponent", Severity: validation.SeverityError,
+		Source: validation.SourceHubShapes,
+	}
+	policySet := validation.PolicyFinding{
+		RuleID: "FACIS-BLACKLIST-COUNTRY", Severity: validation.SeverityError,
+		Source: validation.SourcePolicySetODRL,
+	}
+
+	require.Equal(t, "PASSED", resultFromLocal([]validation.PolicyFinding{contractODRL}))
+	require.Empty(t, blockingFindings([]validation.PolicyFinding{contractODRL}))
+
+	// Everything the gate IS the enforcement point for still blocks, including
+	// an untagged finding from a caller that predates the source tagging.
+	require.Equal(t, "BLOCKED", resultFromLocal([]validation.PolicyFinding{contractODRL, hubShapes}))
+	require.Equal(t, "BLOCKED", resultFromLocal([]validation.PolicyFinding{policySet}))
+	require.Equal(t, "BLOCKED", resultFromLocal([]validation.PolicyFinding{
+		{RuleID: "FACIS-UNTAGGED", Severity: validation.SeverityError},
+	}))
+
+	// A warning on the contract's own policies does not hold the transition
+	// for human review either.
+	contractODRL.Severity = validation.SeverityWarning
+	require.Equal(t, "PASSED", resultFromLocal([]validation.PolicyFinding{contractODRL}))
+}
+
+func TestBlockedGateNamesTheFindingThatBlockedIt(t *testing.T) {
+	blocked := &LocalEvaluationBlockedError{Findings: blockingFindings([]validation.PolicyFinding{
+		{RuleID: "FACIS-SATISFIED", Severity: validation.SeveritySatisfied, Message: "holds"},
+		{
+			RuleID: "title-InConstraintComponent", Severity: validation.SeverityError,
+			Message: "value is not in the allowed list", Source: validation.SourceHubShapes,
+		},
+		{
+			RuleID: "FACIS-CONTRACT-ODRL-POLICY", Severity: validation.SeverityError,
+			Message: "not the gate's call", Source: validation.SourceContractODRL,
+		},
+	})}
+
+	require.Equal(t, []string{"title-InConstraintComponent: value is not in the allowed list"}, blocked.Reasons())
+	require.Equal(t,
+		"workflow gate blocked: local Semantic Hub evaluation blocked the transition: "+
+			"title-InConstraintComponent: value is not in the allowed list",
+		(&BlockedError{Status: "BLOCKED", Cause: blocked}).Error())
+
+	var unwrapped *LocalEvaluationBlockedError
+	require.True(t, errors.As(error(&BlockedError{Status: "BLOCKED", Cause: blocked}), &unwrapped))
+	require.Len(t, unwrapped.Findings, 1)
+
+	// A blocked run with no nameable finding must still not claim a failure
+	// that did not happen: the evaluation succeeded and found something.
+	require.Equal(t, "local Semantic Hub evaluation blocked the transition",
+		(&LocalEvaluationBlockedError{}).Error())
+}
+
 func TestResultPrecedence(t *testing.T) {
 	require.Equal(t, "SUCCESS", resultStatus("PASSED", Response{Result: "PASSED", Findings: []Finding{}}))
 	require.Equal(t, "REVIEW", resultStatus("REVIEW", Response{Result: "PASSED", Findings: []Finding{}}))
@@ -420,6 +486,60 @@ func TestConcurrentClaimDispatchesExactlyOnceAndReusesSameRun(t *testing.T) {
 	require.NotEqual(t, got[0].inserted, got[1].inserted)
 	require.NotEmpty(t, got[0].runID)
 	require.Equal(t, got[0].runID, got[1].runID)
+}
+
+// closeoutDriver honours the context the way a real database driver does, and
+// records the statements that actually reached it.
+type closeoutDriver struct{ state *closeoutState }
+type closeoutState struct {
+	mu       sync.Mutex
+	executed []string
+}
+type closeoutConn struct{ state *closeoutState }
+
+func (d closeoutDriver) Open(string) (driver.Conn, error) { return &closeoutConn{state: d.state}, nil }
+func (c *closeoutConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is unsupported")
+}
+func (c *closeoutConn) Close() error { return nil }
+func (c *closeoutConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions are unsupported")
+}
+func (c *closeoutConn) ExecContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.state.mu.Lock()
+	defer c.state.mu.Unlock()
+	c.state.executed = append(c.state.executed, query)
+	return driver.RowsAffected(1), nil
+}
+
+// A gate dispatch usually fails because the caller went away — an HTTP client
+// timeout, a cancelled request. Closing the run out on that same dead context
+// wrote nothing, so the row stayed DISPATCHING; since (snapshot_id,gate) is
+// unique, every later transition of that contract then read the abandoned run
+// and was refused with 409 "does not permit transition", permanently.
+func TestRunIsClosedOutEvenWhenTheCallerIsGone(t *testing.T) {
+	state := &closeoutState{}
+	driverName := "workflow-gate-closeout-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	sql.Register(driverName, closeoutDriver{state: state})
+	rawDB, err := sql.Open(driverName, "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDB.Close() })
+	coordinator := &Coordinator{DB: sqlx.NewDb(rawDB, driverName)}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.NoError(t, coordinator.finish(cancelled, uuid.NewString(), "BLOCKED", validGateRequest(), nil,
+		errors.New("executor dispatch failed: context canceled")))
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	require.Len(t, state.executed, 1)
+	require.Contains(t, state.executed[0], "UPDATE pac_workflow_gate_runs")
+	require.Contains(t, state.executed[0], "status='DISPATCHING'")
 }
 
 func TestReviewedContinuationRefreshesTimestampForUnchangedSnapshot(t *testing.T) {
@@ -603,6 +723,7 @@ func TestClientReplacedDocumentKeepsTheSnapshotBuildable(t *testing.T) {
 			"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
 			"https://dcs-osc.test/api/semantic/shapes/clause-catalog?version=1",
 		},
+		nil,
 		"https://dcs-osc.test/api/semantic/profile/facis.sla.basic?version=1")
 	require.NoError(t, err)
 	require.NoError(t, requireConsistentShapesBundle(decodeContent(t, created)))

@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { TemplateType } from '@template-repository/models/contract-template'
-import { ONTOLOGY_ASSETS, ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
+import {
+  CONTRACT_PARTY_ROLE_OPTIONS,
+  ONTOLOGY_ASSETS,
+  ONTOLOGY_DOMAIN_FIELDS,
+} from '@template-repository/utils/ontology-domain-fields'
 import { DCS_ODRL_PROFILE_IRI, DEFAULT_FIELD_CONSTRAINT_ACTION } from '@template-repository/utils/sla-ontology-catalog'
 import { applyInlineSemanticValues } from '@contract-workflow-engine/utils/semantic-condition-values'
 import {
@@ -28,6 +32,7 @@ import {
   typedFieldFill,
   type XsdDatatype,
 } from '@/models/dcs-jsonld'
+import { declaredPartyRoles } from '@/utils/participant-selection'
 import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { ContractTemplate } from '@/models/contract-template/contract-template'
 import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
@@ -82,10 +87,10 @@ export const useDcsDraftStore = defineStore(storeId, {
     /** Parties a clause rule can bind (assigner/assignee/target), by label. */
     partyAnchors(): { id: string; label: string }[] {
       const documentId = this.documentIri ?? this.did ?? undefined
-      return [
-        { id: objectIri('party', 'assigner', documentId), label: 'My organization' },
-        { id: objectIri('party', 'assignee', documentId), label: 'The counterparty' },
-      ]
+      return CONTRACT_PARTY_ROLE_OPTIONS.map((role) => ({
+        id: objectIri('party', role.value, documentId),
+        label: role.label,
+      }))
     },
     /** The contract/asset IRI an ODRL rule targets. */
     contractTargetIri(): string {
@@ -214,7 +219,37 @@ export const useDcsDraftStore = defineStore(storeId, {
       parent['dcs:children'] = { '@list': children.map((id) => ({ '@id': id })) }
     },
     deleteBlock(blockId: string): void {
+      const before = this.blocks.slice()
       deleteBlock(this.layout, this.blocks, blockId)
+      this.withdrawRemovedBlockDeclarations(before)
+    },
+    /** What removed prose takes with it: the rules it backed and the field
+     *  declarations nothing binds any more. A rule outliving its `dcs:prose`
+     *  is refused by the hub shapes, and an unbound required declaration
+     *  blocks the offer over a placeholder the document no longer shows —
+     *  the same closedness removeDataObject keeps for a leaf's field. */
+    withdrawRemovedBlockDeclarations(before: DcsBlock[]): void {
+      const remaining = new Set(this.blocks.map((b) => b['@id']))
+      const removed = before.filter((b) => !remaining.has(b['@id']))
+      if (removed.length === 0) return
+
+      this.policies = this.policies.filter((policy) => {
+        const prose = policy['dcs:prose']?.['@id']
+        return !prose || remaining.has(prose)
+      })
+
+      const declared = new Set(this.contractFields.map((field) => field['@id']))
+      const withdrawn = new Set<string>()
+      collectFieldRefs(removed, declared, withdrawn)
+      if (withdrawn.size === 0) return
+
+      const stillBound = new Set<string>()
+      collectFieldRefs(this.blocks, declared, stillBound)
+      collectFieldRefs(this.policies, declared, stillBound)
+      collectFieldRefs(this.contractData, declared, stillBound)
+      this.contractFields = this.contractFields.filter(
+        (field) => !withdrawn.has(field['@id']) || stillBound.has(field['@id']),
+      )
     },
     updateBlock(
       blockId: string,
@@ -246,7 +281,8 @@ export const useDcsDraftStore = defineStore(storeId, {
       operators: SemanticParameterOperator[],
     ): void {
       const documentId = this.documentIri ?? this.did ?? undefined
-      const role = undefined
+      const partyRoles = declaredPartyRoles({ 'dcs:policies': this.policies })
+      if (partyRoles.length !== 2) return
       this.policies = this.policies.filter((p) => !ruleLeftOperands(p).includes(fieldId))
       operators.forEach((operator, index) => {
         if (!isStandardOdrlOperator(operator.operate)) return
@@ -255,8 +291,8 @@ export const useDcsDraftStore = defineStore(storeId, {
           '@id': policyIri(conditionId, parameterName, index, documentId),
           '@type': 'odrl:Duty',
           'odrl:action': { '@id': DEFAULT_FIELD_CONSTRAINT_ACTION },
-          'odrl:assigner': partyReference(role, documentId),
-          'odrl:assignee': partyReference(counterpartRole(role), documentId),
+          'odrl:assigner': partyReference(partyRoles[0]!, documentId),
+          'odrl:assignee': partyReference(partyRoles[1]!, documentId),
           'odrl:target': targetReference(documentId),
           'dcs:prose': proseBlockForField(this.blocks, fieldId),
           'odrl:constraint': [
@@ -396,7 +432,13 @@ export const useDcsDraftStore = defineStore(storeId, {
       this.contractFields.push(...fields)
       this.contractData.push(semanticConditionToContractData({ ...payload, conditionId }, fields, documentId))
       this.policies.push(
-        ...semanticConditionToPolicies({ ...payload, conditionId }, this.contractFields, this.blocks, documentId),
+        ...semanticConditionToPolicies(
+          { ...payload, conditionId },
+          this.contractFields,
+          this.blocks,
+          documentId,
+          declaredPartyRoles({ 'dcs:policies': this.policies }),
+        ),
       )
     },
     updateSemanticCondition(conditionId: string, payload: Omit<SemanticCondition, 'conditionId'>): void {
@@ -413,7 +455,13 @@ export const useDcsDraftStore = defineStore(storeId, {
       ]
       this.policies = this.policies.filter((p) => !ruleLeftOperands(p).some((op) => oldFieldIds.has(op)))
       this.policies.push(
-        ...semanticConditionToPolicies({ ...payload, conditionId }, this.contractFields, this.blocks, documentId),
+        ...semanticConditionToPolicies(
+          { ...payload, conditionId },
+          this.contractFields,
+          this.blocks,
+          documentId,
+          declaredPartyRoles({ 'dcs:policies': this.policies }),
+        ),
       )
     },
     deleteSemanticCondition(conditionId: string): void {
@@ -488,11 +536,13 @@ export const useDcsDraftStore = defineStore(storeId, {
       return id
     },
     deleteClause(blockId: string): void {
+      const before = this.blocks.slice()
       removeClauseFromLayout(this.layout, blockId)
       this.blocks = this.blocks.filter((b) => b['@id'] !== blockId)
-      // A machine-readable rule must never outlive the prose it is backed
-      // by — drop policies whose dcs:prose referenced the deleted clause.
-      this.policies = this.policies.filter((p) => p['dcs:prose']?.['@id'] !== blockId)
+      // A machine-readable rule must never outlive the prose it is backed by,
+      // and neither may a field declaration outlive the placeholder that bound
+      // it.
+      this.withdrawRemovedBlockDeclarations(before)
     },
     updateClause(blockId: string, payload: { title?: string; content?: DcsContentSegment[] }): void {
       this.updateBlock(blockId, payload)
@@ -580,14 +630,8 @@ function policySetIri(documentId?: string): string {
 // to the real counterpart legal-entity DID is left to the semantic mapper
 // that already publishes bound envelopes for peer exchange.
 
-function counterpartRole(role: string | undefined): string {
-  if (role === 'provider') return 'customer'
-  if (role === 'customer') return 'provider'
-  return 'assignee'
-}
-
-function partyReference(role: string | undefined, documentId?: string): JsonLdReference {
-  return { '@id': objectIri('party', role ?? 'assigner', documentId) }
+function partyReference(role: string, documentId?: string): JsonLdReference {
+  return { '@id': objectIri('party', role, documentId) }
 }
 
 function targetReference(documentId?: string): JsonLdReference {
@@ -1073,6 +1117,19 @@ function deleteBlock(layout: DcsLayoutNode[], blocks: DcsBlock[], blockId: strin
   if (block?.['@type'] === 'dcs:Clause') {
     const newChildren = layoutNodeChildren(parent).filter((id) => id !== blockId)
     parent['dcs:children'] = { '@list': newChildren.map((id) => ({ '@id': id })) }
+    // A clause may be placed more than once; the block survives as long as any
+    // layout node still holds it. Once the last placement is gone the block
+    // must go too: assembleCanonicalDocument serializes dcs:blocks whole, so a
+    // clause kept without a placement stays in the document while nothing
+    // renders it — and its prose keeps binding required fields that no user
+    // can reach any more (backend validation.ValidateContractClosed reads
+    // exactly that block list, so the offer is refused over an invisible
+    // placeholder).
+    if (!layout.some((n) => layoutNodeChildren(n).includes(blockId))) {
+      const kept = blocks.filter((b) => b['@id'] !== blockId)
+      blocks.length = 0
+      blocks.push(...kept)
+    }
     return
   }
 
@@ -1086,6 +1143,21 @@ function deleteBlock(layout: DcsLayoutNode[], blocks: DcsBlock[], blockId: strin
   const blocksToKeep = blocks.filter((b) => !toRemove.has(b['@id']))
   blocks.length = 0
   blocks.push(...blocksToKeep)
+}
+
+/** Collects which of `declared` the value still references, at any depth.
+ *  A field is bound by a prose segment, an ODRL operand or a data leaf — all
+ *  of them a `{"@id": …}` reference, so one walk answers for every kind. */
+function collectFieldRefs(value: unknown, declared: Set<string>, found: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) collectFieldRefs(entry, declared, found)
+    return
+  }
+  if (typeof value !== 'object' || value === null) return
+  for (const [key, member] of Object.entries(value)) {
+    if (key === '@id' && typeof member === 'string' && declared.has(member)) found.add(member)
+    else collectFieldRefs(member, declared, found)
+  }
 }
 
 function removeClauseFromLayout(layout: DcsLayoutNode[], blockId: string): void {
@@ -1290,8 +1362,12 @@ function semanticConditionToPolicies(
   _contractFields: DcsContractField[],
   blocks: readonly DcsBlock[],
   documentId?: string,
+  partyRoles: readonly string[] = [],
 ): OdrlRule[] {
   const role = condition.entityRole
+  if (!role || partyRoles.length !== 2 || !partyRoles.includes(role)) return []
+  const counterpart = partyRoles.find((candidate) => candidate !== role)
+  if (!counterpart) return []
   return condition.parameters.flatMap((parameter) =>
     parameter.operators.flatMap((operator, index) => {
       if (!isStandardOdrlOperator(operator.operate)) return []
@@ -1303,7 +1379,7 @@ function semanticConditionToPolicies(
           '@type': 'odrl:Duty',
           'odrl:action': { '@id': DEFAULT_FIELD_CONSTRAINT_ACTION },
           'odrl:assigner': partyReference(role, documentId),
-          'odrl:assignee': partyReference(counterpartRole(role), documentId),
+          'odrl:assignee': partyReference(counterpart, documentId),
           'odrl:target': targetReference(documentId),
           'dcs:prose': proseBlockForField(blocks, fieldId),
           'odrl:constraint': [

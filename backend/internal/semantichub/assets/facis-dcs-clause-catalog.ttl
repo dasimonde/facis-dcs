@@ -90,7 +90,7 @@ dcs:odrlActionVocabulary
   ) .
 
 dcs:OdrlObligationShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Duty ;
   rdfs:label "ODRL Obligation" ;
   sh:property [
@@ -116,7 +116,7 @@ dcs:OdrlObligationShape
 # all expressible through these hub-served shapes).
 
 dcs:OdrlPermissionShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Permission ;
   rdfs:label "ODRL Permission" ;
   sh:property [
@@ -160,7 +160,7 @@ dcs:OdrlPermissionShape
   ] .
 
 dcs:OdrlProhibitionShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Prohibition ;
   rdfs:label "ODRL Prohibition" ;
   sh:property [

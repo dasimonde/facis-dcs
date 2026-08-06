@@ -173,7 +173,7 @@ const instanceHint = computed(() => {
     </div>
 
     <p v-if="!shape" class="text-sm opacity-70">
-      No registered shape describes {{ object['@type'] }} — the object is carried verbatim.
+      No registered shape describes {{ object['@type'] }}. The object is carried verbatim.
     </p>
 
     <div v-else class="space-y-2">

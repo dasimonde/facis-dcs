@@ -1,6 +1,7 @@
 package oid4vp
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -210,13 +211,25 @@ func TestDevTrustConfigLoads(t *testing.T) {
 			t.Errorf("issuer %q has no purposes", iss)
 		}
 		// Only a mechanism that publishes keys in the entry has a JWKS to check.
-		// An x5c issuer has none by design — its key arrives in the credential's
-		// certificate chain — so demanding one of every entry made the mechanism
-		// the configuration exists to choose unusable in the shipped file.
+		// An x5c issuer resolving to a CA has none by design — its key arrives
+		// in the credential's certificate chain — so demanding one of every
+		// entry made the mechanism the configuration exists to choose unusable.
+		//
+		// A LOGIN issuer is the exception, and the bundled key means something
+		// different there: it is the leaf pin (ADR-35). Login terminates at the
+		// certificate the operator named rather than at a CA, so an x5c login
+		// issuer must carry exactly one.
 		switch entry.Mechanism {
 		case MechanismX5C:
+			// The mechanism decides resolution, so an x5c issuer never bundles
+			// a jwks — that would be a second, contradictory answer.
 			if len(entry.JWKS) != 0 {
 				t.Errorf("issuer %q resolves through a certificate chain but also bundles a jwks; one of the two is not what the operator meant", iss)
+			}
+			// A login issuer pins the leaf under that chain instead, which
+			// constrains the chain rather than replacing it.
+			if entry.Allows(PurposeLogin) && len(entry.X5CLeafKeys) == 0 {
+				t.Errorf("issuer %q is granted login and resolves by chain, so it must pin the key its leaf carries", iss)
 			}
 		case MechanismJWKS:
 			var probe map[string]any
@@ -224,6 +237,84 @@ func TestDevTrustConfigLoads(t *testing.T) {
 				t.Errorf("issuer %q jwks is not an object: %v", iss, err)
 			}
 		}
+	}
+}
+
+// The ORCE credential issuer the dev and BDD stacks run is trusted to grant a
+// session, and trusted through the certificate chain it signs with — the same
+// chain, to the same anchor, as the status list those credentials point at
+// (ADR-34: served by the issuer that issued the credential, signed with the
+// same key, identified the same way).
+//
+// The mechanism is the part worth pinning. did:web cannot express this issuer —
+// resolution is https-only (didWebURL), and both stacks reach the issuer over
+// http on a NodePort and a local ingress. Configured that way, every credential
+// from /offer is refused, and the refusal names the issuer rather than the
+// configuration.
+//
+// It is `x5c` with a pinned leaf: the chain is how the credential carries the
+// key, and x5c_leaf_keys names which leaf under it this deployment authorized
+// (ADR-35). The issuer key is a mounted fixture
+// (deployment/helm/charts/orce/pki-dev/issuer.key) precisely so this file can
+// name it — a key generated on the pod's volume at boot could not be pinned by
+// anything committed here.
+func TestDevTrustConfigCoversTheORCEIssuersItsStacksRun(t *testing.T) {
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
+	cfg, err := LoadTrustConfig(devTrustConfigPath)
+	if err != nil {
+		t.Fatalf("shipped dev trust config must load: %v", err)
+	}
+	// dev-stack.sh reaches it on the NodePort (values.issuer.dev.yml); the kind
+	// BDD stack behind a prefix-stripping ingress (values.issuer.bdd.yml). The
+	// DID follows the URL, so each stack's issuer is a distinct identity.
+	// The issuers put their base URL in `iss`, so that is what the entry is
+	// keyed by. dev-stack.sh reaches one on the NodePort; the kind BDD stack the
+	// other behind a prefix-stripping ingress.
+	for _, iss := range []string{"http://localhost:30181", "http://localhost:18080/issuer"} {
+		entry, ok := cfg.Issuers[iss]
+		if !ok {
+			t.Fatalf("issuer %q has no trust entry, so the credentials it issues are refused as untrusted", iss)
+		}
+		if entry.Mechanism != MechanismX5C {
+			t.Errorf("issuer %q declares mechanism %q; it signs with an x5c chain and nothing else can resolve it", iss, entry.Mechanism)
+		}
+		// Login terminates at the leaf, so the key has to be named here or the
+		// credential would be checked against a CA list instead — which admits
+		// whoever that CA vouched for.
+		if len(entry.X5CLeafKeys) == 0 {
+			t.Errorf("issuer %q grants login but pins no leaf key", iss)
+		}
+		if !cfg.For(PurposeLogin).IssuerTrusted(iss) {
+			t.Errorf("issuer %q may not grant a session, which is the only thing its Power of Attorney is for", iss)
+		}
+	}
+}
+
+// An x5c issuer is resolvable only against anchors, so an entry declaring that
+// mechanism with no anchors configured cannot verify a single credential. The
+// two are separate settings (OID4VP_TRUST_DATA_PATH, OID4VP_X5C_TRUST_ANCHORS_
+// PATH) and a stack that sets one without the other looks configured.
+func TestDevTrustConfigShipsAnchorsForItsX5CIssuers(t *testing.T) {
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
+	cfg, err := LoadTrustConfig(devTrustConfigPath)
+	if err != nil {
+		t.Fatalf("shipped dev trust config must load: %v", err)
+	}
+	var x5cIssuers []string
+	for iss, entry := range cfg.Issuers {
+		if entry.Mechanism == MechanismX5C {
+			x5cIssuers = append(x5cIssuers, iss)
+		}
+	}
+	if len(x5cIssuers) == 0 {
+		t.Fatal("no issuer resolves by certificate chain, so this stack no longer exercises the production path")
+	}
+	anchors, err := LoadX5CTrustAnchors(devX5CAnchorsPath)
+	if err != nil {
+		t.Fatalf("issuers %v resolve by chain but the shipped anchors do not load: %v", x5cIssuers, err)
+	}
+	if len(anchors) == 0 {
+		t.Fatalf("issuers %v resolve by chain against no anchors at all", x5cIssuers)
 	}
 }
 
@@ -318,12 +409,12 @@ func TestResolveKeysByMechanism(t *testing.T) {
 }
 
 // Federation cannot require editing every instance's trust file whenever a
-// member is onboarded, so a peer's issuer is trusted dynamically — bounded by
-// its own authority, and authorized separately by the ADR-19 gate and the PDP.
-func TestDynamicPeerTrust(t *testing.T) {
+// member is onboarded, so an unlisted peer is admitted by its certificate chain
+// instead — bounded by its own authority, and authorized separately by the
+// ADR-19 gate and the PDP (ADR-35).
+func TestAnchoredPeerTrust(t *testing.T) {
 	cfg := &TrustConfig{
-		VCTs:        []string{"urn:dcs:poa:v1"},
-		PeerDynamic: true,
+		VCTs: []string{"urn:dcs:poa:v1"},
 		Issuers: map[string]TrustedIssuer{
 			"https://own.example/issuer": {
 				Purposes: []Purpose{PurposeLogin}, Organizations: []string{"did:web:own.example"},
@@ -332,36 +423,32 @@ func TestDynamicPeerTrust(t *testing.T) {
 		},
 	}
 
-	unlisted := "did:web:newpeer.example:issuer"
+	unlisted := "https://newpeer.example/issuer"
 
-	if !cfg.For(PurposePeer).IssuerTrusted(unlisted) {
-		t.Error("an unlisted did:web peer issuer must be verifiable for peering")
+	// Configuration alone admits nothing. The old dynamic path trusted an
+	// unlisted issuer on the strength of its identifier; trust now waits on a
+	// chain that Go has actually verified.
+	if cfg.For(PurposePeer).IssuerTrusted(unlisted) {
+		t.Error("an unlisted peer issuer must not be trusted before its chain is verified")
 	}
-	// Trusting it is worthless if no key can be resolved for it. Asserting only
-	// the gate let this ship as dead code: IssuerTrusted said yes while
-	// resolution rejected the same issuer, so no dynamic peer could ever be
-	// verified.
-	cfg.SetKeyFetcher(stubFetcher{docs: map[string][]byte{
-		"https://newpeer.example/issuer/did.json": []byte(`{
-          "id": "did:web:newpeer.example:issuer",
-          "verificationMethod": [{"id": "did:web:newpeer.example:issuer#key-1", "publicKeyJwk": {"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}}],
-          "assertionMethod": ["did:web:newpeer.example:issuer#key-1"]
-        }`),
-	}})
-	keys, err := cfg.For(PurposePeer).IssuerJWKS(unlisted)
-	if err != nil || !strings.Contains(string(keys), "VlBNhqQn6gLy") {
-		t.Fatalf("a dynamic peer's key must resolve from its own DID document: keys=%q err=%v", keys, err)
+	if !cfg.For(PurposePeer).IssuerTrustedAnchored(unlisted) {
+		t.Error("an unlisted peer issuer whose chain anchored must be trusted for peering")
 	}
-	if usesX5C, err := cfg.For(PurposePeer).IssuerUsesX5C(unlisted); err != nil || usesX5C {
-		t.Errorf("a dynamic peer publishes a DID document, not a chain: %v %v", usesX5C, err)
+
+	// A PID issuer is admitted the same way, and for the same reason: nobody
+	// can enumerate who issues a PID — in production this deployment may be one
+	// of them — so the PID CA list is the statement of which attestations of a
+	// person are believed.
+	if !cfg.For(PurposePID).IssuerTrustedAnchored(unlisted) {
+		t.Error("an unlisted PID issuer whose chain anchored must be trusted for pid")
 	}
-	// Access to this deployment stays the operator's explicit decision.
-	if cfg.For(PurposeLogin).IssuerTrusted(unlisted) {
-		t.Error("a dynamic peer issuer must NOT grant login")
+
+	// Access to this deployment stays explicit: my organization's issuers,
+	// named here, and a certificate under the PoA CA is not one of them.
+	if cfg.For(PurposeLogin).IssuerTrustedAnchored(unlisted) {
+		t.Error("an anchored issuer must NOT grant login")
 	}
-	if cfg.For(PurposePID).IssuerTrusted(unlisted) {
-		t.Error("a dynamic peer issuer must NOT serve as a PID issuer")
-	}
+
 	// It speaks for its own party and no other.
 	if !cfg.For(PurposePeer).IssuerMayAttest(unlisted, "did:web:newpeer.example") {
 		t.Error("a peer issuer must attest its own authority")
@@ -370,24 +457,29 @@ func TestDynamicPeerTrust(t *testing.T) {
 		t.Error("a peer issuer must not attest another party")
 	}
 
-	// Without the flag, nothing is trusted implicitly.
-	cfg.PeerDynamic = false
-	if cfg.For(PurposePeer).IssuerTrusted(unlisted) {
-		t.Error("dynamic peer trust must be opt-in")
+	// An unlisted issuer resolves to no JWKS at all: its key came from the
+	// chain. Resolving it from a document it publishes about itself is the
+	// self-attestation the anchor replaced.
+	if _, err := cfg.For(PurposePeer).IssuerJWKS(unlisted); err == nil {
+		t.Error("an unlisted peer must not resolve a key from anywhere but its chain")
 	}
 }
 
-// A dynamically trusted issuer speaks for its own authority and no other. The
-// bound used to be derived by a Go helper that duplicated the policy's
-// peer_authority rule; it is asserted here through the decision it governs, so
-// there is one statement of it rather than two that can drift.
-func TestDynamicPeerAttestsOnlyItsOwnAuthority(t *testing.T) {
-	cfg := &TrustConfig{PeerDynamic: true}
+// An anchored issuer speaks for its own authority and no other. The bound is
+// asserted through the decision it governs rather than through a Go helper
+// duplicating the policy's peer_authority rule, so there is one statement of it.
+func TestAnchoredPeerAttestsOnlyItsOwnAuthority(t *testing.T) {
+	cfg := &TrustConfig{}
 
+	// Both identifier forms name the same authority: the demo issuers put the
+	// https base URL in `iss`, and a did:web authority carrying a port is
+	// percent-encoded, so the https host has to encode the same way.
 	cases := map[string]string{
 		"did:web:example.com:issuer":             "did:web:example.com",
 		"did:web:example.com":                    "did:web:example.com",
 		"did:web:dcs-b.localhost%3A18080:issuer": "did:web:dcs-b.localhost%3A18080",
+		"https://example.com/issuer":             "did:web:example.com",
+		"https://dcs-b.localhost:18080/issuer":   "did:web:dcs-b.localhost%3A18080",
 	}
 	for iss, authority := range cases {
 		if !cfg.For(PurposePeer).IssuerMayAttest(iss, authority) {
@@ -398,9 +490,10 @@ func TestDynamicPeerAttestsOnlyItsOwnAuthority(t *testing.T) {
 		}
 	}
 
-	// Only did:web qualifies: an https issuer has no authority to derive.
-	if cfg.For(PurposePeer).IssuerMayAttest("https://example.com/issuer", "https://example.com") {
-		t.Error("a non-did:web issuer was dynamically entitled to an organization")
+	// The bound applies to peering only: an anchored issuer never attests for
+	// login, whatever organization it names.
+	if cfg.For(PurposeLogin).IssuerMayAttest("https://example.com/issuer", "did:web:example.com") {
+		t.Error("an unlisted issuer was entitled to an organization for login")
 	}
 }
 
@@ -440,11 +533,13 @@ func TestMechanismIsAuthoritativeNotTheCredential(t *testing.T) {
 }
 
 // An explicit entry is the operator's complete answer: withholding a purpose
-// denies it, rather than falling through to the dynamic peer path.
+// denies it, rather than falling through to the anchored peer path. Without
+// this, purposes:["login"] would silently also grant peer to any issuer holding
+// a certificate under the peer anchors — and no listed issuer could ever be
+// denied peering.
 func TestExplicitEntryDeniesRatherThanFallingThrough(t *testing.T) {
 	cfg := &TrustConfig{
-		VCTs:        []string{"urn:dcs:poa:v1"},
-		PeerDynamic: true,
+		VCTs: []string{"urn:dcs:poa:v1"},
 		Issuers: map[string]TrustedIssuer{
 			"did:web:listed.example:issuer": {
 				Purposes: []Purpose{PurposeLogin}, Organizations: []string{"did:web:listed.example"},
@@ -453,7 +548,10 @@ func TestExplicitEntryDeniesRatherThanFallingThrough(t *testing.T) {
 		},
 	}
 	if cfg.For(PurposePeer).IssuerTrusted("did:web:listed.example:issuer") {
-		t.Error("an entry granting only login must not also grant peer via the dynamic path")
+		t.Error("an entry granting only login must not also grant peer")
+	}
+	if cfg.For(PurposePeer).IssuerTrustedAnchored("did:web:listed.example:issuer") {
+		t.Error("a listed entry must outrank the anchored path, even with a chain that verifies")
 	}
 }
 
@@ -556,6 +654,20 @@ func TestDevKeyGuardSeesDIDJWKAndCertificateForms(t *testing.T) {
 		}
 	})
 
+	// A login issuer's leaf pin is the one key with no CA above it — it IS the
+	// trust decision (ADR-35) — and it is the form an x5c issuer writes its key
+	// in, which is exactly the form a guard reading only `jwks` never saw.
+	t.Run("x5c leaf pin", func(t *testing.T) {
+		body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
+          "purposes":["login"],"organizations":["*"],"mechanism":"x5c",
+          "x5c_leaf_keys":[%q]}}}`, devIssuerLeafKeyPinB64(t))
+		if _, err := LoadTrustConfig(writeTrust(t, body)); err == nil {
+			t.Fatal("pinning a leaf key committed to this repository lets anyone with a clone mint a session here, and must be refused")
+		} else if !strings.Contains(err.Error(), "committed in this repository") {
+			t.Errorf("the refusal must say why: %v", err)
+		}
+	})
+
 	t.Run("x5c member", func(t *testing.T) {
 		body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
           "purposes":["pid"],"mechanism":"jwks",
@@ -585,10 +697,69 @@ func TestDevX5CTrustAnchorsRefusedUnlessExplicitlyAllowed(t *testing.T) {
 	}
 
 	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
-	pool, err := LoadX5CTrustAnchors(devX5CAnchorsPath)
-	if err != nil || pool == nil {
+	anchors, err := LoadX5CTrustAnchors(devX5CAnchorsPath)
+	if err != nil || len(anchors) == 0 {
 		t.Fatalf("DCS_ALLOW_DEV_TRUST must permit the dev anchors: %v", err)
 	}
+}
+
+// The guard refuses the bundle on the FIRST anchor it recognises, so an anchor
+// added after that one is never reached and its key never has to be registered.
+// The bundle holds a root per issuer whose chains this stack verifies, and each
+// of their private keys is committed here — so each one is checked on its own.
+func TestEveryDevX5CAnchorIsRecognisedAsCommittedMaterial(t *testing.T) {
+	data, err := os.ReadFile(devX5CAnchorsPath)
+	if err != nil {
+		t.Fatalf("read dev anchors: %v", err)
+	}
+
+	anchors := 0
+	for rest := data; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatalf("parse dev anchor: %v", err)
+		}
+		anchors++
+		if _, ok := devCertificateKey(cert); !ok {
+			t.Errorf("anchor %q is committed to this repository but devIssuerKeySources does not name its key, so a deployment would accept it without saying so", cert.Subject.CommonName)
+		}
+	}
+	if anchors < 2 {
+		t.Fatalf("expected the dev bundle to hold the PID issuer anchor and the ORCE issuer root, got %d", anchors)
+	}
+}
+
+// devIssuerLeafKeyPinB64 is the leaf key the shipped dev document pins: the
+// public half of deployment/helm/charts/orce/pki-dev/issuer.key, which the dev
+// and BDD ORCE issuer is handed instead of generating its own. Read from the
+// file rather than restated here, so the guard is exercised against the very
+// material a deployment could copy out of this repository.
+func devIssuerLeafKeyPinB64(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(devTrustConfigPath)
+	if err != nil {
+		t.Fatalf("read dev trust config: %v", err)
+	}
+	var doc struct {
+		Issuers map[string]struct {
+			X5CLeafKeys []string `json:"x5c_leaf_keys"`
+		} `json:"issuers"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse dev trust config: %v", err)
+	}
+	for _, entry := range doc.Issuers {
+		if len(entry.X5CLeafKeys) > 0 {
+			return entry.X5CLeafKeys[0]
+		}
+	}
+	t.Fatal("the dev trust config pins no leaf key, so this guard has nothing to check")
+	return ""
 }
 
 func devAnchorCertificateB64(t *testing.T) string {

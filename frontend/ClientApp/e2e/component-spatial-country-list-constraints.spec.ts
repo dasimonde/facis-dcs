@@ -1,4 +1,5 @@
 import { expect, test } from './dcs-test'
+import { selectBilateralClauseRoles } from './lifecycle-helpers'
 import type { Locator, Page } from '@playwright/test'
 const COUNTRY_OPTIONS = ['Germany (DEU)', 'Austria (AUT)', 'Switzerland (CHE)', 'United States (USA)'] as const
 const SPATIAL_OPTION_COUNT = 7
@@ -158,6 +159,15 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
       await analyticsOperations.uncheck()
     }
   }
+
+  // A constraint only reaches the document inside a complete ODRL rule — the
+  // builder emits nothing for a clause that names no rule type, exactly as the
+  // other authoring specs select one before saving.
+  const ruleSelect = (label: string) =>
+    editor.locator('label.form-control').filter({ hasText: label }).locator('select')
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
+  await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralClauseRoles(editor)
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   const createdRequest = page.waitForRequest((request) => request.url().includes('/template/create'))

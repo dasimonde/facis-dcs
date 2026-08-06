@@ -181,8 +181,8 @@ async function pollLoginOnce(state: string, generation: number): Promise<'contin
   if (isLoginPollError(status)) {
     const reason =
       status === LOGIN_POLL_ERROR.NOT_FOUND
-        ? 'Login session not found — starting a new session…'
-        : 'Login status timed out — starting a new session…'
+        ? 'Login session not found. Starting a new session…'
+        : 'Login status timed out. Starting a new session…'
     await restartLogin(reason)
     return 'done'
   }
@@ -193,7 +193,7 @@ async function pollLoginOnce(state: string, generation: number): Promise<'contin
     return 'done'
   }
   if (status.status === 'expired') {
-    await refreshPresentationLink('Login session expired — presentation link refreshed.')
+    await refreshPresentationLink('Login session expired. Presentation link refreshed.')
     return 'done'
   }
   if (status.status === 'pending' && status.expires_in > 0) {
@@ -236,7 +236,7 @@ async function startLogin() {
     if (generation !== pollGeneration) return
     if (isLoginStatusResponse(existing)) {
       if (existing.status === 'expired') {
-        await refreshPresentationLink('Login session expired — presentation link refreshed.')
+        await refreshPresentationLink('Login session expired. Presentation link refreshed.')
         return
       }
       if (existing.status === 'complete' && existing.redirect_uri) {
@@ -244,7 +244,7 @@ async function startLogin() {
         return
       }
       if (existing.status === 'complete') {
-        copyHint.value = 'Login complete but missing redirect_uri — check Hydra flow.'
+        copyHint.value = 'Login complete but redirect_uri is missing. Check the Hydra flow.'
         return
       }
       if (existing.status === 'failed') {
@@ -256,7 +256,7 @@ async function startLogin() {
         return
       }
     } else if (existing === LOGIN_POLL_ERROR.NOT_FOUND) {
-      await refreshPresentationLink('Login session not found — presentation link refreshed.')
+      await refreshPresentationLink('Login session not found. Presentation link refreshed.')
       return
     } else if (existing === LOGIN_POLL_ERROR.TIMEOUT) {
       clearOid4vpBrowserSession()
@@ -273,7 +273,7 @@ async function startLogin() {
     if (generation !== pollGeneration) return
     if (!initiated) {
       clearOid4vpBrowserSession()
-      copyHint.value = 'Could not start login — check backend and database.'
+      copyHint.value = 'Could not start login. Check the backend and database.'
       return
     }
     persistLoginSession(initiated.state, initiated.presentationUrl, initiated.authorizeUrl, initiated.expiresIn)
@@ -345,9 +345,12 @@ async function copyPresentationUrl() {
         <button type="button" class="btn btn-sm btn-primary" @click="copyPresentationUrl">Copy link</button>
         <p v-if="copyHint" class="text-sm text-warning">{{ copyHint }}</p>
         <p class="text-xs opacity-70">
-          Keep this tab open — the QR / link refreshes automatically before it expires (about every 5 minutes). You will
-          be redirected after the wallet presents credentials.
+          Keep this tab open. The QR code and link refresh automatically before they expire (about every 5 minutes). You
+          will be redirected after the wallet presents credentials.
         </p>
+        <RouterLink :to="{ name: ROUTES.AUTH.PID_VERIFY }" class="link text-xs opacity-70">
+          Check your PID credential without signing in
+        </RouterLink>
       </div>
     </div>
     <div v-else class="flex flex-col items-center gap-3">

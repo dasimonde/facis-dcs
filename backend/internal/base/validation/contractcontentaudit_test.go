@@ -467,6 +467,36 @@ func TestAuditContractContentEvaluatesExternalODRLPolicies(t *testing.T) {
 	require.True(t, hasFindingSeverity(findings, "FACIS-EXT-001", "error"))
 }
 
+// The contract's own boundaries and the deployment's policy set are both ODRL
+// and are audited by the same evaluator, so nothing in a finding's rule ID or
+// severity tells them apart. They have different enforcement points — the
+// workflow gate acts on the policy set, approve.go/apply.go on the contract's
+// own — so the source has to be recorded.
+func TestAuditContractContentRecordsWhichAuditProducedEachFinding(t *testing.T) {
+	fieldID := "urn:dcs:field:provider-country"
+	contract := odrlContract(fieldID, "provider", "country",
+		[]any{odrlDuty("FACIS-CONTRACT-STATIC-001", fieldID, "odrl:isNoneOf", []any{"RUS"})},
+		"RUS",
+	)
+
+	policy := map[string]any{
+		"policySetId": "facis.dcs.contract.content.static",
+		"version":     "test",
+		"dcs:policies": []any{
+			odrlDuty("FACIS-EXT-001", fieldID, "odrl:isNoneOf", []any{"RUS"}),
+		},
+	}
+
+	findings, err := AuditContractContent(context.Background(), contract, policy, ContractContentAuditMetadata{})
+	require.NoError(t, err)
+
+	require.Equal(t, SourceContractODRL, requirePolicyFinding(t, findings, "FACIS-CONTRACT-STATIC-001").Source)
+	require.Equal(t, SourcePolicySetODRL, requirePolicyFinding(t, findings, "FACIS-EXT-001").Source)
+	for _, finding := range findings {
+		require.NotEmpty(t, finding.Source, finding.RuleID)
+	}
+}
+
 func TestAuditContractContentAcceptsCanonicalContractODRLValues(t *testing.T) {
 	contract := canonicalAuditContract()
 

@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -14,7 +13,7 @@ import (
 func roundtripMatches(t *testing.T, payload string) error {
 	t.Helper()
 	at := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
-	ctx := WithSigner(context.Background(), NewCapturingSigner())
+	ctx := WithSigner(testChainContext(), NewCapturingSigner())
 
 	original, err := CompilePDF(ctx, []byte(payload), at)
 	if err != nil {

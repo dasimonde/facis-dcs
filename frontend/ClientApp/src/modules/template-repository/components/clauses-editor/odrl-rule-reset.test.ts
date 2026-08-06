@@ -83,10 +83,14 @@ describe('OdrlRuleBuilder draft lifetime', () => {
     expect(draft.root.children).toHaveLength(0)
     expect(draft.actions).toEqual(['odrl:use'])
     expect(draft.type).toBe('odrl:Permission')
+    expect(draft.assignerId).toBe('')
+    expect(draft.assigneeId).toBe('')
     // The pristine draft is not pushed back out as a rule the author never made.
     expect(host.rule).toBeNull()
 
     // The next clause's rule is a new rule, not an overwrite of the saved one.
+    draft.assignerId = `${TEMPLATE_IRI}#party-provider`
+    draft.assigneeId = `${TEMPLATE_IRI}#party-customer`
     draft.actions = ['odrl:distribute']
     await wrapper.vm.$nextTick()
     expect(host.rule).not.toBeNull()
@@ -119,6 +123,8 @@ describe('OdrlRuleBuilder draft lifetime', () => {
   // what is not yet expressible: a group with no constraints in it yet.
   it('keeps an empty group the author just added (its own emit is not an external rule)', async () => {
     const { wrapper, host, draft } = mountHost()
+    draft.assignerId = `${TEMPLATE_IRI}#party-provider`
+    draft.assigneeId = `${TEMPLATE_IRI}#party-customer`
     draft.root.children.push(newAtomic('odrl:purpose', 'odrl:eq'))
     await wrapper.vm.$nextTick()
     expect(host.rule?.['odrl:constraint']).toHaveLength(1)
@@ -138,6 +144,8 @@ describe('OdrlRuleBuilder draft lifetime', () => {
   // author had just used disappeared.
   it('keeps a chosen concept as the fixed boundary it is', async () => {
     const { wrapper, host, draft } = mountHost()
+    draft.assignerId = `${TEMPLATE_IRI}#party-provider`
+    draft.assigneeId = `${TEMPLATE_IRI}#party-customer`
     const atomic = newAtomic('odrl:spatial', 'odrl:eq')
     atomic.values = [{ '@id': 'https://www.iso.org/obp/ui/#iso:code:3166:DEU' }]
     draft.root.children.push(atomic)

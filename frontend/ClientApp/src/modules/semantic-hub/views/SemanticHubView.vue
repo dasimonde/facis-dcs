@@ -112,8 +112,8 @@ onMounted(loadEntries)
       <h1 class="text-xl font-bold">Semantic Hub</h1>
       <p class="mt-1 text-sm text-base-content/70">
         Versioned schema store: JSON-LD contexts, SHACL shapes, and validation profiles every produced document is
-        validated against. Activating a version changes what newly produced documents are checked with —
-        already-produced documents stay pinned to the version they were created under.
+        validated against. Activating a version changes what newly produced documents are checked with. Documents
+        already produced remain pinned to the version used when they were created.
       </p>
     </header>
 

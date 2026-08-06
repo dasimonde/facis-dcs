@@ -146,6 +146,52 @@ func TestTheFirstSignatureStillSealsAndAttributesTheContract(t *testing.T) {
 	require.Equal(t, map[string]any{"@id": instanceA}, nodes[instanceA]["dcs:hasPowerOfAttorney"])
 }
 
+// Every signing party embeds its OWN authorization before applying its own
+// signature, so the signature covers it and the counterparty verifies both out
+// of the PDF (ADR-13, ADR-35). The attachment is therefore one signing event's
+// worth of evidence — this ceremony's summary and the Power of Attorney
+// presented at it — never a bundle standing in for signatures not yet made.
+func TestSigningEvidenceCarriesTheCeremonysOwnSummaryAndPowerOfAttorney(t *testing.T) {
+	summary := json.RawMessage(`{"type":["VerifiableCredential","ContractSigningSummaryCredential"]}`)
+
+	raw, err := signingEvidenceAttachment(summary, strptr("a-presentation"))
+	require.NoError(t, err)
+
+	var attachment struct {
+		Summary         json.RawMessage `json:"summary"`
+		PoAPresentation string          `json:"poa_presentation"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &attachment))
+	require.JSONEq(t, string(summary), string(attachment.Summary))
+	require.Equal(t, "a-presentation", attachment.PoAPresentation)
+}
+
+// A ceremony that presented no Power of Attorney carries no field for one: the
+// receiver must be able to read absence as absence rather than as a credential
+// that failed to verify, because absence still federates.
+func TestSigningEvidenceOmitsAnAbsentPowerOfAttorney(t *testing.T) {
+	raw, err := signingEvidenceAttachment(json.RawMessage(`{"type":["ContractSigningSummaryCredential"]}`), nil)
+	require.NoError(t, err)
+
+	var attachment map[string]any
+	require.NoError(t, json.Unmarshal(raw, &attachment))
+	_, present := attachment["poa_presentation"]
+	require.False(t, present, "an absent Power of Attorney must not be written as an empty one")
+}
+
+// The countersignature on a frozen inbound artifact embeds too: the append is an
+// incremental update, which leaves the originator's signature valid
+// (DCS-OR-C2PA-002), and without it the countersigner's own signature would
+// cover no authorization at all.
+func TestEveryPrepareEmbedsItsEvidenceBeforeTheSignatureIsApplied(t *testing.T) {
+	graph := packageCallGraph(t)
+
+	require.True(t, reaches(graph, "Prepare", "EmbedEvidence"),
+		"Prepare must embed this ceremony's evidence into the PDF the signatory signs")
+	require.True(t, reaches(graph, "Prepare", "signingEvidenceAttachment"),
+		"the embedded evidence must be the attachment built for this ceremony")
+}
+
 // ceremonyAuthorities answers for the ceremonies a contract's signatures were
 // made under.
 type ceremonyAuthorities map[string]*db.SignatureCeremony

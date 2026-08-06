@@ -76,7 +76,7 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 	if s.Gate != nil {
 		if _, _, err := s.Gate.Execute(ctx, workflowgate.Input{
 			Gate: "deployment", ContractDID: envelope.DID,
-			Requester: "system:auto-deploy", Roles: []string{"Process Orchestrator"},
+			Requester:    "system:auto-deploy",
 			Continuation: map[string]any{"requested_by": "system:auto-deploy"},
 		}); err != nil {
 			return err

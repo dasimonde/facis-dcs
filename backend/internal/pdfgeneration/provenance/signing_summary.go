@@ -44,7 +44,13 @@ type SigningSummary struct {
 // binds the pseudonymous holder DID and the KB-JWT sd_hash — never the PID
 // disclosures — so the signed PDF carries no personal data (DCS-FR-SM-08,
 // UC-04-03).
-func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID string, s SigningSummary) (json.RawMessage, string, error) {
+//
+// status is the CONTRACT's entry in the status list this deployment serves — the
+// same entry its lifecycle credentials name (ADR-34). This credential travels
+// inside the contract PDF to the counterparty and outlives the ceremony that
+// produced it, so it has to be revocable, and revocable by the one thing that
+// ever revokes here: the contract falling out of force.
+func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID string, status CredentialStatusRef, s SigningSummary) (json.RawMessage, string, error) {
 	unsignedVC := VCBinding{
 		Context: []interface{}{
 			"https://www.w3.org/ns/credentials/v2",
@@ -67,9 +73,10 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 				"validation_report_hash": "dcs:validationReportHash",
 			},
 		},
-		Type:      []string{"VerifiableCredential", "ContractSigningSummaryCredential"},
-		Issuer:    issuerDID,
-		ValidFrom: s.SignedAt.UTC().Format(time.RFC3339),
+		Type:             []string{"VerifiableCredential", "ContractSigningSummaryCredential"},
+		Issuer:           issuerDID,
+		ValidFrom:        s.SignedAt.UTC().Format(time.RFC3339),
+		CredentialStatus: buildCredentialStatus(status),
 		CredentialSubject: map[string]interface{}{
 			"id":           normalizeSubjectID(s.SignerDID),
 			"contract_id":  s.ContractID,

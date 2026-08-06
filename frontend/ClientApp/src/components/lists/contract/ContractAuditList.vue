@@ -84,6 +84,19 @@ const eventType = useContractEventType()
         <div v-else-if="eventType.isIncreaseContractVersionEvent(audit)">
           <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
         </div>
+        <div v-else-if="eventType.isNegotiationChangeSupersededEvent(audit)">
+          <div>
+            Version {{ audit.event_data.merged_contract_version }} does not carry these accepted change requests:
+          </div>
+          <ul>
+            <li
+              v-for="discard in audit.event_data.superseded"
+              :key="`${discard.negotiation_id}-${discard.superseded_by}`"
+            >
+              {{ discard.negotiation_id }}: {{ discard.fields.join(', ') }} superseded by {{ discard.superseded_by }}
+            </li>
+          </ul>
+        </div>
         <div v-else>{{ audit.event_data }}</div>
       </div>
     </li>

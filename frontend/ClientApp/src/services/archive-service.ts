@@ -15,6 +15,13 @@ export interface ArchivedContract {
   archive_tags?: string[]
 }
 
+/** The stored annotation of an archive entry (DCS-FR-CSA-11). */
+export interface ArchiveAnnotation {
+  did: string
+  summary: string
+  tags?: string[]
+}
+
 /** The erasure-handshake state of one counterparty instance (DCS-NFR-COMP-03). */
 export interface ArchiveErasurePeerStatus {
   peer_did: string
@@ -42,6 +49,15 @@ export const archiveService = {
 
   async erasureStatus(did: string): Promise<ArchiveErasureStatus> {
     return http.get<ArchiveErasureStatus>('/archive/erasure-status', { params: { did } }).then((res) => res.data)
+  },
+
+  /**
+   * Sets the entry's summary and tag set (DCS-FR-CSA-11). Omitting the summary
+   * has the backend generate one from the archived contract's metadata; tags
+   * replace the stored set. Only the annotation is mutable.
+   */
+  async annotate(did: string, summary?: string, tags?: string[]): Promise<ArchiveAnnotation> {
+    return http.post<ArchiveAnnotation>('/archive/annotate', { did, summary, tags }).then((res) => res.data)
   },
 
   /**

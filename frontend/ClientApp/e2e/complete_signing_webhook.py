@@ -6,7 +6,7 @@ the OID4VP login, without importing the behave step modules (which pull in the
 bdd-executor runtime).
 
 Usage: python3 complete_signing_webhook.py <openid4vp://... | request_uri>
-Env:   STATUSLIST_SERVICE_URL, BDD_DCS_BASE_URL
+Env:   ISSUER_BASE_URL, BDD_DCS_BASE_URL
 """
 
 from __future__ import annotations
@@ -50,10 +50,11 @@ def resolve_request_uri(pasted: str) -> str:
 
 def build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonce: str):
     AuthService._ensure_dcs_wallet_importable()
-    from dcs_wallet.issuer import DEFAULT_ISSUER_DID, sign_credential_sd_jwt, sign_key_binding_jwt
+    from dcs_wallet.issuer import sign_credential_sd_jwt_x5c, sign_key_binding_jwt
+    from dcs_wallet.issuer_pki import dev_issuer
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status
+    from dcs_wallet.status_list import build_credential_status, pid_credential_index
 
     keys = AuthService.load_wallet_keys()
     holder_key = keys.wallet_private
@@ -61,25 +62,26 @@ def build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonce
     subject_did = did_jwk_from_public_jwk(holder_public)
 
     # A real status claim (ADR-20): VerifyPID's status-list check is no longer
-    # skipped, so a PID presentation with none would be rejected outright.
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
-
+    # skipped, so a PID presentation with none would be rejected outright — and
+    # the list is believed only from the issuer that publishes it, which is why
+    # this PID is issued as that issuer (ISSUER_BASE_URL).
+    issuer = dev_issuer()
     now = int(time.time())
-    issued = sign_credential_sd_jwt(
+    issued = sign_credential_sd_jwt_x5c(
         visible_claims={
-            "iss": DEFAULT_ISSUER_DID,
+            "iss": issuer.iss,
             "sub": subject_did,
             "vct": "urn:dcs:pid:demo:v1",
             "iat": now - 3600,
             "exp": now + 3600,
             "cnf": {"jwk": cnf_jwk(holder_public)},
             "status": build_credential_status(
-                sub=subject_did, organization=given_name, roles=[family_name],
-                service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+                index=pid_credential_index(given_name=given_name, family_name=family_name),
             ),
         },
         selective_claims={"given_name": given_name, "family_name": family_name},
-        issuer_private=keys.issuer_private,
+        issuer_private=issuer.private_jwk,
+        x5c=issuer.x5c,
     )
     issuer_jwt, disclosures, _ = split_sd_jwt(issued)
     kb_jwt = sign_key_binding_jwt(

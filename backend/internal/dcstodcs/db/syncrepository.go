@@ -36,8 +36,48 @@ type SyncSignature struct {
 	PoARevalidatedAt *time.Time `db:"poa_revalidated_at"`
 }
 
+// Settlement is one party's verified statement that it reached its own
+// settled state (NEGOTIATION -> SUBMITTED) on a named version of a contract
+// document — the evidence the signing gate requires about the counterparty.
+//
+// The same row shape records both directions: FromPeerDID is the party that
+// settled, ToPeerDID the instance it settled toward. A row this instance
+// produced (FromPeerDID == own did:web) additionally carries the delivery
+// bookkeeping — DeliveredAt stays NULL until the peer has accepted it, which
+// is what lets a failed ship be re-delivered instead of vanishing.
+type Settlement struct {
+	DID             string     `db:"did"`
+	FromPeerDID     string     `db:"from_peer_did"`
+	ToPeerDID       string     `db:"to_peer_did"`
+	ContractVersion int        `db:"contract_version"`
+	DocumentDigest  string     `db:"document_digest"`
+	SettledAt       time.Time  `db:"settled_at"`
+	JadesSignature  string     `db:"jades_signature"`
+	RecordedAt      time.Time  `db:"recorded_at"`
+	DeliveredAt     *time.Time `db:"delivered_at"`
+}
+
+// SettlementWithdrawal is one party taking back the settlement it made of a
+// named document version. It is queued and delivered like a settlement — the
+// peer that holds the settlement has to be told, or its signing gate goes on
+// reading a withdrawn agreement as evidence — and carries no signature: the
+// JAdES is produced at delivery from these fields (dcstodcs.BuildSettlementWithdrawal).
+//
+// DocumentDigest is the version the withdrawn settlement covered, which is what
+// binds the withdrawal to one settlement rather than to whichever one the peer
+// happens to hold when it arrives.
+type SettlementWithdrawal struct {
+	DID            string     `db:"did"`
+	FromPeerDID    string     `db:"from_peer_did"`
+	ToPeerDID      string     `db:"to_peer_did"`
+	DocumentDigest string     `db:"document_digest"`
+	WithdrawnAt    time.Time  `db:"withdrawn_at"`
+	RecordedAt     time.Time  `db:"recorded_at"`
+	DeliveredAt    *time.Time `db:"delivered_at"`
+}
+
 type SyncRepository interface {
-	GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx) ([]SyncFail, error)
+	GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx, backoffBase, maxBackoff time.Duration, limit int) ([]SyncFail, error)
 	// CreateOrUpdateSyncFailEntry upserts a sync_fails entry for did.
 	// isGateFailure marks this particular attempt as caused by the ADR-19
 	// trust gate's agreement-credential check (as opposed to e.g. the PDF not
@@ -53,4 +93,40 @@ type SyncRepository interface {
 	// for a synced contract; GetSyncSignature returns nil when none exists.
 	UpsertSyncSignature(ctx context.Context, tx *sqlx.Tx, sig SyncSignature) error
 	GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*SyncSignature, error)
+
+	// UpsertSettlement stores a settlement artifact, replacing an earlier one
+	// for the same (contract, settling party, audience). GetSettlement returns
+	// what the named party settled for the contract, or nil when it has not
+	// settled — the signing gate reads absence as "not agreed".
+	UpsertSettlement(ctx context.Context, tx *sqlx.Tx, settlement Settlement) error
+	GetSettlement(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) (*Settlement, error)
+
+	// GetSettlementsBy returns every settlement one party recorded for a
+	// contract, one per audience — read before DeleteSettlementsBy so the
+	// withdrawal queued toward each audience can name the version that audience
+	// was told about.
+	GetSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) ([]Settlement, error)
+
+	// DeleteSettlementsBy removes every settlement one party recorded for a
+	// contract, toward any audience. Called with this instance's own did:web
+	// when it withdraws the agreement it settled (the workflow engine's
+	// rejection edges), which is the only way a party may move off a document
+	// it has already agreed to, and with a counterparty's did:web when that
+	// counterparty ships a withdrawal of its own.
+	DeleteSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) error
+
+	// UpsertSettlementWithdrawal queues a withdrawal toward one audience,
+	// replacing an undelivered earlier one for the same (contract, withdrawing
+	// party, audience). GetUndeliveredSettlementWithdrawals and
+	// MarkSettlementWithdrawalDelivered are the settlement queue's delivery
+	// bookkeeping applied to it.
+	UpsertSettlementWithdrawal(ctx context.Context, tx *sqlx.Tx, withdrawal SettlementWithdrawal) error
+	GetUndeliveredSettlementWithdrawals(ctx context.Context, tx *sqlx.Tx, fromPeerDID string) ([]SettlementWithdrawal, error)
+	MarkSettlementWithdrawalDelivered(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID, toPeerDID string) error
+
+	// GetUndeliveredSettlements returns the settlements this instance produced
+	// (fromPeerDID == its own did:web) that no peer has confirmed yet, for the
+	// retry scheduler to re-ship; MarkSettlementDelivered closes one out.
+	GetUndeliveredSettlements(ctx context.Context, tx *sqlx.Tx, fromPeerDID string) ([]Settlement, error)
+	MarkSettlementDelivered(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID, toPeerDID string) error
 }

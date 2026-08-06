@@ -77,9 +77,10 @@ contract-signing key (ADR-12, ADR-20). The only signing path is the ceremony:
    persisted. A PID whose issuer credential carries an x5c certificate
    (a real EUDI wallet, rather than this project's JWKS-only dev issuer) is
    only accepted if its chain verifies against `OID4VP_X5C_TRUST_ANCHORS_PATH`
-   (a PEM bundle of trusted roots) — unset in dev/BDD, where no PID is ever
-   x5c-signed; an x5c-bearing credential presented with none configured is
-   refused outright, never trusted off its own embedded certificate.
+   (a PEM bundle of trusted roots, one per issuer whose chains this deployment
+   verifies); an x5c-bearing credential presented with none configured is
+   refused outright, never trusted off its own embedded certificate. The same
+   bundle anchors the signed status list a credential names.
 3. `POST /signature/request/{ceremony_id}/publish` — prepare the to-be-signed
    PDF and JSON-LD payload (evidence embedded, bytes pinned), and publish a
    standard OID4VP Document-Retrieval request object as a QR/deep link.

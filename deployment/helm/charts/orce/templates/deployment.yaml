@@ -142,11 +142,16 @@ spec:
               {{- end }}
             {{- end }}
           {{- end }}
-          {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled }}
+          {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled .Values.pkiRootCA.devFixture }}
           volumeMounts:
             {{- if .Values.persistence.enabled }}
             - name: orce-data
               mountPath: /data
+            {{- end }}
+            {{- if .Values.pkiRootCA.devFixture }}
+            - name: pki-root
+              mountPath: /etc/orce/pki-root
+              readOnly: true
             {{- end }}
             {{- if .Values.flowsFile.enabled }}
             - name: flows-merged
@@ -181,12 +186,17 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- end }}
-      {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled }}
+      {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled .Values.pkiRootCA.devFixture }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: orce-data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-orce
+        {{- end }}
+        {{- if .Values.pkiRootCA.devFixture }}
+        - name: pki-root
+          secret:
+            secretName: {{ .Release.Name }}-orce-pki-root
         {{- end }}
         {{- if .Values.flowsFile.enabled }}
         - name: flows-merged

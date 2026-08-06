@@ -142,13 +142,7 @@ export const contractTemplateService: ContractTemplateService = {
   },
 
   async audit(request: ContractTemplateAuditRequest) {
-    return http
-      .get<ContractTemplateAuditResponse>('/template/audit', { params: request })
-      .then((res) => res.data)
-      .catch((err: unknown) => {
-        console.error('Audit Error:', err)
-        return []
-      })
+    return http.get<ContractTemplateAuditResponse>('/template/audit', { params: request }).then((res) => res.data)
   },
 
   async publish(request: ContractTemplatePublishRequest) {

@@ -112,18 +112,19 @@ Feature: Semantic Hub — versioned schema storage, anchoring, and enforcement
   @DCS-FR-TR-03 @UC-02-08
   Scenario: Activating a stricter SHACL shapes version changes what NEW contracts get flagged for, while already-produced contracts stay pinned
     Given contract "Hub Pinned Pre-V2 Contract" is in "Draft" status
-    When the Auditor triggers a process audit with scope "contracts"
+    When the Auditor triggers a process audit for contract "Hub Pinned Pre-V2 Contract"
     Then the contract content audit trail for "Hub Pinned Pre-V2 Contract" does not report an error for rule "title-InConstraintComponent"
     When the Template Manager registers a stricter version of the "shapes" schema "facis-dcs" that narrows the canonical contract title
     Then get http 200:Success code
     Given contract "Hub Strict Post-V2 Contract" is in "Draft" status
-    When the Auditor triggers a process audit with scope "contracts"
+    When the Auditor triggers a process audit for contract "Hub Strict Post-V2 Contract"
     Then the contract content audit trail for "Hub Strict Post-V2 Contract" reports rule "title-InConstraintComponent" with severity "error"
-    And the contract content audit trail for "Hub Pinned Pre-V2 Contract" does not report an error for rule "title-InConstraintComponent"
+    When the Auditor triggers a process audit for contract "Hub Pinned Pre-V2 Contract"
+    Then the contract content audit trail for "Hub Pinned Pre-V2 Contract" does not report an error for rule "title-InConstraintComponent"
     When the Template Manager rolls the "shapes" schema "facis-dcs" back to version 1
     Then get http 200:Success code
     Given contract "Hub Restored Post-Rollback Contract" is in "Draft" status
-    When the Auditor triggers a process audit with scope "contracts"
+    When the Auditor triggers a process audit for contract "Hub Restored Post-Rollback Contract"
     Then the contract content audit trail for "Hub Restored Post-Rollback Contract" does not report an error for rule "title-InConstraintComponent"
 
   # Phase 3 (DCS-FR-TR-03/TR-04, ADR-10): the template builder's clause

@@ -52,9 +52,14 @@ Feature: Semantic workflow gates
       | signature  |
       | deployment |
 
+  # A contract is pinned to the DCS envelope graphs and to the shape libraries
+  # its own sh:shapesGraph declares (ADR-8), so the library this scenario moves
+  # is one the snapshot contracts declare. A library the hub merely holds
+  # active governs no contract and is deliberately not pinned into one.
   @REQ-external-checkpoint-and-semantic-workflow-gates-AC6 @DCS-FR-TR-03
   Scenario: New snapshots use the activated bundle while older snapshots remain pinned across rollback
-    Given an immutable workflow snapshot "old" is created from the active shapes, libraries, and profile
+    Given the Semantic Hub holds an active shape library the snapshot contracts declare
+    And an immutable workflow snapshot "old" is created from the active shapes, libraries, and profile
     When the Template Manager activates new effective shapes, libraries, and profile versions
     And an immutable workflow snapshot "new" is created from the active shapes, libraries, and profile
     And the Template Manager rolls the effective Semantic Hub bundle back

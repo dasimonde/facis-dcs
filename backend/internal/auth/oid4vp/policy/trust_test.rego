@@ -13,7 +13,6 @@ peer_issuer := "did:web:b.example:issuer"
 
 # A deployment that grants its own issuer login+peer and nothing to the peer's.
 demo_trust := {
-	"peer_dynamic": false,
 	"issuers": {own_issuer: {
 		"purposes": ["login", "peer"],
 		"organizations": ["did:web:a.example"],
@@ -44,7 +43,7 @@ test_unlisted_issuer_is_refused if {
 # a denial, not a fall-through to the dynamic path.
 test_withheld_purpose_is_denied_not_defaulted if {
 	not trust.trusted with input as request("pid", own_issuer, "")
-	not trust.trusted with input as request("pid", own_issuer, "") with input.trust.peer_dynamic as true
+	not trust.trusted with input as request("pid", own_issuer, "") with input.anchored as true
 }
 
 test_issuer_attests_only_its_own_organizations if {
@@ -58,8 +57,7 @@ entitled(organizations) := {
 	"issuer": own_issuer,
 	"organization": "Acme Corp",
 	"trust": {
-		"peer_dynamic": false,
-		"issuers": {own_issuer: {
+			"issuers": {own_issuer: {
 			"purposes": ["peer"],
 			"organizations": organizations,
 			"mechanism": "did:web",
@@ -81,21 +79,32 @@ test_wildcard_must_be_explicit if {
 	trust.may_attest with input as entitled(["Acme Corp"])
 }
 
-# Dynamic peer trust is opt-in, peer-only, and did:web-only.
-test_dynamic_peer_trust_is_bounded if {
+# An unlisted issuer is admitted by its chain and by nothing else: the anchored
+# fact is what turns the denial into a grant, and it never reaches login.
+test_anchored_trust_is_bounded if {
 	not trust.trusted with input as request("peer", peer_issuer, "")
-	trust.trusted with input as request("peer", peer_issuer, "") with input.trust.peer_dynamic as true
-	not trust.trusted with input as request("login", peer_issuer, "") with input.trust.peer_dynamic as true
-	not trust.trusted with input as request("peer", "https://b.example/issuer", "")
-		with input.trust.peer_dynamic as true
+	trust.trusted with input as request("peer", peer_issuer, "") with input.anchored as true
+
+	# PID travels the same way: nobody can enumerate who issues one, so the CA
+	# list is the statement of which attestations of a person are believed.
+	trust.trusted with input as request("pid", peer_issuer, "") with input.anchored as true
+
+	# Login never. Who may obtain a session here is stated by an entry.
+	not trust.trusted with input as request("login", peer_issuer, "") with input.anchored as true
+
+	# The https form the issuers put in `iss` is admitted on the same terms.
+	trust.trusted with input as request("peer", "https://b.example/issuer", "")
+		with input.anchored as true
 }
 
-# A dynamically trusted issuer speaks for its own authority and no other.
-test_dynamic_peer_attests_only_its_own_authority if {
+# An anchored issuer speaks for its own authority and no other, in either
+# identifier form.
+test_anchored_peer_attests_only_its_own_authority if {
 	trust.may_attest with input as request("peer", peer_issuer, "did:web:b.example")
-		with input.trust.peer_dynamic as true
 	not trust.may_attest with input as request("peer", peer_issuer, "did:web:a.example")
-		with input.trust.peer_dynamic as true
+
+	trust.may_attest with input as request("peer", "https://b.example/issuer", "did:web:b.example")
+	not trust.may_attest with input as request("peer", "https://b.example/issuer", "did:web:a.example")
 }
 
 # A denial says why: a policy that only answers false is one nobody can operate.

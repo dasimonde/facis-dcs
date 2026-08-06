@@ -40,6 +40,24 @@ ingress:
   hosts: []
   tls: []
 
+  # Mindestversion fuer TLS (DCS-IR-CI-01, DCS-NFR-SEC-01). Wirkt nur, wo
+  # Traefik aus diesem Chart terminiert: die Ressource ist eine Traefik-
+  # TLSOption, und der Ingress muss sie ueber die Annotation
+  #   traefik.ingress.kubernetes.io/router.tls.options: <ns>-<name>@kubernetescrd
+  # referenzieren, sonst bleibt sie wirkungslos.
+  #
+  # Terminiert der Ingress der Plattform (className leer, wie in
+  # values.prod.yml), gehoert die Einstellung dorthin. Der Deployment-Leitfaden
+  # nennt unter "TLS-Version erzwingen" die Entsprechung je Controller und den
+  # Befehl, mit dem sich das Ergebnis nachmessen laesst.
+  tlsOptions:
+    enabled: false
+    minVersion: "VersionTLS13"
+    # Leer lassen: eine Obergrenze schliesst kuenftige Versionen aus.
+    maxVersion: ""
+    cipherSuites: []
+    sniStrict: false
+
 traefik:
   enabled: false
 
@@ -77,12 +95,24 @@ oid4vp:
     existingConfigMapKey: trust.json
     # Where the ConfigMap is mounted. The file lands at <mountPath>/<key>.
     existingConfigMapMountPath: /etc/dcs/oid4vp
-    xfscAllowUnsignedFallback: false
-    # Optional: trust anchors an x5c-bearing credential's certificate chain
-    # (e.g. a real EUDI wallet's issued PID) must verify against. Empty means
-    # unset — an x5c-bearing credential is then refused outright, never
+    # Trust anchors an x5c-bearing credential's certificate chain must verify
+    # against, ONE SET PER PURPOSE (ADR-35). A purpose left empty has no anchors
+    # and every x5c credential presented for it is refused outright, never
     # trusted off its own embedded certificate (sdjwt.verificationKeyFromX5C).
-    x5cAnchorsPath: ""
+    #
+    # There are two, and they never fall back to one another. `poa` covers
+    # parties — a counterparty's Power of Attorney, admitted by its chain alone,
+    # and our own login issuers, which are the same certificates seen from this
+    # side (the PoA obtained at login here travels in the signed PDF for the
+    # counterparty to verify). `pid` anchors a third party's attestation of a
+    # person, and a certificate under one must not be able to speak for the
+    # other.
+    #
+    # Login is NOT a third list. What separates a login issuer from a peer is
+    # that it must be named in the trust document above; the anchor is shared.
+    x5cAnchors:
+      poa: ""
+      pid: ""
 
 customCA:
   enabled: false
@@ -111,6 +141,10 @@ auditExecutor:
   url: ""
   path: "/audit/run"
   timeout: "10s"
+  # DCS-side evidence collection and the ingress request deadline are separate
+  # from the executor HTTP timeout above.
+  evidenceTimeout: "2m"
+  requestTimeout: "3m"
 
 # Consequential contract transitions use this distinct, snapshot-pinned
 # executor contract. Missing/invalid configuration is a backend boot failure.
@@ -225,6 +259,14 @@ federation:
 signing:
   # DID of this DCS instance (embedded in C2PA lifecycle assertions as authority).
   issuerDID: ""
+
+  # Path to the PEM certificate chain that publishes this instance's signing key.
+  # It is what the status list this instance serves carries as its x5c header,
+  # and its last certificate is the anchor a verifier — this instance included —
+  # has to hold to accept that list (ADR-34). Empty uses the chain the
+  # provisioning job leaves on the shared token volume; a deployment holding a
+  # real HSM key sets the path its own chain is mounted at.
+  issuerX5ChainPath: ""
   issuerDIDSecretRef:
     name: ""
     key: "ISSUER_DID"
@@ -252,19 +294,14 @@ pkcs11:
     key: "PKCS11_PIN"
   provisioning:
     enabled: true
-    # Publish the provisioned did.json and C2PA x5chain as Secrets via the
-    # Kubernetes API, which requires the job to carry its own ServiceAccount +
-    # Role + RoleBinding.
+    # Publish the provisioned did.json as a Secret via the Kubernetes API, which
+    # requires the job to carry its own ServiceAccount + Role + RoleBinding.
     #
     # Set false on clusters that do not grant the installer rbac.authorization
     # (a common on-prem namespace restriction — the install otherwise fails on
     # "cannot create resource roles"). The job then writes nothing to the API:
-    # every artifact stays on the shared token volume it already writes them to,
-    # the backend reads DCS_DID from there, and pdf-core mounts the same volume
-    # read-only for the x5chain. That co-mount is why pdf-core is pinned to the
-    # backend's node in this mode — a ReadWriteOnce volume admits multiple pods
-    # only on one node. Supply persistence.accessModes: ["ReadWriteMany"] to
-    # drop the pinning.
+    # every artifact stays on the shared token volume it already writes them to
+    # and the backend reads DCS_DID from there.
     publishSecrets: true
     # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
     tokenDir: "/var/lib/softhsm"
@@ -387,19 +424,33 @@ statusListLocalhostProxy:
   listenPort: 18080
   upstream: ""
   ingressHost: localhost
+  # Prefixes of the public origin this sidecar answers for. A credential names
+  # its status list by absolute URL and the verifier requires the served token's
+  # `sub` to equal that URL exactly, so the Pod has to fetch the credential's own
+  # URL rather than an in-cluster equivalent.
+  #
+  # `host` is the Ingress host the prefix is routed under, defaulting to
+  # ingressHost — this release's own. The credential issuer is a SEPARATE release
+  # published once at one origin (ADR-34), so its prefix names that origin
+  # outright and stays right for a release answering on some other host.
+  paths:
+    - prefix: /statuslist/
+    - prefix: /issuer/
+      host: localhost
   # Functional HTTP route used by the sidecar readiness probe. Environments
   # that require a particular seeded status list can override this path.
   readinessPath: "/statuslist/health"
 
-# XFSC Status List Service (DCS-OR-C2PA-005)
-# Manages verifiable credential status lists (Status List 2021/2023 format).
-# When enabled, STATUSLIST_SERVICE_URL is auto-derived and wired into DCS.
-# See charts/statuslist-service/values.yaml for all configurable fields.
+# XFSC Status List Service.
+# Nothing points at it: the credentials this deployment issues name the status
+# list it serves and signs itself (ADR-34), and they were the last consumer.
+# It is still deployable while its removal is staged; deleting the subchart is a
+# separate step. See charts/statuslist-service/values.yaml for its fields.
 statuslistService:
   enabled: false
   # url overrides the auto-wired ClusterIP URL when enabled=true.
   url: ""
-  # tenantID is the tenant identifier passed as STATUSLIST_TENANT_ID (defaults to "default" when empty).
+  # tenantID is the tenant identifier used by the service itself.
   tenantID: ""
   image:
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/status-list-service
@@ -553,20 +604,10 @@ pdfCore:
   # pdf-core at startup). Default: auto-derived from the pdf-core service URL,
   # keeping it consistent with the contextIRI default above.
   ontologyBaseURL: ""
-  signing:
-    # No default key/cert ships in this chart (clean-product sweep freeze-day
-    # grep gate: no PEM private key material in committed values files). This
-    # path only matters when pkcs11.provisioning.enabled=false (SoftHSM2/PKCS#11
-    # provisioning is the default and does not use these values at all — see
-    # pdf-core-signing-secret.yaml's render guard). If you disable PKCS11
-    # provisioning, either set existingSecret below, or supply signerKeyPEM +
-    # x5ChainPEM explicitly via --set-file / a values overlay that is NOT
-    # committed to the chart.
-    signerKeyPEM: ""
-    x5ChainPEM: ""
-    # Set to use an existing Secret instead of auto-creating one from the inline values above.
-    existingSecret: ""
-    existingSecretX5ChainKey: "x5chain-pem"
+  # pdf-core holds no signing material. The backend signs the COSE
+  # Sig_structures with its PKCS#11 dcs-c2pa key and sends the matching
+  # certificate chain per request in the X-DCS-C2PA-X5Chain header, so this
+  # chart configures no key, cert or Secret for pdf-core.
 
 ipfs:
   enabled: false

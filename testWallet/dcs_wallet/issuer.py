@@ -9,17 +9,13 @@ from typing import Any
 import jwt
 from jwt.algorithms import ECAlgorithm
 
+from dcs_wallet.issuer_pki import dev_issuer
 from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, private_key_material, public_key_material, public_jwk, write_text
 from dcs_wallet.sdjwt import KB_JWT_TYP, DEFAULT_SD_ALG, KB_JWT_IAT_LEEWAY_SEC, create_property_disclosure, join_sd_jwt, sd_hash, split_sd_jwt
-from dcs_wallet.status_list import DEFAULT_SERVICE_BASE, DEFAULT_TENANT, build_credential_status
+from dcs_wallet.status_list import build_credential_status, fixture_index
 
 POA_VCT = "urn:dcs:poa:v1"
 CREDENTIAL_JWT_TYP = "dc+sd-jwt"
-DEFAULT_ISSUER_DID = "did:web:dev.example:issuer:poa"
-TRUSTED_ISSUER_DIDS = [
-    "did:web:dev.example:issuer:poa",
-    "did:web:dev2.example:issuer:poa",
-]
 CREDENTIAL_EXT = ".jwt"
 CREDENTIAL_IAT = 1719129600
 CREDENTIAL_EXP = 2145916800
@@ -46,6 +42,14 @@ def sign_credential_sd_jwt(
     selective_claims: dict[str, Any],
     issuer_private: dict[str, Any],
 ) -> str:
+    """Sign an SD-JWT VC whose issuer publishes its key as a bare header jwk.
+
+    Nothing this wallet issues for a stack it expects to be believed uses this
+    any more: an issuer DCS trusts is one whose key arrives in a certificate
+    chain (sign_credential_sd_jwt_x5c). What is left for it is the negative
+    probes — a credential from an issuer no deployment configures — where the
+    point is precisely that no configured mechanism resolves this key.
+    """
     ADD_HEADER_KID = True
     ADD_HEADER_JWK = True
 
@@ -82,14 +86,16 @@ def sign_credential_sd_jwt_x5c(
     visible_claims: dict[str, Any],
     selective_claims: dict[str, Any],
     issuer_private: dict[str, Any],
-    issuer_cert_der: bytes,
+    x5c: list[str],
 ) -> str:
     """Same as sign_credential_sd_jwt, but the issuer JWT header carries the
-    issuer's own x5c certificate chain instead of a bare jwk+kid — what a
-    real EUDI wallet's issued PID actually looks like, as opposed to this
-    project's default JWKS-trust-listed dev issuer path (DEFAULT_ISSUER_DID).
-    The issuer's trust entry has to declare mechanism x5c for this to be
-    resolved (backend/internal/auth/oid4vp/sdjwt/keys.go).
+    issuer's certificate chain (base64 DER, leaf first) instead of a bare
+    jwk+kid — what both a real EUDI wallet's PID and this stack's own ORCE
+    issuer actually put there (flow-vci.json).
+
+    DCS picks the resolution branch from the issuer's CONFIGURED mechanism, so
+    the issuer's trust entry has to declare x5c for this chain to be read at all
+    (backend/internal/auth/oid4vp/sdjwt/keys.go, ResolveIssuerVerificationKey).
     """
     disclosures: list[str] = []
     sd_digests: list[str] = []
@@ -102,7 +108,7 @@ def sign_credential_sd_jwt_x5c(
     headers = {
         "typ": CREDENTIAL_JWT_TYP,
         "alg": "ES256",
-        "x5c": [base64.b64encode(issuer_cert_der).decode()],
+        "x5c": list(x5c),
     }
     issuer_jwt = jwt.encode(
         payload,
@@ -165,51 +171,43 @@ def issue_stored_credential(
     *,
     organization: str,
     roles: list[str],
-    issuer_private: dict[str, Any],
     wallet_private: dict[str, Any],
-    issuer_did: str = DEFAULT_ISSUER_DID,
-    credential_status: dict[str, Any] | None = None,
-    statuslist_service_base: str | None = None,
-    statuslist_tenant: str | None = None,
+    status_index: int,
+    issuer_base: str | None = None,
 ) -> str:
-    """Issuer-signed SD-JWT for wallet storage (no KB-JWT; aud/nonce belong to presentation)."""
+    """Issuer-signed SD-JWT for wallet storage (no KB-JWT; aud/nonce belong to presentation).
+
+    Issued as the stack's ORCE issuer (dcs_wallet.issuer_pki): `iss` is the URL
+    its status list lives under, and the chain in the header is the one it signs
+    with. A credential naming any other issuer would point at a list that issuer
+    does not publish, and be refused with the list unread.
+
+    status_index is the credential's own bit in the issuer's status list. There
+    is no default: two credentials sharing a bit means revoking either revokes
+    both, so the caller says which one this is (dcs_wallet.status_list).
+    """
+    issuer = dev_issuer(issuer_base)
     holder_public = public_jwk(wallet_private)
     holder_did_value = did_jwk_from_public_jwk(holder_public)
     holder_jwk = cnf_jwk(holder_public)
-    status_base = (
-        statuslist_service_base.strip()
-        if statuslist_service_base and statuslist_service_base.strip()
-        else DEFAULT_SERVICE_BASE
-    )
-    status_tenant = (
-        statuslist_tenant.strip()
-        if statuslist_tenant and statuslist_tenant.strip()
-        else DEFAULT_TENANT
-    )
     visible_claims = {
-        "iss": issuer_did,
+        "iss": issuer.iss,
         "sub": holder_did_value,
         "vct": POA_VCT,
         "iat": CREDENTIAL_IAT,
         "exp": CREDENTIAL_EXP,
         "cnf": {"jwk": holder_jwk},
-        "status": credential_status
-        or build_credential_status(
-            sub=holder_did_value,
-            organization=organization,
-            roles=roles,
-            service_base=status_base,
-            tenant=status_tenant,
-        ),
+        "status": build_credential_status(index=status_index, issuer_base=issuer_base),
     }
     selective_claims = {
         "organization": organization,
         "roles": roles,
     }
-    return sign_credential_sd_jwt(
+    return sign_credential_sd_jwt_x5c(
         visible_claims=visible_claims,
         selective_claims=selective_claims,
-        issuer_private=issuer_private,
+        issuer_private=issuer.private_jwk,
+        x5c=issuer.x5c,
     )
 
 
@@ -217,28 +215,19 @@ def issue_access_credential(
     *,
     organization: str,
     roles: list[str],
-    issuer_private: dict[str, Any],
     wallet_private: dict[str, Any],
-    issuer_did: str = DEFAULT_ISSUER_DID,
+    status_index: int,
     aud: str = DEFAULT_KB_AUD,
     nonce: str = DEFAULT_KB_NONCE,
-    statuslist_service_base: str | None = None,
-    statuslist_tenant: str | None = None,
+    issuer_base: str | None = None,
 ) -> str:
-    """Build SD-JWT+KB vp_token for an OpenID4VP request (presentation-time).
-    statuslist_service_base/statuslist_tenant default to
-    issue_stored_credential's own defaults when unset — pass
-    BDD_CREDENTIAL_TENANT explicitly for a presentation the BDD/CI status-list
-    provisioning actually seeds (the "default" tenant is not guaranteed to
-    be, see ensure_statuslist_for_dev.py)."""
+    """Build SD-JWT+KB vp_token for an OpenID4VP request (presentation-time)."""
     issued_sd_jwt = issue_stored_credential(
         organization=organization,
         roles=roles,
-        issuer_private=issuer_private,
         wallet_private=wallet_private,
-        issuer_did=issuer_did,
-        statuslist_service_base=statuslist_service_base,
-        statuslist_tenant=statuslist_tenant,
+        status_index=status_index,
+        issuer_base=issuer_base,
     )
     return attach_key_binding(
         issued_sd_jwt=issued_sd_jwt,
@@ -251,10 +240,9 @@ def issue_access_credential(
 def issue_credential_from_template(
     *,
     template_path: Path,
-    issuer_private: dict[str, Any],
     wallet_private: dict[str, Any],
-    issuer_did: str = DEFAULT_ISSUER_DID,
-    credential_status: dict[str, Any] | None = None,
+    status_index: int,
+    issuer_base: str | None = None,
 ) -> str:
     with template_path.open(encoding="utf-8") as fh:
         template_data = json.load(fh)
@@ -267,10 +255,9 @@ def issue_credential_from_template(
     return issue_stored_credential(
         organization=organization,
         roles=roles,
-        issuer_private=issuer_private,
         wallet_private=wallet_private,
-        issuer_did=issuer_did,
-        credential_status=credential_status,
+        status_index=status_index,
+        issuer_base=issuer_base,
     )
 
 
@@ -278,10 +265,8 @@ def issue_credential_file(
     *,
     credentials_dir: Path,
     credential_name: str,
-    issuer_private: dict[str, Any],
     wallet_private: dict[str, Any],
-    issuer_did: str = DEFAULT_ISSUER_DID,
-    credential_status: dict[str, Any] | None = None,
+    issuer_base: str | None = None,
 ) -> Path:
     stem = credential_name.removesuffix(CREDENTIAL_EXT).removesuffix(".template")
     template_path = credentials_dir / f"{stem}.template.json"
@@ -289,35 +274,10 @@ def issue_credential_file(
         raise FileNotFoundError(f"template not found: {template_path}")
     token = issue_credential_from_template(
         template_path=template_path,
-        issuer_private=issuer_private,
         wallet_private=wallet_private,
-        issuer_did=issuer_did,
-        credential_status=credential_status,
+        status_index=fixture_index(stem),
+        issuer_base=issuer_base,
     )
     output_path = credentials_dir / f"{stem}{CREDENTIAL_EXT}"
     write_text(output_path, token)
     return output_path
-
-
-def issue_all_template_files(
-    *,
-    credentials_dir: Path,
-    issuer_private: dict[str, Any],
-    wallet_private: dict[str, Any],
-    issuer_did: str = DEFAULT_ISSUER_DID,
-    credential_status: dict[str, Any] | None = None,
-) -> list[Path]:
-    paths: list[Path] = []
-    for template_path in sorted(credentials_dir.glob("*.template.json")):
-        stem = template_path.name.replace(".template.json", "")
-        paths.append(
-            issue_credential_file(
-                credentials_dir=credentials_dir,
-                credential_name=stem,
-                issuer_private=issuer_private,
-                wallet_private=wallet_private,
-                issuer_did=issuer_did,
-                credential_status=credential_status,
-            )
-        )
-    return paths

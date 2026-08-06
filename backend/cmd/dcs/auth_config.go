@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,8 +15,16 @@ import (
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pathutil"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/service"
 )
+
+// issuerX5ChainPathEnv points at the PEM certificate chain that publishes this
+// deployment's own signing key — the chain the hsm-provision job issues for the
+// C2PA claim signature (c2pa-x5chain.pem), bound to the same PKCS#11 key. It is
+// what the status list this deployment serves carries in its x5c header, and
+// what its own trust anchor is read out of.
+const issuerX5ChainPathEnv = "DCS_ISSUER_X5CHAIN_PATH"
 
 func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 	publicIssuerURL := strings.TrimRight(strings.TrimSpace(os.Getenv("HYDRA_PUBLIC_ISSUER_URL")), "/")
@@ -55,18 +64,50 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 		return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
 	}
 
-	// Optional: a real EUDI-wallet-issued PID (or any x5c-bearing credential)
-	// carries its issuer certificate this way, not a bare JWK. Unset in
-	// environments that never present one (dev/BDD issue PID credentials via
-	// the JWKS issuer path); an x5c credential presented with no trust
-	// anchors configured is refused outright, never silently trusted off its
-	// own embedded leaf cert (sdjwt.verificationKeyFromX5C).
-	if x5cPath := strings.TrimSpace(os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PATH")); x5cPath != "" {
-		x5cRoots, err := oid4vp.LoadX5CTrustAnchors(x5cPath)
-		if err != nil {
-			return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
+	// The two CA trust lists an x5c chain is verified against (ADR-35).
+	//
+	// PoA covers parties: a counterparty's Power of Attorney, admitted by its
+	// chain alone, and our own login issuers — the same certificates seen from
+	// this side, since the PoA a holder obtains at login here is what travels in
+	// the signed PDF for the counterparty to verify. PID is separate so that a
+	// CA attesting persons cannot speak for a party, or a party's CA attest a
+	// person. Neither falls back to the other; a list left unset has no anchors,
+	// and every x5c credential for it is refused rather than trusted off its own
+	// embedded leaf cert (sdjwt.verificationKeyFromX5C).
+	anchorPaths := map[oid4vp.Purpose]string{
+		oid4vp.PurposePeer: "OID4VP_X5C_TRUST_ANCHORS_POA_PATH",
+		oid4vp.PurposePID:  "OID4VP_X5C_TRUST_ANCHORS_PID_PATH",
+	}
+	for purpose, env := range anchorPaths {
+		path := strings.TrimSpace(os.Getenv(env))
+		if path == "" {
+			continue
 		}
-		trustCfg.SetX5CTrustRoots(x5cRoots)
+		anchors, err := oid4vp.LoadX5CTrustAnchors(path)
+		if err != nil {
+			return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %s: %w", env, err)
+		}
+		trustCfg.SetX5CTrustRoots(purpose, anchors)
+	}
+
+	// This deployment issues credentials of its own — the contract lifecycle
+	// credential and the signing summary — and therefore serves and signs their
+	// status list (ADR-34). It also verifies that list, through exactly the path
+	// it verifies anyone else's: chain against the configured anchors, leaf
+	// against the issuer the token names. So the anchor of its own chain has to
+	// be among those anchors, and it cannot be a committed one — the
+	// provisioning job mints it per install — so it is read back out of the
+	// chain the deployment signs with. Without this every verification of our
+	// own provenance credential would report the revocation state as unknown.
+	//
+	// It lands on the PoA list: what a counterparty reads from us is our own
+	// provenance, issued under the same CA that issues our login issuer.
+	if chainPath := strings.TrimSpace(os.Getenv(issuerX5ChainPathEnv)); chainPath != "" {
+		root, err := provenance.StatusListRoot(chainPath)
+		if err != nil {
+			return service.AuthConfig{}, fmt.Errorf("dcs configuration error: %s: %w", issuerX5ChainPathEnv, err)
+		}
+		trustCfg.SetX5CTrustRoots(oid4vp.PurposePeer, []*x509.Certificate{root})
 	}
 
 	// Optional: the endpoint the `orce` mechanism delegates key resolution to.

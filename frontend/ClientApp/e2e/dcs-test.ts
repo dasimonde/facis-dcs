@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type BrowserContext, type Page, test as base } from '@playwright/test'
-import { E2E_API_BASE, E2E_STATUSLIST_URL } from '../playwright.config'
+import { E2E_API_BASE, E2E_ISSUER_BASE_URL } from '../playwright.config'
 
 export type DcsRole =
   | 'Template Creator'
@@ -11,6 +11,7 @@ export type DcsRole =
   | 'Template Approver'
   | 'Template Manager'
   | 'Contract Creator'
+  | 'Contract Negotiator'
   | 'Contract Reviewer'
   | 'Contract Approver'
   | 'Contract Manager'
@@ -61,7 +62,7 @@ print(json.dumps({"token": access_token, "cookies": [
     timeout: 120_000,
     env: {
       ...process.env,
-      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      ISSUER_BASE_URL: E2E_ISSUER_BASE_URL,
       BDD_DCS_BASE_URL: apiBase,
     },
   })

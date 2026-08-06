@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/identity"
 
+	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
@@ -28,6 +30,13 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/query/contracttemplate"
 	"digital-contracting-service/internal/semantichub"
 )
+
+// initialContractVersion mirrors the contracts table's contract_version
+// default: a freshly created or renewed contract is at version 1, which is the
+// negotiation round its first tasks belong to.
+const initialContractVersion = 1
+
+var ErrInvalidOriginatorRole = errors.New("originator role must be one of exactly two template roles")
 
 type CreateCmd struct {
 	DID         string `json:"did"`
@@ -62,8 +71,14 @@ type Creator struct {
 type semanticBundleRefs struct {
 	Context         string
 	CanonicalShapes string
-	Shapes          []string
-	Profile         string
+	// Shapes are the DCS envelope graphs the new contract is pinned to,
+	// canonical first.
+	Shapes []string
+	// Libraries are the hub's other active shapes entries. They are not pinned;
+	// they only supply a version to a library the document declares without
+	// one.
+	Libraries []string
+	Profile   string
 }
 
 func withCreationTimestamp(data db.Contract, evt contractevents.CreateEvent) (db.Contract, contractevents.CreateEvent) {
@@ -73,6 +88,12 @@ func withCreationTimestamp(data db.Contract, evt contractevents.CreateEvent) (db
 	return data, evt
 }
 
+// effectiveBundleRefs turns the hub's active bundle into the anchors a new
+// contract is pinned to. The pin covers the DCS envelope and, through
+// PinSemanticBundle, the libraries the contract's own document declares —
+// nothing else. Pinning every registered library instead judged a contract
+// against graphs it has no relation to, and made those graphs part of what its
+// ship had to carry to the counterparty.
 func effectiveBundleRefs(bundle semantichub.EffectiveBundle) (semanticBundleRefs, error) {
 	if bundle.ContextVersion <= 0 || bundle.ProfileVersion <= 0 || len(bundle.Shapes) == 0 {
 		return semanticBundleRefs{}, errors.New("complete versioned semantic bundle is required")
@@ -80,25 +101,38 @@ func effectiveBundleRefs(bundle semantichub.EffectiveBundle) (semanticBundleRefs
 	if bundle.Shapes[0].Name != semantichub.ShapesName || bundle.Shapes[0].Version <= 0 {
 		return semanticBundleRefs{}, errors.New("canonical shapes must be the first versioned bundle entry")
 	}
-	shapeRefs := make([]string, 0, len(bundle.Shapes))
-	for _, shape := range bundle.Shapes {
-		if strings.TrimSpace(shape.Name) == "" || shape.Version <= 0 {
-			return semanticBundleRefs{}, errors.New("every effective shape requires a name and version")
-		}
-		shapeRefs = append(shapeRefs, semantichub.AnchorURL("shapes", shape.Name, shape.Version))
+	envelopeRefs, err := shapeAnchors(bundle.Shapes)
+	if err != nil {
+		return semanticBundleRefs{}, err
+	}
+	libraryRefs, err := shapeAnchors(bundle.Libraries)
+	if err != nil {
+		return semanticBundleRefs{}, err
 	}
 	return semanticBundleRefs{
 		Context:         semantichub.AnchorURL("context", semantichub.ContextName, bundle.ContextVersion),
-		CanonicalShapes: shapeRefs[0],
-		Shapes:          shapeRefs,
+		CanonicalShapes: envelopeRefs[0],
+		Shapes:          envelopeRefs,
+		Libraries:       libraryRefs,
 		Profile:         semantichub.AnchorURL("profile", semantichub.ProfileName, bundle.ProfileVersion),
 	}, nil
 }
 
-// createTasks opens this instance's own review, negotiation, and approval
+func shapeAnchors(entries []semantichub.Schema) ([]string, error) {
+	anchors := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Name) == "" || entry.Version <= 0 {
+			return nil, errors.New("every effective shape requires a name and version")
+		}
+		anchors = append(anchors, semantichub.AnchorURL("shapes", entry.Name, entry.Version))
+	}
+	return anchors, nil
+}
+
+// createReviewAndApprovalTasks opens this instance's own review and approval
 // tasks (ADR-13): the responsible role lists hold local-RBAC holders only, so
 // each DCS creates and owns its tasks; nothing crosses the boundary.
-func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, ntRepo db.NegotiationTaskRepo, did, createdBy string, resp db.Responsible) error {
+func createReviewAndApprovalTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, did, createdBy string, resp db.Responsible) error {
 	for _, reviewer := range resp.Reviewers {
 		reviewTask := db.ReviewTaskData{
 			DID:       did,
@@ -109,19 +143,6 @@ func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atR
 		_, err := rtRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			return fmt.Errorf("could not create review task: %w", err)
-		}
-	}
-
-	for _, negotiator := range resp.Negotiators {
-		negotiationTask := db.NegotiationTaskData{
-			DID:        did,
-			Negotiator: negotiator,
-			State:      reviewtaskstate.Open.String(),
-			CreatedBy:  createdBy,
-		}
-		_, err := ntRepo.Create(ctx, tx, negotiationTask)
-		if err != nil {
-			return fmt.Errorf("could not create negotiation task: %w", err)
 		}
 	}
 
@@ -138,6 +159,26 @@ func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atR
 		}
 	}
 
+	return nil
+}
+
+// mintNegotiationTask records that this instance engaged with a contract's
+// current negotiation round: authoring the contract (create/renew), accepting
+// an inbound offer, or proposing a redline on one. A task is never minted by
+// passive receipt — it would queue work nobody chose and make the settlement
+// gate in submit read an engagement that never happened. Repeat mints for the
+// same round are absorbed by the repository (idempotent Create).
+func mintNegotiationTask(ctx context.Context, tx *sqlx.Tx, ntRepo db.NegotiationTaskRepo, did, negotiator, createdBy string, contractVersion int) error {
+	_, err := ntRepo.Create(ctx, tx, db.NegotiationTaskData{
+		DID:             did,
+		ContractVersion: contractVersion,
+		Negotiator:      negotiator,
+		State:           negotiationtaskstate.Open.String(),
+		CreatedBy:       createdBy,
+	})
+	if err != nil {
+		return fmt.Errorf("could not create negotiation task: %w", err)
+	}
 	return nil
 }
 
@@ -181,10 +222,16 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		bundleRefs.Context,
 		bundleRefs.CanonicalShapes,
 		bundleRefs.Shapes,
+		bundleRefs.Libraries,
 		bundleRefs.Profile,
 	)
 	if err != nil {
 		return fmt.Errorf("could not pin effective Semantic Hub bundle: %w", err)
+	}
+	if cmd.OriginatorRole != "" {
+		if err := validateOriginatorRole(normalizedContractData, cmd.OriginatorRole); err != nil {
+			return err
+		}
 	}
 	// Parties are attached after normalization for the same reason renewal's
 	// dcs:renewsContract is (see attachRenewsContractReference): the rebase
@@ -268,9 +315,18 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		return fmt.Errorf("could not create contract: %w", err)
 	}
 
-	err = createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd.DID, cmd.CreatedBy, resp)
+	err = createReviewAndApprovalTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd.DID, cmd.CreatedBy, resp)
 	if err != nil {
 		return err
+	}
+
+	// Authoring the contract is this instance's engagement with its first
+	// negotiation round, so the originator holds a task from the start; the
+	// counterparty mints its own when it accepts the offer.
+	for _, negotiator := range resp.Negotiators {
+		if err := mintNegotiationTask(ctx, tx, h.NTRepo, cmd.DID, negotiator, cmd.CreatedBy, initialContractVersion); err != nil {
+			return err
+		}
 	}
 
 	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
@@ -412,6 +468,49 @@ func bindOriginatorParty(raw *datatype.JSON, originDID, role, legalName string) 
 	return &encoded, nil
 }
 
+func validateOriginatorRole(raw *datatype.JSON, originatorRole string) error {
+	if !isAbsoluteRoleURI(originatorRole) {
+		return fmt.Errorf("%w: requested role %q is not an absolute URI", ErrInvalidOriginatorRole, originatorRole)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(*raw, &doc); err != nil {
+		return fmt.Errorf("%w: could not decode contract data: %v", ErrInvalidOriginatorRole, err)
+	}
+	roles := make(map[string]struct{})
+	nodes, _ := doc["dcs:parties"].([]any)
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := node["dcs:role"].(string)
+		if role != "" {
+			if !isAbsoluteRoleURI(role) {
+				return fmt.Errorf("%w: template role %q is not an absolute URI", ErrInvalidOriginatorRole, role)
+			}
+			roles[role] = struct{}{}
+		}
+	}
+	_, member := roles[originatorRole]
+	if len(roles) != 2 || !member {
+		return fmt.Errorf("%w: template roles=%v, requested=%q", ErrInvalidOriginatorRole, mapsKeys(roles), originatorRole)
+	}
+	return nil
+}
+
+func isAbsoluteRoleURI(role string) bool {
+	parsed, err := url.Parse(role)
+	return err == nil && parsed.IsAbs() && !strings.ContainsAny(role, " \t\r\n")
+}
+
+func mapsKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 // setPartyLegalName records the organization on the party node named by iri,
 // without overwriting a name the document already carries for it.
 func setPartyLegalName(doc map[string]any, iri, legalName string) {
@@ -542,8 +641,9 @@ func SeedContractParties(raw datatype.JSON, partyDIDs []string) (datatype.JSON, 
 	return encoded, true, nil
 }
 
-// partyPlaceholderIRI finds the dcs:parties node whose IRI carries the
-// #party-<role> fragment and returns its IRI ("" when absent).
+// partyPlaceholderIRI finds the materialized party node carrying role and
+// returns its IRI. URI roles are percent-encoded in the fragment, so dcs:role
+// is the authoritative comparison key.
 func partyPlaceholderIRI(doc map[string]any, role string) string {
 	nodes, _ := doc["dcs:parties"].([]any)
 	for _, rawNode := range nodes {
@@ -551,7 +651,8 @@ func partyPlaceholderIRI(doc map[string]any, role string) string {
 		if !ok {
 			continue
 		}
-		if iri, _ := node["@id"].(string); strings.HasSuffix(iri, "#party-"+role) {
+		if nodeRole, _ := node["dcs:role"].(string); nodeRole == role {
+			iri, _ := node["@id"].(string)
 			return iri
 		}
 	}

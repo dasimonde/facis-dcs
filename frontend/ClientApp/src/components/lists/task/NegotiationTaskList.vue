@@ -4,7 +4,7 @@ import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useNegotiationTaskStateFilterStore } from '@/stores/state-filter-store'
 import { ContractState } from '@/types/contract-state'
-import { negotiationTaskStates } from '@/types/negotiation-task-state'
+import { NegotiationTaskState, negotiationTaskStates } from '@/types/negotiation-task-state'
 import { compareValues } from '@/utils/comparison'
 import TaskListSearch from './TaskListSearch.vue'
 import ListSort from '../ListSort.vue'
@@ -42,16 +42,16 @@ const sortedTasks = computed(() => {
 
 const hasTasks = computed(() => props.tasks.length > 0)
 
+// Unfiltered, the tab means "rounds awaiting my response": a task exists only
+// because this instance engaged with a negotiation round, and OPEN is exactly
+// the ones it still owes an answer to. The previous default filtered on the
+// CONTRACT's state instead, which encoded a lifecycle assumption the task's own
+// state already answers.
 const filteredTasks = computed(() => {
   if (stateFilterStore.hasFilters) {
     return sortedTasks.value.filter((task) => stateFilterStore.hasFilter(task.state))
   }
-  return sortedTasks.value.filter((task) => {
-    const contractState = contractsStore.findContractByDid(task.did)?.state
-    return (
-      contractState && ([ContractState.draft, ContractState.negotiation] as ContractState[]).includes(contractState)
-    )
-  })
+  return sortedTasks.value.filter((task) => task.state === NegotiationTaskState.open)
 })
 
 const getContractName = (task: ContractNegotiationTask) => {

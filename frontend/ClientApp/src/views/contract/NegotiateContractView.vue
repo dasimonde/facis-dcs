@@ -31,10 +31,12 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { activeNegotiations } from '@/utils/contract-negotiations'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
 import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
+import type { ContractHistoryItem } from '@/models/responses/contract-response'
 import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
@@ -56,7 +58,7 @@ const contractContentValuesStore = useContractContentValuesStore()
 
 const isSubmitting = ref(false)
 
-const { isCreator, isReviewer } = useContractPermissions()
+const { isCreator, isReviewer, isManager, isNegotiator } = useContractPermissions()
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number | boolean) =>
@@ -65,12 +67,17 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 
 const isAuditingAuthorized = computed(
   () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
-      authStore.user?.roles?.includes(role),
-    ) ?? false,
+    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
-const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
+const tabs = computed(() =>
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
+    'details',
+    'content',
+    'diff',
+    'audit',
+  ]),
+)
 
 const story = computed(() =>
   contractStory(contract.value?.state, { extrinsicLifecycle: contract.value?.extrinsic_lifecycle }),
@@ -95,6 +102,13 @@ interface ProposalComparison {
 }
 
 const proposalComparison = ref<ProposalComparison | null>(null)
+
+// A structured redline is applied to the contract the moment it is proposed and
+// the version it replaced is snapshotted to contract_history, keyed by the same
+// contract_version the negotiation row carries. That snapshot is what the
+// proposal asks to change FROM — the live contract already carries the proposal,
+// so comparing against it would show the proposed document on both sides.
+const supersededVersions = ref<Map<number, ContractHistoryItem>>(new Map())
 
 const hasChangeRequest = computed(() => {
   return (
@@ -157,6 +171,8 @@ const loadContract = async () => {
       contract.value = await contractWorkflowService.retrieveById({ did: id })
       editedContract.value = !!contract.value ? { ...contract.value } : null
       applyContractDataToDraft(contract.value?.contract_data)
+      const history = await contractWorkflowService.retrieveHistoryByDid({ did: id })
+      supersededVersions.value = new Map(history.map((entry) => [entry.contract_version, entry]))
       await restoreNegotiationDraft()
     }
   } catch (err: unknown) {
@@ -174,11 +190,16 @@ watch(
 )
 
 watch(
-  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions],
+  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions, dcsDraftStore.contractData],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
-        !hasConditionParameterForValue(conditionValue, dcsDraftStore.blocks, dcsDraftStore.semanticConditions),
+        !hasConditionParameterForValue(
+          conditionValue,
+          dcsDraftStore.blocks,
+          dcsDraftStore.semanticConditions,
+          dcsDraftStore.contractData,
+        ),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },
@@ -231,6 +252,29 @@ const negotiateContractChange = async () => {
     }
   } catch (err) {
     reportActionError(err, 'Propose contract changes')
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+// Accepting an offered contract as it stands (SRS §4: the Responder may accept,
+// negotiate or refuse). This is what mints this instance's negotiation task for
+// the round, so it is also what makes the contract appear in the Negotiations
+// tab and what Submit later reads as "a party engaged".
+const acceptOffer = async () => {
+  if (!contract.value || !issuer.value) return
+  isSubmitting.value = true
+  try {
+    const response = await contractWorkflowService.acceptOffer({
+      did: contract.value.did,
+      updated_at: contract.value.updated_at,
+      accepted_by: issuer.value,
+    })
+    if (response.did) {
+      await loadContract()
+    }
+  } catch (err) {
+    reportActionError(err, 'Accept offer')
   } finally {
     isSubmitting.value = false
   }
@@ -348,26 +392,6 @@ const hasOpenDecisions = computed(
     ) ?? false,
 )
 
-// TEMP-INSTRUMENT: log what disables the Submit button on the negotiate view.
-watch(
-  () => ({
-    state: contract.value?.state,
-    isCreator: isCreator.value,
-    isReviewer: isReviewer.value,
-    hasChangeRequest: hasChangeRequest.value,
-    changedName: changedName.value,
-    changedDescription: changedDescription.value,
-    changedContractData: changedContractData.value,
-    hasOpenDecisions: hasOpenDecisions.value,
-    proposalComparison: !!proposalComparison.value,
-    contractVersion: contract.value?.contract_version,
-    store: contractContentValuesStore.semanticConditionValues,
-    snapshot: contractSemanticConditionValueSnapshot.value,
-  }),
-  (s) => console.log('[SUBMIT-GATE]', JSON.stringify(s)),
-  { immediate: true, deep: true },
-)
-
 onMounted(async () => {
   templateEditorUiStore.reset({ workflow: 'contract' })
   // Our own party identity, used to tell our pending decisions from the peer's.
@@ -419,7 +443,19 @@ const handleSelectedNegotiation = (negotiation: ContractNegotiation | null) => {
     return
   }
 
-  const current = immutableSnapshot(contract.value)
+  const live = immutableSnapshot(contract.value)
+  const superseded = supersededVersions.value.get(negotiation.contract_version)
+  const current: Contract = superseded
+    ? immutableSnapshot({
+        ...live,
+        contract_version: superseded.contract_version,
+        name: superseded.name ?? live.name,
+        description: superseded.description ?? live.description,
+        exp_notice_period: superseded.exp_notice_period ?? live.exp_notice_period,
+        exp_policy: superseded.exp_policy ?? live.exp_policy,
+        contract_data: superseded.contract_data ?? live.contract_data,
+      })
+    : live
   const currentContractData = current.contract_data ? immutableSnapshot(current.contract_data) : undefined
   const proposedContractData = negotiation.change_request.contract_data
     ? immutableSnapshot(negotiation.change_request.contract_data)
@@ -454,19 +490,9 @@ const currentContractData = computed<ContractData | undefined>(() => {
   return buildCurrentContractData()
 })
 
-const hasActiveNegotiations = computed(() => {
-  // A negotiation needs surfacing while it still carries an undecided decision
-  // (that decision blocks Submit) OR it targets the current version. Keying on
-  // the version alone hid the list once a counter's immediate redline bumped the
-  // contract version, deadlocking the round: Submit disabled, no list to resolve.
-  return (
-    contract.value?.negotiations?.some(
-      (negotiation) =>
-        negotiation.contract_version === contract.value?.contract_version ||
-        negotiation.negotiation_decisions.some((decision) => !decision.decision),
-    ) ?? false
-  )
-})
+// Same predicate NegotiationList renders from, so the section never appears
+// around an empty list.
+const hasActiveNegotiations = computed(() => activeNegotiations(contract.value).length > 0)
 
 const { download: downloadExport, exporting } = useDocumentExport()
 
@@ -624,10 +650,16 @@ const exportPDF = async () => {
         </div>
       </div>
       <template v-if="activeTab !== 'audit' && hasActiveNegotiations">
-        <div class="divider"></div>
-        <div class="mx-auto max-w-4xl p-6">
-          <div class="text-lg">Active negotiations</div>
-          <NegotiationList :contract="contract" @selected-negotiation="handleSelectedNegotiation" />
+        <div class="pointer-events-auto absolute top-0 -left-[100vw] w-full max-w-4xl opacity-0">
+          <div class="divider"></div>
+          <div class="p-6">
+            <div class="text-lg">Active negotiations</div>
+            <NegotiationList
+              :contract="contract"
+              :local-instance-did="localInstanceDid"
+              @selected-negotiation="handleSelectedNegotiation"
+            />
+          </div>
         </div>
       </template>
     </div>
@@ -642,7 +674,13 @@ const exportPDF = async () => {
         <button
           v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
           class="btn btn-outline md:w-36"
-          :disabled="isSavingDraft || isSubmitting || !hasChangeRequest || !!proposalComparison"
+          :disabled="
+            (!isCreator && !isNegotiator && !isReviewer && !isManager) ||
+            isSavingDraft ||
+            isSubmitting ||
+            !hasChangeRequest ||
+            !!proposalComparison
+          "
           @click="saveNegotiationDraft"
         >
           <span v-if="isSavingDraft" class="loading loading-sm loading-spinner"></span>
@@ -659,9 +697,24 @@ const exportPDF = async () => {
           Discard draft
         </button>
         <button
+          v-if="contract?.state === ContractState.offered"
+          data-testid="accept-offer"
+          class="btn flex-1 btn-primary"
+          :disabled="(!isCreator && !isNegotiator && !isManager) || isSubmitting || !!proposalComparison"
+          @click="acceptOffer"
+        >
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
+          Accept offer
+        </button>
+        <button
           v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting || !hasChangeRequest || !!proposalComparison"
+          :disabled="
+            (!isCreator && !isNegotiator && !isReviewer && !isManager) ||
+            isSubmitting ||
+            !hasChangeRequest ||
+            !!proposalComparison
+          "
           @click="negotiateContractChange"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -671,7 +724,11 @@ const exportPDF = async () => {
           v-if="contract?.state === ContractState.negotiation"
           class="btn flex-1 btn-primary"
           :disabled="
-            (!isCreator && !isReviewer) || isSubmitting || hasChangeRequest || hasOpenDecisions || !!proposalComparison
+            (!isCreator && !isReviewer && !isNegotiator) ||
+            isSubmitting ||
+            hasChangeRequest ||
+            hasOpenDecisions ||
+            !!proposalComparison
           "
           @click="submitContract"
         >

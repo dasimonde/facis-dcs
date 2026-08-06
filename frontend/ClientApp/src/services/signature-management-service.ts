@@ -8,16 +8,20 @@ import http from '@/api/http'
 // matching the "message" text, which is free-form and not a stable contract.
 const SIGNING_ERROR_MESSAGES: Record<string, string> = {
   document_mismatch:
-    'The signed document does not match what was prepared for signing — its visible content changed after preparation. Download the document again and sign it without modification.',
+    'The signed document does not match what was prepared for signing. Its visible content changed after preparation. Download the document again and sign it without modification.',
   nonce_mismatch:
-    'The signature is not bound to this signing request — it may be stale or was not produced for this ceremony. Start the signing ceremony again.',
+    'The signature is not bound to this signing request. It may be stale or was not produced for this ceremony. Start the signing ceremony again.',
   level_below_required:
     'The signature does not meet the signature level this contract requires (e.g. a Qualified Electronic Signature is required but an Advanced one was provided). Sign with a credential that meets the required level.',
   cert_pid_mismatch:
-    "The signing certificate does not identify the verified signatory — its name does not match the presented identity. Confirm you're signing with the certificate issued to you.",
+    "The signing certificate does not identify the verified signatory. Its name does not match the presented identity. Confirm you're signing with the certificate issued to you.",
   jades_invalid: 'The machine-readable signature (JAdES) accompanying the signed document is invalid or malformed.',
   signature_invalid: 'The submitted signature is not cryptographically valid.',
   ceremony_required: 'A completed identity verification ceremony is required before this contract can be signed.',
+  // Not a refusal of this signer: the contract is waiting for the other party,
+  // and the wait ends without anyone here doing anything.
+  counterparty_not_settled:
+    'Waiting for the counterparty to settle this version. They have not yet confirmed they agree to the document about to be signed. Signing opens as soon as their settlement arrives. If the version was renegotiated, they have to settle it again.',
 }
 
 // Maps a signing-endpoint error to a human-readable message via the typed

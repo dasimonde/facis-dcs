@@ -92,7 +92,9 @@ func NewDCSToDCSHttpClient(host string, pathPrefix string) *dcstodcs.Client {
 		false,
 	)
 	postPdf := c.PostPdf()
+	postSettlement := c.PostSettlement()
+	postSettlementWithdrawal := c.PostSettlementWithdrawal()
 	erase := c.Erase()
 	getProvenance := c.GetProvenance()
-	return dcstodcs.NewClient(postPdf, erase, getProvenance)
+	return dcstodcs.NewClient(postPdf, postSettlement, postSettlementWithdrawal, erase, getProvenance)
 }

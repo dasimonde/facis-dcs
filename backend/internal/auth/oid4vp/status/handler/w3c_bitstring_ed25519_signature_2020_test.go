@@ -53,7 +53,14 @@ func TestW3CBitstring_Check_Ed25519Signature2020(t *testing.T) {
 	// The reference names the list by the URI the fixture identifies itself with,
 	// which is what the handler binds against; rewriteHostTransport is what sends
 	// the fetch to the httptest server instead.
-	result, err := bitstringHandler.Check(context.Background(), status.VerifiedCredential{}, status.Reference{
+	// The credential this list governs is issued by the same did:key that signed
+	// the list — which is what makes the list its statement rather than some
+	// other trusted issuer's (ADR-34).
+	credential := status.VerifiedCredential{Claims: map[string]any{
+		"iss": "did:key:z6Mkg165pEHaUPxkY4NxToor7suxzawEmdT1DEWq3e1Nr2VR",
+	}}
+
+	result, err := bitstringHandler.Check(context.Background(), credential, status.Reference{
 		URI:       "http://localhost:7996/jGidIZFO8f6ey8wZ7Bn8",
 		Index:     1,
 		Purpose:   "revocation",

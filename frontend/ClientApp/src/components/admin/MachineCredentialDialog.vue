@@ -77,7 +77,7 @@ const copy = async (value: string) => {
 
       <div class="mt-4 alert alert-warning">
         <span id="credential-dialog-description" data-testid="credential-once-warning">
-          This secret is shown once. It is not stored and cannot be retrieved — if it is lost, issue a new one, which
+          This secret is shown once. It is not stored and cannot be retrieved. If it is lost, issue a new one, which
           stops this one working.
         </span>
       </div>

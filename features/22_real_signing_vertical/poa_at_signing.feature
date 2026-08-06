@@ -63,6 +63,7 @@ Feature: Power of Attorney at signing
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
     When instance A drives the contract to APPROVED through its own local workflow
+    And instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance A applies a ceremony-backed signature to the contract
     Then instance B holds instance A's signature with its Power of Attorney verified
 

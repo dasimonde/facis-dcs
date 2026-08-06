@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/identity"
 
 	db2 "digital-contracting-service/internal/dcstodcs/db"
@@ -70,9 +71,9 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 	// older than what's stored (see package doc / ADR-0007).
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
-			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
+			return fmt.Errorf("contract %w, please force synchronisation and reload", base.ErrUpdatedElsewhere)
 		}
-		return errors.New("contract was updated elsewhere, please reload")
+		return fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	// Terminate is allowed from any non-terminal state; there is no path back

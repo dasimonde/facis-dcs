@@ -29,7 +29,7 @@ export function useDocumentExport() {
 }
 
 /** Shown when the server refuses because the contract's encryption keys were shredded (DCS-NFR-SEC-13). */
-export const ERASED_CONTENT_MESSAGE = 'Content erased — encryption keys destroyed'
+export const ERASED_CONTENT_MESSAGE = 'Content erased. Encryption keys destroyed.'
 
 /** Matches the backend's ShreddedError message on export/verify responses. */
 export function isErasedContentMessage(message: string): boolean {

@@ -53,9 +53,7 @@ const filteredTasks = computed(() => {
   if (stateFilterStore.hasFilters) {
     return sortedTasks.value.filter((task) => stateFilterStore.hasFilter(task.state))
   }
-  return sortedTasks.value.filter(
-    (task) => !([ReviewTaskState.approved, ReviewTaskState.rejected] as ReviewTaskState[]).includes(task.state),
-  )
+  return sortedTasks.value.filter(canReview)
 })
 
 const getTemplateName = (task: ContractTemplateReviewTask) => {
@@ -70,6 +68,17 @@ const getContractState = (task: ContractReviewTask) => {
   return contractsStore.findContractByDid(task.did)?.state
 }
 
+const getTemplateState = (task: ContractTemplateReviewTask) => {
+  return templatesStore.findTemplateByDid(task.did)?.state
+}
+
+const canReview = (task: ReviewTask) => {
+  if (task.type === 'template') {
+    return task.state === ReviewTaskState.open && getTemplateState(task) === TemplateState.submitted
+  }
+  return task.state === ReviewTaskState.open && getContractState(task) === ContractState.submitted
+}
+
 const canEdit = (task: ReviewTask) => {
   if (task.type === 'contract') return false
 
@@ -80,12 +89,12 @@ const canEdit = (task: ReviewTask) => {
 
 const resolveViewRouteName = (task: ReviewTask) => {
   if (task.type === 'template') {
-    if (task.state === ReviewTaskState.open) {
+    if (canReview(task)) {
       return ROUTES.TEMPLATES.REVIEW
     }
     return ROUTES.TEMPLATES.VIEW
   } else {
-    if (task.state === ReviewTaskState.open && getContractState(task) === ContractState.submitted) {
+    if (canReview(task)) {
       return ROUTES.CONTRACTS.REVIEW
     }
     return ROUTES.CONTRACTS.VIEW

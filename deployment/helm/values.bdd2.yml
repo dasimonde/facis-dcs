@@ -84,8 +84,15 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json
-    xfscAllowUnsignedFallback: true
-    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+    # The dev/BDD stack points both lists at the same bundle: it holds the ORCE
+    # dev root its login and peer credentials chain to AND the dev CA the
+    # synthetic PID x5c issuer signs under. A real deployment separates them —
+    # that is the point of the split (ADR-35) — but here one file is what the
+    # fixtures actually mint under, and pretending otherwise would mean two
+    # copies of the same certificates.
+    x5cAnchors:
+      poa: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+      pid: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 # Own PostgreSQL: this instance's own DCS database plus its own Hydra's
 # database. No "fc" or "statuslist" database — B doesn't run the Federated
@@ -267,6 +274,20 @@ statusListLocalhostProxy:
 # "dcs2" -> Service names "dcs2-ipfs" / "dcs2-ipfs-document-manager".
 ipfs:
   enabled: true
+  # kubo pinned for the disposable stack: `latest` moved to 0.43.0 mid-week and
+  # pin/add started outliving the document-manager's 5s client timeout once the
+  # suite's pinset grew — the same node on 0.35 carried the full run. The
+  # rollback trap the chart warns about (an older kubo refusing a newer repo)
+  # cannot bite here: every run initialises a fresh volume.
+  image:
+    tag: "v0.35.0"
+  # Disposable-stack node tuning (charts/ipfs/values.yaml): no DHT to provide
+  # to, and no per-block fsync — the fsync is what pushed pin/add past the
+  # document-manager's 5s timeout late in the suite, after which every store
+  # failed and the retries snowballed the node.
+  config:
+    routingType: none
+    noSync: true
   persistence:
     enabled: true
 ipfsDocumentManager:
@@ -356,4 +377,3 @@ contractTargets:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
-systemToken: "dcs-local-dev-system-token"

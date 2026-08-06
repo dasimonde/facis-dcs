@@ -361,7 +361,9 @@ test.describe('admin UI accessibility hardening', () => {
     const cases = [
       {
         path: '/ui/admin/targets',
-        api: '**/contract/targets/target-1',
+        // A target is deleted through the collection with the id in the body
+        // (DELETE /contract/targets), not through a per-id path.
+        api: '**/contract/targets',
         trigger: 'target-delete',
         name: /remove target system “archive gateway”/i,
       },
@@ -379,12 +381,13 @@ test.describe('admin UI accessibility hardening', () => {
       const release = new Promise<void>((resolve) => {
         releaseRequest = resolve
       })
-      await page.route(fixture.api, async (route) => {
+      const holdDelete = async (route: Route) => {
         if (route.request().method() !== 'DELETE') return route.fallback()
         requests += 1
         await release
         return json(route, {})
-      })
+      }
+      await page.route(fixture.api, holdDelete)
       await page.goto(fixture.path)
 
       await page.getByTestId(fixture.trigger).click()
@@ -399,7 +402,7 @@ test.describe('admin UI accessibility hardening', () => {
       await expect.poll(() => requests).toBe(1)
       releaseRequest()
       await expect(page.getByTestId(fixture.trigger)).toBeEnabled()
-      await page.unroute(fixture.api)
+      await page.unroute(fixture.api, holdDelete)
     }
   })
 })

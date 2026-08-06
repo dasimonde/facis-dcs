@@ -9,18 +9,20 @@ import type {
   ContractNegotiationDraftSaveRequest,
   ContractNegotiationRequest,
   ContractNegotiationRespondRequest,
+  ContractOfferAcceptRequest,
   ContractOfferRequest,
   ContractRejectRequest,
+  ContractRenewRequest,
   ContractRetrieveByIdRequest,
   ContractRetrieveRequest,
   ContractReviewRequest,
   ContractSearchRequest,
-  ContractStoreRequest,
   ContractSubmitRequest,
   ContractTargetDesignateRequest,
   ContractTargetWriteRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
+  ContractWithdrawRequest,
   MachineIdentityWriteRequest,
 } from '@/models/requests/contract-request'
 import type {
@@ -33,17 +35,19 @@ import type {
   ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
+  ContractOfferAcceptResponse,
   ContractOfferResponse,
   ContractRejectResponse,
+  ContractRenewResponse,
   ContractRetrieveByIdResponse,
   ContractRetrieveResponse,
   ContractReviewResponse,
   ContractSearchResponse,
-  ContractStoreResponse,
   ContractSubmitResponse,
   ContractTarget,
   ContractTerminateResponse,
   ContractUpdateResponse,
+  ContractWithdrawResponse,
   MachineCredential,
   MachineIdentity,
   MachineIdentityCreateResponse,
@@ -69,6 +73,13 @@ export const contractWorkflowService: ContractWorkflowService = {
 
   async negotiate(request: ContractNegotiationRequest) {
     return http.post<ContractNegotiationResponse>('/contract/negotiate', request).then((res) => res.data)
+  },
+
+  // Accept an inbound offer unchanged: mints this instance's negotiation task
+  // for the offer's round and takes the contract OFFERED -> NEGOTIATION. Not
+  // respond(), which decides one already-proposed change request.
+  async acceptOffer(request: ContractOfferAcceptRequest) {
+    return http.post<ContractOfferAcceptResponse>('/contract/accept-offer', request).then((res) => res.data)
   },
 
   async saveNegotiationDraft(request: ContractNegotiationDraftSaveRequest) {
@@ -148,8 +159,12 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http.post<ContractRejectResponse>('/contract/reject', request).then((res) => res.data)
   },
 
-  async store(request: ContractStoreRequest) {
-    return http.post<ContractStoreResponse>('/contract/store', request).then((res) => res.data)
+  async withdraw(request: ContractWithdrawRequest) {
+    return http.post<ContractWithdrawResponse>('/contract/withdraw', request).then((res) => res.data)
+  },
+
+  async renew(request: ContractRenewRequest) {
+    return http.post<ContractRenewResponse>('/contract/renew', request).then((res) => res.data)
   },
 
   async terminate(request: ContractTerminateRequest) {
@@ -219,13 +234,7 @@ export const contractWorkflowService: ContractWorkflowService = {
   },
 
   async audit(request: ContractAuditRequest) {
-    return http
-      .post<ContractAuditResponse>('/contract/audit', request)
-      .then((res) => res.data)
-      .catch((err: unknown) => {
-        console.error('Audit Error:', err)
-        return []
-      })
+    return http.post<ContractAuditResponse>('/contract/audit', request).then((res) => res.data)
   },
 
   async retrieveHistoryByDid(request: ContractHistoryRetrieveRequest) {

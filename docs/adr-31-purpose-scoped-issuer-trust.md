@@ -97,9 +97,10 @@ nothing to check it against — a peer asserting its own authority.
 
 **The credential now travels with the signature.** The ceremony retains the
 Power of Attorney the signatory presented, next to the PID presentation it
-already stored, and the synchronizer ships it with the contract once that
-contract carries signatures (`signatory_poas` on the PDF ship). The receiver
-verifies it before it persists anything of the ship:
+already stored, and it is embedded into the contract PDF beneath the signature
+it authorizes (ADR-35 settles where: inside the PDF, before that party's own
+signature, never as a sibling of it on the wire). The receiver verifies it
+before it persists anything of the ship:
 
 - the issuer is trusted for `peer` and entitled to attest that organization,
 - the credential's `vct`, signature and validity window hold,
@@ -201,7 +202,11 @@ it sits in, and the fix is a general one — ceremony evidence has to be erasabl
 the way contract artifacts are — rather than something to bolt onto this
 column.
 
-**What `peer` gates, and why it is now overloaded.** The purpose is used in two
+**What `peer` gates, and why it was overloaded.** *(Resolved by ADR-35: `peer`
+now means another DCS instance's issuer only, and this instance's own signing
+ceremony verifies the presented Power of Attorney as `login`. The split this
+paragraph asks for is the one that landed.)*
+ The purpose is used in two
 places: a signing ceremony verifying the Power of Attorney presented at it, and
 the receiving instance verifying a counterparty's. Those are different
 questions — "whose attestation may authorize a signature **here**" and "whose
@@ -357,9 +362,9 @@ relying party verifies — and the substance arrives with a real issuer.
   accepted where that counterparty's issuer is trusted for `peer` and entitled
   to its organization. A federation member added without that entry has its
   signed ships refused, with an incident naming why.
-- `peer` carries two meanings until it is split, and granting it to a
-  counterparty's issuer grants both. That is the one thing this ADR still asks
-  an operator to accept knowingly.
+- `peer` carried two meanings until it was split. ADR-35 split it: the local
+  ceremony verifies its Power of Attorney as `login`, and `peer` is reserved for
+  another DCS instance's attestation arriving with a contract.
 - Retained evidence is a holder-bound token at rest. It lives on the signing
   ceremony, next to the PID presentation already stored there, so it inherits
   that record's lifetime — including the fact that a contract erasure shreds

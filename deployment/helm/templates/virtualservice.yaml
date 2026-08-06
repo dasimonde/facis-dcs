@@ -17,6 +17,21 @@ spec:
     - {{ . | quote }}
     {{- end }}
   http:
+    {{- /* The PAC audit may spend up to evidenceTimeout gathering evidence
+         before dispatching. This Istio-only route supplies the wider request
+         deadline; generic ingress annotations remain operator-managed. */}}
+    - name: pac-audit
+      match:
+        - method:
+            exact: POST
+          uri:
+            exact: {{ printf "%s/pac/audit" (include "digital-contracting-service.apiPath" .) }}
+      timeout: {{ .Values.auditExecutor.requestTimeout | quote }}
+      route:
+        - destination:
+            host: {{ include "digital-contracting-service.fullname" . }}
+            port:
+              number: {{ .Values.service.port | int }}
     {{- /* Vendored fc-service route when enabled with route.path — service
          name/port are fc-service's own fixed defaults (kept verbatim, not
          release-prefixed — see Chart.yaml's fc-service dependency). */}}

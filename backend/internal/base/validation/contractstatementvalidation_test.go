@@ -8,8 +8,8 @@ import (
 
 const (
 	testRoleEntityType  = "https://w3id.org/facis/dcs/ontology/v1#CompanyParty"
-	testRoleProvider    = "provider"
-	testRoleCustomer    = "customer"
+	testRoleProvider    = "https://w3id.org/facis/dcs/taxonomy/v1#role-provider"
+	testRoleCustomer    = "https://w3id.org/facis/dcs/taxonomy/v1#role-customer"
 	testRoleReseller    = "reseller"
 	testPaymentTermType = "https://w3id.org/facis/dcs/ontology/v1#PaymentTerm"
 )
@@ -72,7 +72,7 @@ func TestValidateContractStatementsRejectsUnknownPartyRole(t *testing.T) {
 	statements := append(validContractStatementsForValidation(), map[string]any{
 		"@id":   "party-overlord",
 		"@type": testRoleEntityType,
-		"role":  "overlord",
+		"role":  "https://w3id.org/facis/dcs/taxonomy/v1#role-overlord",
 	})
 
 	issues := ValidateContractStatements(statements, statementScopedTestProfile(t))

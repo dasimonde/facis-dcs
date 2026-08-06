@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/userrole"
 
 	"github.com/jmoiron/sqlx"
@@ -57,7 +58,7 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	// aren't peer-synced, so unlike contractworkflowengine there's no
 	// local-vs-remote distinction in the error message here.
 	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
-		return errors.New("contract template was updated elsewhere, please reload")
+		return fmt.Errorf("contract template %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	if processData.State != contracttemplatestate.Reviewed.String() {

@@ -471,30 +471,37 @@ class ContractService:
 
     @staticmethod
     def _prepare_contract_under_review(context, contract_name: str):
-        # Refresh first: async writers (the PDF/C2PA pipeline) may have
-        # touched the row since the cached updated_at was taken.
-        ContractService._refresh_contract(context, contract_name)
-        did, updated_at = ContractService._contract_data(context, contract_name)
         creator_h = context.contract_seed_headers[contract_name]
-        submit_to_negotiation = post_json(
-            context,
-            contract_submit_url(context),
-            ContractService._contract_submit_payload(context, did, updated_at),
-            headers=creator_h,
-        )
-        assert submit_to_negotiation.status_code == 200, submit_to_negotiation.text
-        ContractService._refresh_contract(context, contract_name)
 
+        def submit_once(what: str):
+            # Refresh first: async writers (the PDF/C2PA pipeline) may advance
+            # updated_at between the read and this submit, which the backend
+            # answers as a retryable conflict — re-read and reissue, bounded.
+            import time as _time  # noqa: PLC0415
+
+            resp = None
+            for _ in range(4):
+                ContractService._refresh_contract(context, contract_name)
+                did, updated_at = ContractService._contract_data(context, contract_name)
+                resp = post_json(
+                    context,
+                    contract_submit_url(context),
+                    ContractService._contract_submit_payload(context, did, updated_at),
+                    headers=creator_h,
+                )
+                if resp.status_code != 409:
+                    break
+                _time.sleep(1)
+            assert resp is not None and resp.status_code == 200, (
+                f"{what} failed for '{contract_name}': "
+                f"{resp.status_code if resp is not None else 'no request'} "
+                f"{resp.text if resp is not None else ''}"
+            )
+
+        submit_once("Creator submit (draft -> negotiation)")
         # Backend workflow transitions Draft -> Negotiation on first submit,
         # then Negotiation -> Submitted on a second creator submit.
-        did, updated_at = ContractService._contract_data(context, contract_name)
-        submit_to_submitted = post_json(
-            context,
-            contract_submit_url(context),
-            ContractService._contract_submit_payload(context, did, updated_at),
-            headers=creator_h,
-        )
-        assert submit_to_submitted.status_code == 200, submit_to_submitted.text
+        submit_once("Creator submit (negotiation -> submitted)")
         ContractService._refresh_contract(context, contract_name)
 
     @staticmethod

@@ -77,7 +77,7 @@ async function submit() {
         <span class="label-text text-xs">New version content ({{ mediaType }})</span>
         <label class="label-text-alt link cursor-pointer text-xs">
           Upload file
-          <input type="file" class="hidden" accept=".ttl,.jsonld,.json,.yaml,.yml,text/*" @change="onFileSelected" />
+          <input type="file" class="hidden" accept=".ttl,.jsonld,.json,.yaml,.yml" @change="onFileSelected" />
         </label>
       </label>
       <textarea

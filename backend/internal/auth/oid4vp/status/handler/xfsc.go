@@ -34,7 +34,7 @@ func (h *XFSC) Mechanism() status.Mechanism {
 
 func (h *XFSC) Check(
 	ctx context.Context,
-	_ status.VerifiedCredential,
+	credential status.VerifiedCredential,
 	ref status.Reference,
 ) (status.Result, error) {
 	client := h.Fetcher
@@ -52,10 +52,18 @@ func (h *XFSC) Check(
 	if err != nil {
 		return status.Result{}, status.ErrStatusSignature
 	}
-	return h.resultFromSignedClaims(ref, verified.Claims)
+	return h.resultFromSignedClaims(credential, ref, verified.Claims)
 }
 
-func (h *XFSC) resultFromSignedClaims(ref status.Reference, claims map[string]any) (status.Result, error) {
+func (h *XFSC) resultFromSignedClaims(credential status.VerifiedCredential, ref status.Reference, claims map[string]any) (status.Result, error) {
+	// Whose revocation statement this is (ADR-34): the signature says a trusted
+	// issuer published this list, not that it is the issuer of the credential
+	// whose status it carries.
+	listIssuer, _ := claims["iss"].(string)
+	if err := status.RequireCredentialIssuer(credential, listIssuer); err != nil {
+		return status.Result{}, err
+	}
+
 	subject, _ := claims["sub"].(string)
 	if !status.SubjectMatchesURI(subject, ref.URI) {
 		log.Printf(

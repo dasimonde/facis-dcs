@@ -43,6 +43,33 @@ func lifecycleAuthorityFromContext(ctx context.Context) string {
 	return did
 }
 
+// signingChainCtxKey carries the RFC 9360 x5chain (DER, leaf first) a render
+// embeds in its COSE_Sign1 protected headers. It is the ONLY source of one:
+// pdf-core holds no signing material, matching the key it already does not hold
+// — the caller prepares Sig_structures here and signs them with its own HSM, and
+// the certificate naming that key travels the same way. Each DCS instance signs
+// under its own dcs-c2pa leaf, so the chain belongs to the request, not to
+// whichever pdf-core process serves it.
+type signingChainCtxKey struct{}
+
+// WithSigningChain returns a context whose renders embed chain as the COSE
+// x5chain. Verification uses it in two directions: the replay of a stored
+// manifest runs under the leaf that actually signed it, read back off the
+// artifact, while the witness a verify writes is signed under the caller's own.
+// An empty chain leaves the context untouched, which leaves the render with no
+// signer and therefore refused.
+func WithSigningChain(ctx context.Context, chain [][]byte) context.Context {
+	if len(chain) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, signingChainCtxKey{}, chain)
+}
+
+func signingChainFromContext(ctx context.Context) ([][]byte, bool) {
+	chain, ok := ctx.Value(signingChainCtxKey{}).([][]byte)
+	return chain, ok && len(chain) > 0
+}
+
 // zeroedCOSESignature is the placeholder a CapturingSigner emits: a 64-byte run
 // the "embed" step later overwrites with the real ES256 r||s.
 var zeroedCOSESignature = make([]byte, 64)

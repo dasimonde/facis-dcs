@@ -9,8 +9,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -39,36 +37,39 @@ func mustTestX5ChainPEM(t *testing.T) string {
 	return string(certPEM(der))
 }
 
-func TestLoadSigningMaterialFromEnv_InlineX5Chain(t *testing.T) {
-	env := map[string]string{envX5ChainPEM: mustTestX5ChainPEM(t)}
-	material, err := loadSigningMaterialFromEnv(func(k string) string { return env[k] }, os.ReadFile)
+func TestParseSigningChainPEM_SingleLeaf(t *testing.T) {
+	parsed, err := ParseSigningChainPEM([]byte(mustTestX5ChainPEM(t)))
 	if err != nil {
-		t.Fatalf("loadSigningMaterialFromEnv() error = %v", err)
+		t.Fatalf("ParseSigningChainPEM() error = %v", err)
 	}
-	if len(material.certChainDER) != 1 {
-		t.Fatalf("cert chain length = %d, want 1", len(material.certChainDER))
+	if len(parsed) != 1 {
+		t.Fatalf("cert chain length = %d, want 1", len(parsed))
 	}
 }
 
-func TestLoadSigningMaterialFromEnv_FileX5Chain(t *testing.T) {
-	dir := t.TempDir()
-	chainPath := filepath.Join(dir, "x5chain.pem")
-	if err := os.WriteFile(chainPath, []byte(mustTestX5ChainPEM(t)), 0o644); err != nil {
-		t.Fatalf("write chain: %v", err)
-	}
-	env := map[string]string{envX5ChainPEMFile: chainPath}
-	material, err := loadSigningMaterialFromEnv(func(k string) string { return env[k] }, os.ReadFile)
-	if err != nil {
-		t.Fatalf("loadSigningMaterialFromEnv() error = %v", err)
-	}
-	if len(material.certChainDER) != 1 {
-		t.Fatalf("cert chain length = %d, want 1", len(material.certChainDER))
+func TestParseSigningChainPEM_RejectsNonCertificatePEM(t *testing.T) {
+	if _, err := ParseSigningChainPEM([]byte("not a certificate")); err == nil {
+		t.Fatalf("expected error for PEM carrying no CERTIFICATE block")
 	}
 }
 
-func TestLoadSigningMaterialFromEnv_MissingX5Chain(t *testing.T) {
-	if _, err := loadSigningMaterialFromEnv(func(string) string { return "" }, os.ReadFile); err == nil {
-		t.Fatalf("expected error when x5chain is missing")
+// TestBuildCoseProtectedHeaders_RequiresChainInContext is the certificate half of
+// the guarantee below: pdf-core holds no signing material at all, so a render
+// that reaches a claim signature without a caller-named chain is refused rather
+// than completed under a configured default identity.
+func TestBuildCoseProtectedHeaders_RequiresChainInContext(t *testing.T) {
+	if _, err := buildCoseProtectedHeadersWithX5Chain(context.Background()); err == nil {
+		t.Fatalf("expected error when no signing chain is present in context")
+	}
+}
+
+// TestCompilePDF_RefusesWithoutASigningChain drives the same refusal through a
+// whole compile, so the guarantee cannot be reintroduced by a caller that skips
+// the header.
+func TestCompilePDF_RefusesWithoutASigningChain(t *testing.T) {
+	ctx := WithSigner(context.Background(), testDeterministicSigner{})
+	if _, err := CompilePDF(ctx, []byte(minimalPayloadBase), CanonicalCompiledAt); err == nil {
+		t.Fatalf("CompilePDF compiled a document under no named signer")
 	}
 }
 

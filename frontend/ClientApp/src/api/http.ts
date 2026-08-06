@@ -28,8 +28,12 @@ http.interceptors.response.use(
         }
       }
     }
-    const message = axios.isAxiosError(err) ? (err.response?.data?.message ?? err.message) : err.message
-    const messageId = errorStore.add(String(message))
+    // Callers render the rejected error's own message, so the server's
+    // message replaces Axios's "Request failed with status code N".
+    if (axios.isAxiosError(err) && typeof err.response?.data?.message === 'string') {
+      err.message = err.response.data.message
+    }
+    const messageId = errorStore.add(err.message)
     bindReportedHttpError(err, messageId)
     return Promise.reject(err)
   },

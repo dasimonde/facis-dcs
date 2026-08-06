@@ -83,8 +83,13 @@ func bindingHandler(t *testing.T, body []byte, trusted map[string]*ecdsa.PublicK
 	}
 }
 
+// The credential these tests govern is issued by bindingListIssuer, which is
+// what lets its list be believed at all: a list is the statement of the issuer
+// that issued the credential (ADR-34). The binding under test here is the other
+// half — that the SIGNER is the issuer the list names.
 func checkList(h *handler.W3CBitstring, uri string) (status.Result, error) {
-	return h.Check(context.Background(), status.VerifiedCredential{}, status.Reference{
+	credential := status.VerifiedCredential{Claims: map[string]any{"iss": bindingListIssuer}}
+	return h.Check(context.Background(), credential, status.Reference{
 		URI:       uri,
 		Index:     1,
 		Purpose:   "revocation",

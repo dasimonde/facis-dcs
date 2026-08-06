@@ -30,7 +30,7 @@ func (h *W3CBitstring) Mechanism() status.Mechanism {
 
 func (h *W3CBitstring) Check(
 	ctx context.Context,
-	_ status.VerifiedCredential,
+	credential status.VerifiedCredential,
 	ref status.Reference,
 ) (status.Result, error) {
 	if err := requireStatusTrust(h.Trust); err != nil {
@@ -48,8 +48,14 @@ func (h *W3CBitstring) Check(
 		}
 	}
 
-	encodedList, purpose, err := h.extractW3CEncodedList(response, ref.URI)
+	encodedList, purpose, listIssuer, err := h.extractW3CEncodedList(response, ref.URI)
 	if err != nil {
+		return status.Result{}, err
+	}
+
+	// Whose revocation statement this is (ADR-34). bindToStatusList already ties
+	// the signer to the list; this ties the list to the credential it governs.
+	if err := status.RequireCredentialIssuer(credential, listIssuer); err != nil {
 		return status.Result{}, err
 	}
 
@@ -83,7 +89,9 @@ func (h *W3CBitstring) Check(
 	return status.MapW3CResult(ref, value), nil
 }
 
-func (h *W3CBitstring) extractW3CEncodedList(response fetch.Response, listURI string) (string, string, error) {
+// Returns the encoded list, its status purpose, and the issuer the list names
+// — the last so the caller can bind the list to the credential it governs.
+func (h *W3CBitstring) extractW3CEncodedList(response fetch.Response, listURI string) (string, string, string, error) {
 	contentType := envelope.NormalizeContentType(response.ContentType)
 	body := response.Body
 
@@ -91,38 +99,41 @@ func (h *W3CBitstring) extractW3CEncodedList(response fetch.Response, listURI st
 	case contentType == "application/vc+jwt" || status.IsLikelyJWT(body):
 		claims, signedBy, err := h.verifyJWT(body)
 		if err != nil {
-			return "", "", mapStatusVerifyError(err)
+			return "", "", "", mapStatusVerifyError(err)
 		}
 		if err := bindToStatusList(claims, signedBy, listURI); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
-		return extractEncodedListFromClaims(claims)
+		encoded, purpose, err := extractEncodedListFromClaims(claims)
+		return encoded, purpose, signedBy, err
 	case contentType == "application/vc+cose":
 		claims, signedBy, err := h.verifyCOSE(body)
 		if err != nil {
-			return "", "", mapStatusVerifyError(err)
+			return "", "", "", mapStatusVerifyError(err)
 		}
 		if normalized, ok := status.NormalizeAnyMap(claims); ok {
 			claims = normalized
 		}
 		if err := bindToStatusList(claims, signedBy, listURI); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
-		return extractEncodedListFromMap(claims)
+		encoded, purpose, err := extractEncodedListFromMap(claims)
+		return encoded, purpose, signedBy, err
 	case contentType == "application/vc" || contentType == "application/ld+json" || status.LooksLikeJSON(body):
 		if status.IsLikelyJWT(body) {
-			return "", "", status.ErrUnsupportedMediaType
+			return "", "", "", status.ErrUnsupportedMediaType
 		}
 		claims, signedBy, err := h.verifySecuredW3CDocument(body)
 		if err != nil {
-			return "", "", mapStatusVerifyError(err)
+			return "", "", "", mapStatusVerifyError(err)
 		}
 		if err := bindToStatusList(claims, signedBy, listURI); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
-		return extractEncodedListFromMap(claims)
+		encoded, purpose, err := extractEncodedListFromMap(claims)
+		return encoded, purpose, signedBy, err
 	default:
-		return "", "", status.ErrUnsupportedMediaType
+		return "", "", "", status.ErrUnsupportedMediaType
 	}
 }
 

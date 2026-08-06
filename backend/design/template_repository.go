@@ -726,6 +726,11 @@ var _ = Service("TemplateRepository", func() {
 			Scope("Template Reviewer")
 			Scope("Template Approver")
 			Scope("Template Manager")
+			// Deriving a contract binds the originator to one of the two roles
+			// the template's machine-readable rules declare, so the Contract
+			// Creator has to read the registered template they instantiate —
+			// the role choice cannot be made from a list summary.
+			Scope("Contract Creator")
 		})
 
 		Payload(ContractTemplateRetrieveByIDRequest)

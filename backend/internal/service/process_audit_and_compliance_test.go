@@ -280,6 +280,34 @@ func TestAuditEvidenceResourceUsesExecutorWireNames(t *testing.T) {
 	}
 }
 
+func TestExternalAuditResponseCarriesTheSubmittedTimeline(t *testing.T) {
+	firstDID, secondDID := "did:example:one", "did:example:two"
+	evidence := []*auditEvidenceResource{
+		{Did: firstDID, Component: "CONTRACT_WORKFLOW_ENGINE", AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 1, EventType: "CONTRACT_CREATED", Did: &firstDID},
+			nil,
+		}},
+		nil,
+		{Did: secondDID, Component: "CONTRACT_WORKFLOW_ENGINE", AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 2, EventType: "CONTRACT_SIGNED", Did: &secondDID},
+		}},
+	}
+	response := toPACExternalAuditResponse(auditexecutor.Response{
+		ContractVersion: auditexecutor.ContractVersion, AuditID: "audit-1", CorrelationID: "audit-1",
+		Scope: "contracts", ExecutedAt: "2026-07-29T12:00:00Z",
+	}, evidence)
+
+	if len(response.Timeline) != 2 {
+		t.Fatalf("expected the gathered evidence to be flattened into the timeline, got %d entries", len(response.Timeline))
+	}
+	if response.Timeline[0].EventType != "CONTRACT_CREATED" || response.Timeline[1].EventType != "CONTRACT_SIGNED" {
+		t.Fatalf("unexpected timeline order: %+v", response.Timeline)
+	}
+	if response.Timeline[0].Did == nil || *response.Timeline[0].Did != firstDID {
+		t.Fatalf("a flattened entry lost the DID it is anchored on: %+v", response.Timeline[0])
+	}
+}
+
 func TestValidateAuditScopeDependencies(t *testing.T) {
 	service := &processAuditAndCompliancesrvc{}
 

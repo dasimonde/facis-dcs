@@ -14,7 +14,7 @@ wallet is a configuration change, not a code change (see
 cd testWallet
 pip install -r requirements.txt
 python3 scripts/generate_keys.py --yes   # wallet.jwk, issuer-dev.jwk, wallet-ca (signing certs)
-python3 scripts/ensure_statuslist_for_dev.py
+python3 scripts/check_status_list.py     # the issuer serves the list the credentials name
 python3 scripts/issue_credentials.py     # PoA + self-issued PID credentials from credentials/*.template.json
 ```
 
@@ -26,12 +26,14 @@ DCS. PID credentials for dev/test are **self-issued locally**:
 - `scripts/issue_pid_credentials.py` self-signs a PID SD-JWT VC per
   `credentials/*.pid.template.json` (one `given_name`/`family_name`/... claim
   set each), using the SAME local signing primitives
-  (`dcs_wallet.issuer.sign_credential_sd_jwt`) already used for the Power of
-  Attorney credential — no remote call. It signs under
-  `did:web:dev.example:issuer:poa` (`keys/issuer-dev.jwk`), the SAME dev
-  issuer key/DID `backend/config/oid4vp/trust.dev.json` already trusts for
-  PoA — reused, not a new identity, to keep dev key management to one
-  keypair.
+  (`dcs_wallet.issuer.sign_credential_sd_jwt_x5c`) already used for the Power
+  of Attorney credential — no remote call. It signs as the stack's ORCE
+  credential issuer (`dcs_wallet.issuer_pki`): `iss` is that issuer's base URL
+  and the header carries the certificate chain it signs with, minted here from
+  the PKI fixture that issuer itself is handed
+  (`deployment/helm/charts/orce/pki-dev`). That identity, not a wallet-local
+  DID, because a status list is believed only from the issuer that publishes
+  it — and the ORCE issuer is the only thing in a dev stack that publishes one.
 - **This is a dev-only substitution and must never be pointed at from a
   production trust store.** A production deployment configures
   `OID4VP_TRUST_DATA_PATH` at a real PID issuer registry's public keys
@@ -41,10 +43,19 @@ DCS. PID credentials for dev/test are **self-issued locally**:
 - Self-issued PIDs carry a real status-list claim
   (`dcs_wallet.status_list.build_credential_status`), so the DCS's SM-18
   status check (`checkStatusList` in `VerifyPID`) runs for real. Revoke one
-  for the negative test with `scripts/revoke_statuslist_index.py <index>`
-  (look up the index in the issued `*.pid.jwt`'s `status.status_list.idx`
-  claim, or pass `--credential <file>` to resolve it automatically) — run
-  `scripts/ensure_statuslist_for_dev.py` first so the tenant exists.
+  for the negative test with `scripts/revoke_statuslist_index.py --credential
+  credentials/<name>.pid.jwt`, which posts to the issuer's own admin endpoint
+  and reads the bit back.
+
+### Status list
+
+Every credential here points at the ORCE issuer's own signed list,
+`<ISSUER_BASE_URL>/status-list/1` (ADR-34). Each credential holds an index of
+its own, allocated in `dcs_wallet/status_list.py`: the committed credential
+files have a named entry each, identities a test mints get one derived from
+the identity, and identities a scenario revokes are reserved by name. Sharing
+a bit would mean revoking one credential revokes the other, so issuance
+refuses a committed credential with no allocation of its own.
 
 ### Cert↔PID name alignment
 

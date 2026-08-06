@@ -32,6 +32,7 @@ import (
 	"digital-contracting-service/internal/templaterepository/query/contracttemplate"
 
 	"github.com/jmoiron/sqlx"
+	goa "goa.design/goa/v3/pkg"
 )
 
 // TemplateRepository service example implementation.
@@ -74,6 +75,12 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 func mapTemplateCommandError(err error) error {
 	if errors.Is(err, validation.ErrDocumentSchemaConflict) {
 		return templaterepository.MakeBadRequest(err)
+	}
+	// Same optimistic-concurrency refusal the contract commands answer with a
+	// retryable conflict: the caller re-reads and reissues, so reporting it as
+	// an internal error tells it the opposite of the truth.
+	if errors.Is(err, base.ErrUpdatedElsewhere) {
+		return goa.NewServiceError(err, "conflict", false, true, false)
 	}
 	return templaterepository.MakeInternalError(err)
 }

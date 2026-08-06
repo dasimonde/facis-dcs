@@ -20,9 +20,9 @@ export function compactOdrlIdentifier(identifier: string): string {
 
 /** Rule deontic types (ODRL IM: Permission enables, Prohibition disables, Duty obliges). */
 export const ODRL_RULE_TYPES: { type: 'odrl:Permission' | 'odrl:Prohibition' | 'odrl:Duty'; label: string }[] = [
-  { type: 'odrl:Permission', label: 'Permission — the assignee MAY' },
-  { type: 'odrl:Prohibition', label: 'Prohibition — the assignee MUST NOT' },
-  { type: 'odrl:Duty', label: 'Obligation — the assignee MUST' },
+  { type: 'odrl:Permission', label: 'Permission: the assignee MAY' },
+  { type: 'odrl:Prohibition', label: 'Prohibition: the assignee MUST NOT' },
+  { type: 'odrl:Duty', label: 'Obligation: the assignee MUST' },
 ]
 
 /**

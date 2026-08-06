@@ -18,6 +18,10 @@ from behave import given, then, when
 from steps.support.api_client import signature_request_leaf_url
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+from steps.support.status_list_probe import (
+    assert_refused_for_the_revoked_bit,
+    revoke_credential_bit,
+)
 from steps.template_management.contract_state_machine_steps import _advance_to_approved
 
 from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (
@@ -223,8 +227,6 @@ def step_when_pid_revoked_before_presentation(context, name):
     that EUDIPLO, which omitted status, is removed)."""
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.credential import decode_jwt_payload  # noqa: PLC0415
-    from dcs_wallet.sdjwt import split_sd_jwt  # noqa: PLC0415
-    from dcs_wallet.status_list import credential_status_from_claims, revoke_status_index  # noqa: PLC0415
 
     ceremony_id = context.ceremony_ids[name]
     nonce = context.pid_presentations[name]["nonce"]
@@ -234,11 +236,7 @@ def step_when_pid_revoked_before_presentation(context, name):
     presentation, issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
         given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce,
     )
-    claims = decode_jwt_payload(split_sd_jwt(presentation)[0])
-    idx_uri = credential_status_from_claims(claims)
-    assert idx_uri, f"self-issued PID carries no status claim to revoke: {claims}"
-    idx, uri = idx_uri
-    revoke_status_index(idx, service_base=uri.split("/v1/")[0], tenant=uri.split("/tenants/")[1].split("/")[0])
+    revoke_credential_bit(context, decode_jwt_payload(issuer_jwt))
 
     field_name = ContractService._local_peer_did(context)
     context.requests_response = _complete_ceremony_via_presentation(
@@ -247,7 +245,12 @@ def step_when_pid_revoked_before_presentation(context, name):
     )
 
 
-@then('the ceremony presentation for contract "{name}" is rejected')
-def step_then_presentation_rejected(context, name):
-    resp = context.requests_response
-    assert resp.status_code >= 400, f"expected the presentation to be rejected, got {resp.status_code}: {resp.text}"
+@then('the ceremony presentation for contract "{name}" is rejected for a revoked PID')
+def step_then_presentation_rejected_revoked_pid(context, name):
+    # The PoA presented alongside the PID is status-checked on the same list,
+    # but holds an index derived from its organization rather than this PID's
+    # reserved one, so a refusal naming this index attributes itself to the PID.
+    del name
+    assert_refused_for_the_revoked_bit(
+        context, context.requests_response, "the ceremony presentation",
+    )

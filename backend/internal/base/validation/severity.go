@@ -22,3 +22,17 @@ const (
 	// reported result, so it is not bucketed as passing.
 	SeverityInfo = "info"
 )
+
+// PolicyFinding sources. AuditContractContent folds four audits into one list
+// and they do not share an enforcement point, so a consumer acting on a
+// finding needs to know which audit produced it.
+const (
+	// SourceHubShapes is the Semantic Hub SHACL bundle (ADR-8/ADR-9).
+	SourceHubShapes = "hub-shapes"
+	// SourceValidationProfile is the hub's SLA validation profile.
+	SourceValidationProfile = "validation-profile"
+	// SourceContractODRL is the contract's own embedded dcs:policies.
+	SourceContractODRL = "contract-odrl"
+	// SourcePolicySetODRL is the deployment's contract-content policy set.
+	SourcePolicySetODRL = "policy-set-odrl"
+)

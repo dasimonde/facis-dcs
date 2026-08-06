@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -235,7 +234,10 @@ func renderC2PAManifestStore(ctx context.Context, contractID string, payloadHash
 	//   1 -> -7   (alg=ES256)
 	//   33 -> [certDer]  (x5chain per RFC 9360)
 	// plus empty unprotected map, detached payload and a real signature over claim bytes.
-	protected := buildCoseProtectedHeadersWithX5Chain()
+	protected, err := buildCoseProtectedHeadersWithX5Chain(ctx)
+	if err != nil {
+		return nil, err
+	}
 	sig, err := signClaimSigStructure(ctx, protected, claimPayload)
 	if err != nil {
 		return nil, err
@@ -324,7 +326,10 @@ func renderVerificationUpdateManifest(ctx context.Context, manifestLabel string,
 	claimPayload := renderVerificationClaimCBOR(payloadHash, updateLabel, hardBindingURI, hardBindingAssertionHash[:], ingredientURI, ingredientHash[:], actionsURI, actionsHash[:], lifecycleURI, lifecycleHash[:], remoteManifestsURI, remoteManifestsHash[:])
 	claimBox := renderJUMBFSuperbox(c2paClmUUID, 0x03, "c2pa.claim.v2", [][]byte{renderBMFFBox("cbor", claimPayload)})
 
-	protected := buildCoseProtectedHeadersWithX5Chain()
+	protected, err := buildCoseProtectedHeadersWithX5Chain(ctx)
+	if err != nil {
+		return nil, err
+	}
 	sig, err := signClaimSigStructure(ctx, protected, claimPayload)
 	if err != nil {
 		return nil, err
@@ -626,18 +631,25 @@ func renderRemoteManifestsAssertionCBOR(url string) []byte {
 	)
 }
 
-func buildCoseProtectedHeadersWithX5Chain() []byte {
-	material := mustSigningMaterial()
-	chainItems := make([][]byte, 0, len(material.certChainDER))
-	for _, certDER := range material.certChainDER {
+// buildCoseProtectedHeadersWithX5Chain renders the COSE protected headers for
+// one claim signature. The x5chain comes from the context and nowhere else:
+// pdf-core holds no signing material, so a render that reaches a signature
+// without one names no signer and is refused rather than completed under a
+// default identity.
+func buildCoseProtectedHeadersWithX5Chain(ctx context.Context) ([]byte, error) {
+	chain, ok := signingChainFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no C2PA signing chain in context: the caller must supply the x5chain it signs under")
+	}
+	chainItems := make([][]byte, 0, len(chain))
+	for _, certDER := range chain {
 		chainItems = append(chainItems, cborBytes(certDER))
 	}
 
-	headers := cborMap(
+	return cborMap(
 		cborUint(1), cborNegInt(-7),
 		cborUint(33), cborArray(chainItems...),
-	)
-	return headers
+	), nil
 }
 
 // coseDetachedSig64Marker is the CBOR framing that immediately precedes the
@@ -755,43 +767,21 @@ func isAllZero(b []byte) bool {
 	return len(b) > 0
 }
 
-
-func mustSigningMaterial() signingMaterial {
-	signingMaterialOnce.Do(func() {
-		signingMaterialCached, signingMaterialErr = loadSigningMaterialFromEnv(os.Getenv, os.ReadFile)
-	})
-	if signingMaterialErr != nil {
-		panic(fmt.Sprintf("c2pa signing material configuration error: %v", signingMaterialErr))
-	}
-	return signingMaterialCached
-}
-
-func loadSigningMaterialFromEnv(getenv func(string) string, readFile func(string) ([]byte, error)) (signingMaterial, error) {
-	chainInline := strings.TrimSpace(getenv(envX5ChainPEM))
-	chainFile := strings.TrimSpace(getenv(envX5ChainPEMFile))
-	chainPEM, chainProvided, err := resolveSigningConfigValue(readFile, chainInline, chainFile, envX5ChainPEM, envX5ChainPEMFile)
+// ParseSigningChainPEM decodes a PEM certificate chain into DER, leaf first, and
+// enforces the C2PA certificate profile pdf-core depends on. Callers hand the
+// result to WithSigningChain: pdf-core keeps no chain of its own, so every render
+// that emits a manifest is signed under an identity its caller named.
+func ParseSigningChainPEM(pemBytes []byte) ([][]byte, error) {
+	certs, err := parseCertificateChainPEM(pemBytes)
 	if err != nil {
-		return signingMaterial{}, err
-	}
-	if !chainProvided {
-		return signingMaterial{}, fmt.Errorf("x5chain must be provided; set %s or %s", envX5ChainPEM, envX5ChainPEMFile)
-	}
-	certs, err := parseCertificateChainPEM([]byte(chainPEM))
-	if err != nil {
-		return signingMaterial{}, err
+		return nil, err
 	}
 	if err := requireLeafOrganization(certs[0]); err != nil {
-		return signingMaterial{}, err
+		return nil, err
 	}
-	return signingMaterial{certChainDER: certs}, nil
+	return certs, nil
 }
 
-// requireLeafOrganization refuses a signing leaf that carries no organizationName.
-// c2pa-rs reads it off the signing certificate after the COSE signature verifies
-// and fails the whole validation when it is absent, so a leaf with only a CN
-// produces manifests every C2PA verifier reports as claimSignature.mismatch —
-// a sound signature made indistinguishable from a forged one. Refusing the chain
-// here turns that into a configuration error at startup instead.
 func requireLeafOrganization(leafDER []byte) error {
 	leaf, err := x509.ParseCertificate(leafDER)
 	if err != nil {
@@ -801,23 +791,6 @@ func requireLeafOrganization(leafDER []byte) error {
 		return fmt.Errorf("x5chain leaf %q carries no organizationName; C2PA verifiers reject claims signed by it", leaf.Subject.CommonName)
 	}
 	return nil
-}
-
-func resolveSigningConfigValue(readFile func(string) ([]byte, error), inlineValue string, filePath string, inlineName string, fileName string) (string, bool, error) {
-	if inlineValue != "" && filePath != "" {
-		return "", false, fmt.Errorf("%s and %s are mutually exclusive", inlineName, fileName)
-	}
-	if inlineValue != "" {
-		return inlineValue, true, nil
-	}
-	if filePath == "" {
-		return "", false, nil
-	}
-	content, err := readFile(filePath)
-	if err != nil {
-		return "", false, fmt.Errorf("read %s: %w", filePath, err)
-	}
-	return string(content), true, nil
 }
 
 func parseCertificateChainPEM(pemBytes []byte) ([][]byte, error) {
@@ -953,6 +926,80 @@ func extractLifecycleFields(c2paBytes []byte, manifestIdx int) (map[string]strin
 	return fields, nil
 }
 
+// extractManifestX5Chain returns the DER certificate chain (leaf first) that the
+// manifest at manifestIdx (0-based) of c2paBytes carries in its COSE_Sign1
+// protected headers. A recompile must reproduce it from the document itself: the
+// leaf belongs to the DCS instance that signed that manifest, which for a
+// contract received from a federation peer is not the instance verifying it, and
+// the chain is embedded in the signed bytes rather than derived from the payload.
+func extractManifestX5Chain(c2paBytes []byte, manifestIdx int) ([][]byte, error) {
+	manifestBoxes, err := extractTopLevelManifestBoxes(c2paBytes)
+	if err != nil {
+		return nil, fmt.Errorf("extract manifests: %w", err)
+	}
+	if manifestIdx >= len(manifestBoxes) {
+		return nil, fmt.Errorf("manifest index %d out of range (%d manifests)", manifestIdx, len(manifestBoxes))
+	}
+	signatureBox, err := extractLabeledChildJUMBFBox(manifestBoxes[manifestIdx], "c2pa.signature")
+	if err != nil {
+		return nil, fmt.Errorf("find claim signature: %w", err)
+	}
+	coseSign1, err := jumbfCBORPayload(signatureBox)
+	if err != nil {
+		return nil, fmt.Errorf("read claim signature: %w", err)
+	}
+	protected, _, err := decodeCOSESign1(coseSign1)
+	if err != nil {
+		return nil, fmt.Errorf("decode COSE_Sign1: %w", err)
+	}
+	return coseX5Chain(protected)
+}
+
+// ExtractSigningChain returns the x5chain of a PDF's genesis manifest, for a
+// verifier that must recompile the base under the leaf that signed it.
+func ExtractSigningChain(pdf []byte) ([][]byte, error) {
+	c2paBytes, err := extractEmbeddedStreamByFileSpecName(pdf, "content_credential.c2pa")
+	if err != nil {
+		return nil, fmt.Errorf("extract C2PA: %w", err)
+	}
+	return extractManifestX5Chain(c2paBytes, 0)
+}
+
+// ManifestSigner names the certificate one manifest's claim signature was made
+// under. Replaying a manifest under the leaf it carries proves the bytes are
+// self-consistent; it says nothing about whose leaf that is. Reporting the leaf
+// lets a caller compare it against the identity it expected.
+type ManifestSigner struct {
+	Manifest string
+	LeafDER  []byte
+}
+
+// ManifestSigners lists, in chain order, the leaf each of a PDF's manifests was
+// signed under.
+func ManifestSigners(pdf []byte) ([]ManifestSigner, error) {
+	c2paBytes, err := extractEmbeddedStreamByFileSpecName(pdf, "content_credential.c2pa")
+	if err != nil {
+		return nil, fmt.Errorf("extract C2PA: %w", err)
+	}
+	manifestBoxes, err := extractTopLevelManifestBoxes(c2paBytes)
+	if err != nil {
+		return nil, fmt.Errorf("extract manifests: %w", err)
+	}
+	signers := make([]ManifestSigner, 0, len(manifestBoxes))
+	for i, manifest := range manifestBoxes {
+		label, err := extractJUMBFLabel(manifest)
+		if err != nil {
+			return nil, fmt.Errorf("manifest %d: %w", i, err)
+		}
+		chain, err := extractManifestX5Chain(c2paBytes, i)
+		if err != nil {
+			return nil, fmt.Errorf("manifest %s: %w", label, err)
+		}
+		signers = append(signers, ManifestSigner{Manifest: label, LeafDER: chain[0]})
+	}
+	return signers, nil
+}
+
 // extractLifecycleAuthority returns the DID of the instance that asserted the
 // manifest at manifestIdx. A recompile must reproduce it from the document
 // itself, because it is carried by the manifest rather than the payload.
@@ -1008,7 +1055,6 @@ func extractRemoteManifestURLFromXMP(pdf []byte) string {
 	}
 	return string(rest[:end])
 }
-
 
 // parseCBORTextMap decodes a CBOR map whose keys and values are all text strings.
 func parseCBORTextMap(data []byte) (map[string]string, error) {

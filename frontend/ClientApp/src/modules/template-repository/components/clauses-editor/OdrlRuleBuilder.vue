@@ -89,8 +89,8 @@ function seed(rule: OdrlRule | null): RuleDraft {
   return {
     type: rule?.['@type'] ?? ODRL_RULE_TYPES[0]?.type ?? 'odrl:Permission',
     actions: readActions(rule),
-    assigneeId: rule?.['odrl:assignee']?.['@id'] ?? props.parties[0]?.id ?? '',
-    assignerId: rule?.['odrl:assigner']?.['@id'] ?? props.parties[0]?.id ?? '',
+    assigneeId: rule?.['odrl:assignee']?.['@id'] ?? '',
+    assignerId: rule?.['odrl:assigner']?.['@id'] ?? '',
     targetId: rule?.['odrl:target']?.['@id'] ?? props.contractTargetId,
     root: parseConstraintTree(rule?.['odrl:constraint'] ?? [], declaredFieldIds()),
     duties: readDuties(rule),
@@ -103,7 +103,7 @@ const draft = reactive<RuleDraft>(seed(props.modelValue))
 // that would make each emit retrigger the computed (a reactive feedback loop).
 const ruleId = ref(props.modelValue?.['@id'] ?? `urn:uuid:${crypto.randomUUID()}`)
 
-const complete = computed(() => draft.actions.some((a) => !!a) && !!draft.assigneeId)
+const complete = computed(() => draft.actions.some((a) => !!a) && !!draft.assignerId && !!draft.assigneeId)
 
 function readActions(rule: OdrlRule | null): string[] {
   const action = rule?.['odrl:action']
@@ -244,11 +244,11 @@ watch(
       </label>
       <label class="form-control">
         <span class="label-text text-xs">Granted by (assigner)</span>
-        <IriPicker v-model="draft.assignerId" :options="partyOptions" placeholder="party DID / IRI" />
+        <IriPicker v-model="draft.assignerId" :options="partyOptions" :allow-custom="false" />
       </label>
       <label class="form-control">
         <span class="label-text text-xs">Applies to (assignee)</span>
-        <IriPicker v-model="draft.assigneeId" :options="partyOptions" placeholder="party DID / IRI" />
+        <IriPicker v-model="draft.assigneeId" :options="partyOptions" :allow-custom="false" />
       </label>
       <label class="form-control">
         <span class="label-text text-xs">Toward (target)</span>

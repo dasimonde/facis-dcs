@@ -15,15 +15,20 @@ func TransactionTimeout() time.Duration {
 	return 1 * time.Minute
 }
 
-// SystemToken is the in-cluster service credential the background PDF
-// regenerator presents to the internal signing primitives (it runs on NATS
-// events with no user JWT). Empty when unset — no system caller is accepted.
-func SystemToken() string {
-	return os.Getenv("DCS_SYSTEM_TOKEN")
-}
-
 func HTTPClientTimeout() time.Duration {
 	return 1 * time.Minute
+}
+
+// PACAuditEvidenceTimeout bounds only the DCS-side evidence collection for a
+// PAC audit. PAC_AUDIT_EVIDENCE_TIMEOUT accepts a positive Go duration; empty,
+// invalid and non-positive values retain the default.
+func PACAuditEvidenceTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("PAC_AUDIT_EVIDENCE_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 2 * time.Minute
 }
 
 func OutboxProcessorTimeOut() time.Duration {

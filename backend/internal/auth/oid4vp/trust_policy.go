@@ -118,14 +118,21 @@ func (c *TrustConfig) policyDocument() map[string]any {
 			"mechanism":     string(entry.Mechanism),
 		}
 	}
-	return map[string]any{"issuers": issuers, "peer_dynamic": c.PeerDynamic}
+	return map[string]any{"issuers": issuers}
 }
 
-func (c *TrustConfig) evalInput(purpose Purpose, iss, org string) map[string]any {
+// evalInput carries the question plus the one cryptographic fact the policy is
+// allowed to rely on. `anchored` is Go's word that this credential's chain
+// verified to the anchors for this purpose and that its leaf named this issuer
+// (ADR-35); the policy never inspects a certificate itself. It is false on every
+// path that has not checked, so a caller that forgets it denies rather than
+// admits.
+func (c *TrustConfig) evalInput(purpose Purpose, iss, org string, anchored bool) map[string]any {
 	return map[string]any{
 		"purpose":      string(purpose),
 		"issuer":       canonicalIssuerKey(iss),
 		"organization": strings.TrimSpace(org),
+		"anchored":     anchored,
 		"trust":        c.policyDocument(),
 	}
 }
@@ -151,11 +158,11 @@ func canonicalIssuerKey(iss string) string {
 // A policy that cannot be evaluated denies. Treating a broken policy as
 // permissive would turn a configuration mistake into silent trust, which is the
 // failure mode this whole document exists to prevent.
-func (c *TrustConfig) evaluateBool(query string, purpose Purpose, iss, org string) bool {
+func (c *TrustConfig) evaluateBool(query string, purpose Purpose, iss, org string, anchored bool) bool {
 	if c == nil || PrepareTrustPolicy() != nil {
 		return false
 	}
-	results, err := preparedTrust[query].Eval(context.Background(), rego.EvalInput(c.evalInput(purpose, iss, org)))
+	results, err := preparedTrust[query].Eval(context.Background(), rego.EvalInput(c.evalInput(purpose, iss, org, anchored)))
 	if err != nil || len(results) == 0 || len(results[0].Expressions) == 0 {
 		return false
 	}
@@ -172,10 +179,20 @@ func (v *PurposeView) DenialReasons(iss, org string) []string {
 	if v == nil || v.cfg == nil {
 		return []string{"no trust configuration is loaded"}
 	}
-	return v.cfg.denialReasons(v.purpose, iss, org)
+	return v.cfg.denialReasons(v.purpose, iss, org, false)
 }
 
-func (c *TrustConfig) denialReasons(purpose Purpose, iss, org string) []string {
+// DenialReasonsAnchored explains a refusal that survived chain validation, so
+// the reason names the authorization that failed rather than the missing entry
+// the unanchored view would report.
+func (v *PurposeView) DenialReasonsAnchored(iss, org string) []string {
+	if v == nil || v.cfg == nil {
+		return []string{"no trust configuration is loaded"}
+	}
+	return v.cfg.denialReasons(v.purpose, iss, org, true)
+}
+
+func (c *TrustConfig) denialReasons(purpose Purpose, iss, org string, anchored bool) []string {
 	source := "the built-in policy"
 	if path := TrustPolicyPath(); path != "" {
 		source = fmt.Sprintf("the policy at %s", path)
@@ -185,7 +202,7 @@ func (c *TrustConfig) denialReasons(purpose Purpose, iss, org string) []string {
 		return []string{fmt.Sprintf("%s could not be loaded, so nothing is trusted: %v", source, err)}
 	}
 
-	results, err := preparedTrust[queryReasons].Eval(context.Background(), rego.EvalInput(c.evalInput(purpose, iss, org)))
+	results, err := preparedTrust[queryReasons].Eval(context.Background(), rego.EvalInput(c.evalInput(purpose, iss, org, anchored)))
 	if err != nil {
 		return []string{fmt.Sprintf("%s failed to evaluate, so nothing is trusted: %v", source, err)}
 	}

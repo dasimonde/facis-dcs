@@ -41,6 +41,10 @@ type PolicyFinding struct {
 	// validateAgainstHubShapes (shaclengine.go, ADR-8/ADR-9); zero for
 	// findings from other audit sources (ODRL, the SLA validation profile).
 	ShapesVersion int `json:"shapesVersion,omitempty"`
+	// Source names the audit that produced this finding (the Source*
+	// constants in severity.go). AuditContractContent sets it; the template
+	// policy audit and ad-hoc callers leave it empty.
+	Source string `json:"source,omitempty"`
 }
 
 type templatePolicySet struct {

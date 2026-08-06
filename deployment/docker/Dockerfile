@@ -66,7 +66,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # softhsm2 provides libsofthsm2.so (the PKCS#11 module the backend dlopens) and
 # softhsm2-util. opensc provides pkcs11-tool, openssl issues the dev x5chain,
-# curl+jq let the provisioning job write the x5chain into a Kubernetes Secret.
+# curl+jq let the provisioning job write did.json into a Kubernetes Secret.
 # SoftHSM2 is a software token for dev/staging/CI only, never a production HSM.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

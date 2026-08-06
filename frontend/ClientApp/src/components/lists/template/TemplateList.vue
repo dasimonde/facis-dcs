@@ -117,8 +117,8 @@ onUnmounted(() => stateFilterStore.reset())
       <li v-if="isRepositoryEmpty" class="flex flex-col items-start gap-2 px-4 py-8">
         <p class="font-semibold">No templates yet.</p>
         <p class="max-w-prose text-sm text-base-content/70">
-          Templates are the reusable blueprints contracts are created from. Create one from the Template Builder — it
-          must pass review, approval and catalogue registration before contracts can use it.
+          Templates are the reusable blueprints contracts are created from. It must pass review, approval and catalogue
+          registration before contracts can use it.
         </p>
         <RouterLink
           v-if="isCreator || isManager"

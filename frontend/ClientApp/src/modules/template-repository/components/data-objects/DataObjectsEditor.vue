@@ -67,7 +67,7 @@ function addObject() {
 
     <template v-else>
       <p v-if="!classes.length" class="text-sm opacity-70">
-        No shape libraries are registered in the Semantic Hub beyond the document envelope — register a SHACL library to
+        No shape libraries are registered in the Semantic Hub beyond the document envelope. Register a SHACL library to
         author typed data objects from it.
       </p>
 
@@ -90,7 +90,7 @@ function addObject() {
       </div>
 
       <p v-if="!rootObjects.length && classes.length" class="text-sm opacity-70">
-        No data objects yet{{ mode === 'template' ? ' — pick a class and add one' : '' }}.
+        No data objects yet.{{ mode === 'template' ? ' Pick a class and add one.' : '' }}
       </p>
 
       <DataObjectNode

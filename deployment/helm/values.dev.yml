@@ -18,13 +18,14 @@
 #   Hydra admin  : localhost:30085
 #   NATS             : localhost:30422
 #   ORCE             : localhost:30180
-#   Status List Service : localhost:30821  (XFSC status list management)
+#   Credential issuer: localhost:30181  (release dcs-issuer, installed by
+#                      dev-stack.sh from values.issuer-base.yml +
+#                      values.issuer.dev.yml — NOT part of this release)
+#   Status List Service : localhost:30821  (XFSC; nothing consumes it, ADR-34)
 #   IPFS Gateway: localhost:30480
 #   IPFS API    : localhost:30501
 #
 # Backend .env.dev1 (see that file for the full set):
-#   STATUSLIST_SERVICE_URL=http://localhost:30821
-#   OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK=true
 #   ISSUER_DID=did:web:localhost%3A8991
 # The backend runs natively and provisions its own SoftHSM2 token via
 # dev-stack.sh (scripts/hsm-provision.sh), so no in-cluster PKCS#11 token here.
@@ -160,8 +161,15 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json
-    xfscAllowUnsignedFallback: true
-    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+    # The dev/BDD stack points both lists at the same bundle: it holds the ORCE
+    # dev root its login and peer credentials chain to AND the dev CA the
+    # synthetic PID x5c issuer signs under. A real deployment separates them —
+    # that is the point of the split (ADR-35) — but here one file is what the
+    # fixtures actually mint under, and pretending otherwise would mean two
+    # copies of the same certificates.
+    x5cAnchors:
+      poa: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+      pid: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 # XFSC Status List Service (DCS-OR-C2PA-005)
 statuslistService:
@@ -255,4 +263,3 @@ extraEnv:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
-systemToken: "dcs-local-dev-system-token"

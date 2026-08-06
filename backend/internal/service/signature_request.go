@@ -101,7 +101,10 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	// Prepare seals the agreement, embeds the signing-summary evidence, and
 	// places the AcroForm field, yielding the to-be-signed PDF (it holds no
 	// signing key). This is the exact same preparation /signature/prepare runs.
-	applier := s.newApplier()
+	applier, err := s.newApplier()
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	document, err := applier.Prepare(ctx, command.ApplyCmd{
 		DID:            ceremony.ContractDID,
 		SignerDID:      *ceremony.SignerDID,
@@ -409,7 +412,10 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	// NOT established by the signing certificate: AssertValidAES checks that the
 	// signature is a valid AES and nothing more — no PID-to-certificate identifier
 	// binding is standardised (see apply.go's SubmitSignature).
-	applier := s.newApplier()
+	applier, err := s.newApplier()
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	if err := applier.SubmitSignature(ctx, command.SubmitSignatureCmd{
 		ApplyCmd: command.ApplyCmd{
 			DID:            ceremony.ContractDID,
@@ -488,7 +494,18 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("%w: no Power of Attorney credential was presented at signing", command.ErrPoAUnauthorized))
 	}
 
-	verifiedPoA, err := oid4vp.NewVerifier(s.Trust, oid4vp.PurposePeer).Verify(poaPresentation, presCtx)
+	// `login`, not `peer`. This is THIS instance's ceremony: the signatory is at
+	// their wallet here, and the Power of Attorney they present was issued by
+	// this deployment's own issuer. `peer` means another DCS instance — a PoA
+	// presented at THAT instance's ceremony and embedded in the contract PDF
+	// beneath its own signature (VerifyCounterpartyPoA), verified against the
+	// PoA CA list because we cannot enumerate who a counterparty's issuer is.
+	//
+	// Verifying a local ceremony as `peer` would authorize a signature here on
+	// the strength of a chain to that CA list, letting a counterparty's operator
+	// sign as a party on this instance. Authority to act HERE is the enumerated,
+	// leaf-pinned question (ADR-35).
+	verifiedPoA, err := oid4vp.NewVerifier(s.Trust, oid4vp.PurposeLogin).Verify(poaPresentation, presCtx)
 	if err != nil {
 		log.Printf(ctx, "SignatureRequestCallback: Verify PoA failed for ceremony %s: %v", ceremonyID, err)
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("vp verification failed: PoA: %w", err))

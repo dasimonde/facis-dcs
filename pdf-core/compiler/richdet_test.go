@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bytes"
-	"context"
 	"testing"
 )
 
@@ -36,10 +35,14 @@ const richDetPayload = `{
 
 func TestRichCanonicalizeDeterministic(t *testing.T) {
 	a, err := CanonicalizePayload([]byte(richDetPayload))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 8; i++ {
 		b, err := CanonicalizePayload([]byte(richDetPayload))
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !bytes.Equal(a, b) {
 			t.Fatalf("CanonicalizePayload NON-DETERMINISTIC on run %d\nA=%s\n\nB=%s", i, a, b)
 		}
@@ -47,12 +50,16 @@ func TestRichCanonicalizeDeterministic(t *testing.T) {
 }
 
 func TestRichDoubleCompilePageContent(t *testing.T) {
-	ctx := context.Background()
+	ctx := testChainContext()
 	p1, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(richDetPayload), CanonicalCompiledAt)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 5; i++ {
 		p2, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(richDetPayload), CanonicalCompiledAt)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := MatchPageContent(p1, p2); err != nil {
 			t.Fatalf("rich double-compile page content differs on run %d: %v", i, err)
 		}

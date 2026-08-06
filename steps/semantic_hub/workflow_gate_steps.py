@@ -34,6 +34,7 @@ from steps.support.services.contract_service import ContractService
 from steps.support.services.orce_audit_control_service import (
     OrceAuditControlService,
 )
+from steps.support.services.template_service import TemplateService
 from steps.support.services.workflow_gate_service import WorkflowGateService
 from steps.template_management.contract_state_machine_steps import (
     _advance_to_approved,
@@ -42,6 +43,19 @@ from steps.template_management.contract_state_machine_steps import (
 
 
 CHANNEL = "workflow_gate"
+
+# The DCS envelope graphs. Every document is judged against them, so they are
+# pinned into every contract at the version active when it was created.
+ENVELOPE_SHAPES = ("facis-dcs", "clause-catalog")
+
+# The shape library the effective-bundle snapshots declare. A contract is
+# pinned to the envelope plus the libraries its own sh:shapesGraph names
+# (ADR-8), so a library the hub merely holds active governs nothing; this one
+# is declared, and declared without a version, which is what makes it resolve
+# to whichever version is active when the contract is created.
+BUNDLE_LIBRARY = "bdd-effective-library"
+BUNDLE_LIBRARY_CONTENT = "@prefix sh: <http://www.w3.org/ns/shacl#> ."
+PINNED_SHAPES = ENVELOPE_SHAPES + (BUNDLE_LIBRARY,)
 
 
 def _mode(value: str) -> str:
@@ -150,10 +164,14 @@ def _request_gate(context, gate: str, name: str):
     elif gate == "deployment":
         review_deployment = getattr(context, "workflow_gate_mode", None) == "review"
         if review_deployment:
-            # Signature is its own synchronous gate. Let that gate succeed,
-            # then switch the executor before the asynchronous auto-deploy
-            # subscriber evaluates the deployment gate.
-            OrceAuditControlService.set_mode(context, CHANNEL, "success_empty")
+            # The deployment gate is dispatched by the auto-deploy subscriber
+            # reacting to the signature event, so the signature gate runs first
+            # and there is no moment between the two to switch the executor in.
+            # Scope success to the signature gate and leave the channel-wide
+            # review mode for the deployment gate that follows it.
+            OrceAuditControlService.set_mode(
+                context, CHANNEL, "success_empty", gate="signature"
+            )
         presentation = context.pid_presentations[name]
         response = _apply_signature(
             context,
@@ -165,7 +183,6 @@ def _request_gate(context, gate: str, name: str):
         if review_deployment:
             ContractService._refresh_contract(context, name)
             context.workflow_pre_states[name] = "SIGNED"
-            OrceAuditControlService.set_mode(context, CHANNEL, "review")
     else:
         raise AssertionError(f"Unknown workflow gate {gate!r}")
     context.requests_response = response
@@ -220,6 +237,10 @@ def _observations(context):
 
 def _anchored_asset_name(snapshot: dict, term: str, route: str) -> str:
     reference = snapshot.get(term)
+    # sh:shapesGraph is multi-valued once a document declares a shape library
+    # beside the envelope, and the canonical graph is written first.
+    if isinstance(reference, list):
+        reference = reference[0] if reference else None
     if isinstance(reference, dict):
         reference = reference.get("@id")
     assert isinstance(reference, str) and reference, (
@@ -249,11 +270,13 @@ def _semantic_asset_ref(value, term: str, route: str) -> tuple[str, int, str]:
 
 
 def _semantic_bundle_pins(document: dict) -> dict:
-    canonical = _semantic_asset_ref(
-        document.get("sh:shapesGraph"),
-        "sh:shapesGraph",
-        "shapes",
-    )
+    declared = document.get("sh:shapesGraph")
+    # sh:shapesGraph carries the canonical envelope graph first and one entry
+    # per shape library the document declares beside it (ADR-8).
+    if isinstance(declared, list):
+        assert declared, f"Document has an empty sh:shapesGraph: {document}"
+        declared = declared[0]
+    canonical = _semantic_asset_ref(declared, "sh:shapesGraph", "shapes")
     effective = document.get("dcs:effectiveShapes")
     assert isinstance(effective, list) and effective, (
         f"Document has no immutable dcs:effectiveShapes bundle: {document}"
@@ -661,6 +684,50 @@ def step_no_success_result(context):
     assert response.json().get("status") != "SUCCESS", response.text
 
 
+@given("the Semantic Hub holds an active shape library the snapshot contracts declare")
+def step_active_snapshot_library(context):
+    cursor = context.db.cursor()
+    cursor.execute(
+        "SELECT version FROM semantic_schemas "
+        "WHERE name=%s AND kind='shapes' AND active",
+        (BUNDLE_LIBRARY,),
+    )
+    active = cursor.fetchone()
+    if active is None:
+        # Hub versions are immutable rows in a run-durable database, so the
+        # library may already exist at some version from an earlier run; take
+        # the next number rather than assuming version 1.
+        cursor.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM semantic_schemas "
+            "WHERE name=%s AND kind='shapes'",
+            (BUNDLE_LIBRARY,),
+        )
+        version = int(cursor.fetchone()[0])
+        cursor.execute(
+            "INSERT INTO semantic_schemas "
+            "(name, version, kind, media_type, content, active, created_by) "
+            "VALUES (%s,%s,'shapes','text/turtle',%s,TRUE,'bdd')",
+            (BUNDLE_LIBRARY, version, BUNDLE_LIBRARY_CONTENT),
+        )
+        context.db.commit()
+    cursor.close()
+
+
+def _snapshot_template_data(title: str) -> dict:
+    """Template data whose sh:shapesGraph declares BUNDLE_LIBRARY without a
+    version, so every contract drawn from it pins the library version the hub
+    has active at creation time beside the envelope graphs.
+    """
+    document = TemplateService.canonical_document_data(title)
+    prefixes = dict(document.get("@context") or {})
+    prefixes["sh"] = "http://www.w3.org/ns/shacl#"
+    document["@context"] = prefixes
+    document["sh:shapesGraph"] = [
+        {"@id": f"https://dcs.example/api/semantic/shapes/{BUNDLE_LIBRARY}"}
+    ]
+    return document
+
+
 @given(
     'an immutable workflow snapshot "{alias}" is created from the active shapes, libraries, and profile'
 )
@@ -669,7 +736,9 @@ def step_no_success_result(context):
 )
 def step_create_snapshot(context, alias):
     name = f"Effective Bundle Snapshot {alias} {uuid.uuid4()}"
-    ContractService._create_contract_in_draft(context, name)
+    ContractService._create_contract_in_draft(
+        context, name, template_data=_snapshot_template_data(name)
+    )
     context.workflow_snapshot_contracts = getattr(
         context, "workflow_snapshot_contracts", {}
     )
@@ -681,6 +750,19 @@ def step_create_snapshot(context, alias):
     context.workflow_snapshot_bundles[alias] = document
     context.workflow_snapshot_pins = getattr(context, "workflow_snapshot_pins", {})
     context.workflow_snapshot_pins[alias] = _semantic_bundle_pins(document)
+
+
+def _pinnable_shapes(assets) -> set:
+    """The active shapes rows a snapshot contract pins: the envelope graphs and
+    the one library its document declares. Any other library is registered and
+    active on this hub without governing the contract, so it is deliberately
+    absent from the pin (ADR-8).
+    """
+    return {
+        (name, kind, version)
+        for name, kind, version in assets
+        if kind == "shapes" and name in PINNED_SHAPES
+    }
 
 
 @when("the Template Manager activates new effective shapes, libraries, and profile versions")
@@ -701,10 +783,8 @@ def step_activate_effective_bundle(context):
         (name, "shapes", version)
         for name, version, _url in old_pins["shapes"]
     }
-    assert old_shape_assets == {
-        asset for asset in context.previous_active_bundle if asset[1] == "shapes"
-    }, (
-        f"Old contract did not pin the complete active shapes/library bundle: "
+    assert old_shape_assets == _pinnable_shapes(context.previous_active_bundle), (
+        f"Old contract did not pin the active envelope and the library it declares: "
         f"pins={old_shape_assets}, active={context.previous_active_bundle}"
     )
     assert (
@@ -752,22 +832,23 @@ def step_activate_effective_bundle(context):
         context.activated_target_versions[(name, kind)] = next_version
     cursor.execute(
         "SELECT COALESCE(MAX(version), 0) + 1 FROM semantic_schemas "
-        "WHERE name='bdd-effective-library' AND kind='shapes'"
+        "WHERE name=%s AND kind='shapes'",
+        (BUNDLE_LIBRARY,),
     )
     next_library_version = int(cursor.fetchone()[0])
     cursor.execute(
         "UPDATE semantic_schemas SET active=FALSE "
-        "WHERE name='bdd-effective-library' AND kind='shapes'"
+        "WHERE name=%s AND kind='shapes'",
+        (BUNDLE_LIBRARY,),
     )
     cursor.execute(
         "INSERT INTO semantic_schemas "
         "(name, version, kind, media_type, content, active, created_by) "
-        "VALUES ('bdd-effective-library',%s,'shapes','text/turtle',"
-        "'@prefix sh: <http://www.w3.org/ns/shacl#> .',TRUE,'bdd')",
-        (next_library_version,),
+        "VALUES (%s,%s,'shapes','text/turtle',%s,TRUE,'bdd')",
+        (BUNDLE_LIBRARY, next_library_version, BUNDLE_LIBRARY_CONTENT),
     )
     context.activated_target_versions[
-        ("bdd-effective-library", "shapes")
+        (BUNDLE_LIBRARY, "shapes")
     ] = next_library_version
     context.db.commit()
     cursor.execute(
@@ -819,14 +900,13 @@ def step_new_bundle_resolves(context, alias):
     pins = _semantic_bundle_pins(context.workflow_snapshot_bundles[alias])
     expected_shapes = {
         (name, version)
-        for name, kind, version in context.activated_active_bundle
-        if kind == "shapes"
+        for name, _kind, version in _pinnable_shapes(context.activated_active_bundle)
     }
     actual_shapes = {
         (name, version) for name, version, _url in pins["shapes"]
     }
     assert actual_shapes == expected_shapes, (
-        f"New contract did not pin the activated effective shapes/libraries: "
+        f"New contract did not pin the activated envelope and declared library: "
         f"expected={expected_shapes}, actual={actual_shapes}"
     )
     canonical_name = context.workflow_snapshot_pins["old"]["canonical"][0]
@@ -840,11 +920,12 @@ def step_new_bundle_resolves(context, alias):
         context.activated_target_versions[(profile_name, "profile")],
     )
     assert (
-        "bdd-effective-library",
-        context.activated_target_versions[
-            ("bdd-effective-library", "shapes")
-        ],
-    ) in actual_shapes
+        BUNDLE_LIBRARY,
+        context.activated_target_versions[(BUNDLE_LIBRARY, "shapes")],
+    ) in actual_shapes, (
+        f"New contract did not pin the activated version of the library it "
+        f"declares: {actual_shapes}"
+    )
     assert context.workflow_snapshot_pins["old"] != pins, (
         "New contract unexpectedly retained the complete old semantic bundle"
     )
@@ -867,12 +948,18 @@ def step_rollback_bundle_resolves(context):
         (name, "shapes", version)
         for name, version, _url in rollback["shapes"]
     }
-    restored_active.add(
-        (rollback["profile"][0], "profile", rollback["profile"][1])
+    expected_active = _pinnable_shapes(context.previous_active_bundle)
+    assert restored_active == expected_active, (
+        f"Rollback pins are not the exact pre-activation envelope and library: "
+        f"pins={restored_active}, expected={expected_active}"
     )
-    assert restored_active == context.previous_active_bundle, (
-        f"Rollback pins do not equal the exact pre-activation active bundle: "
-        f"pins={restored_active}, expected={context.previous_active_bundle}"
+    assert (
+        rollback["profile"][0],
+        "profile",
+        rollback["profile"][1],
+    ) in context.previous_active_bundle, (
+        f"Rollback contract did not pin the restored active profile: "
+        f"{rollback['profile']}"
     )
     _assert_semantic_pins_exist(context, rollback)
 

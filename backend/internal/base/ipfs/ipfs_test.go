@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -363,5 +365,74 @@ func TestFetchFileFallsBackToPinnedKuboOnTenantMiss(t *testing.T) {
 	}
 	if string(result.Data) != `{"audit":"entry"}` {
 		t.Fatalf("unexpected fallback data %s", result.Data)
+	}
+}
+
+// Bounded write concurrency is what keeps a slow node recoverable: once one
+// pin outlives the document manager's own client timeout, every unshed caller
+// that piles on keeps the node saturated and the failure feeds itself. The cap
+// turns that stampede into a queue.
+func TestCreateFileBoundsConcurrentWrites(t *testing.T) {
+	var inFlight, peak atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := inFlight.Add(1)
+		for {
+			p := peak.Load()
+			if now <= p || peak.CompareAndSwap(p, now) {
+				break
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		inFlight.Add(-1)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"identifier": map[string]string{"Format": "cid", "Value": "QmTest"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = client.CreateFile(context.Background(), map[string]string{"k": "v"})
+		}()
+	}
+	wg.Wait()
+
+	if got := peak.Load(); got > maxConcurrentWrites {
+		t.Fatalf("observed %d concurrent writes, the cap is %d", got, maxConcurrentWrites)
+	}
+}
+
+// A flat retry cadence keeps a struggling node at constant pressure; the delay
+// has to grow so a stampede spreads out instead of arriving in lockstep.
+func TestCreateRetryBackoffGrows(t *testing.T) {
+	var stamps []time.Time
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		stamps = append(stamps, time.Now())
+		mu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	client.fetchAttempts = 4
+	client.fetchBackoff = 20 * time.Millisecond
+
+	_, err := client.CreateFile(context.Background(), map[string]string{"k": "v"})
+	if err == nil {
+		t.Fatal("a server answering only 500 must fail the write")
+	}
+	if len(stamps) != 4 {
+		t.Fatalf("expected 4 attempts, got %d", len(stamps))
+	}
+	firstGap := stamps[1].Sub(stamps[0])
+	lastGap := stamps[3].Sub(stamps[2])
+	if lastGap < firstGap*2 {
+		t.Fatalf("backoff did not grow: first gap %v, last gap %v", firstGap, lastGap)
 	}
 }

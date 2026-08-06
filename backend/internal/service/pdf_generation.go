@@ -33,6 +33,9 @@ type pdfGenerationSrvc struct {
 	// Credentials verifies a credential read out of a stored PDF against the key
 	// its issuer publishes for assertions.
 	Credentials *provenance.CredentialVerifier
+	// CredentialStatus resolves that credential's revocation entry against the
+	// signed status list it names.
+	CredentialStatus *provenance.CredentialStatusVerifier
 	auth.JWTAuthenticator
 }
 
@@ -48,6 +51,7 @@ func NewPDFGeneration(
 	vcIssuer provenance.VCIssuer,
 	localPeer string,
 	credentials *provenance.CredentialVerifier,
+	credentialStatus *provenance.CredentialStatusVerifier,
 ) pdfgen.Service {
 	if vcIssuer == nil {
 		panic("VCIssuer is required for DCS-OR-C2PA-004 compliance")
@@ -60,6 +64,12 @@ func NewPDFGeneration(
 	if credentials == nil {
 		panic("CredentialVerifier is required to verify embedded credentials")
 	}
+	// Without it a verified credential's revocation entry could not be resolved
+	// at all, and the verify endpoint would report a contract as intact without
+	// ever asking whether it is still in force.
+	if credentialStatus == nil {
+		panic("CredentialStatusVerifier is required to resolve embedded credentials' revocation state")
+	}
 	return &pdfGenerationSrvc{
 		DB:               db,
 		Artifacts:        artifacts,
@@ -71,6 +81,7 @@ func NewPDFGeneration(
 		VCIssuer:         vcIssuer,
 		LocalPeer:        localPeer,
 		Credentials:      credentials,
+		CredentialStatus: credentialStatus,
 		JWTAuthenticator: jwtAuth,
 	}
 }
@@ -174,13 +185,14 @@ func (s *pdfGenerationSrvc) ExportTemplatePdf(ctx context.Context, p *pdfgen.Exp
 
 func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.VerifyContractPdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyContractPdfHandler{
-		DB:          s.DB,
-		CRepo:       s.CRepo,
-		Artifacts:   s.Artifacts,
-		PDFCore:     s.PDFCore,
-		VCIssuer:    s.VCIssuer,
-		IssuerDID:   s.IssuerDID,
-		Credentials: s.Credentials,
+		DB:               s.DB,
+		CRepo:            s.CRepo,
+		Artifacts:        s.Artifacts,
+		PDFCore:          s.PDFCore,
+		VCIssuer:         s.VCIssuer,
+		IssuerDID:        s.IssuerDID,
+		Credentials:      s.Credentials,
+		CredentialStatus: s.CredentialStatus,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfQry{DID: p.Did})
 	if err != nil {
@@ -194,13 +206,14 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 
 func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.VerifyTemplatePdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyTemplatePdfHandler{
-		DB:          s.DB,
-		TRepo:       s.TRepo,
-		Artifacts:   s.Artifacts,
-		PDFCore:     s.PDFCore,
-		VCIssuer:    s.VCIssuer,
-		IssuerDID:   s.IssuerDID,
-		Credentials: s.Credentials,
+		DB:               s.DB,
+		TRepo:            s.TRepo,
+		Artifacts:        s.Artifacts,
+		PDFCore:          s.PDFCore,
+		VCIssuer:         s.VCIssuer,
+		IssuerDID:        s.IssuerDID,
+		Credentials:      s.Credentials,
+		CredentialStatus: s.CredentialStatus,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyTemplatePdfQry{DID: p.Did})
 	if err != nil {

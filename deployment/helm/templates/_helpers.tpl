@@ -85,15 +85,32 @@ claim (Hydra's OIDC discovery, notably).
 {{- end }}
 
 {{/*
-Where pdf-core reads the C2PA x5chain from: the projected Secret when the
-provisioning hook publishes one, otherwise the file the hook leaves on the
-shared token volume.
+Where the backend reads the certificate chain that publishes its own signing key
+(ADR-34). An operator-supplied path wins; otherwise it is the chain the
+provisioning job leaves on the shared token volume. Empty when neither exists,
+which leaves the deployment unable to serve a status list and says so at startup
+rather than serving an unverifiable one.
 */}}
-{{- define "digital-contracting-service.pdfCoreX5ChainPath" -}}
-{{- if .Values.pkcs11.provisioning.publishSecrets -}}
-{{- printf "/x5chain/%s" (include "digital-contracting-service.pdfCoreX5ChainSecretKey" .) -}}
-{{- else -}}
+{{- define "digital-contracting-service.issuerX5ChainPath" -}}
+{{- if .Values.signing.issuerX5ChainPath -}}
+{{- .Values.signing.issuerX5ChainPath -}}
+{{- else if .Values.pkcs11.provisioning.enabled -}}
 {{- printf "%s/c2pa-x5chain.pem" .Values.pkcs11.provisioning.tokenDir -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The origin this deployment serves its own status list under (ADR-34): the
+did:web hostname with publicBaseURL's scheme, and NO api path. The list sits at
+the origin root the way did.json does, because a verifier holding only a
+credential has the URL that credential names and nothing else — it cannot be
+asked to know this deployment's API prefix. This is the `iss` of the served
+token and the identifier its certificate leaf must name.
+*/}}
+{{- define "digital-contracting-service.statusListIssuerURL" -}}
+{{- if .Values.route.publicBaseURL -}}
+{{- $u := urlParse .Values.route.publicBaseURL -}}
+{{- printf "%s://%s" $u.scheme (include "digital-contracting-service.didHostname" .) -}}
 {{- end -}}
 {{- end }}
 
@@ -272,14 +289,6 @@ Auto-created by the chart when pkcs11.pinSecretRef.name is unset.
 {{- end }}
 
 {{/*
-Name of the Secret the provisioning job writes the C2PA x5chain PEM into and
-that pdf-core mounts. SoftHSM2 is a software token for dev/staging/CI only.
-*/}}
-{{- define "digital-contracting-service.hsmX5ChainSecretName" -}}
-{{- printf "%s-hsm-c2pa-x5chain" (include "digital-contracting-service.fullname" .) -}}
-{{- end }}
-
-{{/*
 Normalize the vendored fc-service route path (leading slash, no trailing slash).
 */}}
 {{- define "digital-contracting-service.fcserviceRoutePath" -}}
@@ -296,41 +305,6 @@ PDF-Core internal service URL — auto-wired when pdfCore.enabled=true.
 {{- .Values.pdfCore.url -}}
 {{- else if .Values.pdfCore.enabled -}}
 {{- printf "http://%s-pdf-core:%v" (include "digital-contracting-service.fullname" .) .Values.pdfCore.service.port -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Name of the Secret that holds the pdf-core C2PA signing material.
-*/}}
-{{- define "digital-contracting-service.pdfCoreSigningSecretName" -}}
-{{- default (printf "%s-pdf-core-signing" (include "digital-contracting-service.fullname" .)) .Values.pdfCore.signing.existingSecret -}}
-{{- end }}
-
-{{/*
-Name of the Secret that holds the x5chain PEM for pdf-core C2PA signing.
-When pkcs11.provisioning is enabled the chain is derived from the SoftHSM2
-dcs-c2pa token key by the provisioning job; otherwise the inline dev secret.
-*/}}
-{{- define "digital-contracting-service.pdfCoreX5ChainSecretName" -}}
-{{- if .Values.pdfCore.signing.existingSecret -}}
-{{- .Values.pdfCore.signing.existingSecret -}}
-{{- else if .Values.pkcs11.provisioning.enabled -}}
-{{- include "digital-contracting-service.hsmX5ChainSecretName" . -}}
-{{- else -}}
-{{- include "digital-contracting-service.pdfCoreSigningSecretName" . -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Key within the x5chain Secret for pdf-core C2PA signing.
-*/}}
-{{- define "digital-contracting-service.pdfCoreX5ChainSecretKey" -}}
-{{- if and (not .Values.pdfCore.signing.existingSecret) .Values.pkcs11.provisioning.enabled -}}
-{{- "x5chain-pem" -}}
-{{- else if .Values.pdfCore.signing.existingSecretX5ChainKey -}}
-{{- .Values.pdfCore.signing.existingSecretX5ChainKey -}}
-{{- else -}}
-{{- "x5chain-pem" -}}
 {{- end -}}
 {{- end }}
 
@@ -416,18 +390,6 @@ instead, where the message can say what to set.
 
 {{- define "digital-contracting-service.identitySecretName" -}}
 {{- default (printf "%s-identity" (include "digital-contracting-service.fullname" .)) .Values.identity.secretName -}}
-{{- end }}
-
-{{/*
-STATUSLIST_SERVICE_URL — auto-derived from the statuslistService sub-chart when
-enabled=true, otherwise falls back to the explicit statuslistService.url override.
-*/}}
-{{- define "digital-contracting-service.statuslistServiceURL" -}}
-{{- if .Values.statuslistService.url -}}
-{{- .Values.statuslistService.url -}}
-{{- else if .Values.statuslistService.enabled -}}
-{{- printf "http://%s-statuslist-service:%v" .Release.Name .Values.statuslistService.service.port -}}
-{{- end -}}
 {{- end }}
 
 {{/*

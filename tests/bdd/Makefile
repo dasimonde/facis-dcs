@@ -21,6 +21,10 @@ ARG_BDD ?=
 ARG_BDD_JUNIT ?= --junit --junit-directory $(REPORTS_ABS)/junit
 K8S_NAMESPACE ?= default
 HELM_RELEASE ?= dcs
+# The credential issuer is a release of its own, from the same chart and the
+# same values base production installs it with (ADR-34,
+# deployment/helm/values.issuer-base.yml).
+ISSUER_RELEASE ?= dcs-issuer
 DCS_SERVICE ?= $(HELM_RELEASE)-digital-contracting-service
 DCS_DEPLOYMENT ?= $(DCS_SERVICE)
 LOCAL_FORWARD_PORT ?= 18991
@@ -33,12 +37,21 @@ BDD_PUBLIC_ORIGIN ?= http://localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL ?= $(BDD_PUBLIC_ORIGIN)$(DCS_API_BASE_PATH)
 KIND_CONFIG ?= $(THIS_DIR)kind-config.yaml
 IS_WSL := $(shell grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && echo 1)
+# The external audit-checkpoint sink (features/27) is an HTTPS server the behave
+# process runs in-process on the HOST; the ORCE pod posts to it from inside the
+# cluster, so it needs an address the cluster can route to. `host.docker.internal`
+# only exists on Docker Desktop / Rancher Desktop — on a plain Linux Docker engine
+# (which is what the CI runner has) it resolves nowhere and every publication
+# attempt dies before it leaves the pod. The address that always works there is
+# the kind bridge network's gateway, i.e. the host as the node container sees it;
+# it only exists once the cluster does, so BDD_HELM_SET below is expanded lazily.
+KIND_DOCKER_NETWORK ?= kind
 ifeq ($(IS_WSL),1)
 BDD_CHECKPOINT_SINK_HOST ?= $(shell ip -4 -o addr show dev veth-rd-wsl 2>/dev/null | awk '$$3 == "inet" { split($$4, address, "/"); print address[1]; exit }')
 else
-BDD_CHECKPOINT_SINK_HOST ?= host.docker.internal
+BDD_CHECKPOINT_SINK_HOST ?= $(shell docker network inspect "$(KIND_DOCKER_NETWORK)" --format '{{range .IPAM.Config}}{{println .Gateway}}{{end}}' 2>/dev/null | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$$')
 endif
-BDD_HELM_SET := \
+BDD_HELM_SET = \
 	--set-string hydra.config.selfIssuerURL="$(BDD_PUBLIC_ORIGIN)" \
 	--set-string route.publicBaseURL="$(BDD_DCS_BASE_URL)" \
 	--set-string hydra.config.loginURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/ui/" \
@@ -69,7 +82,6 @@ BDD_RUNNER_SCRIPT ?= scripts/run_bdd_helm.sh
 # What run_bdd_helm runs against the live stack: bdd (behave, default) or e2e
 # (Playwright). See run_e2e_kind_ci.
 RUN_MODE ?= bdd
-CERT_CHAIN_SECRET ?= $(DCS_SERVICE)-hsm-c2pa-x5chain
 COREDNS_REWRITE_SCRIPT ?= scripts/kind_coredns_rewrite.sh
 ORCE_PERSISTENCE_SCRIPT ?= scripts/ensure_orce_persistence.sh
 
@@ -82,7 +94,6 @@ DCS_SERVICE_B ?= $(HELM_RELEASE_B)-digital-contracting-service
 DCS_DEPLOYMENT_B ?= $(DCS_SERVICE_B)
 BDD_PUBLIC_ORIGIN_B ?= http://dcs-b.localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL_B ?= $(BDD_PUBLIC_ORIGIN_B)$(DCS_API_BASE_PATH)
-CERT_CHAIN_SECRET_B ?= $(DCS_SERVICE_B)-hsm-c2pa-x5chain
 # Mirrors BDD_HELM_SET, but for instance B's own Hydra/route pointed at the
 # dcs-b.localhost origin instead of dcs's plain localhost origin.
 BDD_HELM_SET_B := \
@@ -287,9 +298,11 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 	@KUBECTL_BIN="$(KUBECTL_BIN)" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(HELM_RELEASE)" \
 		bash "$(ORCE_PERSISTENCE_SCRIPT)"
 	@if [[ -z "$(BDD_CHECKPOINT_SINK_HOST)" ]]; then \
-		echo "Could not determine a host address reachable from kind for the BDD checkpoint sink."; \
+		echo "Could not determine a host address reachable from kind for the BDD checkpoint sink"; \
+		echo "(no IPv4 gateway on docker network '$(KIND_DOCKER_NETWORK)'). Set BDD_CHECKPOINT_SINK_HOST."; \
 		exit 1; \
 	fi
+	@echo "BDD checkpoint sink advertised to the cluster as https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints"
 	@# Deploy without --wait: Helm defers post-install hooks until all deployments are
 	@# ready, but DCS can't become ready until the devCertChain post-install hook has
 	@# created its Secret — a deadlock. We break the cycle by letting helm return as
@@ -313,22 +326,26 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 	@# time: a prior version wired only to cluster creation was observed to
 	@# not reliably stick.
 	@$(MAKE) kind_coredns_rewrite
+	@# The credential issuer, after the release above because its Ingress
+	@# references a Traefik Middleware and the Traefik CRDs arrive with that
+	@# release. Same chart, same values base and same release name production
+	@# uses, published at the same <origin>/issuer — a signed status list behind
+	@# a stripped path prefix is what broke in production, and it can only fail
+	@# here if here serves the same shape (ADR-34).
+	@KUBECTL_BIN="$(KUBECTL_BIN)" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(ISSUER_RELEASE)" \
+		bash "$(ORCE_PERSISTENCE_SCRIPT)"
+	@"$(HELM_BIN)" upgrade --install "$(ISSUER_RELEASE)" "$(HELM_CHART_PATH)/charts/orce" \
+		--namespace "$(KIND_NAMESPACE)" \
+		--timeout "$(HELM_TIMEOUT)" \
+		--values "$(HELM_CHART_PATH)/values.issuer-base.yml" \
+		--values "$(HELM_CHART_PATH)/values.issuer.bdd.yml"
+	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
+		deployment/"$(ISSUER_RELEASE)"-orce --timeout "$(HELM_TIMEOUT)"
 	@# The image tag is static, so an unchanged manifest never rolls the pods
 	@# even though kind load just replaced the node image — restart both
 	@# freshly-built workloads so the run tests the image that was built.
 	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart \
 		deployment/"$(DCS_DEPLOYMENT)" deployment/"$(DCS_DEPLOYMENT)"-pdf-core 2>/dev/null || true
-	@echo "Waiting for cert chain secret $(CERT_CHAIN_SECRET) (created by post-install hook)..."
-	@deadline=$$(( $$(date +%s) + 1200 )); \
-	until "$(KUBECTL_BIN)" get secret "$(CERT_CHAIN_SECRET)" -n "$(KIND_NAMESPACE)" >/dev/null 2>&1; do \
-		if [ $$(date +%s) -gt $$deadline ]; then \
-			echo "Timed out waiting for $(CERT_CHAIN_SECRET)"; \
-			"$(KUBECTL_BIN)" get pods -n "$(KIND_NAMESPACE)" -l app.kubernetes.io/instance=$(HELM_RELEASE) -o wide || true; \
-			"$(KUBECTL_BIN)" get events -n "$(KIND_NAMESPACE)" --sort-by=.lastTimestamp || true; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
 	@echo "Waiting for DCS deployment to become available..."
 	@if ! "$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
 		deployment/"$(DCS_DEPLOYMENT)" --timeout "$(HELM_TIMEOUT)"; then \
@@ -387,17 +404,6 @@ kind_deploy_b: kind_deploy
 		$(KIND_HELM_SET)
 	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart \
 		deployment/"$(DCS_DEPLOYMENT_B)" 2>/dev/null || true
-	@echo "Waiting for cert chain secret $(CERT_CHAIN_SECRET_B) (created by post-install hook)..."
-	@deadline=$$(( $$(date +%s) + 1200 )); \
-	until "$(KUBECTL_BIN)" get secret "$(CERT_CHAIN_SECRET_B)" -n "$(KIND_NAMESPACE)" >/dev/null 2>&1; do \
-		if [ $$(date +%s) -gt $$deadline ]; then \
-			echo "Timed out waiting for $(CERT_CHAIN_SECRET_B)"; \
-			"$(KUBECTL_BIN)" get pods -n "$(KIND_NAMESPACE)" -l app.kubernetes.io/instance=$(HELM_RELEASE_B) -o wide || true; \
-			"$(KUBECTL_BIN)" get events -n "$(KIND_NAMESPACE)" --sort-by=.lastTimestamp || true; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
 	@echo "Waiting for DCS deployment (instance B) to become available..."
 	@if ! "$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
 		deployment/"$(DCS_DEPLOYMENT_B)" --timeout "$(HELM_TIMEOUT)"; then \
@@ -425,6 +431,7 @@ kind_deploy_b: kind_deploy
 	fi
 
 kind_uninstall:
+	@"$(HELM_BIN)" uninstall "$(ISSUER_RELEASE)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 	@"$(HELM_BIN)" uninstall "$(HELM_RELEASE_B)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 	@"$(HELM_BIN)" uninstall "$(HELM_RELEASE)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 

@@ -20,6 +20,17 @@ import (
 // difference being WHICH objects it redefines.
 func appendRevision(t *testing.T, pdf []byte, objs map[int]string) []byte {
 	t.Helper()
+	root, ok := currentRootObjID(pdf)
+	if !ok {
+		t.Fatal("no /Root in the trailer")
+	}
+	return appendRevisionWithRoot(t, pdf, root, objs)
+}
+
+// appendRevisionWithRoot is appendRevision with the trailer /Root pointed at
+// root, which a signer emitting a fresh catalog object moves.
+func appendRevisionWithRoot(t *testing.T, pdf []byte, root int, objs map[int]string) []byte {
+	t.Helper()
 	prevStartXref, err := previousStartXref(pdf)
 	if err != nil {
 		t.Fatalf("previousStartXref: %v", err)
@@ -27,10 +38,6 @@ func appendRevision(t *testing.T, pdf []byte, objs map[int]string) []byte {
 	maxObjID, err := findTrailerMaxObjID(pdf)
 	if err != nil {
 		t.Fatalf("findTrailerMaxObjID: %v", err)
-	}
-	root, ok := currentRootObjID(pdf)
-	if !ok {
-		t.Fatal("no /Root in the trailer")
 	}
 	ids := make([]int, 0, len(objs))
 	for id := range objs {
@@ -150,6 +157,25 @@ func appendDSSRevision(t *testing.T, pdf []byte) []byte {
 		crlID: fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(crl), crl),
 		dssID: fmt.Sprintf("<< /Type /DSS /CRLs [%d 0 R] >>", crlID),
 	})
+}
+
+// appendRelocatedCatalogRevision appends the revision a signer that publishes a
+// FRESH document catalog leaves behind: the catalog is republished under a new
+// object id and the trailer /Root follows it, so object 1 is no longer the
+// catalog any reader resolves. Returns the new PDF and the new /Root object id.
+func appendRelocatedCatalogRevision(t *testing.T, pdf []byte) ([]byte, int) {
+	t.Helper()
+	maxObjID, err := findTrailerMaxObjID(pdf)
+	if err != nil {
+		t.Fatalf("findTrailerMaxObjID: %v", err)
+	}
+	oldRoot, ok := currentRootObjID(pdf)
+	if !ok {
+		t.Fatal("no /Root in the trailer")
+	}
+	newRoot := maxObjID + 1
+	catalog := strings.TrimSpace(objectBody(t, pdf, oldRoot))
+	return appendRevisionWithRoot(t, pdf, newRoot, map[int]string{newRoot: catalog}), newRoot
 }
 
 // preparedContractPDF builds the document a signing ceremony pins: a compiled

@@ -36,7 +36,22 @@ func parseW3CStatusReferences(raw any, format string) ([]status.Reference, error
 		if entryType == "" {
 			return nil, fmt.Errorf("credentialStatus.type is required")
 		}
-		if entryType != entryTypeBitstringStatusList {
+
+		// Two entry types name a list through credentialStatus, and they differ
+		// in the document at the far end: BitstringStatusListEntry points at a
+		// W3C status list credential, TokenStatusList at an IETF token status
+		// list. The mechanism recorded here is only the starting guess — the
+		// verifier re-routes on the media type the URI actually answers with
+		// (status.SelectMechanismFromResponse) — but starting from the type the
+		// credential declares is what makes the Accept header ask for the right
+		// document in the first place.
+		var mechanism status.Mechanism
+		switch entryType {
+		case entryTypeBitstringStatusList:
+			mechanism = status.MechanismW3CBitstring
+		case entryTypeTokenStatusList:
+			mechanism = status.MechanismIETFToken
+		default:
 			return nil, fmt.Errorf("unsupported credentialStatus.type %q", entryType)
 		}
 
@@ -54,7 +69,7 @@ func parseW3CStatusReferences(raw any, format string) ([]status.Reference, error
 
 		purpose, _ := cs["statusPurpose"].(string)
 		refs = append(refs, status.Reference{
-			Mechanism:        status.MechanismW3CBitstring,
+			Mechanism:        mechanism,
 			URI:              uri,
 			Index:            index,
 			Purpose:          strings.TrimSpace(purpose),

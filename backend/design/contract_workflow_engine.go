@@ -251,6 +251,13 @@ var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", fu
 	Required("negotiator")
 })
 
+var ContractNegotiationSupersessionItem = Type("ContractNegotiationSupersessionItem", func() {
+	Attribute("superseded_by", String, "id of the later accepted change request whose values the merge kept instead")
+	Attribute("fields", ArrayOf(String), "Change request fields whose values did not reach the merged contract version")
+
+	Required("superseded_by", "fields")
+})
+
 var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
 	Attribute("id", String, "id of the negotiation")
 	Attribute("change_request", Any, "Change request")
@@ -259,6 +266,7 @@ var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
 	Attribute("contract_version", Int, "Version of the contract for that the negotiation is")
 
 	Attribute("negotiation_decisions", ArrayOf(ContractNegotiationDecisionItem), "List with decisions for that negotiation")
+	Attribute("superseded", ArrayOf(ContractNegotiationSupersessionItem), "Set when this change request was accepted but a later accepted request overwrote it, so the merged contract version does not carry its content (last-accepted-wins). Absent when nothing of it was discarded.")
 
 	Required("id", "change_request", "created_by", "created_at", "negotiation_decisions", "contract_version")
 })
@@ -388,6 +396,28 @@ var ContractNegotiationRequest = Type("ContractNegotiationRequest", func() {
 
 var ContractNegotiationResponse = Type("ContractNegotiationResponse", func() {
 	Description("Result for creating a contract negotiation")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Required("did")
+})
+
+var ContractOfferAcceptRequest = Type("ContractOfferAcceptRequest", func() {
+	Description("Accept an inbound offer as-is, with no change request (OFFERED -> NEGOTIATION). Distinct from ContractNegotiationRespondRequest, which decides one already-proposed change request.")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
+
+	Attribute("accepted_by", String, "The name of the accepting negotiator")
+
+	Required("did", "updated_at", "accepted_by")
+})
+
+var ContractOfferAcceptResponse = Type("ContractOfferAcceptResponse", func() {
+	Description("Result for accepting an offer")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 
@@ -999,6 +1029,34 @@ var _ = Service("ContractWorkflowEngine", func() {
 		})
 	})
 
+	Method("accept_offer", func() {
+		Description("Accept an inbound offer as-is, with no change request: mints this instance's negotiation task for the offer's current round and moves the contract OFFERED -> NEGOTIATION. Only the counterparty may call it — the origin is refused. Not to be confused with respond (action_flag ACCEPTING), which decides one already-proposed change request.")
+		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-FR-CWE-18")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			// The Responder drives its inbound contracts as Contract Manager
+			// (SRS §4); per-contract authorization is the counterparty gate in
+			// command/acceptoffer.go, not local RBAC.
+			Scope("Contract Manager")
+		})
+
+		Payload(ContractOfferAcceptRequest)
+		Result(ContractOfferAcceptResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/accept-offer")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	// SRS §3.1.1 Contract Negotiation UI lists "Save draft" among its controls,
 	// distinct from "Propose change": a negotiator stages modifications and
 	// proposes them later. Drafts are party-scoped — stored per (contract,
@@ -1331,6 +1389,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Scope("Sys. Contract Approver")
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// The contract list renders its search box for every role that can
+			// open it, and search returns a strict subset of retrieve's fields.
+			Scope("Contract Observer")
 		})
 
 		Payload(ContractSearchRequest)

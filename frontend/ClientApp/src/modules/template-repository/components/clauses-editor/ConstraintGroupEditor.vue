@@ -263,7 +263,7 @@ const unitOptions = computed(() => {
           :list="unitListId"
           placeholder="unit IRI"
           class="input-bordered input input-xs w-28"
-          title="Unit the boundary is measured in (an IRI) — optional"
+          title="Optional unit the boundary is measured in (an IRI)"
         />
         <button type="button" class="btn btn-ghost btn-xs" @click="removeChild(i)">✕</button>
       </div>

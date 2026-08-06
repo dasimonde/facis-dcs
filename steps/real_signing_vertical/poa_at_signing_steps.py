@@ -13,7 +13,12 @@ without a valid PoA, which is recorded as an audit event (FR-SM-04/-26).
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import socket
+import subprocess
+import time
 import uuid
 
 from behave import given, then, when
@@ -130,10 +135,11 @@ def step_when_tamper_counterparty_poa(context, name):
 
 
 # ---------------------------------------------------------------------------
-# Mutual Power-of-Attorney binding across instances (ADR-31): the shipping
-# instance carries the credential behind each signature it applied, and the
-# receiver verifies it instead of reading the contract's dcs:hasPowerOfAttorney
-# claim as though a peer's own assertion were evidence.
+# Mutual Power-of-Attorney binding across instances (ADR-31, ADR-35): each party
+# embeds the credential behind its own signature INTO the contract PDF before
+# signing it, and the receiver verifies every attachment it finds instead of
+# reading the contract's dcs:hasPowerOfAttorney claim as though a peer's own
+# assertion were evidence.
 # ---------------------------------------------------------------------------
 
 
@@ -143,32 +149,130 @@ def _poa_presentation_from_untrusted_issuer(organization: str) -> str:
     verify" case, and the one an operator most plausibly meets: a counterparty
     whose issuer was never granted the `peer` purpose here."""
     AuthService._ensure_dcs_wallet_importable()
-    from dcs_wallet.issuer import issue_access_credential  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE  # noqa: PLC0415
+    from dcs_wallet.issuer import (  # noqa: PLC0415
+        POA_VCT,
+        attach_key_binding,
+        sign_credential_sd_jwt,
+    )
+    from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk  # noqa: PLC0415
+    from dcs_wallet.status_list import build_credential_status, role_credential_index  # noqa: PLC0415
 
-    import os  # noqa: PLC0415
-
+    # Built here rather than through dcs_wallet's issuance entry points, which
+    # issue as the stack's own credential issuer: the point of this credential
+    # is an issuer nobody configured, so it can be resolved by no mechanism the
+    # trust document declares.
     keys = AuthService.load_wallet_keys()
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
-    return issue_access_credential(
-        organization=organization,
-        roles=["Contract Signer"],
+    roles = ["Contract Signer"]
+    holder_public = public_jwk(keys.wallet_private)
+    issued = sign_credential_sd_jwt(
+        visible_claims={
+            "iss": "did:web:untrusted-poa-issuer.example:issuer:poa",
+            "sub": did_jwk_from_public_jwk(holder_public),
+            "vct": POA_VCT,
+            "iat": 1719129600,
+            "exp": 2145916800,
+            "cnf": {"jwk": cnf_jwk(holder_public)},
+            "status": build_credential_status(
+                index=role_credential_index(organization=organization, roles=roles),
+            ),
+        },
+        selective_claims={"organization": organization, "roles": roles},
         issuer_private=keys.issuer_private,
+    )
+    return attach_key_binding(
+        issued_sd_jwt=issued,
         wallet_private=keys.wallet_private,
-        issuer_did="did:web:untrusted-poa-issuer.example:issuer:poa",
-        statuslist_service_base=status_base,
-        statuslist_tenant=BDD_CREDENTIAL_TENANT,
         aud="https://the-counterparty.example",
         nonce="a-nonce-this-instance-never-issued",
     )
 
 
+def _pdf_core_service() -> str:
+    # Instance A's pdf-core ClusterIP service, named for the release the BDD
+    # Helm chart deploys. Overridable for CI parity, like BDD_PDF_CORE_DEPLOYMENT.
+    return os.environ.get("BDD_PDF_CORE_SERVICE", "dcs-digital-contracting-service-pdf-core")
+
+
+@contextlib.contextmanager
+def _pdf_core_forwarded():
+    """Reach instance A's pdf-core directly, over a kubectl port-forward to its
+    ClusterIP service.
+
+    The DCS does not expose an "attach this evidence to this PDF" endpoint —
+    embedding is a step of its own signing pipeline — so a scenario that has to
+    build a PDF carrying evidence the DCS would never produce speaks to pdf-core
+    itself. Same infra-seam convention as the PAdES-B-B fallback scenario's
+    kubectl calls (dcs_real_signing_vertical_orce_steps.py): the namespace and
+    kubectl binary come from the environment, and a missing one hard-fails
+    rather than guessing.
+    """
+    kubectl = os.environ.get("BDD_KUBECTL") or os.environ.get("KUBECTL_BIN", "kubectl")
+    namespace = os.environ.get("K8S_NAMESPACE")
+    assert namespace, (
+        "K8S_NAMESPACE is not set — required to reach instance A's pdf-core for the "
+        "embedded-evidence ship. Hard-failing rather than guessing a namespace."
+    )
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    proc = subprocess.Popen(  # noqa: S603
+        [kubectl, "-n", namespace, "port-forward", f"service/{_pdf_core_service()}", f"{port}:8080"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                raise AssertionError(
+                    f"kubectl port-forward to {_pdf_core_service()} exited: "
+                    f"{proc.stderr.read().decode(errors='replace')}"
+                )
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=1):
+                    break
+            except OSError:
+                time.sleep(0.5)
+        else:
+            raise AssertionError(f"kubectl port-forward to {_pdf_core_service()} never became reachable")
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def _embed_extra_evidence(pdf: bytes, evidence: dict) -> bytes:
+    """Append ONE more signing evidence attachment to an already-signed PDF, the
+    way a countersigning instance appends its own before signing: an incremental
+    update that leaves the signature already there valid. The multipart shape
+    mirrors the backend's own client (plain form fields, no filenames)."""
+    import requests as _requests  # noqa: PLC0415
+
+    with _pdf_core_forwarded() as base_url:
+        resp = _requests.post(
+            f"{base_url}/evidence/embed",
+            files={
+                "pdf": (None, pdf, "application/pdf"),
+                "evidence": (None, json.dumps(evidence).encode(), "application/json"),
+            },
+            timeout=120,
+        )
+    assert resp.status_code == 200, (
+        f"pdf-core /evidence/embed refused the extra attachment: {resp.status_code} {resp.text[:400]}"
+    )
+    return resp.content
+
+
 def _retained_signing_summary(context, contract_did: str) -> str:
     """The signing summary instance A issued for the signature it applied
-    (migrations/sql/20260732_signature_summary_evidence.sql). It rides beside the
-    Power of Attorney on the wire, and the receiver reads the attribution from
-    it — so a ship built here must carry the real one, or it is refused for
-    missing evidence instead of for the credential under test."""
+    (migrations/sql/20260732_signature_summary_evidence.sql). The receiver reads
+    the attribution from the summary embedded next to the Power of Attorney — so
+    the attachment this scenario builds must carry the real one, or the ship is
+    refused for unattested evidence instead of for the credential under test."""
     cursor = context.db.cursor()
     cursor.execute(
         "SELECT summary_vc FROM signature_ceremonies "
@@ -189,12 +293,17 @@ def _retained_signing_summary(context, contract_did: str) -> str:
 
 @when('instance A ships contract "{name}"\'s PDF to instance B with a Power of Attorney that does not verify')
 def step_when_a_ships_bad_poa_to_b(context, name):
-    """Instance A's own outbound ship with exactly one substitution: the Power of
-    Attorney behind its signature is one instance B cannot verify (an issuer no
-    instance grants the `peer` purpose). A's identity and challenge-response, A's
-    real agreement credential, A's own signed PDF and the signing summary A
-    issued for that signature are all genuine, so B's refusal can only come from
-    the credential itself — every gate in front of it passes.
+    """Instance A's own outbound ship with exactly one substitution, made where
+    the evidence actually lives: inside the PDF. A's genuine signed PDF gains one
+    further signing evidence attachment for the party A signed as, carrying A's
+    real signing summary and a Power of Attorney instance B cannot verify (an
+    issuer no instance grants the `peer` purpose). A's identity and
+    challenge-response, A's real agreement credential, A's own signed PDF and the
+    summary attesting that signature are all genuine, so B's refusal can only
+    come from the credential itself — every gate in front of it passes.
+
+    The receiver verifies EVERY attachment it finds rather than the newest per
+    field (ADR-35), which is what makes an appended one decisive.
 
     The ship is built here rather than driven through A's synchronizer because a
     synchronizer ship is retried from sync_fails until it succeeds, and each
@@ -218,21 +327,21 @@ def step_when_a_ships_bad_poa_to_b(context, name):
         f"could not export contract '{name}' from instance A: {export.status_code} {export.text}"
     )
 
+    shipped_pdf = _embed_extra_evidence(export.content, {
+        "summary": json.loads(_retained_signing_summary(context, did)),
+        "poa_presentation": _poa_presentation_from_untrusted_issuer(party_did),
+    })
+
     secret_value = str(uuid.uuid4())
     secret_hash = base64.b64encode(_sign_secret_value_with_dev_key(token_dir, secret_value)).decode()
 
     payload = {
         "from_peer_did": party_did,
         "contract_iri": did,
-        "pdf": base64.b64encode(export.content).decode(),
+        "pdf": base64.b64encode(shipped_pdf).decode(),
         "secret_value": secret_value,
         "secret_hash": secret_hash,
         "contract_state": "SIGNED",
-        "signatory_poas": [{
-            "party": party_did,
-            "presentation": _poa_presentation_from_untrusted_issuer(party_did),
-            "summary": _retained_signing_summary(context, did),
-        }],
     }
     with _as_instance(context, context.base_url_b):
         context.requests_response = post_json(context, contract_peer_pdf_url(context), payload, headers={})
@@ -254,8 +363,6 @@ def step_then_pdf_rejected_counterparty_poa(context):
 
 @then('exactly one incident is recorded in instance B\'s audit trail for contract "{name}"')
 def step_then_one_incident_on_b(context, name):
-    import time  # noqa: PLC0415
-
     from steps.peer_trust.dcs_peer_trust_steps import _as_instance  # noqa: PLC0415
     from steps.peer_trust.dcs_trust_pdp_steps import _count_trust_gate_incidents  # noqa: PLC0415
 
@@ -281,8 +388,6 @@ def step_then_counterparty_poa_verified_on_b(context):
     stored provenance and the absence of a denial incident together say the
     verification passed — a credential that did not verify would have refused
     the exchange and raised one instead."""
-    import time  # noqa: PLC0415
-
     import requests as _requests  # noqa: PLC0415
 
     from steps.peer_trust.dcs_trust_pdp_steps import _count_trust_gate_incidents  # noqa: PLC0415
@@ -327,8 +432,6 @@ def step_then_counterparty_poa_verified_on_b(context):
 
 @then('an audit event records the Power of Attorney finding for contract "{name}"')
 def step_then_audit_records_poa(context, name):
-    import time  # noqa: PLC0415
-
     import requests  # noqa: PLC0415
 
     from steps.support.api_client import signature_audit_url  # noqa: PLC0415

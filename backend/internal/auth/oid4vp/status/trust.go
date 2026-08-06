@@ -48,6 +48,12 @@ type TrustJWKS struct {
 // object. An issuer whose key is resolved by certificate chain carries no
 // bundled JWKS and is absent from this view: its status list is verified from
 // the chain in the token's own x5c header against X5CRoots, not from here.
+//
+// An empty view is therefore a legitimate result, not an error: a deployment
+// whose status-list issuers all publish by certificate — which is what ADR-34
+// makes ours — has no bundled key to put in it. Whether the config as a whole
+// can resolve anything is decided where the anchors are also known; see
+// ConfigureStatusListVerification.
 func NewTrustConfig(issuerJWKS map[string]json.RawMessage) (*TrustConfig, error) {
 	cfg := TrustConfig{Issuers: map[string]TrustIssuerEntry{}}
 	for issuer, raw := range issuerJWKS {
@@ -62,9 +68,6 @@ func NewTrustConfig(issuerJWKS map[string]json.RawMessage) (*TrustConfig, error)
 			continue
 		}
 		cfg.Issuers[issuer] = TrustIssuerEntry{JWKS: jwks}
-	}
-	if len(cfg.Issuers) == 0 {
-		return nil, fmt.Errorf("trust config: no issuer carries a usable JWKS")
 	}
 	return &cfg, nil
 }

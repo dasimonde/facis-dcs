@@ -18,6 +18,7 @@ import (
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/pdfgeneration/provenance/provenancetest"
 )
 
 const testIssuerDID = "did:web:issuer.example"
@@ -85,7 +86,7 @@ func testLifecycleCredential(t *testing.T, key *ecdsa.PrivateKey, statusListURL 
 	  "credentialSubject": {"id": "urn:dcs:subject:test", "status": "active"},
 	  "credentialStatus": {
 	    "id": %q,
-	    "type": "BitstringStatusListEntry",
+	    "type": "TokenStatusList",
 	    "statusPurpose": "revocation",
 	    "statusListIndex": "7",
 	    "statusListCredential": %q
@@ -99,19 +100,13 @@ func testLifecycleCredential(t *testing.T, key *ecdsa.PrivateKey, statusListURL 
 	return signed
 }
 
-// newStatusListServer stands in for the XFSC status-list service and records
-// whether the revocation lookup was made at all — the observable difference
-// between following a credential's own status pointer and refusing to.
-func newStatusListServer(t *testing.T) (url string, consulted *bool) {
+// newStatusListServer serves a status list the way a deployment serves its own
+// — signed, with a chain whose leaf names the issuer — and records whether the
+// revocation lookup was made at all, the observable difference between
+// following a credential's own status pointer and refusing to.
+func newStatusListServer(t *testing.T) *provenancetest.SignedStatusList {
 	t.Helper()
-	hit := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hit = true
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status_list":{"bits":1,"lst":"eNrbuQAAAhcBXQ"}}`))
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL, &hit
+	return provenancetest.NewSignedStatusList(t)
 }
 
 // newStubPDFCore answers POST /verify with the given status and body.
@@ -134,18 +129,18 @@ func newStubPDFCore(t *testing.T, verifyStatus int, verifyBody map[string]any) *
 // and the only one reported as a passing check.
 func TestRunVerifyReportsAVerifiedLifecycleCredentialAsValid(t *testing.T) {
 	key := testKey(t)
-	statusListURL, consulted := newStatusListServer(t)
+	statusList := newStatusListServer(t)
 	pdfCore := newStubPDFCore(t, http.StatusOK, map[string]any{
 		"match":                true,
 		"c2pa_signature_valid": true,
 		"vc_present":           true,
-		"vc_bytes":             base64.StdEncoding.EncodeToString(testLifecycleCredential(t, key, statusListURL)),
+		"vc_bytes":             base64.StdEncoding.EncodeToString(testLifecycleCredential(t, key, statusList.ListURI)),
 	})
 	verifier := &provenance.CredentialVerifier{Resolve: func(string) (*identity.DIDDocument, error) {
 		return testIssuerDocument(t, &key.PublicKey), nil
 	}}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -155,7 +150,7 @@ func TestRunVerifyReportsAVerifiedLifecycleCredentialAsValid(t *testing.T) {
 	if result.C2paSignatureStatus != provenance.CheckValid {
 		t.Fatalf("c2pa_signature_status = %q, want valid", result.C2paSignatureStatus)
 	}
-	if !*consulted {
+	if !statusList.Fetched() {
 		t.Fatal("a verified credential's own status pointer must be followed")
 	}
 }
@@ -165,18 +160,18 @@ func TestRunVerifyReportsAVerifiedLifecycleCredentialAsValid(t *testing.T) {
 // lookup — which follows a pointer inside that credential — does not run.
 func TestRunVerifyReportsAnUnresolvableIssuerAsIndeterminate(t *testing.T) {
 	key := testKey(t)
-	statusListURL, consulted := newStatusListServer(t)
+	statusList := newStatusListServer(t)
 	pdfCore := newStubPDFCore(t, http.StatusOK, map[string]any{
 		"match":                true,
 		"c2pa_signature_valid": true,
 		"vc_present":           true,
-		"vc_bytes":             base64.StdEncoding.EncodeToString(testLifecycleCredential(t, key, statusListURL)),
+		"vc_bytes":             base64.StdEncoding.EncodeToString(testLifecycleCredential(t, key, statusList.ListURI)),
 	})
 	verifier := &provenance.CredentialVerifier{Resolve: func(string) (*identity.DIDDocument, error) {
 		return nil, errors.New("dial tcp: connection refused")
 	}}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -186,7 +181,7 @@ func TestRunVerifyReportsAnUnresolvableIssuerAsIndeterminate(t *testing.T) {
 	if result.StatusListStatus == nil || *result.StatusListStatus == "" {
 		t.Fatal("an unverified credential leaves the revocation state unknown, which must be said")
 	}
-	if *consulted {
+	if statusList.Fetched() {
 		t.Fatal("the revocation lookup must not follow a pointer inside an unverified credential")
 	}
 }
@@ -196,25 +191,25 @@ func TestRunVerifyReportsAnUnresolvableIssuerAsIndeterminate(t *testing.T) {
 func TestRunVerifyReportsAForeignSignedCredentialAsInvalid(t *testing.T) {
 	published := testKey(t)
 	foreign := testKey(t)
-	statusListURL, consulted := newStatusListServer(t)
+	statusList := newStatusListServer(t)
 	pdfCore := newStubPDFCore(t, http.StatusOK, map[string]any{
 		"match":                true,
 		"c2pa_signature_valid": true,
 		"vc_present":           true,
-		"vc_bytes":             base64.StdEncoding.EncodeToString(testLifecycleCredential(t, foreign, statusListURL)),
+		"vc_bytes":             base64.StdEncoding.EncodeToString(testLifecycleCredential(t, foreign, statusList.ListURI)),
 	})
 	verifier := &provenance.CredentialVerifier{Resolve: func(string) (*identity.DIDDocument, error) {
 		return testIssuerDocument(t, &published.PublicKey), nil
 	}}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
 	if result.VcProofStatus != provenance.CheckInvalid {
 		t.Fatalf("vc_proof_status = %q, want invalid", result.VcProofStatus)
 	}
-	if *consulted {
+	if statusList.Fetched() {
 		t.Fatal("the revocation lookup must not follow a pointer inside an unverified credential")
 	}
 }
@@ -226,7 +221,7 @@ func TestRunVerifyReportsAnAbsentCredentialAsNotAvailable(t *testing.T) {
 		"vc_present":           false,
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, "draft")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "draft")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -245,7 +240,7 @@ func TestRunVerifyReportsAFailedC2PAClaimSignatureAsInvalid(t *testing.T) {
 		"vc_present":           false,
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -259,7 +254,7 @@ func TestRunVerifyReportsAFailedC2PAClaimSignatureAsInvalid(t *testing.T) {
 func TestRunVerifyReportsNoC2PAVerdictWhenVerifyDidNotAnswer(t *testing.T) {
 	pdfCore := newStubPDFCore(t, http.StatusConflict, map[string]any{})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -285,7 +280,7 @@ func TestRunVerifyCarriesThePDFCoreDigests(t *testing.T) {
 		"stored_base_pdf_hash": "2222",
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -312,7 +307,7 @@ func TestRunVerifyReportsDivergingDigestsOnAContentMismatch(t *testing.T) {
 		"stored_base_pdf_hash": "3333",
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}

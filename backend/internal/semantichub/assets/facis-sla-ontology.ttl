@@ -73,6 +73,9 @@ dcst:catalog-service-purpose a skos:ConceptScheme ;
 dcst:catalog-data-use-purpose a skos:ConceptScheme ;
   skos:prefLabel "Data Use Purposes"@en .
 
+dcst:catalog-contract-party-role a skos:ConceptScheme ;
+  skos:prefLabel "Contract Party Roles"@en .
+
 dcst:catalog-iso4217-currency a skos:ConceptScheme ;
   skos:prefLabel "ISO 4217 Currencies"@en .
 
@@ -134,8 +137,18 @@ dcst:constraint-sla-availability-percent a dcs:ValueConstraint ;
 
 dcst:constraint-contract-party-role a dcs:ValueConstraint ;
   dcs:format "controlled-vocabulary" ;
-  dcs:allowedValue "supplier", "customer", "provider", "client" ;
+  dcs:valueCatalog dcst:catalog-contract-party-role ;
+  dcs:allowedValue dcst:role-provider, dcst:role-customer, dcst:role-supplier, dcst:role-client ;
   rdfs:label "Contract Party Role Vocabulary Constraint"@en .
+
+dcst:role-provider a skos:Concept ;
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "provider" ; skos:prefLabel "provider"@en .
+dcst:role-customer a skos:Concept ;
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "customer" ; skos:prefLabel "customer"@en .
+dcst:role-supplier a skos:Concept ;
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "supplier" ; skos:prefLabel "supplier"@en .
+dcst:role-client a skos:Concept ;
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "client" ; skos:prefLabel "client"@en .
 
 dcst:country-DEU a skos:Concept ;
   skos:inScheme dcst:catalog-iso3166-alpha3-country ; skos:notation "DEU" ; skos:prefLabel "Germany"@en .

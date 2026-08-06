@@ -6,6 +6,7 @@ const contractEventLabels: Record<string, string> = {
   NEGOTIATE_CONTRACT: 'Proposed contract changes',
   ACCEPT_RESPOND_CONTRACT: 'Accepted negotiation response',
   REJECT_RESPOND_CONTRACT: 'Rejected negotiation response',
+  NEGOTIATION_CHANGE_SUPERSEDED: 'Accepted change request superseded',
   INCREASE_CONTRACT_VERSION: 'Increased contract version',
   APPROVE_CONTRACT: 'Approved contract',
   REJECT_CONTRACT: 'Rejected contract',

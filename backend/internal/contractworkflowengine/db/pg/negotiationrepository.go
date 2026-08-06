@@ -3,7 +3,9 @@ package pg
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -167,7 +169,7 @@ func (r PostgresNegotiationRepo) ReadCreatedByByNegotiationID(ctx context.Contex
 func (r PostgresNegotiationRepo) ReadAllByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.NegotiationData, error) {
 	query := `
         SELECT cn.id, did, contract_version, change_request, negotiator, decision,
-               rejection_reason, created_by, created_at
+               rejection_reason, created_by, created_at, superseded_by
         FROM contract_negotiations cn
             JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
             WHERE cn.did = $1
@@ -181,14 +183,21 @@ func (r PostgresNegotiationRepo) ReadAllByContractDID(ctx context.Context, tx *s
 }
 
 func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) ([]db.NegotiationChangeData, error) {
+	// Without ORDER BY the row order is a GROUP BY artefact — a planner
+	// detail — and the merge that folds these rows is last-write-wins per
+	// field, so it would resolve conflicts differently run to run.
+	// (created_at, id) is a total order: CURRENT_TIMESTAMP is the transaction
+	// clock, so requests proposed in one transaction share a created_at and
+	// the primary key separates them.
 	query := `
-        SELECT cn.id, change_request
+        SELECT cn.id, cn.change_request, cn.created_at
 		FROM contract_negotiations cn
 		JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
 		WHERE cn.did = $1
 		  AND cn.contract_version = $2
-		GROUP BY cn.id, cn.change_request
+		GROUP BY cn.id, cn.change_request, cn.created_at
 		HAVING COUNT(*) = COUNT(CASE WHEN cnd.decision = 'ACCEPTED' THEN 1 END)
+		ORDER BY cn.created_at, cn.id
     `
 	var negotiations []db.NegotiationChangeData
 	err := tx.SelectContext(ctx, &negotiations, query, did, contractVersion)
@@ -264,6 +273,43 @@ func (r PostgresNegotiationRepo) ReadAllNegotiationDecisionsByContractDID(ctx co
 		return nil, err
 	}
 	return decisions, nil
+}
+
+func (r PostgresNegotiationRepo) MarkSuperseded(ctx context.Context, tx *sqlx.Tx, supersessions []db.NegotiationSupersession) error {
+	// One row can lose different fields to different later requests, so the
+	// entries are grouped per superseded request and stored as one array.
+	byNegotiation := map[string][]db.NegotiationSupersession{}
+	order := make([]string, 0, len(supersessions))
+	for _, supersession := range supersessions {
+		if _, seen := byNegotiation[supersession.NegotiationID]; !seen {
+			order = append(order, supersession.NegotiationID)
+		}
+		byNegotiation[supersession.NegotiationID] = append(byNegotiation[supersession.NegotiationID], supersession)
+	}
+
+	statement := `
+        UPDATE contract_negotiations
+        SET superseded_by = $2
+        WHERE id = $1
+    `
+	for _, negotiationID := range order {
+		annotation, err := json.Marshal(byNegotiation[negotiationID])
+		if err != nil {
+			return fmt.Errorf("could not marshal supersession record: %w", err)
+		}
+		result, err := tx.ExecContext(ctx, statement, negotiationID, annotation)
+		if err != nil {
+			return err
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rowsAffected == 0 {
+			return fmt.Errorf("%w: negotiation %s", db.ErrNoMatchingDecision, negotiationID)
+		}
+	}
+	return nil
 }
 
 func (r PostgresNegotiationRepo) RemoteCreateOrUpdateNegotiation(ctx context.Context, tx *sqlx.Tx, data db.NegotiationData) error {

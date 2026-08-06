@@ -173,10 +173,13 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		if err != nil {
 			return nil, fmt.Errorf("could not create negotiation task state: %w", err)
 		}
+		// The task's own round, not the contract's current version: a task is
+		// minted per negotiation round and stays on the round it was minted for
+		// until it is carried forward.
 		negotiationTaskItems = append(negotiationTaskItems, NegotiatorTaskItem{
 			DID:             data.DID,
 			State:           state,
-			ContractVersion: didToVersion[data.DID],
+			ContractVersion: data.ContractVersion,
 			Negotiator:      data.Negotiator,
 			CreatedAt:       data.CreatedAt,
 		})

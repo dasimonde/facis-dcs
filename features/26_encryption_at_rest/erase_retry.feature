@@ -28,6 +28,7 @@ Feature: Peer erase ledger — the erase handshake is tracked from request to co
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
     When instance A drives the contract to APPROVED through its own local workflow
+    And instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance A applies a ceremony-backed signature to the contract
     When the Archive Manager of the dedicated organization deletes the archived cross-instance contract with justification "BDD erase ledger probe"
     Then the erasure ledger on instance A records the peer erase request with its request timestamp

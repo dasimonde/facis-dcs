@@ -34,11 +34,34 @@ type NegotiationData struct {
 	RejectionReason *string        `db:"rejection_reason"`
 	CreatedBy       string         `db:"created_by"`
 	CreatedAt       time.Time      `db:"created_at"`
+	// SupersededBy is the JSON array written by MarkSuperseded — nil until the
+	// round folds, and on a request whose content survived it. It is the only
+	// thing distinguishing an accepted request that shaped the contract from
+	// one that was accepted and then discarded, since Decision stays ACCEPTED
+	// either way.
+	SupersededBy *datatype.JSON `db:"superseded_by"`
 }
 
+// NegotiationSupersession records that folding a negotiation round dropped
+// part of one accepted change request in favour of a later one. The fold is
+// last-accepted-wins per field (see negotiationmerging.MergeChangeRequests),
+// so an accepted request can leave nothing behind while its decision still
+// reads ACCEPTED; Fields names the change-request keys whose values did not
+// reach the merged version.
+type NegotiationSupersession struct {
+	NegotiationID  string   `json:"negotiation_id"`
+	SupersededByID string   `json:"superseded_by"`
+	Fields         []string `json:"fields"`
+}
+
+// NegotiationChangeData is one accepted change request of a round. CreatedAt
+// carries the row's proposal time because the merge folds the requests in that
+// order (see MergeChangeRequests): later accepted requests overwrite earlier
+// ones field by field, so the fold is only well-defined against a total order.
 type NegotiationChangeData struct {
 	ID            string         `db:"id"`
 	ChangeRequest *datatype.JSON `db:"change_request"`
+	CreatedAt     time.Time      `db:"created_at"`
 }
 
 type NegotiationDecisionData struct {
@@ -68,11 +91,19 @@ type NegotiationRepo interface {
 	Accept(ctx context.Context, tx *sqlx.Tx, id string, acceptedBy string) error
 	Reject(ctx context.Context, tx *sqlx.Tx, id string, rejectedBy string, rejectionReason *string) error
 	ReadAllByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationData, error)
+	// ReadAllAcceptedByContractDIDAndVersion returns the round's accepted
+	// change requests ordered by (created_at, id). The order is part of the
+	// contract: the merge that consumes them is order-dependent.
 	ReadAllAcceptedByContractDIDAndVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) ([]NegotiationChangeData, error)
 	HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int, negotiator string, caller string) (bool, error)
 	HasNegotiationForContractVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) (bool, error)
 	ReadAllNegotiationDecisionsByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationDecisionData, error)
 	ReadCreatedByByNegotiationID(ctx context.Context, tx *sqlx.Tx, id string) (string, error)
+	// MarkSuperseded annotates the change requests whose content the fold of a
+	// round discarded, each naming the later accepted request that beat it.
+	// Written in the same transaction as the merged contract version, so the
+	// annotation and the document it explains land together.
+	MarkSuperseded(ctx context.Context, tx *sqlx.Tx, supersessions []NegotiationSupersession) error
 
 	RemoteCreateOrUpdateNegotiation(ctx context.Context, tx *sqlx.Tx, data NegotiationData) error
 	RemoteCreateOrUpdateNegotiationDecision(ctx context.Context, tx *sqlx.Tx, data NegotiationDecisionData) error

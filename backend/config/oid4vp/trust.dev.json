@@ -3,9 +3,8 @@
     "urn:dcs:poa:v1",
     "urn:dcs:pid:demo:v1"
   ],
-  "peer_dynamic": false,
   "issuers": {
-    "did:web:dev.example:issuer:poa": {
+    "http://localhost:30181": {
       "purposes": [
         "login",
         "peer",
@@ -14,19 +13,12 @@
       "organizations": [
         "*"
       ],
-      "mechanism": "jwks",
-      "jwks": {
-        "keys": [
-          {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": "sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss",
-            "y": "0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"
-          }
-        ]
-      }
+      "mechanism": "x5c",
+      "x5c_leaf_keys": [
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfOZixFX/H2zxj4vP0MFU1yRBJO9YQ2XV3sbokuw/rZwmNkgpU/OimNMMHy9ORLyfyTJuFLMthsWNKLKVnTppHA=="
+      ]
     },
-    "did:web:dev2.example:issuer:poa": {
+    "http://localhost:18080/issuer": {
       "purposes": [
         "login",
         "peer",
@@ -35,23 +27,10 @@
       "organizations": [
         "*"
       ],
-      "mechanism": "jwks",
-      "jwks": {
-        "keys": [
-          {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": "sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss",
-            "y": "0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"
-          }
-        ]
-      }
-    },
-    "did:web:dev.example:issuer:pid-x5c": {
-      "purposes": [
-        "pid"
-      ],
-      "mechanism": "x5c"
+      "mechanism": "x5c",
+      "x5c_leaf_keys": [
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfOZixFX/H2zxj4vP0MFU1yRBJO9YQ2XV3sbokuw/rZwmNkgpU/OimNMMHy9ORLyfyTJuFLMthsWNKLKVnTppHA=="
+      ]
     }
   }
 }

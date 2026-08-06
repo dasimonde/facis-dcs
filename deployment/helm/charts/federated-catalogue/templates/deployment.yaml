@@ -1,3 +1,12 @@
+{{- $jdbcURL := .Values.database.url | default "jdbc:postgresql://fc-postgres:5432/postgres" }}
+{{/* Authority of the JDBC URL, so the startup gate below waits on exactly the
+     host:port the datasource connects to. */}}
+{{- $dbAuthority := regexFind "//[^/?]+" $jdbcURL | trimPrefix "//" }}
+{{- $dbHost := $dbAuthority | splitList ":" | first }}
+{{- $dbPort := "5432" }}
+{{- if contains ":" $dbAuthority }}
+{{- $dbPort = $dbAuthority | splitList ":" | last }}
+{{- end }}
 {{- $fusekiURI := .Values.fuseki.uri | default "http://fc-fuseki:3030/ds" }}
 {{- $keycloakInternalUrl := .Values.keycloak.internalUrl | default "http://fc-keycloak-http:8080/auth" }}
 {{- $keycloakIssuerUrl := "" }}
@@ -27,6 +36,32 @@ spec:
         app.kubernetes.io/name: federated-catalogue
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      initContainers:
+        # fc-service runs Liquibase during Spring context startup and Hikari is
+        # configured fail-fast, so a Postgres that is still initialising makes
+        # the process exit 1 instead of retrying. On a cold install both start
+        # together and the container crash-restarts once or twice before the
+        # database is up. Wait here so the pod reaches Ready without a restart.
+        # Uses the fc-service image itself (Alpine, ships nc) — no extra pull.
+        - name: wait-for-fc-postgres
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until nc -z {{ $dbHost }} {{ $dbPort }}; do
+                echo "Waiting for {{ $dbHost }}:{{ $dbPort }} ..."
+                sleep 2
+              done
+              echo "{{ $dbHost }}:{{ $dbPort }} is accepting connections."
+          {{- with .Values.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so mirroring the main block here costs nothing while an
+          # unset one lets a LimitRange default size the whole pod.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       containers:
         # Container name matches fc-realm-provision-job.yaml's hardcoded
         # FC_CONTAINER="fcservice" (its patch_env targets this container by
@@ -52,13 +87,8 @@ spec:
             - name: MANAGEMENT_HEALTH_NEO4J_ENABLED
               value: "false"
             # PostgreSQL
-            {{- if .Values.database.url }}
             - name: SPRING_DATASOURCE_URL
-              value: {{ .Values.database.url | quote }}
-            {{- else }}
-            - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://fc-postgres:5432/postgres"
-            {{- end }}
+              value: {{ $jdbcURL | quote }}
             - name: SPRING_DATASOURCE_USERNAME
               value: {{ .Values.database.username | default "keycloak" | quote }}
             {{- if .Values.database.password }}

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
@@ -169,7 +168,8 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 }
 
 func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
-	credentials *provenance.CredentialVerifier, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+	credentials *provenance.CredentialVerifier, statuses *provenance.CredentialStatusVerifier,
+	lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
@@ -219,7 +219,7 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	switch {
 	case vcProofStatus == provenance.CheckValid:
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
-		ref, present, err := provenance.ExtractCredentialStatus(result.VCBytes)
+		_, present, err := provenance.ExtractCredentialStatus(result.VCBytes)
 		switch {
 		case err != nil:
 			match = false
@@ -232,9 +232,8 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 			statusListCheck = "failed"
 			statusListError = "embedded lifecycle credential has no usable status-list reference"
 		default:
-			httpClient := &http.Client{Timeout: 10 * time.Second}
 			queryStatus := func() (string, error) {
-				return provenance.QueryStatusListStatus(ctx, httpClient, ref.StatusListCredential, ref.Index)
+				return statuses.State(ctx, result.VCBytes)
 			}
 			var statusPassed bool
 			statusListStatus, statusListCheck, statusListError, statusPassed =
@@ -278,11 +277,19 @@ func evaluateLiveStatusCheck(
 	lifecycleStatus string,
 	query func() (string, error),
 ) (status, check, failure string, passed bool) {
-	status, err := queryStatusWithPublicationBarrier(ctx, lifecycleStatus, query)
+	state, err := queryStatusWithPublicationBarrier(ctx, lifecycleStatus, query)
 	if err != nil {
+		// The error itself, not a cause invented for it: it distinguishes a
+		// service that never answered from a list that was served and could not
+		// be used, and those are looked into in different places.
 		return "unavailable", "failed", err.Error(), false
 	}
-	return status, "passed", "", true
+	// "passed" says the lookup ran and the list it read established the state:
+	// the list's own signature verified against the configured trust anchors,
+	// and its leaf identified the issuer it names (ADR-34 §3). Before that it
+	// said only that a URL had answered, and the value had to carry the
+	// qualification with it.
+	return state, "passed", "", true
 }
 
 func queryStatusWithPublicationBarrier(

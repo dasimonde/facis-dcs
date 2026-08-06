@@ -28,6 +28,9 @@ type FilterLabelValue = FilterLabels[FilterLabelKey]
 const selectedFilter = ref<FilterLabelValue>(Object.values(props.filterLabels)[0] ?? '')
 const filterPopover = useTemplateRef('filter-popover')
 const searchResults: ShallowRef<T[]> = shallowRef([])
+// The search currently in flight, so a caller that has to publish a result can
+// wait for it rather than read searchResults mid-request.
+let pendingSearch: Promise<void> | null = null
 
 const selectedOption: Ref<T | null> = ref(null)
 
@@ -56,21 +59,26 @@ const isFilterSelectionDisabled = computed(() => Object.entries(props.filterLabe
 async function searchRequest() {
   if (searchQuery.value.length < 1 || !searchKey.value) {
     searchResults.value = []
+    pendingSearch = null
     return
   }
 
   isSearching.value = true
   searchError.value = null
-  try {
-    await retrieveSearch()
-  } catch (e: unknown) {
-    // A search that could not run has NOT established that nothing matches;
-    // reporting it as an empty result is how a 403 reads as "no results".
-    searchResults.value = []
-    searchError.value = e instanceof Error && e.message ? e.message : 'Search failed'
-  } finally {
-    isSearching.value = false
-  }
+  const run = (async () => {
+    try {
+      await retrieveSearch()
+    } catch (e: unknown) {
+      // A search that could not run has NOT established that nothing matches;
+      // reporting it as an empty result is how a 403 reads as "no results".
+      searchResults.value = []
+      searchError.value = e instanceof Error && e.message ? e.message : 'Search failed'
+    } finally {
+      isSearching.value = false
+    }
+  })()
+  pendingSearch = run
+  await run
 }
 
 async function retrieveSearch() {
@@ -80,10 +88,13 @@ async function retrieveSearch() {
 }
 
 async function searchList(event?: Event) {
-  if (event && event.target instanceof HTMLInputElement) {
-    if (event.target.value !== searchQuery.value) {
-      await searchRequest()
-    }
+  if (event && event.target instanceof HTMLInputElement && event.target.value !== searchQuery.value) {
+    await searchRequest()
+  } else if (searchQuery.value.trim().length > 0) {
+    // Typing already started a search, and clicking Search is not an input
+    // event, so nothing above awaits it. Emitting now publishes the empty
+    // searchResults the arriving response never gets to correct.
+    await (pendingSearch ?? searchRequest())
   }
   if (searchError.value) return
   if (searchQuery.value.trim().length > 0) {

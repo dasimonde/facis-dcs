@@ -43,6 +43,7 @@ import (
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 
 	"github.com/jmoiron/sqlx"
+	goa "goa.design/goa/v3/pkg"
 )
 
 type contractWorkflowEnginesrvc struct {
@@ -178,7 +179,7 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Cont
 	case "deployment":
 		_, err := (&command.Deployer{
 			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
-			TargetRepo: s.TargetRepo, Target: s.TargetClient,
+			TargetRepo: s.TargetRepo, Target: s.TargetClient, PeerSigs: s.SRepo,
 		}).Handle(ctx, command.DeployCmd{
 			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
 			RequestedBy: stringValue("requested_by"), LocalPeer: stringValue("causer_did"),
@@ -199,10 +200,18 @@ func mapContractCommandError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// A background writer — the PDF regenerator, an arriving peer ship —
+	// advanced updated_at between the caller's read and its command. Re-reading
+	// and reissuing succeeds, so this answers 409 with temporary set, where
+	// internal_error told the caller its request would never succeed.
+	if errors.Is(err, base.ErrUpdatedElsewhere) {
+		return goa.NewServiceError(err, "conflict", false, true, false)
+	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
 		errors.Is(err, validation.ErrContractHierarchyInvalid) ||
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
+		errors.Is(err, command.ErrInvalidOriginatorRole) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
 		errors.Is(err, command.ErrKPIVerdictUnknown) ||
 		errors.Is(err, command.ErrKPIRuleMissing) ||
@@ -218,6 +227,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
 		errors.Is(err, command.ErrAgreementSettled) ||
+		errors.Is(err, command.ErrOwnAgreementSettled) ||
 		errors.Is(err, command.ErrNegotiationNotSettled) ||
 		errors.Is(err, db.ErrNoMatchingDecision) {
 		return contractworkflowengine.MakeBadRequest(err)
@@ -280,7 +290,7 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 	}
 	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, mapContractCommandError(err)
 	}
 
 	return &contractworkflowengine.ContractCreateResponse{
@@ -603,6 +613,28 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 	}, nil
 }
 
+// supersessionItems reads back the annotation the negotiation merge left on a
+// change request it accepted and then discarded (last-accepted-wins). A reader
+// of the contract otherwise sees only the ACCEPTED decision and would take the
+// request's content for part of the agreement.
+func supersessionItems(annotation *datatype.JSON) ([]*contractworkflowengine.ContractNegotiationSupersessionItem, error) {
+	if annotation == nil {
+		return nil, nil
+	}
+	var records []db.NegotiationSupersession
+	if err := json.Unmarshal(*annotation, &records); err != nil {
+		return nil, fmt.Errorf("could not read superseded change request record: %w", err)
+	}
+	items := make([]*contractworkflowengine.ContractNegotiationSupersessionItem, 0, len(records))
+	for _, record := range records {
+		items = append(items, &contractworkflowengine.ContractNegotiationSupersessionItem{
+			SupersededBy: record.SupersededByID,
+			Fields:       record.Fields,
+		})
+	}
+	return items, nil
+}
+
 func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *contractworkflowengine.ContractRetrieveByIDRequest) (res *contractworkflowengine.ContractRetrieveByIDResponse, err error) {
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
@@ -638,12 +670,17 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 	for _, item := range contractResult.Negotiations {
 		negotiation, ok := negotiations[item.ID]
 		if !ok {
+			superseded, err := supersessionItems(item.SupersededBy)
+			if err != nil {
+				return nil, contractworkflowengine.MakeInternalError(err)
+			}
 			negotiation = &contractworkflowengine.ContractNegotiationItem{
 				ID:              item.ID,
 				ContractVersion: item.ContractVersion,
 				ChangeRequest:   item.ChangeRequest,
 				CreatedBy:       item.CreatedBy,
 				CreatedAt:       item.CreatedAt.String(),
+				Superseded:      superseded,
 			}
 			negotiations[item.ID] = negotiation
 		}
@@ -971,6 +1008,52 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 	}
 
 	return &contractworkflowengine.ContractNegotiationResponse{
+		Did: req.Did,
+	}, nil
+}
+
+// AcceptOffer takes an inbound offer into negotiation unchanged. Not to be
+// confused with Respond(action_flag=ACCEPTING), which decides one already
+// proposed change request.
+func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contractworkflowengine.ContractOfferAcceptRequest) (res *contractworkflowengine.ContractOfferAcceptResponse, err error) {
+
+	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	handler := command.OfferAcceptor{
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		NTRepo:      s.NTRepo,
+		DIDDocument: s.DIDDocument,
+	}
+	err = handler.Handle(ctx, command.AcceptOfferCmd{
+		DID:        req.Did,
+		UpdatedAt:  updatedAt,
+		AcceptedBy: middleware.GetParticipantID(ctx),
+		HolderDID:  middleware.GetHolderDID(ctx),
+		UserRoles:  middleware.GetUserRoles(ctx),
+		CauserDID:  localPeer,
+	})
+	if err != nil {
+		return nil, mapContractCommandError(err)
+	}
+
+	return &contractworkflowengine.ContractOfferAcceptResponse{
 		Did: req.Did,
 	}, nil
 }

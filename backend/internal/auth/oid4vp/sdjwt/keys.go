@@ -1,6 +1,7 @@
 package sdjwt
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
@@ -36,6 +37,20 @@ type jwksDocument struct {
 // TrustConfig provides issuer trust queries used during JWT signature verification.
 type TrustConfig interface {
 	IssuerTrusted(iss string) bool
+	// IssuerListed reports whether the trust document carries an entry for this
+	// issuer. It selects the resolution path rather than deciding trust: a
+	// listed issuer resolves by its declared mechanism, an unlisted one has
+	// only the anchored path below.
+	IssuerListed(iss string) bool
+	// IssuerTrustedAnchored asks whether this issuer is trusted GIVEN that its
+	// chain verified to this purpose's anchors and its leaf named it (ADR-35).
+	// It is asked only after that has actually been established.
+	IssuerTrustedAnchored(iss string) bool
+	// IssuerPinnedLeafKeys returns the DER SubjectPublicKeyInfo of every key
+	// this issuer's x5c LEAF may carry, and whether this purpose pins the leaf
+	// at all. Login does; peer and pid verify to a CA root instead. A pinning
+	// purpose consults no anchors.
+	IssuerPinnedLeafKeys(iss string) ([][]byte, bool, error)
 	VCTAllowed(vct string) bool
 	IssuerJWKS(iss string) (json.RawMessage, error)
 	// IssuerUsesX5C reports whether this issuer publishes its key through a
@@ -79,6 +94,16 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 	if strings.TrimSpace(iss) == "" {
 		return nil, fmt.Errorf("credential jwt missing iss")
 	}
+
+	// An issuer with no entry is not refused out of hand any more (ADR-35). For
+	// `peer` it may still be admitted by its certificate chain, and that fact
+	// has to be established BEFORE the authorization question can be asked —
+	// which inverts the usual order: crypto first, then policy. Every other
+	// purpose has no such path, and the policy denies them here for it.
+	if !cfg.IssuerListed(iss) {
+		return anchoredIssuerVerificationKey(cfg, token, iss)
+	}
+
 	if !cfg.IssuerTrusted(iss) {
 		return nil, fmt.Errorf("issuer %q is not trusted", iss)
 	}
@@ -92,6 +117,17 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 		rawX5C, ok := token.Header["x5c"]
 		if !ok {
 			return nil, fmt.Errorf("issuer %q publishes its key through a certificate chain, but the credential carries no x5c header", iss)
+		}
+		// Login terminates at the leaf, not at a CA (ADR-35). A certificate
+		// authority's job is to vouch for issuers it has never been asked about
+		// by this deployment, which is exactly right for a counterparty and
+		// exactly wrong for a session here: it would let any CA in the PoA list
+		// mint a new login issuer for this instance. So a login issuer's key is
+		// named in its own entry, and the chain above the leaf is not walked.
+		if pinned, pins, err := cfg.IssuerPinnedLeafKeys(iss); err != nil {
+			return nil, err
+		} else if pins {
+			return verificationKeyFromPinnedLeaf(rawX5C, pinned, iss)
 		}
 		return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots(), iss)
 	}
@@ -110,6 +146,80 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 	}
 
 	return verificationKeyFromTrustedJWKS(jwksRaw, token, iss)
+}
+
+// verificationKeyFromPinnedLeaf resolves a key from an x5c header WITHOUT
+// consulting any certificate authority: the leaf must carry one of the keys the
+// issuer's own trust entry names (ADR-35).
+//
+// This is what "my organization issued this credential" means as a check. A
+// chain to a CA says some authority vouched for whoever holds this certificate;
+// it does not say this deployment's operator ever named them. For a session on
+// this instance only the second statement is worth anything, so the CA plays no
+// part and the pinned key is the whole trust decision.
+//
+// The chain is still parsed and the leaf still has to identify the issuer: a
+// credential whose leaf carries the right key but names someone else is
+// malformed, and reading the key out without looking would accept it.
+func verificationKeyFromPinnedLeaf(raw any, pinned [][]byte, iss string) (any, error) {
+	certs, err := parseX5CChain(raw)
+	if err != nil {
+		return nil, err
+	}
+	leaf := certs[0]
+
+	binding, err := leafIdentifiesIssuer(leaf, iss)
+	if err != nil {
+		return nil, err
+	}
+	if err := leafMayAttest(leaf, binding); err != nil {
+		return nil, err
+	}
+
+	key, err := leafVerificationKey(leaf)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compared as the leaf's own SubjectPublicKeyInfo bytes rather than field by
+	// field, so the check does not depend on the key type and cannot be widened
+	// by one that this code does not know how to take apart.
+	if !keyIsPinned(leaf.RawSubjectPublicKeyInfo, pinned) {
+		return nil, fmt.Errorf("issuer %q is pinned to the key its own leaf must carry, and this credential's leaf carries a different one", iss)
+	}
+	return key, nil
+}
+
+// anchoredIssuerVerificationKey resolves the key of an issuer that has no entry
+// in the trust document, on the strength of its certificate chain alone
+// (ADR-35).
+//
+// The order is the point. The chain is verified to this purpose's anchors and
+// the leaf is required to name the issuer FIRST; only then is the policy asked
+// whether an anchored issuer is admitted for this purpose at all. Asking the
+// policy first would mean either denying every unlisted issuer — which is the
+// enumeration this replaces — or admitting one before anything about it had
+// been checked.
+//
+// Nothing else can rescue an unlisted issuer. There is no JWKS to bundle, no
+// entry to declare a mechanism, and resolving its key from a document it
+// publishes about itself is precisely the self-attestation the anchor replaced.
+func anchoredIssuerVerificationKey(cfg TrustConfig, token *jwt.Token, iss string) (any, error) {
+	rawX5C, ok := token.Header["x5c"]
+	if !ok {
+		return nil, fmt.Errorf("issuer %q has no trust entry, so it can only be admitted by a certificate chain reaching this deployment's anchors, and the credential carries no x5c header", iss)
+	}
+
+	key, err := verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots(), iss)
+	if err != nil {
+		return nil, fmt.Errorf("issuer %q has no trust entry, and its certificate chain does not admit it: %w", iss, err)
+	}
+
+	if !cfg.IssuerTrustedAnchored(iss) {
+		return nil, fmt.Errorf("issuer %q presented a chain that verifies, but is not trusted for this purpose", iss)
+	}
+
+	return key, nil
 }
 
 // ResolveIssuerVerificationKeyForPID resolved a PID issuer's key from the
@@ -131,18 +241,9 @@ func VerificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, err
 	return verificationKeyFromX5C(raw, roots, iss)
 }
 
-// verificationKeyFromX5C parses the full x5c chain (leaf first, per RFC 7517
-// §4.7), verifies leaf -> intermediates -> roots, and returns the leaf's
-// public key. roots being nil (no trust anchors configured) is refused, not
-// silently accepted off the chain's own say-so — an x5c header proves
-// nothing about WHO the leaf belongs to without a trust anchor to verify
-// against; trusting an unverified chain would let anyone mint their own
-// key+cert and self-certify as any issuer.
-func verificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, error) {
-	if roots == nil {
-		return nil, fmt.Errorf("no x5c trust anchors are configured")
-	}
-
+// parseX5CChain decodes an x5c header into certificates, leaf first, per
+// RFC 7517 §4.7.
+func parseX5CChain(raw any) ([]*x509.Certificate, error) {
 	certsRaw, ok := raw.([]any)
 	if !ok || len(certsRaw) == 0 {
 		return nil, fmt.Errorf("x5c header is empty")
@@ -163,6 +264,37 @@ func verificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, err
 			return nil, fmt.Errorf("parse x5c[%d]: %w", i, err)
 		}
 		certs = append(certs, cert)
+	}
+	return certs, nil
+}
+
+// keyIsPinned reports whether a leaf's SubjectPublicKeyInfo is one the trust
+// entry names. Byte equality over the encoded key, so every key type a real
+// issuer might hold is covered and none is silently compared against nothing.
+func keyIsPinned(spki []byte, pinned [][]byte) bool {
+	for _, candidate := range pinned {
+		if bytes.Equal(spki, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// verificationKeyFromX5C parses the full x5c chain (leaf first, per RFC 7517
+// §4.7), verifies leaf -> intermediates -> roots, and returns the leaf's
+// public key. roots being nil (no trust anchors configured) is refused, not
+// silently accepted off the chain's own say-so — an x5c header proves
+// nothing about WHO the leaf belongs to without a trust anchor to verify
+// against; trusting an unverified chain would let anyone mint their own
+// key+cert and self-certify as any issuer.
+func verificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, error) {
+	if roots == nil {
+		return nil, fmt.Errorf("no x5c trust anchors are configured")
+	}
+
+	certs, err := parseX5CChain(raw)
+	if err != nil {
+		return nil, err
 	}
 
 	leaf := certs[0]

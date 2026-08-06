@@ -136,28 +136,19 @@ def _fetch_pending_nonce(context, ceremony_id: str) -> str:
 
 def _build_poa_presentation(*, organization: str, roles: list[str], aud: str, nonce: str) -> str:
     """Build a Power of Attorney SD-JWT VC + KB-JWT presentation authorizing
-    organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03).
-    Uses BDD_CREDENTIAL_TENANT — the SAME status-list tenant
-    AuthService.build_vp_token issues the login/role credential against and
-    ensure_statuslist_for_dev.py seeds — not issue_stored_credential's
-    "default" tenant, which the BDD/CI stack does not reliably provision."""
+    organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03). It
+    names the same issuer status list AuthService.build_vp_token issues the
+    login credential against, on the organization's own index."""
     AuthService._ensure_dcs_wallet_importable()
-    from dcs_wallet.issuer import DEFAULT_ISSUER_DID, issue_access_credential  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE  # noqa: PLC0415
-
-    import os  # noqa: PLC0415
+    from dcs_wallet.issuer import issue_access_credential  # noqa: PLC0415
+    from dcs_wallet.status_list import role_credential_index  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
-    issuer_did = os.getenv("BDD_ISSUER_DID", DEFAULT_ISSUER_DID)
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
     return issue_access_credential(
         organization=organization,
         roles=roles,
-        issuer_private=keys.issuer_private,
         wallet_private=keys.wallet_private,
-        issuer_did=issuer_did,
-        statuslist_service_base=status_base,
-        statuslist_tenant=BDD_CREDENTIAL_TENANT,
+        status_index=role_credential_index(organization=organization, roles=roles),
         aud=aud,
         nonce=nonce,
     )
@@ -182,16 +173,14 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     must be signed by two distinct identities).
     """
     AuthService._ensure_dcs_wallet_importable()
-    import os  # noqa: PLC0415
-
     from dcs_wallet.issuer import (  # noqa: PLC0415
-        DEFAULT_ISSUER_DID,
-        sign_credential_sd_jwt,
+        sign_credential_sd_jwt_x5c,
         sign_key_binding_jwt,
     )
+    from dcs_wallet.issuer_pki import dev_issuer  # noqa: PLC0415
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk  # noqa: PLC0415
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status  # noqa: PLC0415
+    from dcs_wallet.status_list import build_credential_status, pid_credential_index  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
     holder_key = holder_private or keys.wallet_private
@@ -199,30 +188,29 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     subject_did = did_jwk_from_public_jwk(holder_public)
 
     now = int(time.time())
-    # A real status claim (ADR-20): VerifyPID's status-list check is no
-    # longer skipped now that EUDIPLO — which omitted status — is gone, so a
-    # PID presentation with no status claim would be rejected outright. The
-    # seed (given_name/family_name in place of organization/roles) just needs
-    # to be a stable, collision-free per-identity key into the same dev
-    # status-list tenant testWallet/scripts/ensure_statuslist_for_dev.py seeds.
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
+    # A real status claim (ADR-20): VerifyPID's status-list check is no longer
+    # skipped now that EUDIPLO — which omitted status — is gone, so a PID
+    # presentation with no status claim would be rejected outright. One bit per
+    # natural person, on the issuer's own signed list — the issuer this PID
+    # names, because a list is believed only from the issuer that publishes it.
+    issuer = dev_issuer()
     visible_claims = {
-        "iss": DEFAULT_ISSUER_DID,
+        "iss": issuer.iss,
         "sub": subject_did,
         "vct": "urn:dcs:pid:demo:v1",
         "iat": now - 3600,
         "exp": now + 3600,
         "cnf": {"jwk": cnf_jwk(holder_public)},
         "status": build_credential_status(
-            sub=subject_did, organization=given_name, roles=[family_name],
-            service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+            index=pid_credential_index(given_name=given_name, family_name=family_name),
         ),
     }
     selective_claims = {"given_name": given_name, "family_name": family_name}
-    issued = sign_credential_sd_jwt(
+    issued = sign_credential_sd_jwt_x5c(
         visible_claims=visible_claims,
         selective_claims=selective_claims,
-        issuer_private=keys.issuer_private,
+        issuer_private=issuer.private_jwk,
+        x5c=issuer.x5c,
     )
     issuer_jwt, disclosures, _old_kb = split_sd_jwt(issued)
     kb_jwt = sign_key_binding_jwt(
@@ -237,32 +225,33 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
 
 
 def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, nonce: str, trusted: bool = True):
-    """Same as _build_pid_presentation, but the issuer credential JWT carries
-    an x5c certificate chain in its header instead of a bare jwk+kid — what a
-    real EUDI wallet's issued PID actually looks like. The dev issuer's cert
-    names its DID in a SAN URI, because the chain is only accepted for an
-    issuer the leaf identifies. trusted=False signs with an UNRELATED
-    self-signed cert never configured as an OID4VP_X5C_TRUST_ANCHORS_PATH
-    root, for the negative "untrusted issuer is refused" case.
+    """A PID whose issuer JWT carries an x5c certificate chain, verified to this
+    deployment's PID trust anchors — what a real EUDI wallet's issued PID looks
+    like, and how every PID this stack's demo issuer mints is resolved.
+
+    trusted=True is the stack's own demo PID issuer, whose leaf names it in a
+    SAN URI because a chain is only accepted for an issuer the leaf identifies.
+    trusted=False signs with an UNRELATED self-signed cert never configured as
+    an anchor, for the negative "untrusted issuer is refused" case: it is
+    refused at key resolution, before its status claim — which names a list its
+    issuer does not publish — is ever read.
     """
     AuthService._ensure_dcs_wallet_importable()
     from cryptography import x509  # noqa: PLC0415
     from cryptography.hazmat.primitives import serialization  # noqa: PLC0415
 
     from dcs_wallet.issuer import sign_credential_sd_jwt_x5c, sign_key_binding_jwt  # noqa: PLC0415
+    from dcs_wallet.issuer_pki import dev_issuer  # noqa: PLC0415
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, load_json, private_key_material, public_jwk  # noqa: PLC0415
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status  # noqa: PLC0415
-
-    import os  # noqa: PLC0415
+    from dcs_wallet.status_list import build_credential_status, pid_credential_index  # noqa: PLC0415
 
     keys_dir = AuthService.resolve_wallet_keys_dir()
     if trusted:
-        issuer_private = private_key_material(load_json(keys_dir / "issuer-dev-x5c.jwk"))
-        issuer_cert_der = x509.load_pem_x509_certificate(
-            (keys_dir / "issuer-dev-x5c.crt.pem").read_bytes()
-        ).public_bytes(serialization.Encoding.DER)
-        issuer_did = "did:web:dev.example:issuer:pid-x5c"
+        issuer = dev_issuer()
+        issuer_private = issuer.private_jwk
+        x5c = issuer.x5c
+        issuer_did = issuer.iss
     else:
         # An UNRELATED, freshly-minted self-signed cert — never configured as
         # a trust anchor anywhere, deliberately not the trusted dev issuer.
@@ -292,7 +281,7 @@ def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, 
             "y": _b64.urlsafe_b64encode(pub.y.to_bytes(coord, "big")).rstrip(b"=").decode(),
             "d": _b64.urlsafe_b64encode(d.private_value.to_bytes(coord, "big")).rstrip(b"=").decode(),
         }
-        issuer_cert_der = untrusted_cert.public_bytes(serialization.Encoding.DER)
+        x5c = [_b64.b64encode(untrusted_cert.public_bytes(serialization.Encoding.DER)).decode()]
         issuer_did = "did:web:untrusted.example:issuer:pid-x5c"
 
     wallet_private = private_key_material(load_json(keys_dir / "wallet.jwk"))
@@ -300,7 +289,6 @@ def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, 
     subject_did = did_jwk_from_public_jwk(holder_public)
 
     now_ts = int(time.time())
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
     visible_claims = {
         "iss": issuer_did,
         "sub": subject_did,
@@ -309,8 +297,7 @@ def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, 
         "exp": now_ts + 3600,
         "cnf": {"jwk": cnf_jwk(holder_public)},
         "status": build_credential_status(
-            sub=subject_did, organization=given_name, roles=[family_name],
-            service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+            index=pid_credential_index(given_name=given_name, family_name=family_name),
         ),
     }
     selective_claims = {"given_name": given_name, "family_name": family_name}
@@ -318,7 +305,7 @@ def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, 
         visible_claims=visible_claims,
         selective_claims=selective_claims,
         issuer_private=issuer_private,
-        issuer_cert_der=issuer_cert_der,
+        x5c=x5c,
     )
     issuer_jwt, disclosures, _old_kb = split_sd_jwt(issued)
     kb_jwt = sign_key_binding_jwt(

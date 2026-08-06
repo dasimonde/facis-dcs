@@ -9,18 +9,20 @@ import type {
   ContractNegotiationDraftSaveRequest,
   ContractNegotiationRequest,
   ContractNegotiationRespondRequest,
+  ContractOfferAcceptRequest,
   ContractOfferRequest,
   ContractRejectRequest,
+  ContractRenewRequest,
   ContractRetrieveByIdRequest,
   ContractRetrieveRequest,
   ContractReviewRequest,
   ContractSearchRequest,
-  ContractStoreRequest,
   ContractSubmitRequest,
   ContractTargetDesignateRequest,
   ContractTargetWriteRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
+  ContractWithdrawRequest,
   MachineIdentityWriteRequest,
 } from '@/models/requests/contract-request'
 import type {
@@ -33,16 +35,18 @@ import type {
   ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
+  ContractOfferAcceptResponse,
   ContractOfferResponse,
   ContractRejectResponse,
+  ContractRenewResponse,
   ContractRetrieveResponse,
   ContractReviewResponse,
   ContractSearchResponse,
-  ContractStoreResponse,
   ContractSubmitResponse,
   ContractTarget,
   ContractTerminateResponse,
   ContractUpdateResponse,
+  ContractWithdrawResponse,
   MachineCredential,
   MachineIdentity,
   MachineIdentityCreateResponse,
@@ -54,6 +58,7 @@ export interface ContractWorkflowService {
   offer: (request: ContractOfferRequest) => Promise<ContractOfferResponse>
   submit: (request: ContractSubmitRequest) => Promise<ContractSubmitResponse>
   negotiate: (request: ContractNegotiationRequest) => Promise<ContractNegotiationResponse>
+  acceptOffer: (request: ContractOfferAcceptRequest) => Promise<ContractOfferAcceptResponse>
   saveNegotiationDraft: (request: ContractNegotiationDraftSaveRequest) => Promise<ContractNegotiationDraftResponse>
   retrieveNegotiationDraft: (
     request: ContractNegotiationDraftRetrieveRequest,
@@ -69,7 +74,8 @@ export interface ContractWorkflowService {
   search: (request: ContractSearchRequest) => Promise<ContractSearchResponse>
   approve: (request: ContractApproveRequest) => Promise<ContractApproveResponse>
   reject: (request: ContractRejectRequest) => Promise<ContractRejectResponse>
-  store: (request: ContractStoreRequest) => Promise<ContractStoreResponse>
+  withdraw: (request: ContractWithdrawRequest) => Promise<ContractWithdrawResponse>
+  renew: (request: ContractRenewRequest) => Promise<ContractRenewResponse>
   terminate: (request: ContractTerminateRequest) => Promise<ContractTerminateResponse>
   deploy: (request: ContractDeployRequest) => Promise<ContractDeployResponse>
   // Contract target systems (ADR-25)

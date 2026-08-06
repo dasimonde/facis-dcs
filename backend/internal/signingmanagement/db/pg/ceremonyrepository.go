@@ -163,33 +163,12 @@ func (r *PostgresCeremonyRepo) MarkCeremonyVerified(ctx context.Context, tx *sql
 	return nil
 }
 
-// ListAppliedPoAs returns the Power of Attorney retained for each signature
-// applied to the contract. Only a CONSUMED ceremony counts: a verified one whose
-// signing request was never consumed produced no signature, so its credential is
-// evidence for nothing. One row per signature field, the most recently consumed.
-func (r *PostgresCeremonyRepo) ListAppliedPoAs(ctx context.Context, tx *sqlx.Tx, contractDID string) ([]db.AppliedPoA, error) {
-	var applied []db.AppliedPoA
-	err := tx.SelectContext(ctx, &applied, `
-		SELECT DISTINCT ON (field_name) field_name, signer_did, poa_vp_token, COALESCE(summary_vc, '') AS summary_vc
-		  FROM signature_ceremonies
-		 WHERE contract_did = $1
-		   AND consumed_at IS NOT NULL
-		   AND signer_did IS NOT NULL
-		   AND poa_vp_token IS NOT NULL AND poa_vp_token <> ''
-		 ORDER BY field_name, consumed_at DESC`,
-		contractDID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list applied power-of-attorney evidence for %s: %w", contractDID, err)
-	}
-	return applied, nil
-}
-
 func (r *PostgresCeremonyRepo) FindVerifiedCeremonyByField(ctx context.Context, tx *sqlx.Tx, contractDID, fieldName string) (*db.SignatureCeremony, error) {
 	var c db.SignatureCeremony
 	err := tx.GetContext(ctx, &c, `
 		SELECT id, contract_did, field_name, requested_by, status, wallet_uri, nonce,
-		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at, poa_organization, poa_roles
+		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
+		       poa_organization, poa_roles, poa_vp_token
 		  FROM signature_ceremonies
 		 WHERE contract_did = $1 AND field_name = $2 AND status = $3
 		 ORDER BY verified_at DESC NULLS LAST
@@ -209,7 +188,8 @@ func (r *PostgresCeremonyRepo) FindVerifiedCeremony(ctx context.Context, tx *sql
 	var c db.SignatureCeremony
 	err := tx.GetContext(ctx, &c, `
 		SELECT id, contract_did, field_name, requested_by, status, wallet_uri, nonce,
-		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at, poa_organization, poa_roles
+		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
+		       poa_organization, poa_roles, poa_vp_token
 		  FROM signature_ceremonies
 		 WHERE contract_did = $1 AND signer_did = $2 AND status = $3
 		 ORDER BY verified_at DESC NULLS LAST
@@ -225,9 +205,9 @@ func (r *PostgresCeremonyRepo) FindVerifiedCeremony(ctx context.Context, tx *sql
 	return &c, nil
 }
 
-// RecordSummaryVC retains the signing summary issued for a ceremony, so it can
-// travel to the counterparty on the wire instead of being embedded a second
-// time in a PDF that already carries a signature.
+// RecordSummaryVC retains the signing summary issued for a ceremony. The
+// embedded copy inside the PDF is what travels; this one is what the compliance
+// viewer reads per ceremony, and it outlives a PDF this instance no longer holds.
 func (r *PostgresCeremonyRepo) RecordSummaryVC(ctx context.Context, tx *sqlx.Tx, ceremonyID string, summary []byte) error {
 	_, err := tx.ExecContext(ctx, `UPDATE signature_ceremonies SET summary_vc = $2 WHERE id = $1`, ceremonyID, string(summary))
 	if err != nil {

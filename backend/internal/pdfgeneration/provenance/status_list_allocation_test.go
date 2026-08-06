@@ -3,8 +3,10 @@ package provenance
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,10 +84,57 @@ func newTestAllocator(size uint32) (*StatusListAllocator, *memStatusListStore) {
 	return &StatusListAllocator{store: store, listID: DefaultListID}, store
 }
 
-// newTestPublisher is a publisher whose entries are allocated in memory.
-func newTestPublisher(serviceURL, tenantID string) *OCMWStatusListPublisher {
-	allocator, _ := newTestAllocator(listSize)
-	return NewOCMWStatusListPublisher(serviceURL, "did:example:issuer", tenantID, allocator)
+// memStatusListRevocations is the revocation half of the allocation table in
+// memory, with the same "first revocation wins" rule the SQL has: the moment a
+// credential stopped being valid is answered once and never re-stamped.
+type memStatusListRevocations struct {
+	mu        sync.Mutex
+	store     *memStatusListStore
+	revokedAt map[string]time.Time
+}
+
+func (r *memStatusListRevocations) Revoke(_ context.Context, subjectID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.store.mu.Lock()
+	_, allocated := r.store.entries[subjectID]
+	r.store.mu.Unlock()
+	if !allocated {
+		return fmt.Errorf("%s holds no status list entry to revoke", subjectID)
+	}
+	if _, already := r.revokedAt[subjectID]; !already {
+		r.revokedAt[subjectID] = time.Now()
+	}
+	return nil
+}
+
+func (r *memStatusListRevocations) RevokedIndices(_ context.Context, listID int) ([]uint32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	var indices []uint32
+	for subject := range r.revokedAt {
+		if entry, ok := r.store.entries[subject]; ok && entry.ListID == listID {
+			indices = append(indices, entry.Index)
+		}
+	}
+	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+	return indices, nil
+}
+
+func (r *memStatusListRevocations) indices(listID int) []uint32 {
+	got, _ := r.RevokedIndices(context.Background(), listID)
+	return got
+}
+
+// newTestPublisher is a publisher whose entries and bits live in memory.
+func newTestPublisher() (*DCSStatusListPublisher, *memStatusListRevocations) {
+	allocator, store := newTestAllocator(ListSize)
+	revocations := &memStatusListRevocations{store: store, revokedAt: map[string]time.Time{}}
+	return NewDCSStatusListPublisher(
+		func(listID int) string { return StatusListURI("https://dcs.example.org", listID) },
+		allocator, revocations), revocations
 }
 
 // TestDistinctContractsNeverShareARevocationEntry is the defect this allocation
@@ -98,7 +147,7 @@ func newTestPublisher(serviceURL, tenantID string) *OCMWStatusListPublisher {
 // contracts inherit a stranger's revocation state, and the first pair appears
 // inside the first 500.
 func TestDistinctContractsNeverShareARevocationEntry(t *testing.T) {
-	allocator, _ := newTestAllocator(listSize)
+	allocator, _ := newTestAllocator(ListSize)
 
 	seen := make(map[StatusListEntry]string, 5000)
 	for i := 0; i < 5000; i++ {
@@ -116,7 +165,7 @@ func TestDistinctContractsNeverShareARevocationEntry(t *testing.T) {
 // credential already issued advertises the entry, so re-asking must never move
 // it. Every lifecycle credential a contract accumulates is a fresh call here.
 func TestARevocationEntryIsStableForTheLifeOfTheContract(t *testing.T) {
-	allocator, _ := newTestAllocator(listSize)
+	allocator, _ := newTestAllocator(ListSize)
 	const contractID = "did:web:example.org:contracts:stable"
 
 	// Other contracts allocating in between must not shift it.
@@ -137,7 +186,7 @@ func TestARevocationEntryIsStableForTheLifeOfTheContract(t *testing.T) {
 // the same contract can be stamped at once, and the contract has one revocation
 // bit, not one per racing writer.
 func TestConcurrentAllocationForOneContractYieldsOneEntry(t *testing.T) {
-	allocator, store := newTestAllocator(listSize)
+	allocator, store := newTestAllocator(ListSize)
 	const contractID = "did:web:example.org:contracts:raced"
 
 	const writers = 32
@@ -171,7 +220,7 @@ func TestConcurrentAllocationForOneContractYieldsOneEntry(t *testing.T) {
 // exactly-once guarantee has to hold across contracts too, or the race
 // reintroduces the collision by another route.
 func TestConcurrentAllocationForDistinctContractsYieldsDistinctEntries(t *testing.T) {
-	allocator, _ := newTestAllocator(listSize)
+	allocator, _ := newTestAllocator(ListSize)
 
 	const writers = 200
 	results := make([]StatusListEntry, writers)
@@ -205,7 +254,7 @@ func TestConcurrentAllocationForDistinctContractsYieldsDistinctEntries(t *testin
 // wild advertise them. A new allocation must therefore treat an inherited slot
 // as taken — handing it out would create exactly the collision being removed.
 func TestAllocationStepsOverEntriesInheritedFromTheHashScheme(t *testing.T) {
-	allocator, store := newTestAllocator(listSize)
+	allocator, store := newTestAllocator(ListSize)
 	store.inherit("did:web:example.org:contracts:legacy-0", StatusListEntry{ListID: DefaultListID, Index: 0})
 	store.inherit("did:web:example.org:contracts:legacy-1", StatusListEntry{ListID: DefaultListID, Index: 1})
 
@@ -240,7 +289,7 @@ func TestAFullStatusListFailsLoudly(t *testing.T) {
 // nobody registered would advertise entries in a list the service does not
 // serve, where the revoke POST has nothing to flip.
 func TestAllocationInAnUnregisteredListFails(t *testing.T) {
-	store := newMemStatusListStore(DefaultListID, listSize)
+	store := newMemStatusListStore(DefaultListID, ListSize)
 	allocator := &StatusListAllocator{store: store, listID: 7}
 
 	_, err := allocator.Allocate(context.Background(), "did:web:example.org:contracts:elsewhere")
@@ -251,7 +300,7 @@ func TestAllocationInAnUnregisteredListFails(t *testing.T) {
 // TestAllocationNeedsASubject guards the one input that must never be defaulted:
 // an empty subject would collect every anonymous caller on one shared bit.
 func TestAllocationNeedsASubject(t *testing.T) {
-	allocator, _ := newTestAllocator(listSize)
+	allocator, _ := newTestAllocator(ListSize)
 	_, err := allocator.Allocate(context.Background(), "   ")
 	require.Error(t, err)
 }

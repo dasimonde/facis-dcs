@@ -94,7 +94,7 @@ export function compactXsdDatatype(iri: string): XsdDatatype | undefined {
   if (!compact) {
     throw new Error(
       `<${iri}> is an XSD datatype DCS cannot order. Reading it as a string would let a policy boundary over ` +
-        'this field compare lexically and answer wrong — declare a supported datatype, or add this one to ' +
+        'this field compare lexically and answer wrong. Declare a supported datatype, or add this one to ' +
         'XSD_TO_COMPACT and to compareXsdValues in xsd-order.ts.',
     )
   }
@@ -325,6 +325,12 @@ export interface DcsDocumentData {
 export interface DcsTemplateData extends DcsDocumentData {
   '@type': 'dcs:ContractTemplate'
   'dcs:metadata': DcsTemplateMetadata
+  /**
+   * The contractual roles the template declares, as party placeholder nodes
+   * whose IRIs end `#party-<role>`. Creating a contract binds the originating
+   * organization to one of them (backend command/create.go bindOriginatorParty).
+   */
+  'dcs:parties'?: unknown[]
 }
 
 export interface DcsContractData extends DcsDocumentData {

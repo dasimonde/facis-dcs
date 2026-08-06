@@ -96,22 +96,28 @@ func currentSHACLShapesRef() string {
 // validated against, and the validation profile, each at an exact version that
 // no later activation or rollback moves.
 //
-// The canonical DCS envelope graph is this deployment's own, so the new
-// artifact gets the version active at its creation — the same rule the hub
-// context anchor above follows, and what makes an activation change what newly
-// created contracts are checked against. The shape LIBRARIES the document
-// declares are the opposite case: they are the authoring choice a federated
-// template carries, naming the graphs its author modelled its data against, and
-// they are what must validate it on a peer. Those are kept exactly as declared,
-// at the version declared (ADR-8 pin, ADR-23 libraries).
+// envelopeShapeRefs are the DCS envelope graphs, canonical first. They are this
+// deployment's own, so the new artifact gets the versions active at its
+// creation — the same rule the hub context anchor above follows, and what makes
+// an activation change what newly created contracts are checked against. The
+// shape LIBRARIES the document declares are the opposite case: they are the
+// authoring choice a federated template carries, naming the graphs its author
+// modelled its data against, and they are what must validate it on a peer.
+// Those are kept exactly as declared, at the version declared (ADR-8 pin,
+// ADR-23 libraries).
+//
+// activeLibraryRefs is the hub's other active shapes entries. It supplies a
+// version to a library the document declares without one and is not otherwise
+// pinned: an artifact is bound to the envelope and to what it declares, never
+// to every library that happened to be registered when it was created.
 //
 // dcs:effectiveShapes is derived from the result, so the two can never
-// disagree: it holds the selected bundle plus every library the document
-// declares beyond it, which is what makes a declared library resolve even when
-// this hub does not have it active.
-func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, effectiveShapeRefs []string, profileRef string) (*datatype.JSON, error) {
+// disagree: it holds the envelope plus every library the document declares,
+// which is what makes a declared library resolve even when this hub does not
+// have it active.
+func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, envelopeShapeRefs, activeLibraryRefs []string, profileRef string) (*datatype.JSON, error) {
 	if raw == nil || strings.TrimSpace(contextRef) == "" || strings.TrimSpace(canonicalShapesRef) == "" ||
-		len(effectiveShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
+		len(envelopeShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
 		return nil, errors.New("complete semantic bundle references are required")
 	}
 	var data documentData
@@ -131,7 +137,7 @@ func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string
 		contextEntries = append(contextEntries, current)
 	}
 	data["@context"] = contextEntries
-	libraries := declaredShapeLibraryAnchors(data["sh:shapesGraph"], canonicalShapesRef, effectiveShapeRefs)
+	libraries := declaredShapeLibraryAnchors(data["sh:shapesGraph"], canonicalShapesRef, activeLibraryRefs)
 	if len(libraries) == 0 {
 		data["sh:shapesGraph"] = map[string]any{"@id": canonicalShapesRef}
 	} else {
@@ -142,7 +148,7 @@ func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string
 		}
 		data["sh:shapesGraph"] = graphs
 	}
-	data["dcs:effectiveShapes"] = effectiveShapesBundle(effectiveShapeRefs, libraries)
+	data["dcs:effectiveShapes"] = effectiveShapesBundle(envelopeShapeRefs, libraries)
 	data["dcterms:conformsTo"] = map[string]any{"@id": profileRef}
 	return encodeDocumentData(data)
 }
@@ -150,15 +156,16 @@ func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string
 // declaredShapeLibraryAnchors returns the anchors of the shape libraries a
 // document declares beside the canonical graph, in declaration order and as the
 // document wrote them. An anchor that names no version pins nothing, so it is
-// resolved to the bundle's entry of the same name; one this hub has no entry for
-// names a graph that resolves nowhere and is dropped rather than pinned.
-func declaredShapeLibraryAnchors(declared any, canonicalShapesRef string, bundleRefs []string) []string {
+// resolved to this hub's active entry of the same name; one this hub has no
+// entry for names a graph that resolves nowhere and is dropped rather than
+// pinned.
+func declaredShapeLibraryAnchors(declared any, canonicalShapesRef string, activeLibraryRefs []string) []string {
 	canonicalName, ok := anchorShapesName(canonicalShapesRef)
 	if !ok {
 		return nil
 	}
 	bundleByName := map[string]string{}
-	for _, ref := range bundleRefs {
+	for _, ref := range activeLibraryRefs {
 		if name, ok := anchorShapesName(ref); ok {
 			bundleByName[name] = ref
 		}
@@ -181,14 +188,14 @@ func declaredShapeLibraryAnchors(declared any, canonicalShapesRef string, bundle
 	return libraries
 }
 
-// effectiveShapesBundle lists the selected bundle first — its canonical entry
-// leads, which is where the gate and validateAgainstShapeSource read the
-// canonical graph — followed by every declared library the bundle does not
-// already carry at that exact version.
-func effectiveShapesBundle(bundleRefs, libraries []string) []any {
-	refs := make([]any, 0, len(bundleRefs)+len(libraries))
+// effectiveShapesBundle lists the envelope first — its canonical entry leads,
+// which is where the gate and validateAgainstShapeSource read the canonical
+// graph — followed by every declared library the envelope does not already
+// carry at that exact version.
+func effectiveShapesBundle(envelopeRefs, libraries []string) []any {
+	refs := make([]any, 0, len(envelopeRefs)+len(libraries))
 	pinned := map[shapesGraphAnchor]bool{}
-	for _, ref := range bundleRefs {
+	for _, ref := range envelopeRefs {
 		refs = append(refs, map[string]any{"@id": ref})
 		if name, ok := anchorShapesName(ref); ok {
 			pinned[shapesGraphAnchor{Name: name, Version: anchorVersion(ref)}] = true

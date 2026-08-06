@@ -126,9 +126,16 @@ def step_then_evidence_reported_invalid(context, name):
     findings = resp.json().get("findings") or []
     body_text = " ".join(findings).lower()
     assert "evidence" in body_text and (
-        "missing" in body_text or "invalid" in body_text or "failed" in body_text or "mismatch" in body_text
+        "missing" in body_text
+        or "invalid" in body_text
+        or "failed" in body_text
+        or "mismatch" in body_text
+        # A corrupted attachment no longer decodes to the {summary,
+        # poa_presentation} shape at all, which validate reports as unreadable
+        # rather than as a credential that failed verification.
+        or "unreadable" in body_text
     ), (
         f"Expected /signature/validate to report the corrupted signing evidence as "
-        f"invalid/missing (distinct from its normal positive 'PID presentation "
-        f"re-verified' finding), got findings: {findings}"
+        f"invalid/missing/unreadable (distinct from its normal positive 'PID "
+        f"presentation re-verified' finding), got findings: {findings}"
     )

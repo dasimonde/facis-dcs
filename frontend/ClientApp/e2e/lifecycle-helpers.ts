@@ -4,8 +4,8 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applySession, type DcsRole, expect, mintSession, test } from './dcs-test'
-import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_STATUSLIST_URL } from '../playwright.config'
-import type { Browser, Page } from '@playwright/test'
+import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_ISSUER_BASE_URL } from '../playwright.config'
+import type { Browser, Locator, Page } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -44,7 +44,37 @@ async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promi
 async function completeParticipantDialog(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
+  await selectOriginatorRole(dialog)
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
+}
+
+/** Binds the clause rule to the two catalogued roles — Granted by (assigner)
+ *  and Applies to (assignee). The builder emits no rule while either is unset,
+ *  and a template whose rules name no role parties declares no roles for a
+ *  contract to bind its originator to. */
+export async function selectBilateralClauseRoles(editor: Locator): Promise<void> {
+  const roleSelect = (label: string) =>
+    editor.locator('label.form-control').filter({ hasText: label }).locator('select')
+  const assigner = roleSelect('Granted by')
+  const assignee = roleSelect('Applies to')
+  const values = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  const [assignerRole, assigneeRole] = values
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
+}
+
+/** Picks the first of the template's two catalogued roles as the originator's
+ *  own. The dialog refuses Apply without one: the role binds the creating
+ *  organization to a party in the machine-readable rules, and the select stays
+ *  disabled until the loaded template declares exactly two catalogued roles. */
+export async function selectOriginatorRole(dialog: Locator): Promise<void> {
+  const roleSelect = dialog.getByLabel(/Your role in this contract/)
+  await expect(roleSelect).toBeEnabled()
+  const value = await roleSelect.locator('option:not([disabled])').first().getAttribute('value')
+  await roleSelect.selectOption(value)
 }
 
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
@@ -110,7 +140,7 @@ export const FIXTURE_CLAUSE_PROSE = 'The provider invoices the agreed payment am
  * inline placeholder renders an editable input, a bare constraint boundary does
  * not). Returns the created component's DID.
  */
-async function authorPaymentComponent(
+export async function authorPaymentComponent(
   page: Page,
   loginAs: LoginAs,
   name: string,
@@ -142,8 +172,9 @@ async function authorPaymentComponent(
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralClauseRoles(editor)
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
@@ -358,11 +389,13 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
     // Submit), then reload so that state clears before submitting.
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
-      await showBtn.click()
+      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
+      // a coordinate click cannot land, so the event is dispatched directly.
+      await showBtn.dispatchEvent('click')
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )
-      await page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
       await confirmModal(page, 'Confirm')
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
@@ -460,11 +493,13 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
-      await showBtn.click()
+      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
+      // a coordinate click cannot land, so the event is dispatched directly.
+      await showBtn.dispatchEvent('click')
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )
-      await page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
       await confirmModal(page, 'Confirm')
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
@@ -512,8 +547,18 @@ async function startCeremonyAndPrepareDocument(
   await row.getByRole('link', { name: /Open/ }).click()
   await expect(page).toHaveURL(/\/signing\/.+/)
 
+  // The badge follows the VERDICT, not the call completing
+  // (SecureContractViewerView.verify), so an absent badge is a failed integrity
+  // check rather than a slow one, and step 3 stays closed behind it. Capture the
+  // verdict the viewer read so the failure names the mismatch and its findings
+  // instead of reporting a missing element.
+  const verified = page.waitForResponse((r) => r.url().includes('/signature/verify'), { timeout: 60_000 })
   await page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await expect(page.getByText('Verified', { exact: true })).toBeVisible()
+  const verifyResponse = await verified
+  await expect(
+    page.getByText('Verified', { exact: true }),
+    `the integrity check of ${contractDid} did not pass, so the ceremony stays closed: HTTP ${verifyResponse.status()} ${await verifyResponse.text().catch(() => '')}`,
+  ).toBeVisible()
 
   const ceremonyStarted = page.waitForResponse(
     (r) => r.url().includes('/signature/request') && r.request().method() === 'POST',
@@ -541,7 +586,7 @@ async function startCeremonyAndPrepareDocument(
     cwd: repoRoot,
     env: {
       ...process.env,
-      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      ISSUER_BASE_URL: E2E_ISSUER_BASE_URL,
       BDD_DCS_BASE_URL: E2E_API_BASE,
       E2E_SIGNATORY: E2E_SIGNATORY_NAME,
     },

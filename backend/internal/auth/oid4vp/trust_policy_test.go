@@ -92,14 +92,16 @@ func TestDenialReasonsExplainTheRefusal(t *testing.T) {
 // its first use is judged against what it says now — not against a snapshot
 // taken at startup that nothing would report.
 func TestPolicySeesConfigurationChanges(t *testing.T) {
-	cfg := &TrustConfig{PeerDynamic: false}
-	peer := cfg.For(PurposePeer)
+	cfg := &TrustConfig{Issuers: map[string]TrustedIssuer{}}
+	login := cfg.For(PurposeLogin)
 
-	if peer.IssuerTrusted("did:web:b.example:issuer") {
-		t.Fatal("dynamic peer trust must be opt-in")
+	if login.IssuerTrusted("did:web:b.example:issuer") {
+		t.Fatal("an issuer absent from the document must not be trusted for login")
 	}
-	cfg.PeerDynamic = true
-	if !peer.IssuerTrusted("did:web:b.example:issuer") {
+	cfg.Issuers["did:web:b.example:issuer"] = TrustedIssuer{
+		Purposes: []Purpose{PurposeLogin}, Organizations: []string{"did:web:b.example"},
+	}
+	if !login.IssuerTrusted("did:web:b.example:issuer") {
 		t.Error("the policy is still judging against the document it saw first")
 	}
 }

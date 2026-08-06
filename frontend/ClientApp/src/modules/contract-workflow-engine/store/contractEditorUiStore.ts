@@ -28,25 +28,22 @@ export const useContractEditorUiStore = defineStore(storeId, {
     setActiveTab(tab: ContractEditorTabId) {
       this.activeTab = tab
     },
-    availableTabs(contractState: ContractStateType) {
+    // `rendered` is the set of tabs the calling view actually has a pane for;
+    // a tab outside it would select an empty page body.
+    availableTabs(contractState: ContractStateType, rendered: ContractEditorTabId[]) {
       const isAuditingAuthorized =
-        (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
-          useAuthStore().user?.roles?.includes(role),
-        ) ?? false
+        (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => useAuthStore().user?.roles?.includes(role)) ??
+        false
 
-      switch (contractState) {
-        case ContractState.negotiation:
-          return this.tabs.filter(
-            (tab) =>
-              ['details', 'content', 'diff', 'structure'].includes(tab.id) ||
-              (isAuditingAuthorized && tab.id === 'audit'),
-          )
-        default:
-          return this.tabs.filter(
-            (tab) =>
-              ['details', 'content', 'structure'].includes(tab.id) || (isAuditingAuthorized && tab.id === 'audit'),
-          )
-      }
+      const forState: ContractEditorTabId[] =
+        contractState === ContractState.negotiation
+          ? ['details', 'content', 'diff', 'structure']
+          : ['details', 'content', 'structure']
+
+      return this.tabs.filter(
+        (tab) =>
+          rendered.includes(tab.id) && (forState.includes(tab.id) || (isAuditingAuthorized && tab.id === 'audit')),
+      )
     },
     reset(overrides?: Partial<ContractEditorUiState>) {
       Object.assign(this, getInitialState())

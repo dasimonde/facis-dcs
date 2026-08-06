@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"digital-contracting-service/internal/base"
@@ -82,6 +83,10 @@ func materializeRuleParties(doc map[string]interface{}) {
 				iri, _ := ref["@id"].(string)
 				_, role, found := strings.Cut(iri, "#party-")
 				if !found || role == "" {
+					continue
+				}
+				role, err := url.PathUnescape(role)
+				if err != nil || role == "" {
 					continue
 				}
 				if _, seen := roles[iri]; !seen {

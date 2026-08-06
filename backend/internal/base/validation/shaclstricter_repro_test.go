@@ -194,8 +194,7 @@ func TestAuditContractContentFlagsGaiaXParticipantViolations(t *testing.T) {
 // slaAuditContract is a canonical contract carrying real SLA content —
 // typed CompanyParty, PaymentTerm, SLAAgreement, and SLO nodes — the
 // facis.sla.basic profile's statement rules evaluate against real party
-// representations: dcs:parties with plain-string roles (what the workflow
-// engine materializes) or taxonomy-IRI roles (what peers may send).
+// representations: dcs:parties with taxonomy-IRI roles.
 func profileAuditContract(roles ...any) map[string]any {
 	contract := canonicalAuditContract()
 	parties := []any{}
@@ -215,17 +214,26 @@ func profileAuditContract(roles ...any) map[string]any {
 }
 
 func TestAuditContractContentEvaluatesProfileStatements(t *testing.T) {
-	// Plain-string and taxonomy-IRI roles both satisfy the vocabulary; a
-	// role-less party is a not-yet-bound placeholder and is not flagged.
-	valid := profileAuditContract("provider", map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#role-customer"}, nil)
+	// URI roles satisfy the vocabulary; a role-less party is a not-yet-bound
+	// placeholder and is not flagged.
+	valid := profileAuditContract(
+		"https://w3id.org/facis/dcs/taxonomy/v1#role-provider",
+		map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#role-customer"},
+		nil,
+	)
 	findings, err := AuditContractContent(context.Background(), valid, mapPolicy(false, true), ContractContentAuditMetadata{})
 	require.NoError(t, err)
 	for _, finding := range findings {
 		require.NotEqual(t, "company-party-role-vocabulary", finding.RuleID, finding.Message)
 	}
 
-	broken := profileAuditContract("provider", "overlord")
+	broken := profileAuditContract("provider", "https://w3id.org/facis/dcs/taxonomy/v1#role-overlord")
 	findings, err = AuditContractContent(context.Background(), broken, mapPolicy(false, true), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	require.Contains(t, policyFindingRuleIDs(findings), "company-party-role-vocabulary")
+
+	shortAlias := profileAuditContract("provider")
+	findings, err = AuditContractContent(context.Background(), shortAlias, mapPolicy(false, true), ContractContentAuditMetadata{})
 	require.NoError(t, err)
 	require.Contains(t, policyFindingRuleIDs(findings), "company-party-role-vocabulary")
 }

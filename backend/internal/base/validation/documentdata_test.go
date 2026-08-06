@@ -469,16 +469,103 @@ func TestPinSemanticBundleRecordsCompleteImmutableReferences(t *testing.T) {
 		[]string{
 			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
 			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
+		},
+		[]string{"https://dcs.test/semantic/shapes/customer-library?version=7"},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	// The envelope, and nothing else: the document declares no library, so the
+	// registered one is not part of what it is judged against.
+	require.Equal(t, []any{
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/clause-catalog?version=2"},
+	}, document["dcs:effectiveShapes"])
+	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+		document["dcterms:conformsTo"].(map[string]any)["@id"])
+}
+
+// The pin is the contract's dependency list, and a contract depends on the
+// envelope plus what it declares. Pinning every active library instead bound
+// each contract to whatever else the hub happened to hold — on the two-instance
+// vertical, a concurrently running test's shape — and made those graphs part of
+// what the ship to the counterparty had to carry.
+func TestPinSemanticBundleLeavesUndeclaredLibrariesOutOfTheBundle(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@id": "did:web:example.test:contract",
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/customer-library?version=7"},
+		},
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{
+			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
+		},
+		[]string{
 			"https://dcs.test/semantic/shapes/customer-library?version=7",
+			"https://dcs.test/semantic/shapes/e2e-erasure-shape-1785499278293?version=1",
 		},
 		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
 	)
 	require.NoError(t, err)
 	var document map[string]any
 	require.NoError(t, json.Unmarshal(*pinned, &document))
-	require.Len(t, document["dcs:effectiveShapes"], 3)
-	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
-		document["dcterms:conformsTo"].(map[string]any)["@id"])
+
+	effective, err := EffectiveShapeRefs(document)
+	require.NoError(t, err)
+	require.Equal(t, []VersionedShapeRef{
+		{Name: "facis-dcs", Version: 4},
+		{Name: "clause-catalog", Version: 2},
+		{Name: "customer-library", Version: 7},
+	}, effective)
+	require.NotContains(t, effective, VersionedShapeRef{Name: "e2e-erasure-shape-1785499278293", Version: 1})
+}
+
+// A template that names a library without a version delegates the choice to
+// the hub the contract is created on, so the contract pins whichever version
+// is active there at that moment. That is what makes an activation change the
+// library a NEW contract is judged against while every contract already
+// produced keeps the version it was pinned to.
+func TestPinSemanticBundleTakesADeclaredLibrarysActiveVersion(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@id": "did:web:example.test:contract",
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/customer-library"},
+		},
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{
+			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
+		},
+		[]string{"https://dcs.test/semantic/shapes/customer-library?version=7"},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	require.Equal(t, []any{
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/customer-library?version=7"},
+	}, document["sh:shapesGraph"])
+
+	effective, err := EffectiveShapeRefs(document)
+	require.NoError(t, err)
+	require.Equal(t, []VersionedShapeRef{
+		{Name: "facis-dcs", Version: 4},
+		{Name: "clause-catalog", Version: 2},
+		{Name: "customer-library", Version: 7},
+	}, effective)
 }
 
 // A client that rebuilds the contract document from its editor state drops
@@ -530,6 +617,7 @@ func TestPinSemanticBundleKeepsDeclaredShapeLibraries(t *testing.T) {
 		"https://dcs.test/semantic/context/facis-dcs?version=3",
 		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
 		[]string{"https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		nil,
 		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
 	)
 	require.NoError(t, err)
@@ -565,6 +653,7 @@ func TestPinSemanticBundleRepointsAnImportedTemplatesForeignCanonicalAnchor(t *t
 			"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
 			"https://dcs-osc.test/api/semantic/shapes/clause-catalog?version=1",
 		},
+		nil,
 		"https://dcs-osc.test/api/semantic/profile/facis.sla.basic?version=1",
 	)
 	require.NoError(t, err)
@@ -600,8 +689,8 @@ func TestPinSemanticBundleAgreesWithTheWorkflowSnapshotInvariant(t *testing.T) {
 		[]string{
 			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
 			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
-			"https://dcs.test/semantic/shapes/customer-library?version=7",
 		},
+		[]string{"https://dcs.test/semantic/shapes/customer-library?version=7"},
 		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
 	)
 	require.NoError(t, err)

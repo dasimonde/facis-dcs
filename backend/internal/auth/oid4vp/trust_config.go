@@ -23,37 +23,33 @@ type TrustConfig struct {
 	VCTs    []string                 `json:"vcts"`
 	Issuers map[string]TrustedIssuer `json:"issuers"`
 
-	// x5cRoots are the trust anchors an x5c-bearing credential's certificate
-	// chain must verify against (OID4VP_X5C_TRUST_ANCHORS_PATH) — a real
-	// EUDI-wallet-issued PID carries its issuer certificate this way, not a
-	// bare JWK. The dev and BDD stacks exercise that path too, against the
-	// committed dev CA (backend/config/oid4vp/x5c-trust-anchors.dev.pem, which
-	// LoadX5CTrustAnchors accepts only under DCS_ALLOW_DEV_TRUST). Optional:
-	// nil where no issuer publishes a chain, but an x5c credential presented
-	// with no roots configured must be REFUSED, never silently trusted off its
-	// own embedded leaf cert.
-	x5cRoots *x509.CertPool
+	// x5cRoots are the two CA trust lists an x5c-bearing credential's chain is
+	// verified against (ADR-35): one for parties — peer credentials, and the
+	// login issuers that are the same certificates seen from this side — and one
+	// for PID. A real EUDI-wallet-issued PID carries its issuer certificate this
+	// way, not a bare JWK. The dev and BDD stacks exercise that path too,
+	// against the committed dev CA (backend/config/oid4vp/x5c-trust-anchors.dev.pem,
+	// which LoadX5CTrustAnchors accepts only under DCS_ALLOW_DEV_TRUST).
+	//
+	// One flat pool meant a certificate under ANY configured anchor could sign
+	// for any x5c issuer, held apart only by the leaf naming that issuer and by
+	// the entry's purposes. With peers no longer enumerated the second of those
+	// disappears for `peer`, so the list has to be the boundary it was being
+	// credited as — and a PID CA must not be one of the CAs that can authorize a
+	// signature. A set with no anchors refuses every x5c credential for it,
+	// which is the correct failure: an x5c header proves nothing about whose leaf
+	// it is without an anchor to verify against.
+	//
+	// Keyed by ANCHOR SET, of which there are two — see anchorSetFor. Held as
+	// certificates rather than finished pools because a set accumulates anchors
+	// from more than one source (a mounted bundle, plus this deployment's own
+	// provisioned root), and a CertPool cannot be enumerated once built, so a
+	// second contribution could only replace the first.
+	x5cRoots map[Purpose][]*x509.Certificate
 
 	// ORCEResolverURL is the flow endpoint the orce mechanism delegates to
 	// (OID4VP_ORCE_RESOLVER_URL). Empty unless a deployment uses it.
 	ORCEResolverURL string `json:"orce_resolver_url"`
-
-	// PeerDynamic lets a counterparty's issuer be trusted for `peer` without a
-	// static entry, provided it is did:web-resolvable.
-	//
-	// Enumerating peers here would mean editing this file on every instance
-	// whenever a federation member is onboarded — an allowlist, not a
-	// federation. Whether we deal with a peer AT ALL is already decided
-	// dynamically and fail-closed by the ADR-19 trust gate: the peer's
-	// self-signed agreement credential must verify against its own did.json and
-	// match this instance's federation rules hash, and the local policy
-	// endpoint (DCS_TRUST_PDP_URL) must approve the interaction. That is the
-	// authorization decision; this flag only says the verifier need not carry a
-	// second, static copy of it.
-	//
-	// Login is deliberately NOT dynamic: who may obtain a session here is local
-	// policy the operator states explicitly.
-	PeerDynamic bool `json:"peer_dynamic"`
 
 	keyFetcher KeyFetcher
 }
@@ -65,11 +61,23 @@ type TrustConfig struct {
 type Purpose string
 
 const (
-	// PurposeLogin: credentials from this issuer may grant a session here.
+	// PurposeLogin: credentials from this issuer may act HERE — grant a session,
+	// and authorize a signature at this instance's own ceremony. Both are the
+	// same question ("may this holder act as a party on this deployment"), and
+	// both are answered by an issuer this operator named and pinned.
 	PurposeLogin Purpose = "login"
-	// PurposePeer: credentials from this issuer are verified when they arrive
-	// from a counterparty, and when this instance presents its own side of a
-	// mutual Power-of-Attorney binding.
+	// PurposePeer: credentials issued by ANOTHER DCS INSTANCE's issuer — the
+	// Power of Attorney behind a signature applied over there, embedded into the
+	// contract PDF as an associated file BEFORE that instance's own signature,
+	// so its signature covers its own authorization and the PDF carries
+	// everything the receiver needs (ADR-13: the PDF is the wire format).
+	// Verified here on receipt (VerifyCounterpartyPoA,
+	// dcstodcs.CounterpartyPoAGate).
+	//
+	// It never authorizes anything here. That is what lets it be admitted by a
+	// chain to the PoA CA list rather than by an entry: we cannot enumerate who
+	// a counterparty's issuer is, and we do not have to, because believing their
+	// attestation is not the same as letting it act.
 	PurposePeer Purpose = "peer"
 	// PurposePID: credentials from this issuer attest the identity of a natural
 	// person. A PID is a third party's attestation — an instance that issued it
@@ -126,6 +134,18 @@ type TrustedIssuer struct {
 	Organizations []string        `json:"organizations"`
 	Mechanism     Mechanism       `json:"mechanism"`
 	JWKS          json.RawMessage `json:"jwks"`
+	// X5CLeafKeys pins the public keys a LOGIN issuer's x5c leaf may carry,
+	// base64 DER SubjectPublicKeyInfo (ADR-35). It is not a second way to
+	// publish a key — the credential still carries its chain, and the mechanism
+	// is still x5c. It states which leaf under that chain this deployment's
+	// operator actually named, so no certificate authority can introduce
+	// another login issuer here.
+	//
+	// A key rather than a whole certificate: the issuer re-mints its leaf when
+	// its public URL changes and keeps the key, so pinning the certificate
+	// would refuse a legitimate reissue. DER rather than a JWK so it covers
+	// every key type a real issuer might hold, not only EC.
+	X5CLeafKeys []string `json:"x5c_leaf_keys"`
 }
 
 // Allows reports whether this entry lists the purpose.
@@ -166,6 +186,15 @@ var devIssuerKeySources = map[string]string{
 	"sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss": "testWallet/keys/issuer-dev.jwk",
 	"rnizNORb2RpCt7obNCoi9-6IE6dM6cj2TLue-zwvTZc": "testWallet/keys/issuer-dev-x5c.jwk, which is also the CA key in backend/config/oid4vp/x5c-trust-anchors.dev.pem",
 	"TPg_7qbilFLESVua3__W5v-5PiqqmJWvb5l4jrrXvS4": "testWallet/keys/wallet.jwk",
+	// The root the dev/BDD ORCE credential issuer is handed instead of
+	// generating one, so its status lists and credentials chain to an anchor
+	// that exists before the issuer has ever booted (scripts/orce-dev-root-ca.py).
+	"oZV6WnfYJyAtBAvwpIywxo_KTCHOOhRcHb7lC9fvEDU": "deployment/helm/charts/orce/pki-dev/root-ca.key, the CA the dev/BDD ORCE issuer signs under",
+	// The issuer key itself, mounted so the dev/BDD stacks can PIN it as their
+	// login issuer (ADR-35). A login issuer is verified against the key an
+	// operator wrote down, and a key generated on the pod's volume at boot is
+	// not knowable when that trust document is committed.
+	"fOZixFX_H2zxj4vP0MFU1yRBJO9YQ2XV3sbokuw_rZw": "deployment/helm/charts/orce/pki-dev/issuer.key, the leaf key the dev/BDD ORCE issuer signs credentials with",
 }
 
 // devIssuerKeyX is devIssuerKeySources keyed by the canonical form of each
@@ -219,11 +248,43 @@ func devKeyMaterial(iss string, entry TrustedIssuer) string {
 	if source := devKeyInJWKS(entry.JWKS); source != "" {
 		return source
 	}
+	if source := devKeyInLeafPins(entry.X5CLeafKeys); source != "" {
+		return source
+	}
 	if strings.HasPrefix(strings.TrimSpace(iss), "did:jwk:") {
 		if key, err := sdjwt.JWKFromDIDJWK(strings.TrimSpace(iss)); err == nil {
 			if source, ok := devIssuerKeyX[canonicalCoordinate(key.X)]; ok {
 				return source
 			}
+		}
+	}
+	return ""
+}
+
+// devKeyInLeafPins names the committed key a login issuer's leaf pin holds.
+//
+// A pin is key material like any other: it says which key this deployment
+// believes its own login issuer by, so pinning one whose private half ships in
+// this repository lets anyone with a clone mint a session here. The guard read
+// only `jwks`, which is exactly the form an x5c issuer does not use — so the
+// one entry shape that carries a key for the purpose with no CA above it was
+// the one shape nothing checked.
+func devKeyInLeafPins(pins []string) string {
+	for _, encoded := range pins {
+		der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			continue
+		}
+		key, err := x509.ParsePKIXPublicKey(der)
+		if err != nil {
+			continue
+		}
+		pub, ok := key.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+		if source, ok := devIssuerKeyX[canonicalCoordinateFromInt(pub.X)]; ok {
+			return source
 		}
 	}
 	return ""
@@ -320,6 +381,23 @@ func LoadTrustConfig(path string) (*TrustConfig, error) {
 		return nil, fmt.Errorf("trust config %q: issuers is required", path)
 	}
 
+	// Keys are canonicalised once, here, so every lookup afterwards — the
+	// policy input, the mechanism resolver, the listed/unlisted split ADR-35
+	// turns on — agrees on what this issuer is called. A did:web re-spelled in
+	// another case would otherwise miss its own entry and be treated as
+	// unlisted, which now means "try the anchored peer path" rather than
+	// "refuse".
+	canonical := make(map[string]TrustedIssuer, len(cfg.Issuers))
+	for iss, entry := range cfg.Issuers {
+		key := canonicalIssuerKey(iss)
+		if existing, clash := canonical[key]; clash {
+			_ = existing
+			return nil, fmt.Errorf("trust config %q: issuers %q and %q are the same identifier written two ways; one entry has to be the operator's complete answer for it", path, iss, key)
+		}
+		canonical[key] = entry
+	}
+	cfg.Issuers = canonical
+
 	allowDev := devTrustAllowed()
 
 	for iss, entry := range cfg.Issuers {
@@ -341,6 +419,29 @@ func LoadTrustConfig(path string) (*TrustConfig, error) {
 		}
 		if !supportedMechanisms[entry.Mechanism] {
 			return nil, fmt.Errorf("trust config %q: issuer %q declares mechanism %q, which this build cannot resolve", path, iss, entry.Mechanism)
+		}
+		// The mechanism decides how a key is resolved, and an x5c issuer
+		// resolves from its chain. Bundling a JWKS beside it states two
+		// resolutions for one issuer, and only one of them can be what the
+		// operator meant. The leaf pin below is NOT that: it constrains the
+		// chain rather than offering an alternative to it.
+		if entry.Mechanism == MechanismX5C && len(entry.JWKS) != 0 {
+			return nil, fmt.Errorf("trust config %q: issuer %q resolves through a certificate chain but also bundles a jwks; one of the two is not what the operator meant (to pin a login issuer's leaf, use x5c_leaf_keys)", path, iss)
+		}
+		if len(entry.X5CLeafKeys) > 0 {
+			if entry.Mechanism != MechanismX5C {
+				return nil, fmt.Errorf("trust config %q: issuer %q pins leaf keys but does not resolve through a certificate chain, so there is no leaf to pin", path, iss)
+			}
+			if _, err := decodeLeafKeyPins(entry.X5CLeafKeys, iss); err != nil {
+				return nil, fmt.Errorf("trust config %q: %w", path, err)
+			}
+		}
+		// A login issuer terminates at its leaf (ADR-35), so the key it carries
+		// has to be named here. Without it the credential would be checked
+		// against a CA list instead — which admits whoever that CA vouched for,
+		// and this deployment's operator never named them.
+		if entry.Allows(PurposeLogin) && entry.Mechanism == MechanismX5C && len(entry.X5CLeafKeys) == 0 {
+			return nil, fmt.Errorf("trust config %q: issuer %q is granted login and resolves by certificate chain, so it must pin the key its leaf carries in `x5c_leaf_keys`; a login issuer verified against a CA list would let that CA introduce another one", path, iss)
 		}
 		if entry.Mechanism == MechanismJWKS {
 			if len(entry.JWKS) == 0 {
@@ -388,7 +489,8 @@ type PurposeView struct {
 	purpose Purpose
 }
 
-// IssuerTrusted reports whether this issuer is granted this purpose.
+// IssuerTrusted reports whether this issuer is granted this purpose on the
+// strength of configuration alone — no certificate chain has been validated.
 //
 // The rules are in policy/trust.rego, not here: which issuer may do what, on
 // whose behalf, is the part a deployment changes, and it is easier to audit as
@@ -397,7 +499,84 @@ func (v *PurposeView) IssuerTrusted(iss string) bool {
 	if v == nil || v.cfg == nil {
 		return false
 	}
-	return v.cfg.evaluateBool(queryTrusted, v.purpose, iss, "")
+	return v.cfg.evaluateBool(queryTrusted, v.purpose, iss, "", false)
+}
+
+// IssuerTrustedAnchored asks the same question having established the
+// cryptographic fact an unlisted peer is admitted on (ADR-35): this credential's
+// chain verified to this purpose's anchors, and its leaf named this issuer.
+//
+// It is a separate method rather than a parameter on IssuerTrusted so that a
+// caller cannot assert the fact by accident. Only sdjwt's resolution path may
+// pass it, because only there has the chain actually been checked.
+func (v *PurposeView) IssuerTrustedAnchored(iss string) bool {
+	if v == nil || v.cfg == nil {
+		return false
+	}
+	return v.cfg.evaluateBool(queryTrusted, v.purpose, iss, "", true)
+}
+
+// IssuerPinnedLeafKeys returns the keys a login issuer's x5c leaf must carry
+// (ADR-35), and whether this purpose pins the leaf at all.
+//
+// Only login does. A counterparty's Power of Attorney and a PID are verified to
+// a CA root, because this deployment cannot know in advance which issuers will
+// present them. A session here is the opposite question — the operator names
+// their own organization's issuers — so it terminates at the leaf, and no CA in
+// either list can introduce a new one.
+//
+// A login issuer that resolves by certificate chain and pins nothing is a
+// configuration error, not an issuer that pins nothing: it would fall through to
+// a CA check that is not the rule for login. LoadTrustConfig refuses it, and
+// this returns the same error for a configuration assembled in code.
+func (v *PurposeView) IssuerPinnedLeafKeys(iss string) ([][]byte, bool, error) {
+	if v == nil || v.cfg == nil || v.purpose != PurposeLogin {
+		return nil, false, nil
+	}
+	entry, ok := v.cfg.Issuers[canonicalIssuerKey(iss)]
+	if !ok || entry.Mechanism != MechanismX5C {
+		return nil, false, nil
+	}
+	if len(entry.X5CLeafKeys) == 0 {
+		return nil, false, fmt.Errorf("login issuer %q resolves by certificate chain but pins no leaf key, so nothing states that this organization issued the credential", iss)
+	}
+	pins, err := decodeLeafKeyPins(entry.X5CLeafKeys, iss)
+	if err != nil {
+		return nil, false, err
+	}
+	return pins, true, nil
+}
+
+// decodeLeafKeyPins turns the configured base64 DER into the bytes a leaf's own
+// SubjectPublicKeyInfo is compared against. Parsed rather than compared as text:
+// base64 has more than one spelling of the same bytes, and a pin that missed
+// because of padding would fail open into "no key matched" rather than loudly.
+func decodeLeafKeyPins(encoded []string, iss string) ([][]byte, error) {
+	pins := make([][]byte, 0, len(encoded))
+	for i, value := range encoded {
+		der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+		if err != nil {
+			return nil, fmt.Errorf("issuer %q: x5c_leaf_keys[%d] is not base64 DER: %w", iss, i, err)
+		}
+		if _, err := x509.ParsePKIXPublicKey(der); err != nil {
+			return nil, fmt.Errorf("issuer %q: x5c_leaf_keys[%d] is not a DER SubjectPublicKeyInfo: %w", iss, i, err)
+		}
+		pins = append(pins, der)
+	}
+	return pins, nil
+}
+
+// IssuerListed reports whether the trust document carries an entry for this
+// issuer at all. It is deliberately NOT a trust decision: it selects which
+// resolution path runs. A listed issuer resolves by its declared mechanism; an
+// unlisted one has only the anchored path, and reaches it before anything has
+// been decided about it.
+func (v *PurposeView) IssuerListed(iss string) bool {
+	if v == nil || v.cfg == nil {
+		return false
+	}
+	_, ok := v.cfg.Issuers[canonicalIssuerKey(iss)]
+	return ok
 }
 
 // IssuerUsesX5C reports whether the issuer publishes its key through a
@@ -528,7 +707,11 @@ func signatureAlgMatchesCurve(alg, crv string) bool {
 	return false
 }
 
-func (v *PurposeView) X5CTrustRoots() *x509.CertPool { return v.cfg.X5CTrustRoots() }
+// X5CTrustRoots returns the anchors for THIS view's purpose (ADR-35). The view
+// already carries the purpose, so scoping the anchors needs no change to the
+// interface sdjwt resolves against — a peer credential simply cannot be
+// validated against the PID anchors, whatever it presents.
+func (v *PurposeView) X5CTrustRoots() *x509.CertPool { return v.cfg.anchorsFor(v.purpose) }
 
 // IssuerMayAttest reports whether the issuer was entitled to name this
 // organization.
@@ -544,14 +727,17 @@ func (v *PurposeView) IssuerMayAttest(iss, org string) bool {
 	if v == nil || v.cfg == nil {
 		return false
 	}
-	return v.cfg.evaluateBool(queryMayAttest, v.purpose, iss, org)
+	// The anchored fact is not restated: this is only ever asked about a
+	// credential that already verified, and for an unlisted issuer the only way
+	// to have verified is the anchored path (policy/trust.rego, may_attest).
+	return v.cfg.evaluateBool(queryMayAttest, v.purpose, iss, org, false)
 }
 
 func (c *TrustConfig) IssuerTrusted(iss string) bool {
 	if c == nil {
 		return false
 	}
-	_, ok := c.Issuers[strings.TrimSpace(iss)]
+	_, ok := c.Issuers[canonicalIssuerKey(iss)]
 
 	return ok
 }
@@ -573,7 +759,7 @@ func (c *TrustConfig) VCTAllowed(vct string) bool {
 }
 
 func (c *TrustConfig) IssuerJWKS(iss string) (json.RawMessage, error) {
-	entry, ok := c.Issuers[strings.TrimSpace(iss)]
+	entry, ok := c.Issuers[canonicalIssuerKey(iss)]
 	if !ok {
 		return nil, fmt.Errorf("issuer %q is not trusted", iss)
 	}
@@ -585,35 +771,112 @@ func (c *TrustConfig) IssuerJWKS(iss string) (json.RawMessage, error) {
 	return signatureVerificationKeys(entry.JWKS, iss)
 }
 
-// X5CTrustRoots returns the configured x5c chain-validation trust anchors, or
-// nil if none were loaded (an x5c-bearing credential must then be refused,
-// never accepted off its own embedded leaf cert — see sdjwt.verificationKeyFromX5C).
-func (c *TrustConfig) X5CTrustRoots() *x509.CertPool {
+// anchorsFor returns the x5c chain-validation trust anchors for one purpose, or
+// nil if that purpose has none (an x5c-bearing credential presented for it must
+// then be refused, never accepted off its own embedded leaf cert — see
+// sdjwt.verificationKeyFromX5C).
+//
+// There is deliberately no fallback to some other purpose's anchors, and no
+// "default" set. A purpose whose anchors were forgotten must fail closed and
+// say so; borrowing another purpose's would silently restore the flat pool
+// ADR-35 replaced, at exactly the moment the configuration is wrong.
+func (c *TrustConfig) anchorsFor(p Purpose) *x509.CertPool {
 	if c == nil {
 		return nil
 	}
-	return c.x5cRoots
+	return poolOf(c.x5cRoots[anchorSetFor(p)])
 }
 
-// SetX5CTrustRoots attaches the x5c chain-validation trust anchors loaded via
-// LoadX5CTrustAnchors. Separate from LoadTrustConfig because the anchors are
-// PEM certificates, not JSON, and are optional (OID4VP_X5C_TRUST_ANCHORS_PATH).
-func (c *TrustConfig) SetX5CTrustRoots(pool *x509.CertPool) {
-	c.x5cRoots = pool
+// anchorSetFor maps a purpose onto the CA trust list its chains verify against.
+// There are TWO lists — PoA and PID — not one per purpose.
+//
+// A login issuer and a peer issuer are the same certificate seen from two
+// sides. The Power of Attorney a holder obtains at login here travels inside the
+// signed PDF to the counterparty, who verifies it as peer evidence against
+// their PoA list — which must therefore contain the CA that issued OUR login
+// issuer. Splitting login onto a third list would mean publishing the same root
+// twice and keeping the copies in step.
+//
+// What separates login from peer is not the anchor but the enumeration: a login
+// issuer must have an entry here, a peer need not (ADR-35). PID is the second
+// list because a CA that attests persons must not be able to speak for a party,
+// nor a party's CA attest a person — and because nobody can enumerate who
+// issues a PID, including this deployment itself in production.
+func anchorSetFor(p Purpose) Purpose {
+	if p == PurposePID {
+		return PurposePID
+	}
+	return PurposePeer
+}
+
+func poolOf(anchors []*x509.Certificate) *x509.CertPool {
+	if len(anchors) == 0 {
+		return nil
+	}
+	pool := x509.NewCertPool()
+	for _, cert := range anchors {
+		pool.AddCert(cert)
+	}
+	return pool
+}
+
+// SetX5CTrustRoots attaches the chain-validation anchors for one purpose,
+// loaded via LoadX5CTrustAnchors. Separate from LoadTrustConfig because the
+// anchors are PEM certificates, not JSON, and each purpose mounts its own
+// (OID4VP_X5C_TRUST_ANCHORS_{PEER,PID,LOGIN}_PATH).
+// Anchors ADD to the purpose rather than replacing it, because a purpose is
+// legitimately fed from more than one place — a mounted bundle and, for `peer`,
+// the root this deployment's own provisioning job minted.
+func (c *TrustConfig) SetX5CTrustRoots(p Purpose, anchors []*x509.Certificate) {
+	if len(anchors) == 0 {
+		return
+	}
+	if c.x5cRoots == nil {
+		c.x5cRoots = make(map[Purpose][]*x509.Certificate, 2)
+	}
+	set := anchorSetFor(p)
+	c.x5cRoots[set] = append(c.x5cRoots[set], anchors...)
+}
+
+// unionX5CRoots is every anchor this deployment holds, for whatever purpose.
+//
+// The status-list verifier is one object for the process and is reached without
+// a purpose in hand (checkStatusList), so it cannot be given a scoped set. The
+// union is sound because the handlers now bind the list to the credential it
+// governs (status.RequireCredentialIssuer): the list must be issued by the same
+// issuer as that credential, and that credential was already admitted under its
+// own purpose's anchors. So a list anchored for one purpose cannot speak for a
+// credential admitted under another, which is the only thing a scoped set would
+// have bought here.
+func (c *TrustConfig) unionX5CRoots() *x509.CertPool {
+	if c == nil {
+		return nil
+	}
+	var all []*x509.Certificate
+	for _, anchors := range c.x5cRoots {
+		all = append(all, anchors...)
+	}
+	return poolOf(all)
 }
 
 // LoadX5CTrustAnchors reads a PEM bundle of one or more trusted root
 // certificates (ConfigMap mount) that x5c-bearing credential chains must
 // verify against.
 //
-// An anchor whose key is committed to this repository is refused for the same
-// reason a bundled JWKS key is, and it is the same key: the shipped
-// backend/config/oid4vp/x5c-trust-anchors.dev.pem is self-signed with
-// testWallet/keys/issuer-dev-x5c.jwk, so anyone with a clone can issue a
-// certificate under that anchor and be believed as a PID issuer. Certificates
-// are therefore parsed one by one rather than handed to AppendCertsFromPEM,
-// which reveals nothing about what it added.
-func LoadX5CTrustAnchors(path string) (*x509.CertPool, error) {
+// A bundle holds one root per issuer whose chains a deployment verifies — the
+// PID issuer's, and the login issuer's, whose root is what a signed status list
+// chains to. Every private key behind the shipped
+// backend/config/oid4vp/x5c-trust-anchors.dev.pem is committed here, so anyone
+// with a clone can issue under those anchors and be believed. Such an anchor is
+// refused for the same reason a bundled JWKS key is, and certificates are
+// therefore parsed one by one rather than handed to AppendCertsFromPEM, which
+// reveals nothing about what it added — including a recognisable anchor sitting
+// behind an unrecognised one.
+// Certificates are returned rather than a finished pool so the caller can put
+// the same anchor in more than one place: a purpose's own pool, and the union
+// the status-list verifier holds. A CertPool cannot be enumerated once built,
+// so a pool alone could not be combined with another.
+func LoadX5CTrustAnchors(path string) ([]*x509.Certificate, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("x5c trust anchors path is empty")
@@ -625,8 +888,7 @@ func LoadX5CTrustAnchors(path string) (*x509.CertPool, error) {
 	}
 
 	allowDev := devTrustAllowed()
-	pool := x509.NewCertPool()
-	anchors := 0
+	var anchors []*x509.Certificate
 	for rest := data; ; {
 		var block *pem.Block
 		block, rest = pem.Decode(rest)
@@ -645,13 +907,12 @@ func LoadX5CTrustAnchors(path string) (*x509.CertPool, error) {
 				return nil, fmt.Errorf("x5c trust anchors %q: anchor %q is keyed to material committed in this repository (%s), so anyone holding a clone could issue a certificate under it and be believed; set DCS_ALLOW_DEV_TRUST=true if this really is a development stack", path, cert.Subject.CommonName, source)
 			}
 		}
-		pool.AddCert(cert)
-		anchors++
+		anchors = append(anchors, cert)
 	}
 
-	if anchors == 0 {
+	if len(anchors) == 0 {
 		return nil, fmt.Errorf("x5c trust anchors %q: no valid PEM certificates found", path)
 	}
 
-	return pool, nil
+	return anchors, nil
 }

@@ -181,6 +181,24 @@ export interface ContractIncreaseContractVersionEvent {
   user_roles: UserRole[]
 }
 
+// Emitted when folding a negotiation round discarded the content of a change
+// request that stands at ACCEPTED, because a later accepted request set the
+// same fields. Without it the trail shows the acceptance and nothing else.
+export interface ContractNegotiationChangeSupersededEvent {
+  did: string
+  holder_did: string
+  contract_version: number
+  merged_contract_version: number
+  superseded: {
+    negotiation_id: string
+    superseded_by: string
+    fields: string[]
+  }[]
+  submitted_by: string
+  occurred_at: string
+  user_roles: UserRole[]
+}
+
 export type ContractEvent =
   | ContractCreateEvent
   | ContractUpdateEvent
@@ -199,3 +217,4 @@ export type ContractEvent =
   | ContractAuditEvent
   | ContractReviewEvent
   | ContractIncreaseContractVersionEvent
+  | ContractNegotiationChangeSupersededEvent

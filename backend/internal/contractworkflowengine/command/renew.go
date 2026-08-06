@@ -99,7 +99,7 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	}
 
 	if cmd.UpdatedAt.Unix() < original.UpdatedAt.Unix() {
-		return nil, errors.New("contract was updated elsewhere, please reload")
+		return nil, fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	originalState, err := contractstate.NewContractState(original.State)
@@ -210,8 +210,13 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	// negotiation tasks for the new instance follow the exact same rules as
 	// a plain create — automatic metadata carryover (DCS-FR-CWE-22) extends
 	// to who is responsible, not just contract fields.
-	if err := createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd.DID, cmd.RenewedBy, resp); err != nil {
+	if err := createReviewAndApprovalTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd.DID, cmd.RenewedBy, resp); err != nil {
 		return nil, err
+	}
+	for _, negotiator := range resp.Negotiators {
+		if err := mintNegotiationTask(ctx, tx, h.NTRepo, cmd.DID, negotiator, cmd.RenewedBy, initialContractVersion); err != nil {
+			return nil, err
+		}
 	}
 
 	evt := contractevents.RenewEvent{

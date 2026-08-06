@@ -121,6 +121,13 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err := h.CRepo.RemoteUpdate(ctx, tx, data); err != nil {
 			return fmt.Errorf("could not update local contract copy: %w", err)
 		}
+		// A new document arrived, so the round it belongs to is a new one: any
+		// engagement this instance had with the superseded version is owed again
+		// against this one. This carries tasks forward, it never mints a first
+		// one — receiving a document is not engaging with it.
+		if err := h.NTRepo.RollForward(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+			return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
+		}
 	} else {
 		// A first receipt is an inbound offer: this instance's intrinsic state
 		// starts at OFFERED (an offer on our table, awaiting our own review),
@@ -152,7 +159,12 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err := h.CRepo.RemoteCreate(ctx, tx, data); err != nil {
 			return fmt.Errorf("could not create local contract copy: %w", err)
 		}
-		if err := createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd.ContractIRI, cmd.LocalPeer, resp); err != nil {
+		// Review and approval tasks only. No negotiation task is minted here:
+		// receiving an offer is not engaging with it, and a task on arrival would
+		// make submit's "no open tasks" gate answer for a round nobody entered.
+		// The counterparty mints its own by accepting the offer or by proposing a
+		// redline on it (command/acceptoffer.go, command/negotiate.go).
+		if err := createReviewAndApprovalTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd.ContractIRI, cmd.LocalPeer, resp); err != nil {
 			return err
 		}
 	}

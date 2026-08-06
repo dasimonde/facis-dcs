@@ -1,14 +1,8 @@
 package oid4vp
 
 import (
-	"bytes"
-	"compress/gzip"
-	"encoding/base64"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
 	"digital-contracting-service/internal/auth/oid4vp/status"
@@ -50,72 +44,93 @@ func TestConfigureStatusListVerificationTakesOnlyIssuersWithABundledKey(t *testi
 	assert.NotContains(t, projected.Issuers, "did:web:example:issuer:x5c")
 }
 
-func makeXFSCListBody(bitstring []byte) []byte {
-	var buf bytes.Buffer
-	w := gzip.NewWriter(&buf)
-	_, _ = w.Write(bitstring)
-	_ = w.Close()
-	body, _ := json.Marshal(map[string]any{
-		"tenantId": "default",
-		"listId":   1,
-		"list":     base64.RawStdEncoding.EncodeToString(buf.Bytes()),
+// Every status-list issuer publishing by certificate is the deployed
+// arrangement, not a broken one — our own issuers bundle no key at all, and
+// TestCheckStatusList_IETFStatusList_Active runs on exactly that. What is broken
+// is neither a bundled key nor an anchor: every status list then resolves to no
+// key and every credential is refused, which belongs at startup rather than at
+// the first login.
+func TestConfigureStatusListVerificationRefusesAConfigThatCanVerifyNothing(t *testing.T) {
+	err := ConfigureStatusListVerification(&TrustConfig{
+		Issuers: map[string]TrustedIssuer{"did:web:example:issuer:x5c": {Mechanism: MechanismX5C}},
 	})
-	return body
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no x5c trust anchors are configured")
 }
 
+// The deployed shape end to end: a statuslist+jwt carrying an x5c chain, which
+// SelectMechanismFromResponse routes to handler.IETFToken. Nothing else in this
+// package covers that combination, and it is the one a login credential's status
+// list takes on every instance (ADR-34).
 func TestCheckStatusList_IETFStatusList_Active(t *testing.T) {
-	bitstring := make([]byte, 125000)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.EqualFold(strings.TrimSpace(r.Header.Get("Content-Type")), status.XFSCSignedContentType) {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		assert.Equal(t, status.IETFStatusListAccept, r.Header.Get("Accept"))
-		assert.Empty(t, r.Header.Get("Content-Type"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(makeXFSCListBody(bitstring))
-	}))
-	defer srv.Close()
+	const index = 62073
 
-	claims, err := json.Marshal(map[string]any{
-		"status": map[string]any{
-			"status_list": map[string]any{
-				"uri": srv.URL,
-				"idx": 62073,
-			},
-		},
-	})
+	list := newIETFStatusList(t, 125000)
+	require.NotEmpty(t, list.chain, "the default fixture must sign by chain, not by bundled key")
+	trustIETFStatusList(t, list)
+
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
 	require.NoError(t, err)
 	require.NoError(t, checkStatusList(claims))
 }
 
 func TestCheckStatusList_IETFStatusList_Revoked(t *testing.T) {
-	idx := uint32(3)
-	bitstring := make([]byte, 16)
-	bitstring[idx/8] |= 1 << (idx % 8)
+	const index = 3
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.EqualFold(strings.TrimSpace(r.Header.Get("Content-Type")), status.XFSCSignedContentType) {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		assert.Equal(t, status.IETFStatusListAccept, r.Header.Get("Accept"))
-		assert.Empty(t, r.Header.Get("Content-Type"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(makeXFSCListBody(bitstring))
-	}))
-	defer srv.Close()
+	list := newIETFStatusList(t, 16)
+	trustIETFStatusList(t, list)
 
-	claims, err := json.Marshal(map[string]any{
-		"status": map[string]any{
-			"status_list": map[string]any{
-				"uri": srv.URL,
-				"idx": idx,
-			},
-		},
-	})
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
 	require.NoError(t, err)
 
+	// The same credential against the same list is accepted before the
+	// revocation, so what the refusal below reports is the bit and not a list
+	// that failed to load — with no unsigned fallback both look alike.
+	require.NoError(t, checkStatusList(claims))
+
+	list.Revoke(index)
+
+	err = checkStatusList(claims)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "revoked")
+}
+
+// A chain proves the anchor vouched for the certificate, not whose certificate
+// it is. The issuer's boot path used to mint its leaf before the public URL was
+// knowable, so the leaf carried no SAN at all — it chained perfectly and
+// identified nobody, and every status list it signed was refused on an instance
+// that had the right anchor mounted. The leaf is now minted from the request's
+// own URL; this is what would fail if it went back to being minted at boot.
+func TestCheckStatusList_IETFStatusList_RefusesALeafThatNamesNoIssuer(t *testing.T) {
+	const index = 3
+
+	list := newIETFStatusList(t, 16, leafNamingNoIssuer(t))
+	trustIETFStatusList(t, list)
+
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
+	require.NoError(t, err)
+
+	err = checkStatusList(claims)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "revoked",
+		"an unusable list must not read as a revocation: the bit was never set")
+}
+
+// The other branch of the same handler. An issuer that publishes no certificate
+// is verified against the key bundled in the trust document, and the anchors are
+// absent — so this cannot be passing on the chain the case above supplies.
+func TestCheckStatusList_IETFStatusList_BundledKeyIssuer(t *testing.T) {
+	const index = 9
+
+	list := newIETFStatusList(t, 16, keyByJWKS)
+	require.Empty(t, list.chain)
+	trustIETFStatusList(t, list)
+
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
+	require.NoError(t, err)
+	require.NoError(t, checkStatusList(claims))
+
+	list.Revoke(index)
 	err = checkStatusList(claims)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "revoked")

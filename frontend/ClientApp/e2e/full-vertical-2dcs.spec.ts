@@ -1,9 +1,11 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOfferOn,
   acceptOpenDecisionsOn,
   assertManifestChainGrew,
   assertNotYetSignable,
   assertReceivedInState,
+  assertSigningRefusedUntilCounterpartySettles,
   authorContractTemplate,
   authorSemanticComponent,
   counterOffer,
@@ -40,9 +42,17 @@ import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
  * Exercises the merged backend R5/R5c work: the negotiation counter-offer
  * round-trip (each adjustment ships a new PDF, chain grows), the
  * settle/consolidation gate (signing refused pre-settle; extrinsic phase
- * proposed→agreed→executed on the retrieve API), and cross-instance double
- * signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
+ * proposed→agreed→executed on the retrieve API), the mutual settlement gate
+ * (signing refused while the counterparty has not settled this version, and
+ * opening once its shipped settlement artifact arrives), and cross-instance
+ * double signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
  * stays as the local-only lifecycle coverage until this supersedes it.
+ *
+ * Every stage from 4 on ARRIVES at least once the way a human does — a row found
+ * in a list or a task tab, then that page's own action — instead of navigating
+ * straight to the URL. A hop that types the URL reaches its page even when
+ * nothing in the product links there, which is exactly how a negotiate view the
+ * counterparty had no route to passed every run of this vertical.
  *
  * SRS traceability: every stage cites the governing requirement so this reads as
  * a normative, traceable proof rather than an arbitrary script. Federation is
@@ -68,12 +78,13 @@ test.afterEach(async () => {
 })
 
 test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
-  // Ten stages across two instances, including two full wallet signing
-  // ceremonies in Stage 8 — an earlier, shorter budget left no headroom once
-  // the ceremony waits were sized to span the wallet leg. Halved from 25min:
-  // still generous for the real ceremony waits, but a genuine hang here
-  // shouldn't cost 25 minutes (+ a CI retry) to surface.
-  test.setTimeout(750_000)
+  // Ten stages across two instances, including three full wallet signing
+  // ceremonies — the two that sign in Stage 8, plus the one Stage 7 runs to the
+  // point of refusal — an earlier, shorter budget left no headroom once the
+  // ceremony waits were sized to span the wallet leg. Still well under the
+  // original 25min: generous for the real ceremony waits, but a genuine hang
+  // here shouldn't cost 25 minutes (+ a CI retry) to surface.
+  test.setTimeout(840_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b
@@ -152,6 +163,15 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // adjustment ships a new PDF and the C2PA ingredient chain grows by one on BOTH
   // parties (the counterparty's provenance is chained, not reset).
   await test.step('Stage 6 [DCS-FR-CWE-18, DCS-IR-CWE-03/-04, DCS-OR-C2PA-002]: negotiation ping-pong 20000 -> 10000 -> 15000', async () => {
+    // B enters the round first, arriving the way its counterparty would: the
+    // offer is found in B's contract list, opened, and taken into negotiation
+    // through the contract's own action, where "Accept offer" fires
+    // Offered --EventNegotiate--> Negotiation. The acceptance is what mints B's
+    // negotiation task and so what puts the contract in B's Negotiations tab —
+    // asserted empty for this contract before the accept and holding its row
+    // after, since a received offer on its own queues nothing.
+    await acceptOfferOn(b, contractDid)
+
     // B redlines 20000 -> 10000 through the SRS §3.1.1 Save-draft leg: the
     // redline is staged as B's party draft, survives leaving the Negotiate
     // view, and only "Change Proposal" makes it real — the chain growth
@@ -178,17 +198,21 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // ADR-2 state machine gates EventSign until APPROVED; ADR-13 extrinsic lifecycle
   // → agreed]: consolidation/settle = reaching APPROVED via the real submit →
   // review → approve flow on each instance (not a fabricated /contract/settle
-  // route). Signing is refused before APPROVED (ACCEPTED = signing gate); the
-  // extrinsic lifecycle flips proposed → agreed on both sides.
-  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle', async () => {
+  // route). Signing is refused twice over — before APPROVED by the local state
+  // machine, and after it while the COUNTERPARTY has not settled, which local
+  // state cannot answer; the extrinsic lifecycle flips proposed → agreed on both
+  // sides.
+  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle and pre-counterparty', async () => {
     // The signing gate holds pre-settle: B's signer cannot sign an unapproved
     // contract — the Secure Contract Viewer's signing list does not offer it.
     await assertNotYetSignable(b, contractDid)
 
-    // Mutual agreement first: the ping-pong ended with A's 15000 counter, so B
-    // still owes a decision on it. That undecided record replicates to A's copy
-    // too, and any open decision disables Submit — so A cannot consolidate until
-    // B has accepted. This IS the settle handshake, not test scaffolding.
+    // Clears whatever B still owes a decision on before it settles. Only B's
+    // OWN 10000 counter is listed here: a change request is recorded on the
+    // instance that proposed it and never crosses the boundary (ADR-13 ships
+    // documents, not negotiation rows), so A's 15000 counter reached B as the
+    // document B now holds, not as something to accept. The settle handshake
+    // itself is the mutual approve + settlement ship asserted below.
     await acceptOpenDecisionsOn(b, contractDid)
 
     // Settle = consolidate to APPROVED via the real submit → review → approve UI
@@ -197,6 +221,19 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     // is local RBAC, so A approving says nothing about B's copy — B's reviewer
     // and approver still have to act, and the signing gate is per instance.
     await settleToApprovedOn(a, contractDid)
+
+    // A is now APPROVED and has shipped its own settlement, but B has not
+    // settled: A's signer is offered the contract and is still refused, because
+    // signing claims BOTH parties agreed this version and A holds no evidence
+    // that B did. Absence of that evidence is not agreement — this is the gate
+    // the live demo instances went straight past, signing while the peer was
+    // still negotiating.
+    await assertSigningRefusedUntilCounterpartySettles(a, contractDid, 'Instance A Signatory')
+
+    // B settles the same document, which ships B's settlement to A. Stage 8
+    // then signs on both instances: that it succeeds at all is the other half
+    // of this assertion — the gate opens on the peer's evidence arriving, not
+    // on anything A does.
     await settleToApprovedOn(b, contractDid)
     await assertReceivedInState(a, contractDid, 'APPROVED')
     await assertReceivedInState(b, contractDid, 'APPROVED')

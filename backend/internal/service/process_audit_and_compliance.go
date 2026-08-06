@@ -153,12 +153,12 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 	if err := s.persistAuditRun(ctx, executorRequest, executorResponse, rawResponse); err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
-	return toPACExternalAuditResponse(executorResponse), nil
+	return toPACExternalAuditResponse(executorResponse, evidence), nil
 }
 
 func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context, req *processauditandcompliance.PACAuditRequest, scopeConfig auditScopeConfig) (res []*auditEvidenceResource, err error) {
 
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(ctx, conf.PACAuditEvidenceTimeout())
 	defer cancel()
 
 	if err := s.validateAuditScopeDependencies(scopeConfig); err != nil {
@@ -197,6 +197,7 @@ func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context,
 			RetrievedBy: middleware.GetParticipantID(ctx),
 			HolderDID:   middleware.GetHolderDID(ctx),
 			UserRoles:   middleware.GetUserRoles(ctx),
+			DID:         qry.DID,
 		}
 		contractContentTrailHandler := qry2.ContractContentTrailAuditor{
 			DB:    s.DB,

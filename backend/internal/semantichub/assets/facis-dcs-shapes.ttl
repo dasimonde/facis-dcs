@@ -13,7 +13,7 @@
 # blank node — SHACL's equivalent of "requires a stable @id".
 
 dcs:CanonicalContractShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass dcs:Contract ;
   sh:nodeKind sh:IRI ;
   sh:property [
@@ -31,7 +31,7 @@ dcs:CanonicalContractShape
   ] .
 
 dcs:ContractMetadataShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass dcs:ContractMetadata ;
   sh:property [
     sh:path dcs:title ;
@@ -44,7 +44,7 @@ dcs:ContractMetadataShape
 # Every machine-readable ODRL rule must be backed by human-audited prose:
 # dcs:prose references the clause node whose text the rule operationalizes.
 dcs:OdrlDutyProseShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Duty ;
   sh:property [
     sh:path dcs:prose ;
@@ -54,7 +54,7 @@ dcs:OdrlDutyProseShape
   ] .
 
 dcs:OdrlPermissionProseShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Permission ;
   sh:property [
     sh:path dcs:prose ;
@@ -64,7 +64,7 @@ dcs:OdrlPermissionProseShape
   ] .
 
 dcs:OdrlProhibitionProseShape
-  a sh:NodeShape ;
+  a sh:NodeShape, dcs:TechnicalShape ;
   sh:targetClass odrl:Prohibition ;
   sh:property [
     sh:path dcs:prose ;
@@ -74,7 +74,7 @@ dcs:OdrlProhibitionProseShape
   ] .
 
 dcs:ContractFieldShape
-    a sh:NodeShape ;
+    a sh:NodeShape, dcs:TechnicalShape ;
     sh:targetClass dcs:ContractField ;
     sh:property [
         sh:path dcs:label ;

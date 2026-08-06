@@ -1,23 +1,16 @@
 package provenance
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// StatusListPublisher publishes contract status to a status list service (DCS-OR-C2PA-005).
-// This integrates with XFSC's OCM-W Status List Service to maintain a verifiable
-// status list (Status List 2021/2023 format) with ≤ 5 minute update latency.
+// StatusListPublisher publishes contract status to the status list this
+// deployment serves (DCS-OR-C2PA-005).
 type StatusListPublisher interface {
 	// PublishStatus updates the contract status in the status list.
 	// Returns the entry the contract's credentials must advertise — the same
@@ -34,279 +27,150 @@ type StatusListPublisher interface {
 	RevokeStatus(ctx context.Context, contractID string) (entry CredentialStatusRef, err error)
 }
 
-// listSize is the number of entries in a standard 16 KB bitstring status list (2^17).
-// It is the size the statuslist-service is deployed with; the bound an
-// allocation is actually held to lives per list in status_list_cursors.
-const listSize = 131072
+// ListSize is the number of entries in a status list this deployment serves
+// (2^17, a 16 KB bitstring). The bound an allocation is actually held to lives
+// per list in status_list_cursors; this is the size list 1 is registered with.
+const ListSize = 131072
 
 // DefaultListID is the list contract revocation entries were allocated in
 // before any rollover (1-indexed), and the one migration 20260734 registers.
 const DefaultListID = 1
 
 // statusListEntryType is the credentialStatus.type a contract VC advertises: a
-// token status list, which is what the XFSC statuslist-service serves (see
-// QueryStatusListStatus for the format and its LSB-first bit order).
+// token status list, which is what the URI serves — a signed statuslist+jwt
+// whose status_list.lst is a zlib-compressed, LSB-first bitstring.
 const statusListEntryType = "TokenStatusList"
 
-// OCMWStatusListPublisher is a client for the XFSC statuslist-service.
-// It calls POST /v1/tenants/{tenantID}/status/{listID}/revoke/{index} to revoke entries.
-// The status list is available at GET /v1/tenants/{tenantID}/status/{listID}.
+// StatusListRevocations is the persistence a served status list is built from:
+// which of this deployment's allocated entries carry a set bit.
+type StatusListRevocations interface {
+	// Revoke sets subjectID's bit. Revoking an already-revoked subject keeps
+	// the original moment: a status list is asked after the fact when a
+	// credential stopped being valid, and re-stamping it on every republished
+	// terminal state would move that answer.
+	Revoke(ctx context.Context, subjectID string) error
+
+	// RevokedIndices returns the entry indices of listID whose bit is set.
+	RevokedIndices(ctx context.Context, listID int) ([]uint32, error)
+}
+
+// DCSStatusListPublisher places a contract in the status list this deployment
+// issues, serves and signs (ADR-34).
+//
+// The DCS mints the contract lifecycle credential and the signing summary
+// credential, so by the rule ADR-34 is named after it is the party that
+// publishes their revocation status. Both the allocation and the bit live in
+// this deployment's own database; nothing is POSTed to a separate service that
+// would then have to be trusted to still hold the bit — and to say so under a
+// signature — when a verifier asks.
 //
 // Which entry a contract owns is not derivable from the contract id: it is
 // allocated once and read back from the allocator every time, so the entry a
 // credential advertises and the entry a revocation flips cannot drift apart,
 // and no two contracts can end up sharing one.
-type OCMWStatusListPublisher struct {
-	// ServiceURL is the statuslist-service root endpoint (e.g., http://statuslist:8080).
-	ServiceURL string
+type DCSStatusListPublisher struct {
+	// ListURI resolves a list id to the absolute URI credentials name and a
+	// verifier fetches — the same URI the served token carries in `sub`, which
+	// the verifier refuses if the two differ.
+	ListURI func(listID int) string
 
-	// IssuerDID is the issuer DID that owns the status list.
-	IssuerDID string
-
-	// TenantID is the tenant identifier in the statuslist-service path (default "default").
-	TenantID string
-
-	entries *StatusListAllocator
-
-	client *http.Client
+	entries     *StatusListAllocator
+	revocations StatusListRevocations
 }
 
-// NewOCMWStatusListPublisher creates a status list publisher that calls the
-// XFSC statuslist-service HTTP API.  tenantID may be empty, defaulting to "default".
-// entries must not be nil: without it a contract has no revocation entry, and
-// guessing one is the defect this parameter exists to remove.
-func NewOCMWStatusListPublisher(serviceURL, issuerDID, tenantID string, entries *StatusListAllocator) *OCMWStatusListPublisher {
-	if tenantID == "" {
-		tenantID = "default"
-	}
-	return &OCMWStatusListPublisher{
-		ServiceURL: serviceURL,
-		IssuerDID:  issuerDID,
-		TenantID:   tenantID,
-		entries:    entries,
-		client:     &http.Client{Timeout: 10 * time.Second},
-	}
+// NewDCSStatusListPublisher creates the publisher for the list this deployment
+// serves itself. entries and revocations must not be nil: without the first a
+// contract has no revocation entry, and without the second a terminal contract
+// state would set no bit while every credential kept advertising one.
+func NewDCSStatusListPublisher(
+	listURI func(listID int) string,
+	entries *StatusListAllocator,
+	revocations StatusListRevocations,
+) *DCSStatusListPublisher {
+	return &DCSStatusListPublisher{ListURI: listURI, entries: entries, revocations: revocations}
 }
 
-// statusListURI returns the URL at which the status list holding entry can be fetched.
-func (p *OCMWStatusListPublisher) statusListURI(entry StatusListEntry) string {
-	return fmt.Sprintf("%s/v1/tenants/%s/status/%d", p.ServiceURL, p.TenantID, entry.ListID)
+// StatusListEntries hands out the status list entry a subject's credentials
+// advertise, without asserting anything about the subject's lifecycle state.
+//
+// It exists for the credentials a contract accumulates besides the lifecycle
+// one — the signing summary above all. They must name the SAME entry: the bit
+// says whether the contract is in force, and a summary credential pointing
+// somewhere else would keep reading valid after the contract it evidences was
+// terminated. Issuing one must not, however, publish a lifecycle status, which
+// is why this is not PublishStatus.
+type StatusListEntries interface {
+	EntryFor(ctx context.Context, subjectID string) (CredentialStatusRef, error)
+}
+
+// EntryFor returns the contract's allocated status list entry as the reference
+// a credential advertises, allocating one the first time it is asked.
+func (p *DCSStatusListPublisher) EntryFor(ctx context.Context, contractID string) (CredentialStatusRef, error) {
+	return p.entryFor(ctx, contractID)
 }
 
 // entryFor returns the contract's allocated status list entry as the reference
 // a credential advertises.
-func (p *OCMWStatusListPublisher) entryFor(ctx context.Context, contractID string) (StatusListEntry, CredentialStatusRef, error) {
+func (p *DCSStatusListPublisher) entryFor(ctx context.Context, contractID string) (CredentialStatusRef, error) {
 	if p.entries == nil {
-		return StatusListEntry{}, CredentialStatusRef{},
+		return CredentialStatusRef{},
 			fmt.Errorf("status list publisher has no entry allocator: required to place %s in the status list", contractID)
+	}
+	if p.ListURI == nil {
+		return CredentialStatusRef{},
+			fmt.Errorf("status list publisher has no list URI: %s would advertise an entry in a list nobody can fetch", contractID)
 	}
 	entry, err := p.entries.Allocate(ctx, contractID)
 	if err != nil {
-		return StatusListEntry{}, CredentialStatusRef{}, err
+		return CredentialStatusRef{}, err
 	}
-	return entry, CredentialStatusRef{StatusListCredential: p.statusListURI(entry), Index: entry.Index}, nil
+	return CredentialStatusRef{StatusListCredential: p.ListURI(entry.ListID), Index: entry.Index}, nil
 }
 
-// revokeResponse is the JSON shape returned by the statuslist-service revoke endpoint.
-type revokeResponse struct {
-	TenantID string `json:"tenantId"`
-	ListID   int    `json:"listId"`
-	Index    int    `json:"index"`
-	Status   string `json:"status"`
-}
-
-// setRevoked calls POST /{tenantID}/status/{listID}/revoke/{index} for the
-// contract's allocated entry — the same entry its credentials advertise.
-// ServiceURL must be non-empty; an empty URL is a hard failure (DCS hard-failure policy).
-func (p *OCMWStatusListPublisher) setRevoked(ctx context.Context, contractID string, entry StatusListEntry) error {
-	if p.ServiceURL == "" {
-		return fmt.Errorf("status list ServiceURL must not be empty: required for revocation of %s", contractID)
-	}
-	url := fmt.Sprintf("%s/v1/tenants/%s/status/%d/revoke/%d", p.ServiceURL, p.TenantID, entry.ListID, entry.Index)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(nil))
-	if err != nil {
-		return fmt.Errorf("build revoke request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("POST %s: %w", url, err)
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Println("could not close response body:", err)
-		}
-	}(resp.Body)
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("statuslist-service revoke returned %d: %s", resp.StatusCode, body)
-	}
-
-	var r revokeResponse
-	if err := json.Unmarshal(body, &r); err == nil {
-		_ = r // parsed for logging; ignore unmarshal errors on unexpected shapes
-	}
-	return nil
-}
-
-// PublishStatus updates the contract status in the XFSC status list (DCS-OR-C2PA-005).
-// Terminal states (terminated, expired, replaced, suspended) set the revocation bit.
-// Comparison is case-insensitive so CWE UPPERCASE states (TERMINATED, EXPIRED, …)
-// are handled correctly alongside the SRS lowercase vocabulary.
-// Active/draft/amended states are the default (not revoked) and require no HTTP call.
-func (p *OCMWStatusListPublisher) PublishStatus(
+// PublishStatus records the contract status in the status list
+// (DCS-OR-C2PA-005). Terminal states (terminated, expired, replaced, suspended)
+// set the revocation bit. Comparison is case-insensitive so CWE UPPERCASE
+// states (TERMINATED, EXPIRED, …) are handled correctly alongside the SRS
+// lowercase vocabulary. Active/draft/approved/amended states are the default —
+// not revoked — and set nothing.
+func (p *DCSStatusListPublisher) PublishStatus(
 	ctx context.Context,
 	contractID string,
 	status string,
-	reason string,
-	effectiveAt time.Time,
+	_ string,
+	_ time.Time,
 ) (CredentialStatusRef, error) {
-	entry, ref, err := p.entryFor(ctx, contractID)
+	ref, err := p.entryFor(ctx, contractID)
 	if err != nil {
 		return CredentialStatusRef{}, fmt.Errorf("publish status %s for %s: %w", status, contractID, err)
 	}
 
 	switch strings.ToLower(status) {
 	case "terminated", "expired", "replaced", "suspended":
-		if err := p.setRevoked(ctx, contractID, entry); err != nil {
+		if err := p.setRevoked(ctx, contractID); err != nil {
 			return CredentialStatusRef{}, fmt.Errorf("publish status %s for %s: %w", status, contractID, err)
 		}
 	}
-	// active, draft, approved, amended — default state = not revoked, no action required.
 	return ref, nil
-}
-
-// statusListResponse is the JSON shape actually returned by the deployed XFSC
-// statuslist-service for GET /v1/tenants/{tenant}/status/{listId}:
-//
-//	{"list": "<base64, gzip-compressed bitstring>", "listId": 1, "tenantId": "default"}
-//
-// This is NOT a W3C VC (no credentialSubject wrapper).
-type statusListResponse struct {
-	List string `json:"list"`
-}
-
-// QueryStatusListStatus fetches the status list at statusListCredential and returns
-// "revoked" if the entry at index is set, "active" otherwise (DCS-OR-C2PA-006).
-//
-// The XFSC statuslist-service (deployment/helm/charts/statuslist-service) returns a
-// plain {"list": "...", "listId": ..., "tenantId": "..."} JSON object rather than a
-// W3C VC; "list" is a base64-encoded, gzip-compressed bitstring. Bit packing
-// follows the IETF Token Status List / XFSC convention (LSB-first), matching the
-// parsing already established for status list checks in internal/auth/oid4vp.
-func QueryStatusListStatus(ctx context.Context, client *http.Client, statusListCredential string, index uint32) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusListCredential, nil)
-	if err != nil {
-		return "", fmt.Errorf("build status list request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("GET %s: %w", statusListCredential, err)
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Println("could not close response body:", err)
-		}
-	}(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status list service returned %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read status list response: %w", err)
-	}
-
-	var sl statusListResponse
-	if err := json.Unmarshal(body, &sl); err != nil {
-		return "", fmt.Errorf("parse status list response: %w", err)
-	}
-
-	encoded := strings.TrimSpace(sl.List)
-	if encoded == "" {
-		return "", fmt.Errorf("status list response has no list field")
-	}
-
-	bitstring, err := decodeAndDecompressStatusList(encoded)
-	if err != nil {
-		return "", err
-	}
-
-	byteIdx := index / 8
-	if int(byteIdx) >= len(bitstring) {
-		return "", fmt.Errorf("index %d out of range for bitstring of %d bytes", index, len(bitstring))
-	}
-	// IETF Token Status List / XFSC statuslist-service convention: LSB-first —
-	// bit N is at bit (N%8) of byte N/8.
-	bitIdx := uint(index % 8)
-	if bitstring[byteIdx]&(1<<bitIdx) != 0 {
-		return "revoked", nil
-	}
-	return "active", nil
-}
-
-// decodeAndDecompressStatusList base64-decodes encoded (accepting both padded/
-// unpadded and standard/url-safe alphabets, since deployments have been
-// observed to disagree on this detail) and gzip-decompresses the result
-// (the XFSC statuslist-service's only compression format).
-func decodeAndDecompressStatusList(encoded string) ([]byte, error) {
-	compressed, err := decodeStatusListBase64(encoded)
-	if err != nil {
-		return nil, fmt.Errorf("base64 decode status list: %w", err)
-	}
-
-	r, err := gzip.NewReader(bytes.NewReader(compressed))
-	if err != nil {
-		return nil, fmt.Errorf("create gzip reader for bitstring: %w", err)
-	}
-	defer func(r io.ReadCloser) {
-		if err := r.Close(); err != nil {
-			log.Printf("close gzip reader for bitstring: %v", err)
-		}
-	}(r)
-	out, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("decompress gzip bitstring: %w", err)
-	}
-	return out, nil
-}
-
-// decodeStatusListBase64 tries the base64 variants seen across StatusList2021
-// (base64url, unpadded) and the XFSC statuslist-service (standard, padded).
-func decodeStatusListBase64(s string) ([]byte, error) {
-	var lastErr error
-	for _, enc := range []*base64.Encoding{
-		base64.RawURLEncoding,
-		base64.StdEncoding,
-		base64.URLEncoding,
-		base64.RawStdEncoding,
-	} {
-		if b, err := enc.DecodeString(s); err == nil {
-			return b, nil
-		} else {
-			lastErr = err
-		}
-	}
-	return nil, lastErr
 }
 
 // RevokeStatus marks the contract as revoked in the status list (DCS-OR-C2PA-005).
-func (p *OCMWStatusListPublisher) RevokeStatus(ctx context.Context, contractID string) (CredentialStatusRef, error) {
-	entry, ref, err := p.entryFor(ctx, contractID)
+func (p *DCSStatusListPublisher) RevokeStatus(ctx context.Context, contractID string) (CredentialStatusRef, error) {
+	ref, err := p.entryFor(ctx, contractID)
 	if err != nil {
 		return CredentialStatusRef{}, fmt.Errorf("revoke %s: %w", contractID, err)
 	}
-	if err := p.setRevoked(ctx, contractID, entry); err != nil {
+	if err := p.setRevoked(ctx, contractID); err != nil {
 		return CredentialStatusRef{}, fmt.Errorf("revoke %s: %w", contractID, err)
 	}
 	return ref, nil
+}
+
+func (p *DCSStatusListPublisher) setRevoked(ctx context.Context, contractID string) error {
+	if p.revocations == nil {
+		return fmt.Errorf("status list publisher has no revocation store: the bit for %s would never be set", contractID)
+	}
+	return p.revocations.Revoke(ctx, contractID)
 }
 
 // CredentialStatusRef locates one credential's entry in a status list.

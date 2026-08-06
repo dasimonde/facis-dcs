@@ -68,6 +68,11 @@ def _raw_request(context, method, path, data, content_type):
     request = urllib.request.Request(f"{context.server_url}{path}", data=data, method=method)
     if content_type:
         request.add_header("Content-Type", content_type)
+    # pdf-core holds no signing material, so every render names the chain it signs
+    # under, as the DCS backend does with the certificate for its dcs-c2pa key.
+    chain = getattr(context, "c2pa_x5chain_pem", None)
+    if chain:
+        request.add_header("X-DCS-C2PA-X5Chain", base64.b64encode(chain).decode("ascii"))
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return {

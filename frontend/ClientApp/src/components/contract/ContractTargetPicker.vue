@@ -50,7 +50,12 @@ const load = async () => {
   }
 }
 
-onMounted(load)
+// The registry read is scoped to the manager roles (design listContractTargets).
+// Every other role the contract routes admit reads the designation off the
+// contract itself, so fetching for them only paints a permission error.
+onMounted(() => {
+  if (editable.value) void load()
+})
 watch(
   () => props.contract.target_id,
   (id) => (selected.value = id ?? ''),
@@ -93,7 +98,7 @@ const designate = async () => {
         :aria-labelledby="selectedLabelId"
         class="select-bordered select select-sm"
       >
-        <option value="">— none —</option>
+        <option value="">None</option>
         <option v-for="target in targets" :key="target.id" :value="target.id">{{ target.name }}</option>
       </select>
       <button

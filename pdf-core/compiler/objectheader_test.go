@@ -115,30 +115,30 @@ func TestObjectHeaderLookupAcceptsACRLFHeader(t *testing.T) {
 func TestExtractSigningEvidenceIgnoresADecoyObjectID(t *testing.T) {
 	pdf := decoyPDF(signingEvidenceFileName, 42, `{"evidence":"real"}`, `{"evidence":"decoy"}`, false, false)
 
-	evidence, found, err := ExtractSigningEvidence(pdf)
+	evidence, err := ExtractSigningEvidence(pdf)
 	if err != nil {
 		t.Fatalf("ExtractSigningEvidence: %v", err)
 	}
-	if !found {
-		t.Fatal("the evidence attachment is present")
+	if len(evidence) != 1 {
+		t.Fatalf("the evidence attachment is present once, got %d", len(evidence))
 	}
-	if string(evidence) != `{"evidence":"real"}` {
-		t.Fatalf("read the decoy object's stream: %s", evidence)
+	if string(evidence[0]) != `{"evidence":"real"}` {
+		t.Fatalf("read the decoy object's stream: %s", evidence[0])
 	}
 }
 
 func TestExtractSigningEvidenceReadsTheCurrentCRLFDefinition(t *testing.T) {
 	pdf := decoyPDF(signingEvidenceFileName, 42, `{"evidence":"current"}`, `{"evidence":"superseded"}`, true, true)
 
-	evidence, found, err := ExtractSigningEvidence(pdf)
+	evidence, err := ExtractSigningEvidence(pdf)
 	if err != nil {
 		t.Fatalf("ExtractSigningEvidence: %v", err)
 	}
-	if !found {
-		t.Fatal("the evidence attachment is present")
+	if len(evidence) != 1 {
+		t.Fatalf("the evidence attachment is present once, got %d", len(evidence))
 	}
-	if string(evidence) != `{"evidence":"current"}` {
-		t.Fatalf("read a superseded definition: %s", evidence)
+	if string(evidence[0]) != `{"evidence":"current"}` {
+		t.Fatalf("read a superseded definition: %s", evidence[0])
 	}
 }
 

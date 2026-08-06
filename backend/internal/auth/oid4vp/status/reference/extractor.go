@@ -13,7 +13,12 @@ import (
 
 const (
 	entryTypeBitstringStatusList = "BitstringStatusListEntry"
-	defaultStatusSize            = 1
+	// entryTypeTokenStatusList is a credentialStatus pointing at an IETF token
+	// status list rather than a W3C status list credential. It is what this
+	// deployment's own contract lifecycle and signing summary credentials
+	// advertise, because that is the document their URI serves (ADR-34).
+	entryTypeTokenStatusList = "TokenStatusList"
+	defaultStatusSize        = 1
 )
 
 type Extractor interface {

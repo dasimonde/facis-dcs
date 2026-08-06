@@ -2,7 +2,7 @@ import { normalizeNumberInput } from '@template-repository/utils/number-format'
 import { resolveAllowedValues } from '@template-repository/utils/value-constraint-catalog'
 import { compareXsdValues } from '@/models/xsd-order'
 import type { SemanticConditionValue } from '@/models/contract/contract-data'
-import type { DcsBlock, DcsClause } from '@/models/dcs-jsonld'
+import type { DcsBlock, DcsClause, DcsContractDataObject } from '@/models/dcs-jsonld'
 import type { SemanticCondition, SemanticValueConstraint } from '@template-repository/models/contract-template'
 
 export interface VerificationResult {
@@ -57,22 +57,43 @@ function clauseConditionIds(clause: DcsClause, semanticConditions: SemanticCondi
   return [...conditionIds]
 }
 
+/** Every contract field the typed domain-object graph binds: an object's
+ *  property may hold a literal or a reference, and a reference to a declared
+ *  field IS that field's negotiable leaf (ADR-23). Such a leaf is reached
+ *  through its object and is never named in clause prose. */
+function contractDataFieldIds(contractData: DcsContractDataObject[]): Set<string> {
+  const bound = new Set<string>()
+  for (const object of contractData) {
+    for (const [property, value] of Object.entries(object)) {
+      if (property === '@id' || property === '@type') continue
+      for (const entry of Array.isArray(value) ? value : [value]) {
+        if (typeof entry === 'object' && entry !== null && '@id' in entry) bound.add(entry['@id'])
+      }
+    }
+  }
+  return bound
+}
+
 export function hasConditionParameterForValue(
   conditionValue: SemanticConditionValue,
   blocks: DcsBlock[],
   semanticConditions: SemanticCondition[],
+  contractData: DcsContractDataObject[],
 ): boolean {
   // A filled value is keyed by its placeholder @id (conditionId), not by the
   // referencing block — its blockId is intentionally empty. It stays valid as
-  // long as some clause references that placeholder and the matching condition
-  // declares the parameter. Looking the block up by blockId (== '') matched
-  // nothing, so the cleanup watcher dropped every value, emptied the store and
-  // flipped changedContractData true, disabling Submit.
-  const referenced = blocks.some(
-    (block) =>
-      block['@type'] === 'dcs:Clause' &&
-      clauseConditionIds(block, semanticConditions).includes(conditionValue.conditionId),
-  )
+  // long as the document still reaches that field — from clause prose, or as a
+  // leaf of a typed domain object — and the matching condition declares the
+  // parameter. Looking the block up by blockId (== '') matched nothing, so the
+  // cleanup watcher dropped every value, emptied the store and flipped
+  // changedContractData true, disabling Submit.
+  const referenced =
+    contractDataFieldIds(contractData).has(conditionValue.conditionId) ||
+    blocks.some(
+      (block) =>
+        block['@type'] === 'dcs:Clause' &&
+        clauseConditionIds(block, semanticConditions).includes(conditionValue.conditionId),
+    )
   if (!referenced) return false
 
   const matchedCondition = semanticConditions.find((condition) => condition.conditionId === conditionValue.conditionId)

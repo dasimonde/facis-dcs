@@ -28,14 +28,14 @@ const canEdit = computed(() => {
 })
 
 const canReview = computed(() => {
-  return props.template.state === TemplateState.submitted && isReviewer
+  return props.template.state === TemplateState.submitted && (isReviewer.value || isManager.value)
 })
 
 const resolveViewRouteName = computed(() => {
   if (canReview.value) {
     return ROUTES.TEMPLATES.REVIEW
   }
-  if (props.template.state === TemplateState.reviewed && isApprover) {
+  if (props.template.state === TemplateState.reviewed && (isApprover.value || isManager.value)) {
     return ROUTES.TEMPLATES.APPROVE
   }
   return ROUTES.TEMPLATES.VIEW

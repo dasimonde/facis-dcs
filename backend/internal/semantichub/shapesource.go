@@ -2,6 +2,7 @@ package semantichub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -89,13 +90,47 @@ func (h HubShapeSource) ShapesBundleAt(ctx context.Context, refs []validation.Ve
 	}
 	parts := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		content, err := h.versionContent(ctx, ref.Name, "shapes", ref.Version)
+		content, err := pinnedShapesContent(ctx, h, ref)
 		if err != nil {
 			return "", fmt.Errorf("semantic hub: effective shapes %s v%d: %w", ref.Name, ref.Version, err)
 		}
 		parts = append(parts, content)
 	}
 	return strings.Join(parts, "\n\n"), nil
+}
+
+// shapesReader is the two stored-row reads pinned-bundle resolution makes.
+type shapesReader interface {
+	versionContent(ctx context.Context, name, kind string, version int) (string, error)
+	active(ctx context.Context, name, kind string) (string, int, error)
+}
+
+// pinnedShapesContent resolves one entry of a document's pinned bundle
+// (ADR-8).
+//
+// An envelope entry is always THIS instance's own graph, and a peer-written row
+// is unreachable from an envelope name. Its version number means something only
+// within one deployment — each seeds its own genesis — so a number this hub
+// never assigned resolves to the active envelope graph rather than failing: the
+// alternative is that two deployments built from different images can never
+// evaluate each other's contracts at all.
+//
+// A library is the authoring instance's own vocabulary, so it resolves from
+// this hub's entries where it published one and otherwise from the peer
+// namespace the ship carrying the document installed it into.
+func pinnedShapesContent(ctx context.Context, hub shapesReader, ref validation.VersionedShapeRef) (string, error) {
+	content, err := hub.versionContent(ctx, ref.Name, ShapesKind, ref.Version)
+	if err == nil {
+		return content, nil
+	}
+	if !errors.Is(err, ErrSchemaNotFound) {
+		return "", err
+	}
+	if IsEnvelopeShapes(ref.Name) {
+		content, _, err := hub.active(ctx, ref.Name, ShapesKind)
+		return content, err
+	}
+	return hub.versionContent(ctx, ref.Name, PeerShapesKind, ref.Version)
 }
 
 func (h HubShapeSource) ProfileAt(ctx context.Context, version int) (string, error) {
