@@ -83,9 +83,9 @@ const policyBadgeClass = (audit: TemplateAuditItem) => {
         <div v-else-if="eventType.isApproveEvent(audit)">
           <div>Approved by: {{ audit.event_data.approved_by }}</div>
         </div>
-        <div v-else-if="eventType.isRejectEvent(audit)" class="flex justify-between">
-          <div>Rejected by: {{ audit.event_data.rejected_by }}</div>
-          <div>Reason: {{ audit.event_data.reason }}</div>
+        <div v-else-if="eventType.isRejectEvent(audit)" class="flex flex-col gap-1">
+          <div class="min-w-0 break-all">Rejected by: {{ audit.event_data.rejected_by }}</div>
+          <div class="min-w-0 break-words whitespace-pre-wrap">Reason: {{ audit.event_data.reason }}</div>
         </div>
         <div v-else-if="eventType.isVerifyEvent(audit)">
           <div>Verified by: {{ audit.event_data.verified_by }}</div>

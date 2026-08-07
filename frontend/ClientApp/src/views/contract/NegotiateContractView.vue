@@ -110,6 +110,11 @@ const proposalComparison = ref<ProposalComparison | null>(null)
 // so comparing against it would show the proposed document on both sides.
 const supersededVersions = ref<Map<number, ContractHistoryItem>>(new Map())
 
+const loadSupersededVersions = async (did: string) => {
+  const history = await contractWorkflowService.retrieveHistoryByDid({ did })
+  supersededVersions.value = new Map(history.map((entry) => [entry.contract_version, entry]))
+}
+
 const hasChangeRequest = computed(() => {
   return (
     changedName.value ||
@@ -171,8 +176,7 @@ const loadContract = async () => {
       contract.value = await contractWorkflowService.retrieveById({ did: id })
       editedContract.value = !!contract.value ? { ...contract.value } : null
       applyContractDataToDraft(contract.value?.contract_data)
-      const history = await contractWorkflowService.retrieveHistoryByDid({ did: id })
-      supersededVersions.value = new Map(history.map((entry) => [entry.contract_version, entry]))
+      await loadSupersededVersions(id)
       await restoreNegotiationDraft()
     }
   } catch (err: unknown) {
@@ -436,14 +440,23 @@ function immutableSnapshot<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-const handleSelectedNegotiation = (negotiation: ContractNegotiation | null) => {
+const handleSelectedNegotiation = async (negotiation: ContractNegotiation | null) => {
   if (!contract.value) return
   if (!negotiation) {
     proposalComparison.value = null
     return
   }
 
+  // The snapshot this proposal changes FROM is the only honest left-hand side:
+  // proposing applies the redline immediately, so the live contract already
+  // carries it. Selecting a proposal the moment it is created can outrun the
+  // history refetch that follows it, and the map is then one version stale --
+  // so a miss is refetched rather than quietly compared against the live
+  // contract, which would show the proposed document in both panels.
   const live = immutableSnapshot(contract.value)
+  if (!supersededVersions.value.has(negotiation.contract_version) && contract.value.did) {
+    await loadSupersededVersions(contract.value.did)
+  }
   const superseded = supersededVersions.value.get(negotiation.contract_version)
   const current: Contract = superseded
     ? immutableSnapshot({

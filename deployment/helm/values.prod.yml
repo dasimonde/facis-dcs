@@ -98,9 +98,6 @@ federatedCatalogue:
 
 ipfs:
   enabled: true
-  tenantBaseURLSecretRef:
-    name: dcs-prod-ipfs-credentials
-    key: IPFS_TENANT_BASE_URL
   mfsBaseURLSecretRef:
     name: dcs-prod-ipfs-credentials
     key: IPFS_MFS_BASE_URL

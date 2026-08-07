@@ -231,26 +231,11 @@ ipfs:
     gatewayNodePort: 30480
     apiNodePort: 30501
 
-ipfsDocumentManager:
-  enabled: true
-  service:
-    type: NodePort
-    nodePort: 30481
-  ipfs:
-    host: "dcs-ipfs"
-    apiGatewayURL: "http://dcs-ipfs:8080/ipfs"
-    rpcApiPort: 5001
-    logLevel: "debug"
-  config:
-    serverMode: "debug"
 
 # IPFS client env vars are not used when replicaCount=0 (backend runs locally).
 # For local dev, set in backend/.env.dev:
-#   IPFS_TENANT_BASE_URL=
 #   IPFS_MFS_BASE_URL=http://localhost:30501
-# In-cluster, IPFS_MFS_BASE_URL is auto-wired from the ipfs sub-chart. If
-# ipfsDocumentManager is enabled with a valid image, IPFS_TENANT_BASE_URL is
-# auto-wired to the document-manager service.
+# In-cluster, IPFS_MFS_BASE_URL is auto-wired from the ipfs sub-chart.
 
 route:
   basePath: "/api"

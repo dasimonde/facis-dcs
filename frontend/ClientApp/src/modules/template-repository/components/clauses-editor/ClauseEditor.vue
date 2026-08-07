@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, useId } from 'vue'
+import { computed, onMounted, ref, toRaw, useId, watch } from 'vue'
 import ClauseTextEditor from '@template-repository/components/clauses-editor/ClauseTextEditor.vue'
 import OdrlRuleBuilder from '@template-repository/components/clauses-editor/OdrlRuleBuilder.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
@@ -10,7 +10,14 @@ import {
   ONTOLOGY_DOMAIN_FIELDS,
   refreshOntologyDomainFields,
 } from '@template-repository/utils/ontology-domain-fields'
-import { type DcsContentSegment, localNameOf, type OdrlRule } from '@/models/dcs-jsonld'
+import {
+  type DcsClause,
+  type DcsContentSegment,
+  type DcsContractField,
+  isDcsClause,
+  localNameOf,
+  type OdrlRule,
+} from '@/models/dcs-jsonld'
 import type { DomainFieldDefinition, SemanticCondition } from '@template-repository/models/contract-template'
 
 /**
@@ -20,10 +27,27 @@ import type { DomainFieldDefinition, SemanticCondition } from '@template-reposit
  * assets (a shape's target class, e.g. an imported Gaia-X ServiceOffering,
  * whose properties become fields). A clause's meaning IS an ODRL rule; an asset
  * is what that rule targets.
+ *
+ * create and edit share this component with isolated local draft state so the
+ * Add-clause form and an in-list edit session cannot overwrite each other.
  */
 
+const props = withDefaults(
+  defineProps<{
+    mode?: 'create' | 'edit'
+    /** Required when mode is edit — the clause block @id being revised. */
+    clauseId?: string
+  }>(),
+  { mode: 'create' },
+)
+
+const emit = defineEmits<{
+  save: []
+  cancel: []
+}>()
+
 const store = useDcsDraftStore()
-const { partyAnchors, contractTargetIri, contractFields } = storeToRefs(store)
+const { partyAnchors, contractTargetIri, contractFields, contractData, blocks, policies } = storeToRefs(store)
 
 // A schema registered in the hub after app startup becomes pickable here on
 // the next mount; a failed refresh keeps the startup vocabulary.
@@ -63,6 +87,122 @@ const contentId = useId()
 const objectToAddId = useId()
 
 const uuid = () => `urn:uuid:${crypto.randomUUID()}`
+const isEdit = computed(() => props.mode === 'edit')
+
+/** Deep-copy store values into a plain draft. structuredClone fails on Vue
+ *  reactive proxies that Pinia hands out from the draft store. */
+function cloneDraft<T>(value: T): T {
+  return JSON.parse(JSON.stringify(toRaw(value))) as T
+}
+
+function clauseContent(clause: DcsClause): DcsContentSegment[] {
+  const raw = clause['dcs:content']
+  if (typeof raw === 'string') return []
+  return raw['@list']
+}
+
+function fieldIdsInContent(segments: DcsContentSegment[]): string[] {
+  const ids: string[] = []
+  for (const segment of segments) {
+    if (typeof segment !== 'string' && segment['@id']) ids.push(segment['@id'])
+  }
+  return ids
+}
+
+function domainFieldFromContractField(field: DcsContractField, classIri?: string): DomainFieldDefinition {
+  const shapeIri = field['dcs:shape']?.['@id'] ?? ''
+  const fromHub =
+    (classIri
+      ? ONTOLOGY_ASSETS.find((asset) => asset.id === classIri)?.properties.find((p) => p.ontologyId === shapeIri)
+      : undefined) ??
+    ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === shapeIri) ??
+    ONTOLOGY_ASSETS.flatMap((asset) => asset.properties).find((property) => property.ontologyId === shapeIri)
+  if (fromHub) return fromHub
+  return {
+    ontologyId: shapeIri || field['@id'],
+    parameterName: localNameOf(shapeIri || field['@id']),
+    type: 'string',
+    datatype: field['dcs:datatype'],
+    label: field['dcs:label'] || localNameOf(field['@id']),
+    valueConstraint: field['dcs:valueConstraint'],
+  }
+}
+
+function resetDraft() {
+  title.value = ''
+  content.value = []
+  clauseFields.value = []
+  clauseAssets.value = []
+  rule.value = null
+  objectToAdd.value = ''
+}
+
+function hydrateFromStore(clauseId: string) {
+  const block = blocks.value.find((entry) => entry['@id'] === clauseId)
+  if (!block || !isDcsClause(block)) {
+    resetDraft()
+    return
+  }
+
+  title.value = block['dcs:title'] ?? ''
+  content.value = cloneDraft(clauseContent(block))
+
+  const referencedFieldIds = new Set(fieldIdsInContent(content.value))
+  const ownedAssets: ClauseAsset[] = []
+  const fieldToAsset = new Map<string, string>()
+
+  for (const object of contractData.value) {
+    const classIri = typeof object['@type'] === 'string' ? object['@type'] : undefined
+    if (!classIri) continue
+    const propertyEntries = Object.entries(object).filter(([key]) => !key.startsWith('@'))
+    const linkedFieldIds = propertyEntries.flatMap(([, value]) => {
+      const members = Array.isArray(value) ? value : [value]
+      return members
+        .filter(
+          (member): member is { '@id': string } => typeof member === 'object' && member !== null && '@id' in member,
+        )
+        .map((member) => member['@id'])
+    })
+    if (!linkedFieldIds.some((id) => referencedFieldIds.has(id))) continue
+    const hubAsset = ONTOLOGY_ASSETS.find((asset) => asset.id === classIri)
+    const asset: ClauseAsset = {
+      id: object['@id'],
+      asset: hubAsset ?? { id: classIri, label: localNameOf(classIri), properties: [] },
+      name: hubAsset?.label ?? localNameOf(classIri),
+      color: assetAccent(ownedAssets.length),
+    }
+    ownedAssets.push(asset)
+    for (const fieldId of linkedFieldIds) fieldToAsset.set(fieldId, asset.id)
+  }
+  clauseAssets.value = ownedAssets
+
+  const fields: ClauseField[] = []
+  for (const fieldId of referencedFieldIds) {
+    const stored = contractFields.value.find((field) => field['@id'] === fieldId)
+    if (!stored) continue
+    const assetLocalId = fieldToAsset.get(fieldId)
+    const classIri = assetLocalId ? ownedAssets.find((asset) => asset.id === assetLocalId)?.asset.id : undefined
+    fields.push({
+      id: fieldId,
+      field: domainFieldFromContractField(stored, classIri),
+      assetLocalId,
+    })
+  }
+  clauseFields.value = fields
+
+  const bound = policies.value.find((policy) => policy['dcs:prose']?.['@id'] === clauseId)
+  rule.value = bound ? cloneDraft(bound) : null
+  objectToAdd.value = ''
+}
+
+watch(
+  () => [props.mode, props.clauseId] as const,
+  ([mode, clauseId]) => {
+    if (mode === 'edit' && clauseId) hydrateFromStore(clauseId)
+    else if (mode === 'create') resetDraft()
+  },
+  { immediate: true },
+)
 
 // One picker of hub objects: an object may be an asset (a shape's target class,
 // carrying properties) or a bare data field (a property). Its role — an ODRL
@@ -175,9 +315,8 @@ const assetAnchors = computed(() => clauseAssets.value.map((a) => ({ id: a.id, l
 
 const canSave = computed(() => !!title.value.trim() && content.value.length > 0)
 
-function save() {
-  if (!canSave.value) return
-  store.addClauseWithMeaning({
+function meaningPayload() {
+  return {
     title: title.value.trim(),
     content: content.value,
     fields: clauseFields.value.map((cf) => ({
@@ -197,17 +336,30 @@ function save() {
         .map((cf) => ({ fieldId: cf.id, path: cf.field.ontologyId })),
     })),
     rule: rule.value,
-  })
-  title.value = ''
-  content.value = []
-  clauseFields.value = []
-  clauseAssets.value = []
-  rule.value = null
+  }
+}
+
+function save() {
+  if (!canSave.value) return
+  if (isEdit.value) {
+    if (!props.clauseId) return
+    store.updateClauseWithMeaning(props.clauseId, meaningPayload())
+    emit('save')
+    return
+  }
+  store.addClauseWithMeaning(meaningPayload())
+  resetDraft()
+}
+
+function cancel() {
+  if (isEdit.value) emit('cancel')
+  else resetDraft()
 }
 </script>
 
 <template>
-  <div class="space-y-3" data-testid="split-clause-editor">
+  <div class="space-y-3" :data-testid="isEdit ? 'split-clause-editor-edit' : 'split-clause-editor'">
+    <h3 v-if="isEdit" class="text-sm font-semibold text-base-content/80">Edit clause</h3>
     <label :for="titleId" class="sr-only">Clause title</label>
     <input
       :id="titleId"
@@ -290,8 +442,12 @@ function save() {
       </div>
     </div>
 
-    <div class="flex justify-end">
-      <button type="button" class="btn btn-sm btn-primary" :disabled="!canSave" @click="save">Add clause</button>
+    <div class="flex items-center justify-between gap-2">
+      <button v-if="isEdit" type="button" class="btn btn-outline btn-xs" @click="cancel">Cancel</button>
+      <span v-else />
+      <button type="button" class="btn btn-sm btn-primary" :disabled="!canSave" @click="save">
+        {{ isEdit ? 'Save changes' : 'Add clause' }}
+      </button>
     </div>
   </div>
 </template>

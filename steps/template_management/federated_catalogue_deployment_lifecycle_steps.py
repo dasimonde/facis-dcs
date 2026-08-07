@@ -548,7 +548,6 @@ def step_given_legacy_neo4j_install(context):
         "dss": {"enabled": False},
         "statuslistService": {"enabled": False},
         "ipfs": {"enabled": False},
-        "ipfsDocumentManager": {"enabled": False},
         "monitoring": {"enabled": False},
         "traefik": {"enabled": False},
         "postgresql": {"enabled": True},

@@ -547,6 +547,53 @@ export const useDcsDraftStore = defineStore(storeId, {
     updateClause(blockId: string, payload: { title?: string; content?: DcsContentSegment[] }): void {
       this.updateBlock(blockId, payload)
     },
+    /** Replaces a clause's prose and its bound ODRL meaning. New fields/assets
+     *  are appended; existing ids keep their store rows so shared document
+     *  references stay intact. Policies previously bound to this clause's
+     *  prose are withdrawn and replaced by the edited rule. */
+    updateClauseWithMeaning(
+      blockId: string,
+      payload: {
+        title: string
+        content: DcsContentSegment[]
+        fields: { id: string; parameterName: string; domainFieldIri: string; label?: string }[]
+        assets?: { id: string; classIri: string; properties: { fieldId: string; path: string }[] }[]
+        rule: OdrlRule | null
+      },
+    ): void {
+      this.updateBlock(blockId, { title: payload.title, content: payload.content })
+      this.policies = this.policies.filter((policy) => policy['dcs:prose']?.['@id'] !== blockId)
+
+      const assetClassByFieldId = new Map<string, string>()
+      for (const asset of payload.assets ?? []) {
+        for (const property of asset.properties) assetClassByFieldId.set(property.fieldId, asset.classIri)
+      }
+      for (const field of payload.fields) {
+        if (this.contractFields.some((existing) => existing['@id'] === field.id)) continue
+        this.contractFields.push(
+          contractFieldFromDomainField(
+            field.id,
+            field.parameterName,
+            field.domainFieldIri,
+            field.label,
+            assetClassByFieldId.get(field.id),
+          ),
+        )
+      }
+      for (const asset of payload.assets ?? []) {
+        const next = {
+          '@id': asset.id,
+          '@type': asset.classIri,
+          ...Object.fromEntries(asset.properties.map((p) => [p.path, { '@id': p.fieldId }])),
+        }
+        const index = this.contractData.findIndex((object) => object['@id'] === asset.id)
+        if (index >= 0) this.contractData[index] = next
+        else this.contractData.push(next)
+      }
+      if (payload.rule) {
+        this.policies.push(bindRuleProse(payload.rule, blockId))
+      }
+    },
     addMetaData(payload: MetaData): boolean {
       const name = payload.name.trim()
       const value = payload.value

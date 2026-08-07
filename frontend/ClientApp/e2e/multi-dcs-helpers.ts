@@ -1452,7 +1452,7 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
   await inst.page
-    .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+    .getByRole('dialog', { name: /local semantic precheck/i })
     .getByRole('button', { name: 'Confirm approval', exact: true })
     .click()
   await forwarded

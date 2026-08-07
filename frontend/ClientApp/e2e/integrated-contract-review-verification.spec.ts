@@ -111,7 +111,7 @@ async function gotoReview(page: Page): Promise<void> {
 }
 
 function localPrecheckDialog(page: Page) {
-  return page.getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+  return page.getByRole('dialog', { name: /local semantic precheck/i })
 }
 
 test.describe('integrated Contract Review verification', () => {
@@ -136,8 +136,8 @@ test.describe('integrated Contract Review verification', () => {
 
     const dialog = localPrecheckDialog(page)
     await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText(/lokale semantische vorprüfung/i)
-    await expect(dialog.getByText(/keine findings|no findings/i)).toHaveCount(1)
+    await expect(dialog).toContainText(/local semantic precheck/i)
+    await expect(dialog.getByText(/no findings/i)).toHaveCount(1)
   })
 
   test('AC3 lists every local finding, offers no confirmation, and never submits', async ({ page }) => {
@@ -165,8 +165,8 @@ test.describe('integrated Contract Review verification', () => {
 
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
     const dialog = localPrecheckDialog(page)
-    await expect(dialog).toContainText(/keine findings|no findings/i)
-    await expect(dialog.getByLabel(/kommentar.*optional|optional.*comment/i)).toBeVisible()
+    await expect(dialog).toContainText(/no findings/i)
+    await expect(dialog.getByLabel(/comment \(optional\)/i)).toBeVisible()
     await expect(dialog.getByRole('button', { name: /confirm/i })).toBeEnabled()
   })
 
@@ -184,7 +184,7 @@ test.describe('integrated Contract Review verification', () => {
 
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
     const dialog = localPrecheckDialog(page)
-    await dialog.getByLabel(/kommentar.*optional|optional.*comment/i).fill('  Ready for approval.  ')
+    await dialog.getByLabel(/comment \(optional\)/i).fill('  Ready for approval.  ')
     await dialog.getByRole('button', { name: /confirm/i }).dblclick()
 
     await expect.poll(() => submissions.length).toBe(1)
@@ -226,7 +226,7 @@ test.describe('integrated Contract Review verification', () => {
     const approve = page.getByRole('button', { name: 'Approve', exact: true })
     await approve.dblclick()
     const dialog = localPrecheckDialog(page)
-    await expect(dialog.getByRole('alert')).toContainText(/vorprüfung|verification|semanti/i)
+    await expect(dialog.getByRole('alert')).toContainText(/verification|semantic/i)
     await expect(dialog.getByRole('button', { name: /confirm/i })).toHaveCount(0)
     await expect(dialog.getByRole('button', { name: /retry/i })).toBeEnabled()
   })
@@ -257,8 +257,8 @@ test.describe('integrated Contract Review verification', () => {
     const confirm = dialog.getByRole('button', { name: /confirm/i })
     await confirm.dblclick()
 
-    await expect(dialog.getByRole('alert')).toContainText(/submit|submission|übermittlung/i)
-    await expect(dialog.getByRole('alert')).not.toContainText(/vorprüfung.*fehlgeschlagen|verification.*failed/i)
+    await expect(dialog.getByRole('alert')).toContainText(/submit|submission/i)
+    await expect(dialog.getByRole('alert')).not.toContainText(/verification.*failed/i)
     expect(attempts).toBe(1)
     expect(maxConcurrent).toBe(1)
 

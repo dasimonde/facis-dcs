@@ -243,22 +243,6 @@ UI path override or derived default.
 {{- end }}
 
 {{/*
-IPFS Document Manager tenant base URL (auto-wired when ipfsDocumentManager sub-chart is enabled).
-*/}}
-{{- define "digital-contracting-service.ipfsTenantBaseURL" -}}
-{{- if .Values.ipfsClient.tenantBaseURL -}}
-{{- .Values.ipfsClient.tenantBaseURL -}}
-{{- else if .Values.ipfsDocumentManager.enabled -}}
-{{- $host := printf "%s-ipfs-document-manager" .Release.Name -}}
-{{- $port := default 8080 .Values.ipfsDocumentManager.service.port -}}
-{{- $tenant := default "tenant_space" .Values.ipfsClient.tenantName -}}
-{{- printf "http://%s:%v/v1/tenants/%s" $host $port $tenant -}}
-{{- else -}}
-{{- "" -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 IPFS MFS base URL - Kubo RPC API (auto-wired when ipfs sub-chart is enabled).
 */}}
 {{- define "digital-contracting-service.ipfsMfsBaseURL" -}}

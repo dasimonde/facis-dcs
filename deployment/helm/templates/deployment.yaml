@@ -304,16 +304,7 @@ spec:
             - name: TSA_TRUST_CERT_FILE
               value: /etc/dcs/tsa-trust/tsa-cert.pem
             {{- end }}
-            # ---- IPFS storage -------------------------------------------------------
-            - name: IPFS_TENANT_BASE_URL
-              {{- if .Values.ipfs.tenantBaseURLSecretRef.name }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.ipfs.tenantBaseURLSecretRef.name | quote }}
-                  key: {{ .Values.ipfs.tenantBaseURLSecretRef.key | quote }}
-              {{- else }}
-              value: {{ include "digital-contracting-service.ipfsTenantBaseURL" . | quote }}
-              {{- end }}
+            # ---- IPFS storage (Kubo RPC API, direct -- ADR-36) -----------------------
             - name: IPFS_MFS_BASE_URL
               value: {{ include "digital-contracting-service.ipfsMfsBaseURL" . | quote }}
             # ---- Archive notary / ORCE ---------------------------------------------

@@ -122,15 +122,15 @@ function handleCancel(event: Event) {
       @close="restoreTriggerFocus"
     >
       <div class="modal-box flex max-h-[85vh] w-full max-w-lg flex-col">
-        <h3 id="contract-local-precheck-title" class="text-lg font-bold">Lokale semantische Vorprüfung</h3>
+        <h3 id="contract-local-precheck-title" class="text-lg font-bold">Local semantic precheck</h3>
         <p id="contract-local-precheck-description" class="mt-2 text-sm text-base-content/70">
-          Diese lokale semantische Vorprüfung prüft die im Vertrag hinterlegten Werte. Sie ersetzt keine vollständige
-          Policy- oder SHACL-Prüfung.
+          This local semantic precheck validates the values stored in the contract. It does not replace a full policy or
+          SHACL check.
         </p>
 
         <div v-if="isVerifying" class="my-5 flex items-center gap-3" role="status">
           <span class="loading loading-sm loading-spinner" aria-hidden="true"></span>
-          Lokale semantische Vorprüfung läuft…
+          Running local semantic precheck…
         </div>
 
         <div v-else-if="verificationError" class="my-5 alert alert-error" role="alert">
@@ -140,8 +140,8 @@ function handleCancel(event: Event) {
 
         <div v-else-if="verificationSucceeded && findings.length > 0" class="my-5">
           <div class="alert alert-warning">
-            Die lokale semantische Vorprüfung ergab {{ findings.length }}
-            {{ findings.length === 1 ? 'Finding' : 'Findings' }}. Alle Findings müssen vor der Freigabe behoben werden.
+            Local semantic precheck returned {{ findings.length }} {{ findings.length === 1 ? 'finding' : 'findings' }}.
+            Resolve every finding before approving.
           </div>
           <ul class="mt-3 max-h-72 space-y-2 overflow-y-auto" aria-label="Local semantic findings">
             <li
@@ -155,7 +155,7 @@ function handleCancel(event: Event) {
         </div>
 
         <div v-else-if="verificationSucceeded" class="my-5 alert alert-success" role="status">
-          Die lokale semantische Vorprüfung ist abgeschlossen: keine Findings.
+          Local semantic precheck completed with no findings.
         </div>
 
         <div v-if="submissionError" class="my-5 alert alert-error" role="alert">
@@ -166,7 +166,7 @@ function handleCancel(event: Event) {
         </div>
 
         <label v-if="canConfirm" class="form-control">
-          <span class="label-text mb-1">Kommentar (optional)</span>
+          <span class="label-text mb-1">Comment (optional)</span>
           <textarea
             v-model="comment"
             class="textarea-bordered textarea min-h-20 w-full resize-y"
