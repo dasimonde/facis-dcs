@@ -340,13 +340,12 @@ func main() {
 		log.Fatalf(ctx, err, "Failed to initialize Hydra JWT validator")
 	}
 
-	// Initialize IPFS client
-	ipfsTenantBaseURL := os.Getenv("IPFS_TENANT_BASE_URL")
+	// Initialize IPFS client. Artifacts go to the Kubo RPC API directly (ADR-36).
 	mfsBaseURL := os.Getenv("IPFS_MFS_BASE_URL")
-	if ipfsTenantBaseURL == "" || mfsBaseURL == "" {
-		log.Fatalf(ctx, nil, "IPFS configuration missing: IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL environment variables must be specified")
+	if mfsBaseURL == "" {
+		log.Fatalf(ctx, nil, "IPFS configuration missing: the IPFS_MFS_BASE_URL environment variable must be specified")
 	}
-	ipfsAPIClient := ipfs.NewClient(ipfsTenantBaseURL, mfsBaseURL)
+	ipfsAPIClient := ipfs.NewClient(mfsBaseURL)
 
 	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
 	lockRepo := &pg.PostgresIPLockoutRepo{}

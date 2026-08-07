@@ -544,9 +544,7 @@ func (j OutboxProcessor) writeEntry(ctx context.Context, event datatype.OutboxEv
 		return anchoredEntry{}, fmt.Errorf("could not encode entry for event %d: %w", event.ID, err)
 	}
 
-	// A batch drains hundreds of queued events; the bulk variant keeps most of
-	// the write pool free for the stores a user is waiting on.
-	stored, err := j.IPFSClient.CreateFileBulk(ctx, entry)
+	stored, err := j.IPFSClient.CreateFile(ctx, entry)
 	if err != nil {
 		return anchoredEntry{}, fmt.Errorf("could not create IPFS file for event %d: %w", event.ID, err)
 	}

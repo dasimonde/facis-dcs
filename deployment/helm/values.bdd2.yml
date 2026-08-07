@@ -271,7 +271,7 @@ statusListLocalhostProxy:
 # organization (two independent provenance stores) — sharing instance A's Kubo
 # was a test shortcut that both collides on MFS paths and bottlenecks every
 # PDF export through one node. Mirrors instance A's values.bdd.yml, release
-# "dcs2" -> Service names "dcs2-ipfs" / "dcs2-ipfs-document-manager".
+# "dcs2" -> Service name "dcs2-ipfs".
 ipfs:
   enabled: true
   # kubo pinned for the disposable stack: `latest` moved to 0.43.0 mid-week and
@@ -290,14 +290,6 @@ ipfs:
     noSync: true
   persistence:
     enabled: true
-ipfsDocumentManager:
-  enabled: true
-  ipfs:
-    host: "dcs2-ipfs"
-    apiGatewayURL: "http://dcs2-ipfs:8080/ipfs"
-    rpcApiPort: 5001
-  config:
-    serverMode: "debug"
 
 # ORCE (Timestamp Authority): shared with instance A's TSA rather than a
 # second co-deployed instance — see signing.tsaURL below.

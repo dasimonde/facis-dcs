@@ -29,9 +29,6 @@ dependencies:
 - name: ipfs
   repository: file://charts/ipfs
   version: 0.1.0
-- name: ipfs-document-manager
-  repository: file://charts/ipfs-document-manager
-  version: 0.1.0
 - name: statuslist-service
   repository: file://charts/statuslist-service
   version: 0.1.0
@@ -41,5 +38,5 @@ dependencies:
 - name: traefik
   repository: https://traefik.github.io/charts
   version: 41.0.0
-digest: sha256:0e5a5847ec037dbb031a3098dbe320c51a3cb237bd310ce877b4f2e6f08688c8
-generated: "2026-07-30T15:40:27.652447149+02:00"
+digest: sha256:1cf1079201379a9e7e52502644ae856473bf0c4b390efb82e28e496623bb1337
+generated: "2026-08-06T20:59:46.446548581+02:00"

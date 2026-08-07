@@ -141,15 +141,20 @@ jobs:
           # misses an early failure. WARN/ERROR (permission denials, auth
           # failures) survive the whole run's volume this way instead.
           kubectl logs -n dcs-bdd deployment/fc-service --tail=-1 | grep -E 'WARN|ERROR|extracted roles|Completed [45]' || true
-          # The shared IPFS node sits under every store, ship, and audit
-          # anchor: when pins start failing 500 mid-run, everything after it
-          # fails as timeouts three layers up while kubo's own reason — disk
-          # pressure, repo limit, a wedged GC — was never captured. Same for
-          # the document-manager in front of it, and df on the node answers
-          # the disk-pressure half outright.
+          # The IPFS node sits under every store, ship and audit anchor, so a
+          # node in trouble surfaces as timeouts three layers up while its own
+          # reason -- disk pressure, repo limit, a wedged GC -- goes uncaptured.
+          # The pin count and repo size are what distinguish a node that
+          # degrades as the run grows from one that was never healthy.
           kubectl logs -n dcs-bdd deployment/dcs-ipfs --tail=400 --prefix || true
-          kubectl logs -n dcs-bdd deployment/dcs-ipfs-document-manager --tail=400 --prefix || true
           docker exec dcs-bdd-control-plane df -h / /var || true
+          for release in dcs dcs2; do
+            echo "--- ${release}-ipfs node state ---"
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'ipfs pin ls --type=recursive 2>/dev/null | wc -l' || true
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              ipfs repo stat || true
+          done
 
       - name: Generate coverage XML and summary
         if: always()

@@ -369,7 +369,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await page
-      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('dialog', { name: /local semantic precheck/i })
       .getByRole('button', { name: 'Confirm approval', exact: true })
       .click()
     await forwarded

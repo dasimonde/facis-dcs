@@ -51,11 +51,6 @@ dependencies:
     repository: "file://charts/ipfs"
     condition: ipfs.enabled
     alias: ipfs
-  - name: ipfs-document-manager
-    version: "0.1.0"
-    repository: "file://charts/ipfs-document-manager"
-    condition: ipfsDocumentManager.enabled
-    alias: ipfsDocumentManager
   - name: statuslist-service
     version: "0.1.0"
     repository: "file://charts/statuslist-service"

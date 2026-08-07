@@ -416,7 +416,7 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await page
-      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('dialog', { name: /local semantic precheck/i })
       .getByRole('button', { name: 'Confirm approval', exact: true })
       .click()
     await forwarded
@@ -520,7 +520,7 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await page
-      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('dialog', { name: /local semantic precheck/i })
       .getByRole('button', { name: 'Confirm approval', exact: true })
       .click()
     await forwarded

@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import ExistingClausesList from '@template-repository/components/clauses-editor/ExistingClausesList.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import type { DcsClause, DcsContentSegment } from '@/models/dcs-jsonld'
+import type { DcsClause } from '@/models/dcs-jsonld'
 
 const store = useDcsDraftStore()
 const uiStore = useTemplateEditorUiStore()
@@ -22,20 +22,14 @@ function startEditClause(blockId: string) {
   editingBlockId.value = blockId
 }
 
-function cancelEdit() {
+/** Leaves edit mode; the child already persisted on save, or discarded on cancel. */
+function closeEditor() {
   editingBlockId.value = null
-}
-
-function saveEditedClause(payload: { blockId: string; title: string; content: DcsContentSegment[] }) {
-  const title = payload.title.trim()
-  if (!payload.content.length) return
-  store.updateClause(payload.blockId, { title, content: payload.content })
-  if (editingBlockId.value === payload.blockId) cancelEdit()
 }
 
 function deleteClause(blockId: string) {
   store.deleteClause(blockId)
-  if (editingBlockId.value === blockId) cancelEdit()
+  if (editingBlockId.value === blockId) closeEditor()
 }
 
 function placeClause(blockId: string) {
@@ -56,7 +50,7 @@ function placeClause(blockId: string) {
     @delete="deleteClause"
     @edit="startEditClause"
     @place="placeClause"
-    @save="saveEditedClause"
-    @cancel-edit="cancelEdit"
+    @save="closeEditor"
+    @cancel="closeEditor"
   />
 </template>

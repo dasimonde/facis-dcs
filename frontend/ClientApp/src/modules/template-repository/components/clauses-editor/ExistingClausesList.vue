@@ -2,14 +2,14 @@
 import { computed } from 'vue'
 import IconEdit from '@core/components/icons/IconEdit.vue'
 import IconRemove from '@core/components/icons/IconRemove.vue'
-import ClauseEditorForm from '@template-repository/components/clauses-editor/ClauseEditorForm.vue'
+import ClauseEditor from '@template-repository/components/clauses-editor/ClauseEditor.vue'
 import ClauseSegmentsPreview from '@template-repository/components/clauses-editor/ClauseSegmentsPreview.vue'
 import {
   getPlaceholderLabelFromConditions,
   parseSegmentsFromContent,
   type Segment,
 } from '@template-repository/composables/useClauseTextChips'
-import type { DcsClause, DcsContentSegment } from '@/models/dcs-jsonld'
+import type { DcsClause } from '@/models/dcs-jsonld'
 import type { SemanticCondition } from '@template-repository/models/contract-template'
 
 const props = withDefaults(
@@ -28,12 +28,12 @@ const outlineBlockIds = computed(() => props.blockIdsInOutline)
 defineEmits<{
   delete: [blockId: string]
   edit: [blockId: string]
-  save: [payload: { blockId: string; title: string; content: DcsContentSegment[] }]
+  save: []
   place: [blockId: string]
-  'cancel-edit': []
+  cancel: []
 }>()
 
-function clauseContent(clause: DcsClause): DcsContentSegment[] {
+function clauseContent(clause: DcsClause) {
   const content = clause['dcs:content']
   if (typeof content === 'string') return []
   return content['@list']
@@ -60,14 +60,7 @@ function getPlaceholderLabel(seg: Segment): string {
     >
       <div class="min-w-0 flex-1">
         <div v-if="editingBlockId === clause['@id']">
-          <ClauseEditorForm
-            :mode="'edit'"
-            :initial-title="clause['dcs:title'] ?? ''"
-            :initial-content="clauseContent(clause)"
-            :semantic-conditions="semanticConditions"
-            @submit="(payload) => $emit('save', { blockId: clause['@id'], ...payload })"
-            @cancel="$emit('cancel-edit')"
-          />
+          <ClauseEditor mode="edit" :clause-id="clause['@id']" @save="$emit('save')" @cancel="$emit('cancel')" />
         </div>
         <div v-else>
           <div class="text-sm font-semibold text-base-content">

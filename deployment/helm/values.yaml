@@ -611,11 +611,7 @@ pdfCore:
 
 ipfs:
   enabled: false
-  tenantBaseURL: ""
   mfsBaseURL: ""
-  tenantBaseURLSecretRef:
-    name: ""
-    key: "IPFS_TENANT_BASE_URL"
   mfsBaseURLSecretRef:
     name: ""
     key: "IPFS_MFS_BASE_URL"
@@ -627,13 +623,8 @@ ipfs:
     # ciphertext; deploy.sh asserts the bound class when one is set.
     storageClassName: ""
 
-ipfsDocumentManager:
-  enabled: false
-
-# IPFS Document Manager client – auto-wired when sub-charts are enabled
+# Kubo RPC client – auto-wired when the ipfs sub-chart is enabled (ADR-36)
 ipfsClient:
-  tenantName: "tenant_space"  # tenant identifier in the Document Manager URL path
-  tenantBaseURL: ""            # IPFS_TENANT_BASE_URL explicit override
   mfsBaseURL: ""               # IPFS_MFS_BASE_URL explicit override (Kubo RPC API)
 
 # ---- Optional monitoring stack (Prometheus, Grafana, Alertmanager) ----------------
@@ -803,9 +794,6 @@ sharedServices:
     - name: orce
       service: "{{ .Release.Name }}-orce"
       port: 1880
-    - name: ipfs-dm
-      service: "{{ .Release.Name }}-ipfs-document-manager"
-      port: 8080
 
 # ---- Contract target systems (ADR-25) ---------------------------------
 # Systems a signed contract can be deployed to. A fresh install has an empty

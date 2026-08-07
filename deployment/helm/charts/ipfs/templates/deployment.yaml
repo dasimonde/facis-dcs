@@ -47,6 +47,15 @@ spec:
               {{- if .Values.config.routingType }}
               ipfs config Routing.Type {{ .Values.config.routingType }}
               {{- end }}
+              {{- if eq .Values.config.routingType "none" }}
+              # Routing.Type=none stops the DHT, not the swarm: the daemon still
+              # dials every bootstrap peer it ships with and keeps those
+              # connections alive over TCP and QUIC. On a shared CI runner that
+              # is pure contention against the very writes the node is being
+              # timed on, so a node that is meant to talk to nobody is given
+              # nobody to talk to.
+              ipfs bootstrap rm --all
+              {{- end }}
               {{- if .Values.config.noSync }}
               ipfs config --json Datastore.NoSync true
               {{- end }}
