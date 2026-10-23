@@ -16,3 +16,10 @@ func TestInvalidOriginatorRoleIsBadRequest(t *testing.T) {
 	require.ErrorAs(t, err, &serviceErr)
 	require.Equal(t, "bad_request", serviceErr.Name)
 }
+
+func TestInvalidRenewalTermIsBadRequest(t *testing.T) {
+	err := mapContractCommandError(fmt.Errorf("renew contract: %w", command.ErrInvalidRenewalTerm))
+	var serviceErr *goa.ServiceError
+	require.ErrorAs(t, err, &serviceErr)
+	require.Equal(t, "bad_request", serviceErr.Name)
+}

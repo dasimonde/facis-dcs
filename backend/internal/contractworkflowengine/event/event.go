@@ -848,7 +848,8 @@ func (e IncreaseContractVersionEvent) GetDID() string {
 	return e.DID
 }
 
-// ContractExpired is emitted when change requests for contract merged
+// ContractExpired is emitted when the expiry cron job persists EXPIRED. ExpPolicy
+// is nil for a contract without an expiration policy.
 type ContractExpired struct {
 	DID             string                             `json:"did"`
 	HolderDID       string                             `json:"holder_did"`

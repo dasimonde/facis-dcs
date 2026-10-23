@@ -50,3 +50,13 @@ func TestArchiveExpiringWindowInvalidValuesKeepDefault(t *testing.T) {
 		}
 	}
 }
+
+// DCS-FR-CSA-14: without a configured retention policy, nothing is retained.
+func TestArchiveRetentionYears(t *testing.T) {
+	for value, want := range map[string]int{"": 0, "10": 10, " 6 ": 6, "0": 0, "-1": 0, "ten": 0} {
+		t.Setenv("DCS_ARCHIVE_RETENTION_YEARS", value)
+		if got := ArchiveRetentionYears(); got != want {
+			t.Fatalf("value %q: expected %d, got %d", value, want, got)
+		}
+	}
+}

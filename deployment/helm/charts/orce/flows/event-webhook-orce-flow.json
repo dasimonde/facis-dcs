@@ -157,6 +157,18 @@
                             },
                             {
                                 "l": {
+                                    "en-US": "contract.expired"
+                                },
+                                "v": "contract.expired"
+                            },
+                            {
+                                "l": {
+                                    "en-US": "contract.renewal_due"
+                                },
+                                "v": "contract.renewal_due"
+                            },
+                            {
+                                "l": {
                                     "en-US": "template.created"
                                 },
                                 "v": "template.created"

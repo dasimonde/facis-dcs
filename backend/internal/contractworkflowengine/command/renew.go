@@ -30,6 +30,10 @@ import (
 // client error by service.mapContractCommandError.
 var ErrContractNotRenewable = errors.New("contract is not in a renewable state")
 
+// ErrInvalidRenewalTerm is returned when the renewal's term dates are
+// inconsistent. Mapped to a client error by service.mapContractCommandError.
+var ErrInvalidRenewalTerm = errors.New("invalid renewal term")
+
 // renewableStates are the original-contract states from which a renewal
 // instance may be created. A contract must at least have been agreed
 // (APPROVED) or be in its performance/archival lifecycle (SIGNED, ACTIVE,
@@ -167,13 +171,9 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 		renewalContractData = &seeded
 	}
 
-	newStartDate := original.StartDate
-	if cmd.NewStartDate != nil {
-		newStartDate = cmd.NewStartDate
-	}
-	newExpDate := original.ExpDate
-	if cmd.NewExpDate != nil {
-		newExpDate = cmd.NewExpDate
+	newStartDate, newExpDate, err := renewalTerm(original.StartDate, original.ExpDate, cmd.NewStartDate, cmd.NewExpDate, time.Now().UTC())
+	if err != nil {
+		return nil, err
 	}
 	newExpPolicy := original.ExpPolicy
 	if cmd.NewExpPolicy != nil {
@@ -182,6 +182,16 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	newExpNoticePeriod := original.ExpNoticePeriod
 	if cmd.NewExpNoticePeriod != nil {
 		newExpNoticePeriod = cmd.NewExpNoticePeriod
+	}
+
+	renewalContractData, err = stampRenewalTerm(renewalContractData, sharedContractDetails{
+		StartDate:       newStartDate,
+		ExpDate:         newExpDate,
+		ExpPolicy:       newExpPolicy,
+		ExpNoticePeriod: newExpNoticePeriod,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	data := db.Contract{
@@ -383,4 +393,71 @@ func attachRenewsContractReference(raw *datatype.JSON, originalDID string, origi
 		return nil, fmt.Errorf("could not encode contract data: %w", err)
 	}
 	return &encoded, nil
+}
+
+// renewalTerm returns the renewal's start and expiry. Given dates win. Without
+// a given expiry, an original whose expiry has passed moves forward by whole
+// terms of its own length until the expiry lies ahead: a copied past expiry
+// makes the new DRAFT read EXPIRED at once (contracts_effective view). Without
+// both original dates the length is unknown, so the expiry stays empty.
+func renewalTerm(origStart, origExp, newStart, newExp *time.Time, now time.Time) (*time.Time, *time.Time, error) {
+	start, exp := origStart, origExp
+	if newStart != nil {
+		start = newStart
+	}
+	if newExp != nil {
+		exp = newExp
+	} else if origExp != nil && !origExp.After(now) {
+		exp = nil
+		if origStart != nil && origExp.After(*origStart) {
+			length := origExp.Sub(*origStart)
+			if newStart == nil {
+				s := origExp.Add(now.Sub(*origExp) / length * length)
+				start = &s
+			}
+			e := start.Add(length)
+			exp = &e
+		} else if newStart == nil {
+			start = nil
+		}
+	}
+	if exp != nil && !exp.After(now) {
+		return nil, nil, fmt.Errorf("%w: expiration date must be in the future", ErrInvalidRenewalTerm)
+	}
+	if start != nil && exp != nil && !exp.After(*start) {
+		return nil, nil, fmt.Errorf("%w: expiration date must be after start date", ErrInvalidRenewalTerm)
+	}
+	return start, exp, nil
+}
+
+// stampRenewalTerm writes the renewal's term into dcs:metadata. The copy
+// carries the original's term, so an empty date removes the original's key.
+func stampRenewalTerm(payload *datatype.JSON, term sharedContractDetails) (*datatype.JSON, error) {
+	stamped, _, err := stampSharedDetailsIntoContractData(payload, term)
+	if err != nil {
+		return nil, err
+	}
+	if stamped == nil || (term.StartDate != nil && term.ExpDate != nil) {
+		return stamped, nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(*stamped), &doc); err != nil {
+		return nil, fmt.Errorf("could not parse contract data for the renewal term: %w", err)
+	}
+	meta, _ := doc["dcs:metadata"].(map[string]any)
+	if meta == nil {
+		return stamped, nil
+	}
+	if term.StartDate == nil {
+		delete(meta, metaStartDate)
+	}
+	if term.ExpDate == nil {
+		delete(meta, metaExpirationDate)
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("could not marshal contract data with the renewal term: %w", err)
+	}
+	cleared := datatype.JSON(raw)
+	return &cleared, nil
 }

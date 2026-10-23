@@ -247,6 +247,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrTargetDisabled) ||
 		errors.Is(err, command.ErrSigningIncomplete) ||
 		errors.Is(err, command.ErrContractNotRenewable) ||
+		errors.Is(err, command.ErrInvalidRenewalTerm) ||
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
 		errors.Is(err, command.ErrNotProposalAuthor) ||

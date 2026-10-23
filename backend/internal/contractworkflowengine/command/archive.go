@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -65,11 +66,13 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signing ArchiveSi
 		return db.ContractArchiveEntry{}, err
 	}
 
+	storedAt := time.Now().UTC()
 	return db.ContractArchiveEntry{
 		DID:              contract.DID,
 		ContractVersion:  contract.ContractVersion,
 		StoredBy:         storedBy,
-		StoredAt:         time.Now().UTC(),
+		StoredAt:         storedAt,
+		RetentionUntil:   retentionUntil(contract.ExpDate, storedAt, conf.ArchiveRetentionYears()),
 		ContractSnapshot: snapshotJSON,
 		ContentHash:      contentHash,
 		SignatureMeta:    &signatureMetadata,
@@ -155,4 +158,19 @@ func stringPtrValue(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+// retentionUntil starts the retention period at the contract's expiry, or at
+// archival for a contract without one. The archive trigger refuses deletion
+// before this date. No period configured means no retention date.
+func retentionUntil(expDate *time.Time, storedAt time.Time, years int) *time.Time {
+	if years <= 0 {
+		return nil
+	}
+	from := storedAt
+	if expDate != nil {
+		from = expDate.UTC()
+	}
+	until := from.AddDate(years, 0, 0)
+	return &until
 }

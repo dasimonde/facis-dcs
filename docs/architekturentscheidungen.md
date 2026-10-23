@@ -169,6 +169,14 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   `DCS_SYNC_FAIL_RETRY_INTERVAL`, `DCS_ARCHIVE_EXPIRING_WINDOW_DAYS`,
   `DCS_API_RATE_LIMIT_PER_MINUTE`) fallen bei unparsbaren oder nicht
   positiven Werten stets auf den Default zurück.
+- **Was gilt:** Die Aufbewahrungsfrist archivierter Verträge kommt aus
+  `DCS_ARCHIVE_RETENTION_YEARS` (DCS-FR-CSA-14). Bei der Archivierung gilt
+  `retention_until` = Ablaufdatum (ohne Ablaufdatum: Archivierungszeitpunkt)
+  plus Frist. Ohne Wert gibt es keine Frist: `retention_until` bleibt leer,
+  Löschen bleibt erlaubt. **Warum:** Die SRS verlangt eine konfigurierte
+  Aufbewahrungsrichtlinie ohne festen Wert, und Löschen nur „if permitted by
+  policy“ (DCS-FR-CSA-17). Ein Default würde jedes Löschen und die
+  DSGVO-Löschung (Key Shredding) bis zum Fristende sperren.
 
 ## Identität (did:web, Peer-Vertrauen, Maschinen-Identitäten)
 

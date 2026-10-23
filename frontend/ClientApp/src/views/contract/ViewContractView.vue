@@ -15,6 +15,7 @@ import { useContractEditorUiStore } from '@contract-workflow-engine/store/contra
 import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
 import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
+import ExpiredPolicyNotice from '@/components/contract/ExpiredPolicyNotice.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
@@ -406,6 +407,9 @@ const exportBundle = async () => {
       </div>
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
+      <div v-if="contract" class="mx-auto max-w-4xl px-6 pt-3 empty:hidden">
+        <ExpiredPolicyNotice :contract="contract" />
+      </div>
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
         <!-- Both exports need the loaded contract's DID; until it arrives the

@@ -7,10 +7,10 @@
 // command/RPC side of DCS-to-DCS federation; the peer-transport side lives
 // in the separate dcstodcs package).
 //
-// Ownership model: every contract has a single writer, its Origin peer (see
-// command package doc). Expiry is additionally exposed instantly to readers
-// via the contracts_effective DB view (EXPIRED computed at query time),
-// while this file's cron job lags behind to persist the state and emit the
+// Each DCS instance writes its own copy of a contract (ADR-13), so each
+// instance expires its own copy. Expiry is exposed instantly to readers via
+// the contracts_effective DB view (EXPIRED computed at query time), while
+// this file's cron job lags behind to persist the state and emit the
 // corresponding event/audit-trail entry.
 package contractworkflowengine
 
@@ -103,49 +103,46 @@ func (t expiryTask) read(ctx context.Context, tx *sqlx.Tx) ([]database.ContractM
 	return t.repo.ReadExpiredContracts(ctx, tx)
 }
 
+// handle persists EXPIRED and emits ContractExpired. The event carries the
+// configured policy, so subscribers start the renewal, termination or
+// archiving workflow (DCS-FR-CWE-10). A contract without a policy expires too.
 func (t expiryTask) handle(ctx context.Context, tx *sqlx.Tx, expiredContract database.ContractMetadata) error {
-	if expiredContract.ExpPolicy == nil {
-		return fmt.Errorf("unknown expiration policy for expired contract with DID %s", expiredContract.DID)
-	}
-	policy, err := expirationpolicy.NewExpirationPolicy(*expiredContract.ExpPolicy)
+	evt, err := newExpiredEvent(expiredContract, time.Now().UTC())
 	if err != nil {
-		return fmt.Errorf("could not create expiration policy: %w", err)
+		return err
 	}
-
 	// Readers already see EXPIRED instantly via the contracts_effective view once
 	// exp_date has passed; this persists that state physically and emits the
 	// ContractExpired event, so it necessarily lags the view by up to the poll interval.
-	err = t.repo.UpdateState(ctx, tx, expiredContract.DID, contractstate.Expired.String())
-	if err != nil {
+	if err := t.repo.UpdateState(ctx, tx, expiredContract.DID, contractstate.Expired.String()); err != nil {
 		return fmt.Errorf("could not update expired contract with DID %s: %w", expiredContract.DID, err)
 	}
-
-	state, err := contractstate.NewContractState(expiredContract.State)
-	if err != nil {
-		return fmt.Errorf("could not create state for expired contract with DID %s: %w", expiredContract.DID, err)
-	}
-
-	evt := contractevents.ContractExpired{
-		DID:             expiredContract.DID,
-		ContractVersion: expiredContract.ContractVersion,
-		State:           state,
-		ExpPolicy:       &policy,
-		OccurredAt:      time.Now().UTC(),
-	}
-	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
-	if err != nil {
+	if err := event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine); err != nil {
 		return fmt.Errorf("could not create event: %w", err)
 	}
-
-	switch policy {
-	case expirationpolicy.Renewal:
-		fmt.Printf("ToDo: call renewal logic for expired contract with DID %s\n", expiredContract.DID)
-	case expirationpolicy.Archiving:
-		fmt.Printf("ToDo: call archiving logic for expired contract with DID %s\n", expiredContract.DID)
-	case expirationpolicy.Termination:
-		fmt.Printf("ToDo: call termination logic for expired contract with DID %s\n", expiredContract.DID)
-	}
 	return nil
+}
+
+func newExpiredEvent(c database.ContractMetadata, now time.Time) (contractevents.ContractExpired, error) {
+	state, err := contractstate.NewContractState(c.State)
+	if err != nil {
+		return contractevents.ContractExpired{}, fmt.Errorf("could not create state for expired contract with DID %s: %w", c.DID, err)
+	}
+	var policy *expirationpolicy.ExpirationPolicy
+	if c.ExpPolicy != nil {
+		p, err := expirationpolicy.NewExpirationPolicy(*c.ExpPolicy)
+		if err != nil {
+			return contractevents.ContractExpired{}, fmt.Errorf("could not create expiration policy: %w", err)
+		}
+		policy = &p
+	}
+	return contractevents.ContractExpired{
+		DID:             c.DID,
+		ContractVersion: c.ContractVersion,
+		State:           state,
+		ExpPolicy:       policy,
+		OccurredAt:      now,
+	}, nil
 }
 
 type renewalDueTask struct{ repo database.ContractRepo }
