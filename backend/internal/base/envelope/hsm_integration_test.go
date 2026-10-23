@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"math/big"
 	"os"
 	"testing"
 
@@ -44,10 +43,9 @@ func TestHSMDeriveECDHMatchesSoftware(t *testing.T) {
 		t.Fatalf("generate ephemeral key: %v", err)
 	}
 	point := eph.PublicKey().Bytes()
-	ephECDSA := &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     new(big.Int).SetBytes(point[1:33]),
-		Y:     new(big.Int).SetBytes(point[33:65]),
+	ephECDSA, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), point)
+	if err != nil {
+		t.Fatalf("parse ephemeral public key: %v", err)
 	}
 
 	zHSM, err := hsm.DeriveECDH(hsm.KeyLabelECDH(), ephECDSA)

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 const (
@@ -95,8 +96,8 @@ func publicJWK(key *ecdsa.PrivateKey) sdjwt.JWK {
 	return sdjwt.JWK{
 		Kty: "EC",
 		Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-		Y:   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+		X:   ecutil.MustJWKX(ecutil.AsPublic(key)),
+		Y:   ecutil.MustJWKY(ecutil.AsPublic(key)),
 	}
 }
 

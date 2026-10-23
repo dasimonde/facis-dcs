@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -45,8 +46,8 @@ func testIssuerDocument(t *testing.T, credentialKey *ecdsa.PublicKey) *identity.
 			"publicKeyJwk": map[string]any{
 				"kty": "EC",
 				"crv": "P-256",
-				"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-				"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+				"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+				"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 			},
 		}
 	}

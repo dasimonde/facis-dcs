@@ -4,10 +4,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"encoding/base64"
 	"testing"
 
 	"digital-contracting-service/internal/auth/oid4vp/status"
+	"digital-contracting-service/internal/base/ecutil"
 
 	"github.com/stretchr/testify/require"
 )
@@ -69,7 +69,7 @@ func ecJWK(t *testing.T, key *ecdsa.PrivateKey, kid string) map[string]any {
 		"kty": "EC",
 		"crv": "P-256",
 		"kid": kid,
-		"x":   base64.RawURLEncoding.EncodeToString(key.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(key.Y.Bytes()),
+		"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+		"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 	}
 }

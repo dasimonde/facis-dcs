@@ -20,6 +20,7 @@ import (
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 // eraserTestDIDDocument builds a DIDDocument for the local instance via the
@@ -52,8 +53,8 @@ func eraserTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
-					"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-					"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+					"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+					"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 					"x5c": []string{base64.StdEncoding.EncodeToString(certDER)},
 				},
 			},

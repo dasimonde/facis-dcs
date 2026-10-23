@@ -20,7 +20,7 @@ RUN npm run build:docker
 #-- Go Build Stage --
 # glibc (Debian) toolchain with cgo: the PKCS#11 layer (ThalesGroup/crypto11 →
 # miekg/pkcs11) is cgo-only, so a static CGO_ENABLED=0 build cannot link it.
-FROM golang:1.25 AS go-builder
+FROM golang:1.26.10 AS go-builder
 
 WORKDIR /build
 

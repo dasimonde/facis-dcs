@@ -17,7 +17,6 @@ package identity
 import (
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -28,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -38,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/safehttp"
 )
 
@@ -87,19 +86,11 @@ func (jwk PublicKeyJWK) ECPublicKey() (*ecdsa.PublicKey, error) {
 	if jwk.Crv != "" && jwk.Crv != "P-256" {
 		return nil, fmt.Errorf("unsupported EC curve %q (only P-256 is supported)", jwk.Crv)
 	}
-	xBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+	pub, err := ecutil.FromJWKCoords(jwk.X, jwk.Y)
 	if err != nil {
-		return nil, fmt.Errorf("decoding x: %w", err)
+		return nil, err
 	}
-	yBytes, err := base64.RawURLEncoding.DecodeString(jwk.Y)
-	if err != nil {
-		return nil, fmt.Errorf("decoding y: %w", err)
-	}
-	return &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
-	}, nil
+	return pub, nil
 }
 
 type VerificationMethod struct {
@@ -298,7 +289,7 @@ func (d *DIDDocument) PublishesKeyFor(purpose Purpose, pub *ecdsa.PublicKey) boo
 		if err != nil {
 			continue
 		}
-		if published.X.Cmp(pub.X) == 0 && published.Y.Cmp(pub.Y) == 0 {
+		if ecutil.Equal(published, pub) {
 			return true
 		}
 	}
@@ -386,7 +377,7 @@ func (d *DIDDocument) methodHoldingKey(pub *ecdsa.PublicKey) (*VerificationMetho
 			if err != nil {
 				continue
 			}
-			if published.X.Cmp(pub.X) == 0 && published.Y.Cmp(pub.Y) == 0 {
+			if ecutil.Equal(published, pub) {
 				return &methods[i], nil
 			}
 		}
@@ -581,7 +572,7 @@ func (d *DIDDocument) verifyCertificateOf(method *VerificationMethod, trustPool 
 	if err != nil {
 		return err
 	}
-	if certPub.X.Cmp(jwkPub.X) != 0 || certPub.Y.Cmp(jwkPub.Y) != 0 {
+	if !ecutil.Equal(certPub, jwkPub) {
 		return errors.New("certificate public key does not match JWK public key")
 	}
 

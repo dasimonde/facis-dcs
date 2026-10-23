@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -24,6 +23,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
@@ -363,8 +363,8 @@ func taskTestDIDDocument(t *testing.T) *identity.DIDDocument {
 				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
-					"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-					"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+					"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+					"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 				},
 			},
 		},

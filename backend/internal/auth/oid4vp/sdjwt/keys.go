@@ -9,8 +9,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"strings"
+
+	"digital-contracting-service/internal/base/ecutil"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -627,29 +628,7 @@ func stringValue(v any) string {
 }
 
 func ecPublicKey(xB64, yB64 string) (*ecdsa.PublicKey, error) {
-	x, err := decodeCoordinate(xB64)
-
-	if err != nil {
-		return nil, err
-	}
-
-	y, err := decodeCoordinate(yB64)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
-}
-
-func decodeCoordinate(value string) (*big.Int, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(value)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return new(big.Int).SetBytes(raw), nil
+	return ecutil.FromJWKCoords(xB64, yB64)
 }
 
 // issuerBinding is how a leaf certificate was tied to the issuer identifier it

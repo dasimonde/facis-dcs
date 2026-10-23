@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/auth/oid4vp/status/fetch"
 	"digital-contracting-service/internal/auth/oid4vp/status/handler"
+	"digital-contracting-service/internal/base/ecutil"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -133,8 +134,8 @@ func (l *xfscSignedList) trustedJWKS(pub *ecdsa.PublicKey) *status.TrustConfig {
 		statusListIssuer: {JWKS: status.TrustJWKS{Keys: []map[string]any{{
 			"kty": "EC",
 			"crv": "P-256",
-			"x":   base64.RawURLEncoding.EncodeToString(pub.X.FillBytes(make([]byte, 32))),
-			"y":   base64.RawURLEncoding.EncodeToString(pub.Y.FillBytes(make([]byte, 32))),
+			"x":   ecutil.MustJWKX(ecutil.AsPublic(pub)),
+			"y":   ecutil.MustJWKY(ecutil.AsPublic(pub)),
 		}}}},
 	}}
 }

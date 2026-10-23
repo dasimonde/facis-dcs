@@ -5,6 +5,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"testing"
+
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 // The point of pinning a login issuer's leaf: a certificate authority cannot
@@ -37,7 +39,7 @@ func TestPinnedLeaf_CACannotIntroduceALoginIssuer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the pinned issuer's own leaf must be accepted: %v", err)
 	}
-	if pub, ok := key.(*ecdsa.PublicKey); !ok || pub.X.Cmp(mine.X) != 0 {
+	if pub, ok := key.(*ecdsa.PublicKey); !ok || !ecutil.Equal(pub, ecutil.AsPublic(mine)) {
 		t.Fatal("resolution returned a key that is not the pinned one")
 	}
 

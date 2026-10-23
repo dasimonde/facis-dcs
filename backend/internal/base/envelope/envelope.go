@@ -21,9 +21,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/hsm"
 )
 
@@ -200,18 +200,9 @@ func (epk EphemeralPublicKey) publicKey() (*ecdsa.PublicKey, error) {
 	if epk.Kty != "EC" || epk.Crv != "P-256" {
 		return nil, fmt.Errorf("unsupported epk %s/%s (only EC P-256)", epk.Kty, epk.Crv)
 	}
-	xBytes, err := base64.RawURLEncoding.DecodeString(epk.X)
+	pub, err := ecutil.FromJWKCoords(epk.X, epk.Y)
 	if err != nil {
-		return nil, fmt.Errorf("decoding x: %w", err)
-	}
-	yBytes, err := base64.RawURLEncoding.DecodeString(epk.Y)
-	if err != nil {
-		return nil, fmt.Errorf("decoding y: %w", err)
-	}
-	pub := &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
+		return nil, fmt.Errorf("decoding epk: %w", err)
 	}
 	if _, err := pub.ECDH(); err != nil {
 		return nil, fmt.Errorf("epk not on P-256: %w", err)

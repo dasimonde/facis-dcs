@@ -7,7 +7,7 @@ COPY pdf-core/Makefile pdf-core/Makefile
 RUN make -C pdf-core docs
 
 # Stage 2: build the Go binary
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.10-alpine AS builder
 WORKDIR /app
 COPY pdf-core/go.mod pdf-core/go.sum ./
 RUN go mod download

@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/base/identity"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 // eraseTestDIDDocument builds a DIDDocument with a self-signed x5c leaf whose
@@ -58,8 +59,8 @@ func eraseTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
-					"x":   base64.RawURLEncoding.EncodeToString(otherKey.X.FillBytes(make([]byte, 32))),
-					"y":   base64.RawURLEncoding.EncodeToString(otherKey.Y.FillBytes(make([]byte, 32))),
+					"x":   ecutil.MustJWKX(ecutil.AsPublic(otherKey)),
+					"y":   ecutil.MustJWKY(ecutil.AsPublic(otherKey)),
 				},
 			},
 			{
@@ -67,8 +68,8 @@ func eraseTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
-					"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-					"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+					"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+					"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 					"x5c": []string{base64.StdEncoding.EncodeToString(certDER)},
 				},
 			},

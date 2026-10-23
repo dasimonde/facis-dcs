@@ -20,6 +20,8 @@ import (
 	"math/big"
 	"strings"
 
+	"digital-contracting-service/internal/base/ecutil"
+
 	"github.com/ThalesGroup/crypto11"
 )
 
@@ -109,12 +111,15 @@ func (h *HSM) PublicJWK(label string) (map[string]any, error) {
 
 // ECPublicKeyJWK renders an ECDSA P-256 public key as a JWK map.
 func ECPublicKeyJWK(pub *ecdsa.PublicKey) map[string]any {
-	size := (pub.Curve.Params().BitSize + 7) / 8
+	x, y, err := ecutil.UncompressedXY(pub)
+	if err != nil {
+		return map[string]any{"kty": "EC", "crv": "P-256", "x": "", "y": ""}
+	}
 	return map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   coordinate(pub.X, size),
-		"y":   coordinate(pub.Y, size),
+		"x":   base64.RawURLEncoding.EncodeToString(x),
+		"y":   base64.RawURLEncoding.EncodeToString(y),
 	}
 }
 
@@ -141,10 +146,4 @@ func ECDSADERToRaw(der []byte, curve elliptic.Curve) ([]byte, error) {
 	parsed.R.FillBytes(out[:size])
 	parsed.S.FillBytes(out[size:])
 	return out, nil
-}
-
-func coordinate(v *big.Int, size int) string {
-	buf := make([]byte, size)
-	v.FillBytes(buf)
-	return base64.RawURLEncoding.EncodeToString(buf)
 }

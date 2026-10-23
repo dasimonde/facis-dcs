@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/identity"
 )
 
@@ -65,8 +65,8 @@ func didMethodJSON(methodID, controller string, key *ecdsa.PublicKey) map[string
 		"publicKeyJwk": map[string]any{
 			"kty": "EC",
 			"crv": "P-256",
-			"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-			"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+			"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+			"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 		},
 	}
 }

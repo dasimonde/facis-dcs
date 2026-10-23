@@ -7,11 +7,12 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"math/big"
 	"net/url"
 	"testing"
 	"time"
+
+	"digital-contracting-service/internal/base/ecutil"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -47,8 +48,8 @@ func holderCNF(t *testing.T) (jwt.MapClaims, string) {
 	jwk := JWK{
 		Kty: "EC",
 		Crv: "P-256",
-		X:   base64URL(key.X),
-		Y:   base64URL(key.Y),
+		X:   ecutil.MustJWKX(ecutil.AsPublic(key)),
+		Y:   ecutil.MustJWKY(ecutil.AsPublic(key)),
 	}
 	did, err := DIDJWKFromPublicJWK(jwk)
 	if err != nil {
@@ -91,10 +92,6 @@ func TestHolderSubject(t *testing.T) {
 	if _, err := HolderSubject(claims); err == nil {
 		t.Fatal("a did:jwk sub naming a different key than cnf.jwk was accepted")
 	}
-}
-
-func base64URL(v *big.Int) string {
-	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, 32)))
 }
 
 // --- x5c leaves as real issuers actually carry them ---
