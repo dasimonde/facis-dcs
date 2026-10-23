@@ -133,20 +133,8 @@ func (s *semanticHubsrvc) Register(ctx context.Context, p *semantichubgen.Regist
 		content = fetched
 	}
 
-	if p.Kind == "context" {
-		// A context version must at least parse as a JSON-LD document with
-		// an @context object — a broken active context would break every
-		// subsequent document normalization.
-		var doc struct {
-			Context map[string]any `json:"@context"`
-		}
-		if err := json.Unmarshal([]byte(content), &doc); err != nil || len(doc.Context) == 0 {
-			return nil, semantichubgen.MakeBadRequest(
-				fmt.Errorf("context schema content must be a JSON-LD document with a non-empty @context object"))
-		}
-	}
-	if strings.TrimSpace(content) == "" {
-		return nil, semantichubgen.MakeBadRequest(errors.New("schema content must not be empty (provide content or source_url)"))
+	if err := semantichub.ValidateSchemaContent(p.Kind, content); err != nil {
+		return nil, semantichubgen.MakeBadRequest(err)
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
@@ -195,6 +183,17 @@ func (s *semanticHubsrvc) Rollback(ctx context.Context, p *semantichubgen.Rollba
 		return nil, semantichubgen.MakeInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	schema, err := s.Repo.Get(ctx, tx, p.Name, p.Kind, p.Version)
+	if err != nil {
+		if errors.Is(err, semantichub.ErrSchemaNotFound) {
+			return nil, semantichubgen.MakeNotFound(err)
+		}
+		return nil, semantichubgen.MakeInternalError(err)
+	}
+	if err := semantichub.ValidateSchemaContent(schema.Kind, schema.Content); err != nil {
+		return nil, semantichubgen.MakeBadRequest(err)
+	}
 
 	if err := s.Repo.Activate(ctx, tx, p.Name, p.Kind, p.Version); err != nil {
 		if errors.Is(err, semantichub.ErrSchemaNotFound) {
