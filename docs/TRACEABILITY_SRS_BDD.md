@@ -30,8 +30,8 @@ or documentation files, no automated test asserts that part.
 | Status | Meaning | Count |
 |---|---|---|
 | ✅ Covered | the product meets the requirement text; the evidence names the tests, specs or shipped configuration | 243 |
-| ☑️ Covered with recorded deviation | met, except a named part that is a recorded deviation (ADR or product-owner scope decision, see the deviation register) | 30 |
-| 🟡 Partial | the evidence covers the part the row describes; the row names the remaining part of the requirement text | 1 |
+| ☑️ Covered with recorded deviation | met, except a named part that is a recorded deviation (ADR or product-owner scope decision, see the deviation register) | 31 |
+| 🟡 Partial | the evidence covers the part the row describes; the row names the remaining part of the requirement text | 0 |
 | ❌ Deviation | not implemented, by recorded decision (see the deviation register) | 5 |
 | | **Total** | **279** |
 
@@ -365,7 +365,7 @@ this for all three formats. Unit tests:
 | ID | Requirement | Status | Evidence / disposition |
 |---|---|---|---|
 | DCS-NFR-COMP-01 | Legal Compliance | ☑️ Covered with recorded deviation | Technical controls for eIDAS and GDPR: AES signatures by natural persons only (ADR-17), the regulatory rule pack at the deployment gate (ADR-37; `TestEIDASLevelGateBlocksASignatureBelowTheRequiredLevel`, `TestPIDInTheContractDocumentIsFlaggedForReview`, `backend/internal/processauditandcompliance/workflowgate/regulatory_test.go`), GDPR erasure by key shredding (DCS-NFR-COMP-03 tags in `features/26_encryption_at_rest/key_shredding.feature` and `erase_retry.feature`). Deviation: the DCS makes no legal-conformity assessment; rule-pack findings are technical evidence, not a legal opinion (ADR-37). |
-| DCS-NFR-COMP-02 | EUCS/ENISA Compliance | 🟡 Partial | The technical controls that EUCS Annex A groups are in place: access control and role separation (DCS-FR-PACM-04, DCS-NFR-BR-05), cryptography and key management (DCS-IR-HI-01, DCS-NFR-SEC-14), logging and monitoring (DCS-NFR-SEC-09, DCS-FR-UC-09-2), secure disposal (DCS-NFR-SEC-13), network segmentation (DCS-NFR-SEC-14). Remaining part: no mapping of the EUCS Annex A control set to these controls and to the operator's responsibilities, per assurance level. |
+| DCS-NFR-COMP-02 | EUCS/ENISA Compliance | ☑️ Covered with recorded deviation | [EUCS control mapping](eucs-control-mapping.md) maps every objective of EUCS Annex A (ENISA candidate scheme, draft of December 2020) to the DCS control and its evidence, or to the operator: the DCS implements or provides the technical controls of IAM, CKM, CS, PI, PSS and the logging, backup and vulnerability parts of OPS, CCM and DEV (for example DCS-NFR-SEC-14, DCS-IR-HI-01, DCS-NFR-SEC-09, DCS-NFR-SEC-13). Deviation: the organisational categories (OIS, ISP, RM, HR, AM, PS, PM, INQ and most of IM, BC and CO) are controls of the operator as cloud service provider, and certification at an assurance level applies to the operator's service. EUCS is not adopted, so no certificate can be issued. |
 | DCS-NFR-COMP-03 | GDPR Compliance | ☑️ Covered with recorded deviation | Audit logs: tamper-proof audit trail with ORCE anchoring and RFC 3161 time (DCS-FR-PACM-01, DCS-NFR-BR-05, DCS-OR-C2PA-009), logging and monitoring (DCS-NFR-SEC-09), access control and a recorded purpose on audit reads (DCS-FR-PACM-04). GDPR Art. 17 erasure by key shredding on every instance that holds a copy, including the plaintext copies in PostgreSQL (`features/26_encryption_at_rest/key_shredding.feature:24`, `features/26_encryption_at_rest/erase_retry.feature:22`; DCS-NFR-SEC-13); privacy by design and selective disclosure (DCS-NFR-SQ-04, DCS-NFR-SEC-18). Deviation: the DCS provides the technical controls; certification against ISO/IEC 27001 and ETSI EN 319 401 and the legal-conformity assessment belong to the operator ([ADR-37](adr-37-regulatory-rule-pack.md)). |
 
 ## 2.3 Product Constraints (DCS-PC-…)
@@ -486,6 +486,7 @@ Each row names the requirements it affects and where the decision is recorded.
 | Revocation reaches an open session at the next refresh | DCS-NFR-BR-06, DCS-IR-CI-09 | Access tokens are checked locally; their lifetime (5 minutes in prod and acceptance) bounds the delay ([ADR-38](adr-38-recorded-deviations-of-the-pilot.md) §8). |
 | PostgreSQL only | DCS-OE-05, DCS-PC-03 | Replica coordination uses PostgreSQL advisory locks and `LISTEN`/`NOTIFY` ([ADR-38](adr-38-recorded-deviations-of-the-pilot.md) §9). |
 | Lockout per client address | DCS-FR-UC-01-4 | An unverified access token carries no trusted identity, so the lock is per client address; users behind one address share it ([ADR-38](adr-38-recorded-deviations-of-the-pilot.md) §10). |
+| EUCS certification | DCS-NFR-COMP-02 | The organisational EUCS controls and the certification belong to the operator as cloud service provider; EUCS is not adopted ([EUCS control mapping](eucs-control-mapping.md)). |
 | Legal-conformity assessment | DCS-NFR-COMP-01 | Rule-pack findings are technical evidence, not a legal opinion ([ADR-37](adr-37-regulatory-rule-pack.md)). |
 | "Replaced" C2PA lifecycle banner | DCS-OR-C2PA-006 | No workflow command leads to the Replaced state; recorded in `features/19_c2pa_conformance/c2pa_conformance.feature` (header and the @skip scenario). |
 
