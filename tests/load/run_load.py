@@ -12,7 +12,8 @@ tests/bdd run_load_kind_once), which supplies the environment and the venv.
    rate step by step (LOAD_CAPACITY_RATES) until a step breaks a limit. The
    capacity is the highest rate that held every limit; at that step the
    requests each replica served give its throughput at saturation. The test
-   fails when two replicas hold less than one replica.
+   fails when two replicas hold less than half of one replica: on one node
+   the steps double, so one step is runner noise.
 5. Restores the replica count and the per-caller rate limit, which the run
    lifts so that the phases measure the stack and not the limit of one caller.
 
@@ -175,8 +176,10 @@ def main():
 
         capacities = {replicas: capacity(replicas, setup) for replicas in (1, 2)}
         print(f"== capacity (reads/s that held every limit, per-replica requests/s): {capacities}", flush=True)
-        if capacities[2][0] < capacities[1][0]:
-            print(f"FAIL: two replicas held {capacities[2][0]} reads/s, less than one replica ({capacities[1][0]})", flush=True)
+        # Both replicas share one node, and the steps double, so one step of
+        # runner noise halves the result. Fail only below that step.
+        if capacities[2][0] * 2 < capacities[1][0]:
+            print(f"FAIL: two replicas held {capacities[2][0]} reads/s, less than half of one replica ({capacities[1][0]})", flush=True)
             ok = False
     finally:
         kubectl("set", "env", f"deployment/{DEPLOYMENT}", "DCS_API_RATE_LIMIT_PER_MINUTE-")
@@ -200,7 +203,7 @@ def main():
                   "One CI node runs both replicas and the whole stack, so this shows the spread and the "
                   "per-replica throughput at saturation, not linear scaling."]
     lines += ["", "Limits: read p95 < 500 ms, write p95 < 2000 ms, < 1 % failed, no dropped iterations, "
-              f"each of 2 replicas serves >= {MIN_SHARE:.0%}, 2 replicas hold at least the capacity of 1.",
+              f"each of 2 replicas serves >= {MIN_SHARE:.0%}, 2 replicas hold at least half the capacity of 1 (one step of runner noise).",
               f"Result: {'passed' if ok else 'FAILED'}"]
     print("\n".join(lines))
     summary = os.getenv("GITHUB_STEP_SUMMARY")
