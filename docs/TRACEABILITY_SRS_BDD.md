@@ -1,7 +1,7 @@
 # SRS ⇄ BDD Traceability Matrix
 
-**Sources.** Requirements: `docs/SRS_FACIS_DCS.pdf` (text form `docs/SRS_FACIS_DCS.txt`), all 277
-bracket-defined `[DCS-…]` IDs: the 247 product, interface, constraint, environment and C2PA IDs and
+**Sources.** Requirements: `docs/SRS_FACIS_DCS.pdf` (text form `docs/SRS_FACIS_DCS.txt`), all 279
+bracket-defined `[DCS-…]` IDs: the 249 product, interface, constraint, environment and C2PA IDs and
 the 30 `[DCS-FR-UC-XX-Y]` use-case requirements. Evidence: the behave suite in `features/` and the
 Playwright suite in `frontend/ClientApp/e2e` (both run on every CI push against a kind cluster,
 `.github/workflows/bdd-kind.yml`), the Go and vitest unit tests (`.github/workflows/lint-and-format.yml`;
@@ -30,10 +30,10 @@ or documentation files, no automated test asserts that part.
 | Status | Meaning | Count |
 |---|---|---|
 | ✅ Covered | the product meets the requirement text; the evidence names the tests, specs or shipped configuration | 243 |
-| ☑️ Covered with recorded deviation | met, except a named part that is a recorded deviation (ADR or product-owner scope decision, see the deviation register) | 29 |
-| 🟡 Partial | the evidence covers the part the row describes; the row names the remaining part of the requirement text | 0 |
+| ☑️ Covered with recorded deviation | met, except a named part that is a recorded deviation (ADR or product-owner scope decision, see the deviation register) | 30 |
+| 🟡 Partial | the evidence covers the part the row describes; the row names the remaining part of the requirement text | 1 |
 | ❌ Deviation | not implemented, by recorded decision (see the deviation register) | 5 |
-| | **Total** | **277** |
+| | **Total** | **279** |
 
 ## 3.2.1 Template Repository (DCS-FR-TR-…)
 
@@ -364,7 +364,9 @@ this for all three formats. Unit tests:
 
 | ID | Requirement | Status | Evidence / disposition |
 |---|---|---|---|
-| DCS-NFR-COMP-01 | Legal Compliance | ☑️ Covered with recorded deviation | Technical controls for eIDAS and GDPR: AES signatures by natural persons only (ADR-17), the regulatory rule pack at the deployment gate (ADR-37; `TestEIDASLevelGateBlocksASignatureBelowTheRequiredLevel`, `TestPIDInTheContractDocumentIsFlaggedForReview`, `backend/internal/processauditandcompliance/workflowgate/regulatory_test.go`), GDPR erasure by key shredding (DCS-NFR-COMP-03 tags in `features/26_encryption_at_rest/key_shredding.feature` and `erase_retry.feature`). Deviation: the DCS makes no legal-conformity assessment; rule-pack findings are technical evidence, not a legal opinion (ADR-37). The SRS text of DCS-NFR-COMP-02 (EUCS Annex A, SHOULD) has no control mapping in the repository. |
+| DCS-NFR-COMP-01 | Legal Compliance | ☑️ Covered with recorded deviation | Technical controls for eIDAS and GDPR: AES signatures by natural persons only (ADR-17), the regulatory rule pack at the deployment gate (ADR-37; `TestEIDASLevelGateBlocksASignatureBelowTheRequiredLevel`, `TestPIDInTheContractDocumentIsFlaggedForReview`, `backend/internal/processauditandcompliance/workflowgate/regulatory_test.go`), GDPR erasure by key shredding (DCS-NFR-COMP-03 tags in `features/26_encryption_at_rest/key_shredding.feature` and `erase_retry.feature`). Deviation: the DCS makes no legal-conformity assessment; rule-pack findings are technical evidence, not a legal opinion (ADR-37). |
+| DCS-NFR-COMP-02 | EUCS/ENISA Compliance | 🟡 Partial | The technical controls that EUCS Annex A groups are in place: access control and role separation (DCS-FR-PACM-04, DCS-NFR-BR-05), cryptography and key management (DCS-IR-HI-01, DCS-NFR-SEC-14), logging and monitoring (DCS-NFR-SEC-09, DCS-FR-UC-09-2), secure disposal (DCS-NFR-SEC-13), network segmentation (DCS-NFR-SEC-14). Remaining part: no mapping of the EUCS Annex A control set to these controls and to the operator's responsibilities, per assurance level. |
+| DCS-NFR-COMP-03 | GDPR Compliance | ☑️ Covered with recorded deviation | Audit logs: tamper-proof audit trail with ORCE anchoring and RFC 3161 time (DCS-FR-PACM-01, DCS-NFR-BR-05, DCS-OR-C2PA-009), logging and monitoring (DCS-NFR-SEC-09), access control and a recorded purpose on audit reads (DCS-FR-PACM-04). GDPR Art. 17 erasure by key shredding on every instance that holds a copy, including the plaintext copies in PostgreSQL (`features/26_encryption_at_rest/key_shredding.feature:24`, `features/26_encryption_at_rest/erase_retry.feature:22`; DCS-NFR-SEC-13); privacy by design and selective disclosure (DCS-NFR-SQ-04, DCS-NFR-SEC-18). Deviation: the DCS provides the technical controls; certification against ISO/IEC 27001 and ETSI EN 319 401 and the legal-conformity assessment belong to the operator ([ADR-37](adr-37-regulatory-rule-pack.md)). |
 
 ## 2.3 Product Constraints (DCS-PC-…)
 
