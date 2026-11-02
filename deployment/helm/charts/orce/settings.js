@@ -1,7 +1,8 @@
 /**
  * The default settings.js of the ecofacis/xfsc-orce image (2.0.13, /data/settings.js),
  * with these changes:
- *  - rawBodyJSON as httpAdminMiddleware and httpNodeMiddleware;
+ *  - rawBodyJSON as httpAdminMiddleware and httpNodeMiddleware, and for the
+ *    node endpoints also rawTimestampQuery;
  *  - no httpStatic: it served every file under /data without authentication,
  *    including the issuer keys in /data/pki;
  *  - the editor and the admin API run only when ORCE_ADMIN_PASSWORD_HASH holds
@@ -43,6 +44,22 @@ const rawBodyJSON = require('body-parser').json({
     limit: '5mb',
     verify: function (req, res, buf) { req.rawBody = buf; }
 });
+
+/** Keeps an RFC 3161 TimeStampReq (application/timestamp-query) as a Buffer
+ * for POST /tsa. Node-RED parses an unknown body type as text, which changes
+ * the DER bytes; a body parsed here is skipped by Node-RED's own parser.
+ */
+const rawTimestampQuery = require('body-parser').raw({
+    type: 'application/timestamp-query',
+    limit: '64kb'
+});
+
+function httpNodeBodyParsers(req, res, next) {
+    rawBodyJSON(req, res, function (err) {
+        if (err) { return next(err); }
+        rawTimestampQuery(req, res, next);
+    });
+}
 
 module.exports = {
     /*******************************************************************************
@@ -237,7 +254,7 @@ module.exports = {
      * applied to all http in nodes, or any other sort of common request processing.
      * It can be a single function or an array of middleware functions.
      */
-    httpNodeMiddleware: rawBodyJSON,
+    httpNodeMiddleware: httpNodeBodyParsers,
     //httpNodeMiddleware: function(req,res,next) {
     //    // Handle/reject the request, or pass it on to the http in node by calling next();
     //    // Optionally skip our rawBodyParser by setting this to true;
