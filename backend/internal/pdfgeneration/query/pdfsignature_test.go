@@ -47,7 +47,7 @@ func TestRunVerifyReportsPAdESIndicationFromDSS(t *testing.T) {
 		{"no DSS configured", signedTestPDF, nil, provenance.CheckIndeterminate, "DSS_URL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := runVerify(context.Background(), []byte(tc.pdf), pdfCore, nil, nil, tc.validator, SignerAnchors{}, "active")
+			result, err := runVerify(context.Background(), []byte(tc.pdf), pdfCore, nil, nil, tc.validator, SignerAnchors{}, "active", 0)
 			if err != nil {
 				t.Fatalf("runVerify: %v", err)
 			}
@@ -70,7 +70,7 @@ func TestRunVerifyReportsAnUnsignedPDFSignatureAsNotAvailable(t *testing.T) {
 	pdfCore := newStubPDFCore(t, http.StatusOK, map[string]any{"match": true, "c2pa_signature_valid": true})
 	validator := &fakeDSS{}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, validator, SignerAnchors{}, "draft")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, validator, SignerAnchors{}, "draft", 0)
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -79,5 +79,36 @@ func TestRunVerifyReportsAnUnsignedPDFSignatureAsNotAvailable(t *testing.T) {
 	}
 	if validator.called {
 		t.Fatal("the DSS was asked about a PDF without a signature")
+	}
+}
+
+// ADR-40: a contract that records a QES is checked against the QES criteria.
+// A QES whose certificate expired without long-term validation data passes the
+// AES criteria, so only the recorded count shows it as invalid.
+func TestRunVerifyHoldsAQESContractToTheQESCriteria(t *testing.T) {
+	pdfCore := newStubPDFCore(t, http.StatusOK, map[string]any{"match": true, "c2pa_signature_valid": true})
+	expired := &dss.Report{Indication: "INDETERMINATE", SubIndication: "OUT_OF_BOUNDS_NO_POE", SignedBy: "Signatory A", Qualification: "QESig"}
+	longTerm := &dss.Report{Indication: "TOTAL-PASSED", SignedBy: "Signatory A", Qualification: "QESig"}
+
+	for _, tc := range []struct {
+		name      string
+		report    *dss.Report
+		qualified int
+		status    string
+	}{
+		{"QES without long-term validation data", expired, 1, provenance.CheckInvalid},
+		{"QES with long-term validation data", longTerm, 1, provenance.CheckValid},
+		{"AES contract", expired, 0, provenance.CheckValid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := runVerify(context.Background(), []byte(signedTestPDF), pdfCore, nil, nil,
+				&fakeDSS{reports: []*dss.Report{tc.report}}, SignerAnchors{}, "active", tc.qualified)
+			if err != nil {
+				t.Fatalf("runVerify: %v", err)
+			}
+			if result.PdfSignatureStatus != tc.status {
+				t.Fatalf("pdf_signature_status = %q, want %q (detail %v)", result.PdfSignatureStatus, tc.status, result.PdfSignatureDetail)
+			}
+		})
 	}
 }

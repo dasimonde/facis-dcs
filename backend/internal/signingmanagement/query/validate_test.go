@@ -3,6 +3,9 @@ package query
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -84,5 +87,53 @@ func TestValidatorAuditsFailedAttempts(t *testing.T) {
 	}
 	if evt.Data["outcome"] != "FAILED" || evt.Data["error"] != err.Error() || evt.Data["validated_by"] != "participant-1" {
 		t.Fatalf("event data = %#v, want outcome FAILED, error and actor", evt.Data)
+	}
+}
+
+type storedPDFRepoFake struct{ db.ContractRepo }
+
+func (storedPDFRepoFake) FetchContractPDFBytes(context.Context, *sqlx.Tx, string) ([]byte, error) {
+	return []byte("%PDF signed"), nil
+}
+
+// DCS-FR-SM-02 (ADR-40): the compliance viewer checks a contract that records
+// a QES against the QES criteria. A QES whose certificate expired without
+// long-term validation data (INDETERMINATE/OUT_OF_BOUNDS_NO_POE) passes the
+// AES criteria, so only this check shows it.
+func TestValidateWithDSSReportsALostQES(t *testing.T) {
+	signature := func(indication, sub string) string {
+		return `{"simpleReport":{"signatureOrTimestampOrEvidenceRecord":[{"Signature":{"Indication":"` + indication +
+			`","SubIndication":"` + sub + `","SignedBy":"CN=Jane Doe","SignatureQualification":"QESig"}}]}}`
+	}
+	for name, tc := range map[string]struct {
+		report    string
+		qualified int
+		lost      bool
+	}{
+		"QES without long-term validation data": {signature("INDETERMINATE", "OUT_OF_BOUNDS_NO_POE"), 1, true},
+		"QES still valid":                       {signature("TOTAL-PASSED", ""), 1, false},
+		"AES contract":                          {signature("INDETERMINATE", "OUT_OF_BOUNDS_NO_POE"), 0, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.report))
+			}))
+			defer srv.Close()
+			t.Setenv("DSS_URL", srv.URL)
+
+			_, findings, err := (&Validator{CRepo: storedPDFRepoFake{}}).validateWithDSS(context.Background(), nil, "did:web:example.test:contracts:1", tc.qualified)
+			if err != nil {
+				t.Fatalf("validateWithDSS: %v", err)
+			}
+			lost := false
+			for _, finding := range findings {
+				if strings.Contains(finding, "validate as QES") {
+					lost = true
+				}
+			}
+			if lost != tc.lost {
+				t.Fatalf("findings = %q, want a lost QES finding: %v", findings, tc.lost)
+			}
+		})
 	}
 }

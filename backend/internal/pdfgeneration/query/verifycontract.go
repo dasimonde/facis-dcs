@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 
@@ -70,6 +71,19 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 		return nil, fmt.Errorf("read contract PDF verification state for %s: %w", qry.DID, err)
 	}
 
+	// The PDF signature check holds the contract to as many QES as it records
+	// (ADR-40).
+	signatures, err := h.CRepo.ReadSignedSignatures(ctx, tx, qry.DID)
+	if err != nil {
+		return nil, fmt.Errorf("read the signatures of %s: %w", qry.DID, err)
+	}
+	qualified := 0
+	for _, signature := range signatures {
+		if strings.EqualFold(signature.CredentialType, "QES") {
+			qualified++
+		}
+	}
+
 	currentC2PAState, err := provenance.MapCWEStateToC2PA(contract.State)
 	if err != nil {
 		return nil, fmt.Errorf("map contract state %q to C2PA state: %w", contract.State, err)
@@ -90,5 +104,5 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 	if err != nil || len(pdf) == 0 {
 		return nil, fmt.Errorf("fetch contract PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
-	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, h.Signatures, h.signerAnchors(contract), currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, h.Signatures, h.signerAnchors(contract), currentC2PAState, qualified)
 }
