@@ -39,6 +39,10 @@ spec:
         signing:
           issuerDID: "did:web:acceptance.dcs.example.org"
           tsaURL: "https://tsa.example.org/tsr"
+        dss:
+          tsp:
+            # A qualified timestamp authority (ADR-40).
+            url: "https://qtsa.example.org/tsr"
         messaging:
           secretRef:
             name: dcs-acceptance-nats

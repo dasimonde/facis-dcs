@@ -46,6 +46,9 @@ lists them with the Secrets and their keys.
 {{- if and .Values.networkPolicy.enabled .Values.ingress.enabled (not .Values.networkPolicy.ingressFrom) }}
 {{- $missing = append $missing "networkPolicy.ingressFrom: the pods of the ingress controller, so the backend, ORCE and DSS admit no other client outside the release" }}
 {{- end }}
+{{- if and .Values.dss.enabled (not (dig "tsp" "url" "" .Values.dss)) }}
+{{- $missing = append $missing "dss.tsp.url: a qualified RFC 3161 timestamp authority for DSS, which timestamps the PAdES-B-LTA archive of a QES contract (ADR-40)" }}
+{{- end }}
 {{- if $missing }}
 {{- fail (printf "this release uses a real HSM or a Hydra outside dev mode, and the backend cannot start without:\n  - %s\nSee deployment/README.md, \"Production prerequisites\"." (join "\n  - " $missing)) }}
 {{- end }}
