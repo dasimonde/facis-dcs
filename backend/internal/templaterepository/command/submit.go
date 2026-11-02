@@ -221,7 +221,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 	}
 
 	if len(nextTemplateState) > 0 && processData.State != nextTemplateState.String() {
-		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, nextTemplateState.String())
+		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, nextTemplateState.String(), cmd.SubmittedBy)
 		if err != nil {
 			return fmt.Errorf("could not update contract template state: %w", err)
 		}

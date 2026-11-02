@@ -25,6 +25,7 @@ type ContractTemplate struct {
 	Name         *string   `db:"name"`
 	Description  *string   `db:"description"`
 	CreatedBy    string    `db:"created_by"`
+	UpdatedBy    string    `db:"updated_by"`
 	CreatedAt    time.Time `db:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"`
 	// ContentUpdatedAt moves only when the content changes (see ContractTemplateProcessData).
@@ -58,6 +59,7 @@ type ContractTemplateMetadata struct {
 	Name         *string   `db:"name"`
 	Description  *string   `db:"description"`
 	CreatedBy    string    `db:"created_by"`
+	UpdatedBy    string    `db:"updated_by"`
 	CreatedAt    time.Time `db:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"`
 	BaseTemplate *string   `db:"base_template"`
@@ -96,6 +98,8 @@ type ContractTemplateUpdateData struct {
 	// TemplateLevel and RequiredTemplates are left unchanged when nil.
 	TemplateLevel     *string
 	RequiredTemplates []string
+	// UpdatedBy is the identity behind the change.
+	UpdatedBy string
 }
 
 type ContractTemplateHistory struct {
@@ -108,6 +112,7 @@ type ContractTemplateHistory struct {
 	Name         *string        `db:"name"`
 	Description  *string        `db:"description"`
 	CreatedBy    string         `db:"created_by"`
+	UpdatedBy    string         `db:"updated_by"`
 	CreatedAt    time.Time      `db:"created_at"`
 	UpdatedAt    time.Time      `db:"updated_at"`
 	TemplateData *datatype.JSON `db:"template_data"`
@@ -155,7 +160,7 @@ type ContractTemplateRepo interface {
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplateProcessData, error)
 	// UpdateState changes the state only when the stored state is from;
 	// otherwise it returns ErrInvalidTemplateState.
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, from string, to string) error
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, from string, to string, actor string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractTemplateUpdateData) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplatePDFState, error)
 	// ReadDIDsMissingStoredPDF returns the DIDs of at most limit templates that

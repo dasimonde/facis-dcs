@@ -47,7 +47,7 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 	statement := `
 		WITH source AS (
 			SELECT
-				did, template_type, party_type, name, description, created_by, template_data, jurisdiction, industry,
+				did, template_type, party_type, name, description, created_by, updated_by, template_data, jurisdiction, industry,
 				template_level, required_templates,
 				CASE
 					WHEN state IN ('REGISTERED', 'PUBLISHED') THEN version + 1
@@ -61,12 +61,12 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 			WHERE did = $2
 		)
 		INSERT INTO contract_templates
-			(did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
+			(did, version, state, template_type, party_type, name, description, created_by, updated_by, created_at, updated_at,
 			 template_data, base_template, jurisdiction, industry, template_level, required_templates)
 		SELECT
 			$1,
 			source.new_version,
-			'DRAFT', source.template_type, source.party_type, source.name, source.description, source.created_by, NOW(), NOW(),
+			'DRAFT', source.template_type, source.party_type, source.name, source.description, source.created_by, source.updated_by, NOW(), NOW(),
 			source.template_data, source.new_base_template, source.jurisdiction, source.industry,
 			source.template_level, source.required_templates
 		FROM source
@@ -94,10 +94,10 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string) error {
 	statement := `
         INSERT INTO contract_templates_history 
-            (did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
+            (did, version, state, template_type, party_type, name, description, created_by, updated_by, created_at, updated_at,
              template_data, base_template, jurisdiction, industry, compliance_status, template_level, required_templates)
         SELECT
-            did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
+            did, version, state, template_type, party_type, name, description, created_by, updated_by, created_at, updated_at,
             template_data, base_template, jurisdiction, industry, compliance_status, template_level, required_templates
         FROM contract_templates
         WHERE did = $1
@@ -109,7 +109,7 @@ func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Cont
 func (r *PostgresContractTemplateRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractTemplateHistory, error) {
 	query := `
         SELECT did, version, state, name, description,
-               created_by, created_at, updated_at, template_data, template_type, party_type, base_template,
+               created_by, updated_by, created_at, updated_at, template_data, template_type, party_type, base_template,
                jurisdiction, industry, compliance_status, template_level, required_templates
         FROM contract_templates_history WHERE did = $1
     `
@@ -149,7 +149,7 @@ func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, 
 func (r *PostgresContractTemplateRepo) ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplate, error) {
 	query := `
         SELECT did, version, state, name, description,
-               created_by, created_at, updated_at, content_updated_at, template_data, template_type, party_type,
+               created_by, updated_by, created_at, updated_at, content_updated_at, template_data, template_type, party_type,
                base_template, jurisdiction, industry, compliance_status, template_level, required_templates
         FROM contract_templates WHERE did = $1
     `
@@ -182,7 +182,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 		)
 		SELECT
 			t.did, t.version, t.state, t.template_type, t.party_type, t.name,
-			t.description, t.created_by, t.created_at, t.updated_at,
+			t.description, t.created_by, t.updated_by, t.created_at, t.updated_at,
 			t.base_template, t.jurisdiction, t.industry, t.compliance_status, t.template_level, t.required_templates,
 			CASE
 				WHEN t.state NOT IN ('REGISTERED', 'PUBLISHED') THEN FALSE
@@ -214,7 +214,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values db.SearchValues, pagination datatype.Pagination) ([]db.ContractTemplateMetadata, error) {
 	query := `
         SELECT did, version, state, name, template_type, party_type, description,
-               created_by, created_at, updated_at, base_template, jurisdiction, industry, compliance_status,
+               created_by, updated_by, created_at, updated_at, base_template, jurisdiction, industry, compliance_status,
                template_level, required_templates
         FROM contract_templates
     `
@@ -263,13 +263,13 @@ func (r *PostgresContractTemplateRepo) ReadProcessDataByDID(ctx context.Context,
 // error and the caller's rollback removes the entry. The update applies only
 // while the stored state is from: of two concurrent transitions, the second
 // waits for the first and then finds a changed state.
-func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, from string, to string) error {
+func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, from string, to string, actor string) error {
 	if err := r.CreateHistoryEntryForDID(ctx, tx, did); err != nil {
 		return fmt.Errorf("could not create history entry: %w", err)
 	}
 	statement := `
         UPDATE contract_templates ct
-        SET state = $2::contract_template_state
+        SET state = $2::contract_template_state, updated_by = $4
         WHERE did = $1
           AND state = $3::contract_template_state
           AND (
@@ -284,7 +284,7 @@ func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx
               )
           )
     `
-	result, err := tx.ExecContext(ctx, statement, did, to, from)
+	result, err := tx.ExecContext(ctx, statement, did, to, from, actor)
 	if err != nil {
 		return fmt.Errorf("could not update registered state: %w", err)
 	}
@@ -481,6 +481,9 @@ func createQuery(data db.ContractTemplateUpdateData) (*string, []interface{}, er
 	}
 	if len(columns) == 0 {
 		return nil, nil, errors.New("no fields to update")
+	}
+	if data.UpdatedBy != "" {
+		addParam("updated_by", data.UpdatedBy)
 	}
 
 	// Invalidate the cached PDF only when rendered content changes.

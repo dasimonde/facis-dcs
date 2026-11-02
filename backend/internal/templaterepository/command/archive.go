@@ -100,7 +100,7 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 		}
 	}
 
-	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, newState.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, newState.String(), cmd.ArchivedBy)
 	if err != nil {
 		return fmt.Errorf("could not update state: %w", err)
 	}

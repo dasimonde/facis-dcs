@@ -105,7 +105,7 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Approved.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Approved.String(), cmd.ApprovedBy)
 	if err != nil {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}

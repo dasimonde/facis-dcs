@@ -30,7 +30,7 @@ func TestTemplateUpdateStateRequiresExpectedStatePostgres(t *testing.T) {
 	require.NoError(t, err)
 
 	tx := database.MustBegin()
-	err = (&pg.PostgresContractTemplateRepo{}).UpdateState(ctx, tx, "tpl", "APPROVED", "REGISTERED")
+	err = (&pg.PostgresContractTemplateRepo{}).UpdateState(ctx, tx, "tpl", "APPROVED", "REGISTERED", "registrar")
 	require.NoError(t, tx.Rollback())
 	require.ErrorIs(t, err, tpldb.ErrInvalidTemplateState)
 

@@ -37,6 +37,7 @@ type GetHistoryByIDResult struct {
 	Name         *string
 	Description  *string
 	CreatedBy    string
+	UpdatedBy    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	TemplateData *datatype.JSON
@@ -105,6 +106,7 @@ func (h *GetHistoryByIDHandler) Handle(ctx context.Context, query GetHistoryByID
 			Name:         entry.Name,
 			Description:  entry.Description,
 			CreatedBy:    entry.CreatedBy,
+			UpdatedBy:    entry.UpdatedBy,
 			CreatedAt:    entry.CreatedAt,
 			UpdatedAt:    entry.UpdatedAt,
 			TemplateData: entry.TemplateData,

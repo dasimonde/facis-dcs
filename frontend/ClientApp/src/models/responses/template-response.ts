@@ -45,6 +45,7 @@ interface ContractTemplateSearchResponseItem extends TemplateSearchableMetadata,
   description?: string
   created_at: string
   created_by: string
+  updated_by?: string
   updated_at: string
 }
 
@@ -59,6 +60,8 @@ export interface ContractTemplateHistoryEntry {
   name?: string
   description?: string
   created_by: string
+  /** Identity behind this revision */
+  updated_by?: string
   created_at: string
   updated_at: string
 }
@@ -80,6 +83,7 @@ export interface ContractTemplateRetrieveByIdResponse extends TemplateSearchable
   name?: string
   description?: string
   created_by: string
+  updated_by?: string
   created_at: string
   updated_at: string
   /** The template data of the contract template */
