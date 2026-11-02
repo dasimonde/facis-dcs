@@ -33,7 +33,8 @@ func TestAuditReportPostgres(t *testing.T) {
 	keys := &artifactstore.PostgresCEKRepo{DB: database}
 	store := artifactstore.New(objects, keys, reportAgreement{key}, "did:example:instance", "did:example:instance#agreement", &key.PublicKey)
 	service := &processAuditAndCompliancesrvc{DB: database, ATrailReader: base.AuditTrailReader{Artifacts: store}}
-	ctx := middleware.InjectAuthContext(context.Background(), []string{userrole.Auditor.String()}, "did:example:holder", "did:example:participant")
+	// The operator's system client reads every frozen report of the instance.
+	ctx := middleware.InjectAuthContext(context.Background(), []string{userrole.Auditor.String()}, "did:example:holder", "did:example:instance")
 	fixture := reportSnapshotFixture(t)
 	for _, replacement := range []struct{ old, value string }{{"audit-1", "12345678-1234-4234-8234-123456789abc"}, {"correlation-1", "12345678-1234-4234-8234-123456789def"}} {
 		fixture.RequestBytes = bytes.ReplaceAll(fixture.RequestBytes, []byte(replacement.old), []byte(replacement.value))
@@ -139,6 +140,37 @@ func (a reportAgreement) DeriveECDH(peer *ecdsa.PublicKey) ([]byte, error) {
 		return nil, err
 	}
 	return private.ECDH(public)
+}
+
+// reportKeys keeps the wrapped CEKs in memory for tests without Postgres.
+type reportKeys struct{ records []artifactstore.CEKRecord }
+
+func (k *reportKeys) Fetch(_ context.Context, scope artifactstore.Scope, recipient string) (*artifactstore.CEKRecord, error) {
+	for i := range k.records {
+		if r := &k.records[i]; r.ScopeKind == string(scope.Kind) && r.ScopeID == scope.ID && r.RecipientDID == recipient {
+			return r, nil
+		}
+	}
+	return nil, nil
+}
+
+func (k *reportKeys) List(_ context.Context, scope artifactstore.Scope) ([]artifactstore.CEKRecord, error) {
+	var records []artifactstore.CEKRecord
+	for _, r := range k.records {
+		if r.ScopeKind == string(scope.Kind) && r.ScopeID == scope.ID {
+			records = append(records, r)
+		}
+	}
+	return records, nil
+}
+
+func (k *reportKeys) Insert(_ context.Context, scope artifactstore.Scope, recipient string, wrapped []byte) (bool, error) {
+	k.records = append(k.records, artifactstore.CEKRecord{ScopeKind: string(scope.Kind), ScopeID: scope.ID, RecipientDID: recipient, WrappedCEK: wrapped})
+	return true, nil
+}
+
+func (k *reportKeys) Shred(context.Context, artifactstore.Scope, string, string) (int64, error) {
+	return 0, nil
 }
 
 type reportObjects struct{ blobs map[string][]byte }

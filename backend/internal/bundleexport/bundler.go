@@ -161,7 +161,7 @@ type componentInfo struct {
 // including one on a related member — it returns an *ErrRefused. On success
 // it also records an EXPORT audit event (FR-CSA-18).
 func (b *Bundler) ExportContract(ctx context.Context, did string, ec ExportContext) (io.ReadCloser, error) {
-	ctx = contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: ec.ExportedBy, Roles: ec.UserRoles, LocalPeer: b.LocalPeer})
+	ctx = contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: ec.ExportedBy, LocalPeer: b.LocalPeer})
 
 	files := bundleFiles{}
 	var components []componentInfo
@@ -412,7 +412,7 @@ func (b *Bundler) relatedFamilyTx(ctx context.Context, did string, packaged map[
 		return nil, err
 	}
 	related, err := readableRelated(ctx, tx, b.CRepo, family, packaged, func(data *cwedb.Contract) bool {
-		return contractquery.CallerMayReadContract(ec.ExportedBy, ec.UserRoles, b.LocalPeer, data)
+		return contractquery.CallerMayReadContract(ec.ExportedBy, b.LocalPeer, data)
 	})
 	if err != nil {
 		return nil, err

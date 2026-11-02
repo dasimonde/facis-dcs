@@ -8,14 +8,12 @@ import (
 	"fmt"
 
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/datatype/userrole"
 )
 
 var ErrDenied = errors.New("not authorized to access this contract")
 
 type Scope struct {
 	Organization string
-	Roles        userrole.UserRoles
 	LocalPeer    string
 	system       bool
 }
@@ -34,22 +32,22 @@ func FromContext(ctx context.Context) (Scope, bool) {
 	scope, ok := ctx.Value(scopeKey{}).(Scope)
 	return scope, ok
 }
-func (s Scope) Privileged() bool {
-	for _, role := range s.Roles {
-		switch role {
-		case userrole.SystemContractCreator, userrole.SystemContractReviewer, userrole.SystemContractApprover, userrole.SystemContractManager, userrole.SystemContractSigner, userrole.SystemAdministrator, userrole.Auditor:
-			return true
-		}
-	}
-	return false
+
+// ActsForInstance reports a system client whose organization is this
+// instance's DID: it reads the contracts of every organization on the
+// instance. A role alone does not cross organizations, so an Auditor, a
+// System Administrator or a Sys.* client of an organization reads that
+// organization's contracts only, as for writes (ADR-27).
+func (s Scope) ActsForInstance() bool {
+	return s.LocalPeer != "" && s.Organization == s.LocalPeer
 }
 
 // MayRead admits the creating organization and the organizations named in
 // dcs:parties. A copy received from a peer has the peer's DID as creator, so on
 // this instance only the organizations its sender named may read it; a copy
-// that names none is readable by privileged roles only.
+// that names none is readable only by a client that acts for the instance.
 func (s Scope) MayRead(origin, createdBy string, raw *datatype.JSON) bool {
-	if s.system || s.Privileged() {
+	if s.system || s.ActsForInstance() {
 		return true
 	}
 	if s.Organization == "" {
@@ -109,7 +107,7 @@ func decide(ctx context.Context) (Scope, rowFilter) {
 	switch {
 	case !scoped:
 		return s, noRows
-	case s.system || s.Privileged():
+	case s.system || s.ActsForInstance():
 		return s, allRows
 	}
 	return s, partyRows

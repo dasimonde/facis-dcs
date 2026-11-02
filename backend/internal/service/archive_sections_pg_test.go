@@ -70,7 +70,13 @@ func TestArchivedSectionsAreReadableOnlyByTheirParties(t *testing.T) {
 	ids, err = read(organizationContext("Org C", "Contract Observer"), "")
 	require.NoError(t, err)
 	require.Equal(t, []string{"urn:c#delivery"}, ids)
-	ids, err = read(organizationContext("Org Audit", "Auditor"), "")
+	// QA F03: an Auditor of another organization reads no section; the
+	// operator's system client reads all of them.
+	_, err = read(organizationContext("Org Audit", "Auditor"), "")
+	require.ErrorContains(t, err, "not authorized")
+	instance, err := svc.DIDDocument.GetID()
+	require.NoError(t, err)
+	ids, err = read(organizationContext(instance, "Sys. Contract Manager"), "")
 	require.NoError(t, err)
 	require.Equal(t, []string{"urn:c#payment", "urn:c#delivery"}, ids)
 

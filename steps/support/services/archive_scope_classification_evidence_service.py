@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 
 from steps.support.api_client import (
-    delete_with_params, get_with_headers, post_json, put_json,
+    delete_with_params, did_document_url, get_with_headers, post_json, put_json,
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
@@ -31,6 +31,12 @@ class ArchiveScopeClassificationEvidenceService:
             headers=ArchiveScopeClassificationEvidenceService.headers(context, roles, organization),
             timeout=context.http_timeout_seconds,
         )
+
+    @staticmethod
+    def instance_did(context):
+        response = requests.get(did_document_url(context.base_url), timeout=context.http_timeout_seconds)
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
 
     @staticmethod
     def signed_contract(context, name):

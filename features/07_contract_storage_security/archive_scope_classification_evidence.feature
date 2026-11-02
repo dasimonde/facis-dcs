@@ -40,7 +40,8 @@ Feature: Archive snapshot, party classification, organization scope and evidence
     And the organization of contract "Visible Org Contract" sees it in contract, archive and signing searches but cannot see "Foreign Org Contract"
     When a Contract Manager from the organization of "Visible Org Contract" requests "/contract/retrieve/{did}" for contract "Visible Org Contract"
     Then the response status is 200
-    And the privileged readers can retrieve contract "Foreign Org Contract" from an unrelated organization
+    And the cross-organization roles of an unrelated organization cannot retrieve contract "Foreign Org Contract"
+    And a system client acting for the instance can retrieve contract "Foreign Org Contract"
 
   @DCS-FR-CWE-07 @DCS-NFR-SEC-03
   Scenario Outline: Indirect contract reads reject an unrelated organization with an otherwise valid role

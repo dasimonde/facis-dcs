@@ -151,13 +151,21 @@ def indirect_read(context, own, path, target):
     context.requests_response = Service.get(context, path.replace("{did}", did), ["Contract Manager"], context.contract_organizations[own])
 
 
-@then('the privileged readers can retrieve contract "{name}" from an unrelated organization')
-def privileged_read(context, name):
+@then('the cross-organization roles of an unrelated organization cannot retrieve contract "{name}"')
+def cross_organization_roles_refused(context, name):
+    # QA F03: a role does not cross organizations.
     did, _ = ContractService._contract_data(context, name)
     for role in ("Auditor", "Sys. Administrator", "Sys. Contract Manager"):
         response = Service.get(context, f"/contract/retrieve/{did}", ["Contract Observer", role], "BDD Unrelated Privileged Org")
-        assert response.status_code == 200, (role, response.text)
-        assert response.json()["did"] == did
+        assert response.status_code == 403, (role, response.status_code, response.text)
+
+
+@then('a system client acting for the instance can retrieve contract "{name}"')
+def instance_client_read(context, name):
+    did, _ = ContractService._contract_data(context, name)
+    response = Service.get(context, f"/contract/retrieve/{did}", ["Sys. Contract Manager"], Service.instance_did(context))
+    assert response.status_code == 200, response.text
+    assert response.json()["did"] == did
 
 
 @given('the evidence file "{filename}" contains hexadecimal bytes "{content}"')

@@ -120,8 +120,10 @@ func TestReadHTTPRegressionsPostgres(t *testing.T) {
 	}
 	require.NoError(t, database.Get(&after, "SELECT count(*) FROM outbox_events"))
 	require.Equal(t, before, after)
-	get("/signature/request/"+ids["foreign"], userrole.SystemContractSigner, 200)
-	get("/signature/audit?justification=review&did=foreign", userrole.Auditor, 200)
+	// QA F03: a Sys.* or Auditor role of the caller's organization does not
+	// read another organization's contract.
+	get("/signature/request/"+ids["foreign"], userrole.SystemContractSigner, 403)
+	get("/signature/audit?justification=review&did=foreign", userrole.Auditor, 403)
 	get("/signature/request/10000000-0000-4000-8000-000000000099", userrole.ContractObserver, 404)
 	get("/signature/audit?justification=review&did=missing", userrole.ComplianceOfficer, 404)
 	body := get("/archive/detail?did=own&contract_version=1", userrole.ContractObserver, 200)

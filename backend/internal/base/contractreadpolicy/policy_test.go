@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/datatype/userrole"
 )
 
 const localPeer = "did:web:local"
@@ -13,7 +12,7 @@ const localPeer = "did:web:local"
 func TestMayRead(t *testing.T) {
 	party := datatype.JSON(`{"dcs:parties":[{"dcs:legalName":"Org A"}]}`)
 	none := datatype.JSON(`{}`)
-	user := Scope{Organization: "Org A", Roles: userrole.UserRoles{userrole.ContractObserver}, LocalPeer: localPeer}
+	user := Scope{Organization: "Org A", LocalPeer: localPeer}
 	for _, tc := range []struct {
 		name              string
 		scope             Scope
@@ -27,8 +26,11 @@ func TestMayRead(t *testing.T) {
 		{"foreign without data", user, localPeer, "Org B", nil, false},
 		{"received copy without parties", user, "did:web:peer", "did:web:peer", &none, false},
 		{"received copy naming the organization", user, "did:web:peer", "did:web:peer", &party, true},
-		{"received copy naming another organization", Scope{Organization: "Org C", Roles: user.Roles, LocalPeer: localPeer}, "did:web:peer", "did:web:peer", &party, false},
-		{"no organization", Scope{Roles: user.Roles, LocalPeer: localPeer}, localPeer, "", &party, false},
+		{"received copy naming another organization", Scope{Organization: "Org C", LocalPeer: localPeer}, "did:web:peer", "did:web:peer", &party, false},
+		{"no organization", Scope{LocalPeer: localPeer}, localPeer, "", &party, false},
+		{"system client acting for the instance", Scope{Organization: localPeer, LocalPeer: localPeer}, localPeer, "Org B", &none, true},
+		{"system client acting for the instance reads a received copy", Scope{Organization: localPeer, LocalPeer: localPeer}, "did:web:peer", "did:web:peer", &none, true},
+		{"instance DID without a known local peer", Scope{Organization: localPeer}, localPeer, "Org B", &none, false},
 		{"system scope", Scope{system: true}, localPeer, "Org B", &none, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,16 +38,6 @@ func TestMayRead(t *testing.T) {
 				t.Fatalf("MayRead = %v, want %v", got, tc.want)
 			}
 		})
-	}
-	for _, role := range []userrole.UserRole{userrole.SystemContractCreator, userrole.SystemContractReviewer, userrole.SystemContractApprover, userrole.SystemContractManager, userrole.SystemContractSigner, userrole.SystemAdministrator, userrole.Auditor} {
-		if !(Scope{Roles: userrole.UserRoles{role}, LocalPeer: localPeer}).MayRead(localPeer, "Org B", &none) {
-			t.Fatalf("privileged role %s denied", role)
-		}
-	}
-	for _, role := range []userrole.UserRole{userrole.ContractObserver, userrole.ContractSigner, userrole.ContractManager, userrole.ComplianceOfficer, userrole.ArchiveManager} {
-		if (Scope{Organization: "Org A", Roles: userrole.UserRoles{role}, LocalPeer: localPeer}).MayRead(localPeer, "Org B", &none) {
-			t.Fatalf("role %s reads a foreign contract", role)
-		}
 	}
 }
 
@@ -57,8 +49,8 @@ func TestPredicateDecision(t *testing.T) {
 		want rowFilter
 	}{
 		{"no scope", ctx, noRows},
-		{"user scope", WithScope(ctx, Scope{Organization: "Org A", Roles: userrole.UserRoles{userrole.ContractObserver}, LocalPeer: localPeer}), partyRows},
-		{"privileged role", WithScope(ctx, Scope{Roles: userrole.UserRoles{userrole.Auditor}, LocalPeer: localPeer}), allRows},
+		{"user scope", WithScope(ctx, Scope{Organization: "Org A", LocalPeer: localPeer}), partyRows},
+		{"system client acting for the instance", WithScope(ctx, Scope{Organization: localPeer, LocalPeer: localPeer}), allRows},
 		{"system scope", WithSystemScope(ctx), allRows},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

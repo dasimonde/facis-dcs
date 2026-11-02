@@ -57,8 +57,14 @@ func TestArchiveAccessBypassesPostgres(t *testing.T) {
 		require.NoError(t, err)
 	}
 	manager := middleware.InjectAuthContext(ctx, []string{"Archive Manager"}, "holder", "Org A")
-	auditor := middleware.InjectAuthContext(ctx, []string{"Auditor"}, "holder", "Audit Org")
-	statistics, err := archiveService.Statistics(manager, &archive.StatisticsPayload{})
+	// The operator's system client reads every organization; an Auditor of
+	// another organization reads none of these contracts (QA F03).
+	auditor := middleware.InjectAuthContext(ctx, []string{"Sys. Contract Manager", "Auditor"}, "holder", peer)
+	unrelatedAuditor := middleware.InjectAuthContext(ctx, []string{"Auditor"}, "holder", "Audit Org")
+	statistics, err := archiveService.Statistics(unrelatedAuditor, &archive.StatisticsPayload{})
+	require.NoError(t, err)
+	require.Equal(t, 0, statistics.ArchivedTotal)
+	statistics, err = archiveService.Statistics(manager, &archive.StatisticsPayload{})
 	require.NoError(t, err)
 	require.Equal(t, 1, statistics.ArchivedTotal)
 	require.Len(t, statistics.ExpiringContracts, 1)

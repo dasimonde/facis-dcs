@@ -21,7 +21,7 @@ func contractReadContext(ctx context.Context, document identity.DIDDocument) (co
 	if err != nil {
 		return ctx, contractworkflowengine.MakeInternalError(err)
 	}
-	return contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), Roles: middleware.GetUserRoles(ctx), LocalPeer: peer}), nil
+	return contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), LocalPeer: peer}), nil
 }
 
 type contractAccessRow struct {
@@ -48,7 +48,7 @@ func authorizeContractRead(ctx context.Context, database *sqlx.DB, localPeer, di
 	if err != nil {
 		return err
 	}
-	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), Roles: middleware.GetUserRoles(ctx), LocalPeer: localPeer}
+	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), LocalPeer: localPeer}
 	if !scope.MayRead(row.Origin, row.CreatedBy, row.Data) {
 		return contractworkflowengine.MakeForbidden(contractreadpolicy.ErrDenied)
 	}
@@ -143,13 +143,13 @@ func authorizeContractReadDocument(ctx context.Context, database *sqlx.DB, docum
 	return authorizeContractRead(ctx, database, peer, did)
 }
 
-// readableContractDIDs is nil only for the existing privileged cross-organization roles.
+// readableContractDIDs is nil only for a client that acts for the instance.
 func readableContractDIDs(ctx context.Context, database *sqlx.DB) (map[string]bool, error) {
 	scope, ok := contractreadpolicy.FromContext(ctx)
 	if !ok {
 		return nil, contractworkflowengine.MakeForbidden(contractreadpolicy.ErrDenied)
 	}
-	if scope.Privileged() {
+	if scope.ActsForInstance() {
 		return nil, nil
 	}
 	var params []any

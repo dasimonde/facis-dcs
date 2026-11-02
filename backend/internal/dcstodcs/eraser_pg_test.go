@@ -9,7 +9,6 @@ import (
 
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/contractreadpolicy"
-	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
@@ -269,7 +268,7 @@ func TestErasedContractStaysReadableForItsNamedParties(t *testing.T) {
 	require.Equal(t, `{"dcs:parties": [{"dcs:legalName": "Org B"}]}`, data)
 
 	ctx := contractreadpolicy.WithScope(context.Background(),
-		contractreadpolicy.Scope{Organization: "Org B", Roles: userrole.UserRoles{userrole.ContractObserver}})
+		contractreadpolicy.Scope{Organization: "Org B"})
 	params := []any{erasedDID}
 	var readable int
 	require.NoError(t, db.Get(&readable, `SELECT count(*) FROM contracts WHERE did = $1 AND `+
