@@ -698,7 +698,7 @@ func (c *Coordinator) List(ctx context.Context, status string, pending bool) ([]
         ORDER BY r.created_at DESC`, status, pending); err != nil {
 		return nil, err
 	}
-	// ponytail: one Read per run; a single joined query when the list grows large.
+	// Limit: one Read per run; a single joined query when the list grows large.
 	runs := make([]Run, 0, len(ids))
 	for _, id := range ids {
 		run, err := c.Read(ctx, id, "", "")

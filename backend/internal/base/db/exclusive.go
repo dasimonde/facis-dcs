@@ -35,7 +35,7 @@ func RunExclusive(ctx context.Context, database *sqlx.DB, name string, fn func()
 // after the other. A waiter holds no connection: it tries the lock again every
 // lockRetryInterval, so the pool stays free for the holder's own transactions.
 //
-// ponytail: polling, so waiters are not served in order; a session lock on a
+// Limit: polling, so waiters are not served in order; a session lock on a
 // dedicated connection if order matters.
 func RunLocked(ctx context.Context, database *sqlx.DB, name string, fn func() error) error {
 	for {

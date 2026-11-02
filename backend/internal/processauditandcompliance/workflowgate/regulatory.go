@@ -209,7 +209,7 @@ func regulatoryFindings(content map[string]any, facts regulatoryFacts) []validat
 
 	// GDPR: the contract document is the payload and the source of the
 	// rendered PDF, so a signatory's PID must not occur in it.
-	// ponytail: exact match of whole string values; a PID value inside a longer text is not found.
+	// Limit: exact match of whole string values; a PID value inside a longer text is not found.
 	pid := make(map[string]bool, len(facts.PIDValues))
 	for _, value := range facts.PIDValues {
 		pid[strings.ToLower(strings.TrimSpace(value))] = true

@@ -29,7 +29,7 @@ import (
 //
 // Objects held inside object streams (/Type /ObjStm) are not resolved: a copy
 // re-saved with object streams reports a mismatch.
-// ponytail: no object-stream resolution; add it when a supported tool re-saves copies that way.
+// Limit: no object-stream resolution; add it when a supported tool re-saves copies that way.
 
 // pdfValue is one parsed PDF object.
 type pdfValue struct {

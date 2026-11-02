@@ -36,7 +36,7 @@ type SignerAnchors struct {
 
 // anchorSigners returns the C2PA signer status and, per manifest, the party
 // its leaf is anchored to or why it is not.
-// ponytail: the chain is checked at the current time; a leaf that expired since
+// Limit: the chain is checked at the current time; a leaf that expired since
 // it signed reports invalid until manifests carry a trusted timestamp.
 func anchorSigners(signers []pdfcore.ManifestSigner, anchors SignerAnchors) (status, detail string) {
 	if len(signers) == 0 {
