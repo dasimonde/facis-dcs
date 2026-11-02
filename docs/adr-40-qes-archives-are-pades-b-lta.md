@@ -56,6 +56,10 @@ a QES contract is augmented to PAdES-B-LT/B-LTA. This ADR records how.
    (an `OnlineTSPSource`, `deployment/helm/charts/dss`). A production-like
    release with the co-deployed DSS does not render without it. Empty, the
    DSS image uses its own in-process TSA, which no trusted list names.
+   ORCE stands in for the qualified trust service provider in a test
+   deployment: its local TSA answers RFC 3161 over `POST /tsa`, and
+   `dss.tsp.url` can point there. Those timestamps are not qualified; a
+   production release names the TSA of its QTSP instead.
 8. **Later lifecycle updates.** pdf-core reads the trailer of the section the
    last `startxref` names (a classic trailer or a cross-reference stream) and
    matches the catalog with any whitespace, so a lifecycle update after the
