@@ -170,6 +170,15 @@ dss:
 archive:
   retentionYears: 10
 
+# The bundled ORCE notarizes every archive entry, and the backend records the
+# RFC 3161 timestamp of signing.tsaURL with it (DCS-FR-CSA-03). The Secret
+# dcs-prod-archive-audit-token holds ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN.
+orce:
+  enabled: true
+global:
+  archiveAuditTokenSecretRef:
+    name: dcs-prod-archive-audit-token
+
 # Daily dump of the DCS database (DCS-NFR-SF-03): docs/backup-integration-guide.md.
 # Set persistence.storageClassName to an encrypted class.
 backup:

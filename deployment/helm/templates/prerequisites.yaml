@@ -21,6 +21,17 @@ lists them with the Secrets and their keys.
 {{- if not .Values.signing.tsaURL }}
 {{- $missing = append $missing "signing.tsaURL: the RFC 3161 timestamp authority, TSA_URL" }}
 {{- end }}
+{{- if not .Values.orce.enabled }}
+{{- if not .Values.archiveNotary.baseURL }}
+{{- $missing = append $missing "orce.enabled or archiveNotary.baseURL: the archive notary, which records the RFC 3161 timestamp of every archive entry (DCS-FR-CSA-03), ORCE_ARCHIVE_NOTARY_URL" }}
+{{- end }}
+{{- if not .Values.auditExecutor.url }}
+{{- $missing = append $missing "orce.enabled or auditExecutor.url: the PAC audit executor, PAC_AUDIT_EXECUTOR_URL" }}
+{{- end }}
+{{- if not .Values.workflowGateExecutor.url }}
+{{- $missing = append $missing "orce.enabled or workflowGateExecutor.url: the workflow-gate executor, PAC_WORKFLOW_GATE_EXECUTOR_URL" }}
+{{- end }}
+{{- end }}
 {{- if not (or .Values.messaging.natsURL .Values.messaging.secretRef.name .Values.nats.enabled) }}
 {{- $missing = append $missing "messaging.natsURL, messaging.secretRef.name or nats.enabled: the NATS server, NATS_URL" }}
 {{- end }}
