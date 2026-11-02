@@ -664,6 +664,7 @@ Two trust configurations follow from that:
 ### TLS
 - Use certificates from a trusted Certificate Authority
 - Recommend [cert-manager](https://cert-manager.io/) for automatic renewal
+- Where cert-manager cannot renew (a namespace LimitRange with a per-container minimum above the 10m CPU / 64Mi of its HTTP-01 solver pod refuses that pod), set `acmeRenewal`: a CronJob that renews the certificate with certbot and writes the TLS Secret the ingress serves.
 - TLS 1.3 minimum (DCS-IR-CI-01, DCS-NFR-SEC-01). When Traefik terminates the ingress TLS, the chart enforces it: it writes a `TLSOption` with `minVersion: VersionTLS13` and names it on the ingress (`ingress.tlsOptions`, on by default). For another controller, set the minimum on the controller. For ingress-nginx, set `ssl-protocols: "TLSv1.3"` in the controller ConfigMap.
 - Verify after install. The first command must fail, the second must connect:
   ```bash
@@ -679,6 +680,17 @@ Two trust configurations follow from that:
   - `nginx` (ingress-nginx): the ingress carries `backend-protocol: "HTTPS"`, `proxy-ssl-secret: <namespace>/<release>-internal-tls`, `proxy-ssl-verify: "on"`, `proxy-ssl-name` and `proxy-ssl-protocols: "TLSv1.3"`.
   - Any other class: the routes use the plain ports. Set `ingress.className` to `traefik` or `nginx` to get TLS on this hop.
 - Co-deployed PostgreSQL password: with `postgresql.auth.password` empty, the chart generates a random password on install and keeps it on upgrade (Secret `<release>-postgresql`). The backend, the backup and the compliance monitor get it as `PGPASSWORD`.
+
+### Namespaces with a LimitRange or a ResourceQuota
+- A container without its own resources gets the LimitRange default, which can exhaust a `limits.cpu` quota. Give every container requests and limits at or above the LimitRange minimum, also the sidecars and the hook jobs: `resources`, `pdfCore.resources`, `postgresql.resources`, `nats.resources`, `ipfs.resources`, `hydra.resources`, `hydra.jobResources` (also the client registration container of the Hydra pod), `orce.resources`, `orce.jobResources`, `global.internalTLS.proxy.resources` (the TLS proxy beside each service), `complianceMonitor.resources`, `pkcs11.provisioning.resources`, `acmeRenewal.resources` and `backup.resources`.
+- A rollout runs the old and the new pod side by side. Restart one Deployment at a time when the quota leaves less headroom than the largest pod.
+
+### First install on `WaitForFirstConsumer` storage
+- The volumes of `acmeRenewal` and `backup` are used only by their CronJobs. With a StorageClass in `WaitForFirstConsumer` mode they bind at the first run, and `helm --wait` waits for them until it times out. After the first install, run each CronJob once:
+  ```bash
+  kubectl -n <namespace> create job acme-first-run --from=cronjob/<fullname>-acme
+  kubectl -n <namespace> create job backup-first-run --from=cronjob/<fullname>-db-backup
+  ```
 
 ### Pod security and image integrity (DCS-NFR-SEC-05)
 - Every pod the chart and its subcharts own runs with a `RuntimeDefault` seccomp profile, with all capabilities dropped and without privilege escalation. The containers run as a fixed non-root UID on a read-only root filesystem and write only to their volumes and `emptyDir` mounts (`/tmp` and the paths each component writes). Chart test: `deployment/helm/tests/pod_security_test.sh`.
