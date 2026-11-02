@@ -25,13 +25,14 @@ vi.mock('@/services/contract-template-service', () => ({
   },
 }))
 
-function entry(version: number, state: string, updatedAt: string): ContractTemplateHistoryEntry {
+function entry(version: number, state: string, updatedAt: string, updatedBy?: string): ContractTemplateHistoryEntry {
   return {
     did: DID,
     version,
     state,
     template_type: 'CONTRACT_TEMPLATE',
     created_by: 'did:web:example.com:creator',
+    updated_by: updatedBy,
     created_at: '2026-07-01T08:00:00Z',
     updated_at: updatedAt,
   } as ContractTemplateHistoryEntry
@@ -53,9 +54,9 @@ describe('TemplateProvenance history', () => {
     retrieve.mockClear()
   })
 
-  it('renders the history entries of the template, oldest first', async () => {
+  it('renders the history entries of the template, oldest first, with who changed each', async () => {
     retrieveHistory.mockResolvedValue([
-      entry(1, 'SUBMITTED', '2026-07-02T10:00:00Z'),
+      entry(1, 'SUBMITTED', '2026-07-02T10:00:00Z', 'did:web:example.com:reviewer'),
       entry(1, 'DRAFT', '2026-07-01T09:00:00Z'),
     ])
 
@@ -65,7 +66,7 @@ describe('TemplateProvenance history', () => {
     const rows = wrapper.findAll('[data-testid="template-history-entry"]')
     expect(rows.map((row) => row.findAll('td').map((cell) => cell.text()))).toEqual([
       ['1', 'DRAFT', new Date('2026-07-01T09:00:00Z').toLocaleString(), 'did:web:example.com:creator'],
-      ['1', 'SUBMITTED', new Date('2026-07-02T10:00:00Z').toLocaleString(), 'did:web:example.com:creator'],
+      ['1', 'SUBMITTED', new Date('2026-07-02T10:00:00Z').toLocaleString(), 'did:web:example.com:reviewer'],
     ])
   })
 

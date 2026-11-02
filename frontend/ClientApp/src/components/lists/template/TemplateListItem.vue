@@ -80,6 +80,7 @@ function getTemplateLink(template: PartialContractTemplate): string {
           <div class="flex min-w-0 flex-col gap-0.5 text-sm leading-snug">
             <div v-if="template.version">Version: {{ template.version }}</div>
             <div v-if="template.updated_at">Last changed: {{ new Date(template.updated_at).toLocaleString() }}</div>
+            <div v-if="template.updated_by">Last changed by: {{ template.updated_by }}</div>
             <div v-if="template.created_by">Created by: {{ template.created_by }}</div>
             <div>Creation date: {{ new Date(template.created_at).toLocaleDateString() }}</div>
           </div>

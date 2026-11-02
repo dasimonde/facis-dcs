@@ -89,7 +89,7 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			return nil, fmt.Errorf("%w: compliance status %s", ErrTemplateNotCompliant, existing.ComplianceStatus)
 		}
 
-		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, existing.State, contracttemplatestate.Registered.String())
+		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, existing.State, contracttemplatestate.Registered.String(), cmd.RegisteredBy)
 		if err != nil {
 			return nil, fmt.Errorf("could not update registered state: %w", err)
 		}

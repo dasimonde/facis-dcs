@@ -83,7 +83,7 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Rejected.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Rejected.String(), cmd.RejectedBy)
 	if err != nil {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}

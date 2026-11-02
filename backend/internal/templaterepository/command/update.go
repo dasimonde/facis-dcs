@@ -129,6 +129,7 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	}
 
 	newData := db.ContractTemplateUpdateData{
+		UpdatedBy:    cmd.UpdatedBy,
 		DID:          cmd.DID,
 		TemplateType: templateType,
 		PartyType:    cmd.PartyType,

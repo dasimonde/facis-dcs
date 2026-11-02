@@ -175,6 +175,7 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
 	Attribute("created_by", String, "Identifier of who created the contract template (DCS-IR-TR-08)")
+	Attribute("updated_by", String, "Identity behind the last change of the contract template (DCS-FR-TR-05)")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
@@ -200,6 +201,7 @@ var ContractTemplateItem = Type("ContractTemplateItem", func() {
 	Attribute("name", String, "Name")
 	Attribute("description", String, "Description")
 	Attribute("created_by", String, "Created by")
+	Attribute("updated_by", String, "Identity behind the last change of the contract template (DCS-FR-TR-05)")
 	Attribute("created_at", String, "Created at")
 	Attribute("updated_at", String, "Updated at")
 	Attribute("latest_did", String, "The DID of the newest contract template")
@@ -290,6 +292,7 @@ var ContractTemplateHistoryRetrieveByIDResponse = Type("ContractTemplateHistoryR
 	Attribute("description", String, "A description for that template")
 
 	Attribute("created_by", String, "Identifier of who created the contract template")
+	Attribute("updated_by", String, "Identity behind the last change of this revision (DCS-FR-TR-05)")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
@@ -342,6 +345,7 @@ var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDRes
 	Attribute("description", String, "A description for that template")
 
 	Attribute("created_by", String, "Identifier of who created the contract template")
+	Attribute("updated_by", String, "Identity behind the last change of the contract template (DCS-FR-TR-05)")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")

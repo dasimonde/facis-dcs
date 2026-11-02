@@ -40,6 +40,7 @@ type GetByIDResult struct {
 	Name         *string
 	Description  *string
 	CreatedBy    string
+	UpdatedBy    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	TemplateData *datatype.JSON
@@ -123,6 +124,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 		Name:         data.Name,
 		Description:  data.Description,
 		CreatedBy:    data.CreatedBy,
+		UpdatedBy:    data.UpdatedBy,
 		CreatedAt:    data.CreatedAt,
 		UpdatedAt:    data.UpdatedAt,
 		TemplateData: data.TemplateData,

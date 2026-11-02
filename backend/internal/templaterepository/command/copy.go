@@ -66,6 +66,7 @@ func (h *Copier) Handle(ctx context.Context, cmd CopyCmd) error {
 	err = h.CTRepo.Update(ctx, tx, db.ContractTemplateUpdateData{
 		DID:          cmd.NewDID,
 		TemplateData: normalizedTemplateData,
+		UpdatedBy:    cmd.CopiedBy,
 	})
 	if err != nil {
 		return fmt.Errorf("could not normalize copied contract template data: %w", err)

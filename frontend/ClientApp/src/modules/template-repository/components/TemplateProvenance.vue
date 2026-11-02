@@ -67,7 +67,7 @@ watch(
           <th>Version</th>
           <th>State</th>
           <th>Changed at</th>
-          <th>Created by</th>
+          <th>Changed by</th>
         </tr>
       </thead>
       <tbody>
@@ -75,7 +75,7 @@ watch(
           <td>{{ entry.version }}</td>
           <td>{{ entry.state }}</td>
           <td>{{ formatWhen(entry.updated_at) }}</td>
-          <td class="break-all">{{ entry.created_by }}</td>
+          <td class="break-all">{{ entry.updated_by ?? entry.created_by }}</td>
         </tr>
       </tbody>
     </table>

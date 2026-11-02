@@ -64,6 +64,8 @@ export interface TemplateReviewNote {
 export interface ContractTemplate extends TemplateSearchableMetadata, TemplateStructure {
   did: string
   created_by: string
+  /** Identity behind the last change */
+  updated_by?: string
   created_at: string
   version: number
   party_type: PartyType
