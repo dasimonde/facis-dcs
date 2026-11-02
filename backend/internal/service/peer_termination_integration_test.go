@@ -31,7 +31,7 @@ func (s *capturingTerminationSender) SendTermination(_ context.Context, _ string
 // instance that received the contract, in the same transaction, and the
 // notifier delivers it until the peer confirms. The signed challenge binds the
 // contract, the receiver and the reason.
-func TestQATerminationIsPropagatedToThePeerPostgres(t *testing.T) {
+func TestTerminationIsPropagatedToThePeerPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	document := eraseTestDIDDocument(t, "local.example")
 	peer, err := document.GetID()
@@ -74,7 +74,7 @@ func TestQATerminationIsPropagatedToThePeerPostgres(t *testing.T) {
 
 // The receiving side terminates its copy only on notice from a party, does not
 // notify back, and confirms a repeated notice.
-func TestQAPeerTerminationNoticeTerminatesTheLocalCopyPostgres(t *testing.T) {
+func TestPeerTerminationNoticeTerminatesTheLocalCopyPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	local, err := document.GetID()

@@ -20,7 +20,7 @@ import (
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
 
-func TestQAPartyTypePostgres(t *testing.T) {
+func TestPartyTypePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	tx, err := database.BeginTxx(ctx, nil)
@@ -76,7 +76,7 @@ func TestQAPartyTypePostgres(t *testing.T) {
 
 }
 
-func TestQAPartyTypeCreateValidation(t *testing.T) {
+func TestPartyTypeCreateValidation(t *testing.T) {
 	kind := "CONTRACT_TEMPLATE"
 	require.Error(t, server.ValidateCreateRequestBody(&server.CreateRequestBody{TemplateType: &kind}))
 	for _, value := range []string{"", "multi_party", "CONTRACT_TEMPLATE", "MULTI_PARTY", "SINGLE_PARTY"} {
@@ -89,7 +89,7 @@ func TestQAPartyTypeCreateValidation(t *testing.T) {
 	}
 }
 
-func TestQAPartyTypeUpdateManageHistory(t *testing.T) {
+func TestPartyTypeUpdateManageHistory(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	repo := &pg.PostgresContractTemplateRepo{}
@@ -121,7 +121,7 @@ func TestQAPartyTypeUpdateManageHistory(t *testing.T) {
 	}
 }
 
-func TestQAPartyTypeCatalogueImport(t *testing.T) {
+func TestPartyTypeCatalogueImport(t *testing.T) {
 	database := pgtest.Open(t)
 	for _, value := range []string{"SINGLE_PARTY", "MULTI_PARTY", "", "invalid"} {
 		t.Run(value, func(t *testing.T) {

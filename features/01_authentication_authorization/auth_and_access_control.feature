@@ -16,7 +16,7 @@ Feature: Authentication Endpoints
     When the system sends "GET" request to endpoint "/auth/logout" without payload
     Then the response status is 401
 
-  @REQ-qa-fixes-abschluss-AC1 @DCS-IR-SI-03
+  @DCS-IR-SI-03
   Scenario Outline: Access restricted endpoint responds with access denied (CWE)
     Given no bearer token is supplied
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
@@ -57,7 +57,7 @@ Feature: Authentication Endpoints
       # required justification before the JWT check; placeholders reach 401.
       | GET    | /archive/audit?justification=placeholder | {} |
 
-  @REQ-qa-fixes-abschluss-AC1 @DCS-FR-TR-06
+  @DCS-FR-TR-06
   Scenario Outline: Access restricted endpoint responds with access denied (Template Repository)
     Given no bearer token is supplied
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"

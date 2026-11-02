@@ -16,7 +16,7 @@ import (
 
 // DCS-FR-CWE-23: termination removes the contract from active workflows. Open
 // tasks go; decided tasks stay as the record of the decision.
-func TestQATerminateClosesOpenTasksPostgres(t *testing.T) {
+func TestTerminateClosesOpenTasksPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()

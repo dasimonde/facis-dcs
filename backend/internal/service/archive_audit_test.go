@@ -69,7 +69,7 @@ func TestArchiveAuditChecksOnlyTheFilteredContract(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	objects := &countingObjects{}
-	store := artifactstore.New(objects, &artifactstore.PostgresCEKRepo{DB: db}, qaReportAgreement{key}, "did:web:dcs.example", "did:web:dcs.example#agreement", &key.PublicKey)
+	store := artifactstore.New(objects, &artifactstore.PostgresCEKRepo{DB: db}, reportAgreement{key}, "did:web:dcs.example", "did:web:dcs.example#agreement", &key.PublicKey)
 	for _, did := range []string{"did:web:dcs.example:contract:one", "did:web:dcs.example:contract:two"} {
 		_, err := store.Put(context.Background(), artifactstore.ContractScope(did), []byte("key"))
 		require.NoError(t, err)

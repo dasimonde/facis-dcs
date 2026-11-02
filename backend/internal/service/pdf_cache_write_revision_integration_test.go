@@ -12,7 +12,7 @@ import (
 // A background PDF cache write must not move the revision that the optimistic
 // lock compares; an edit must. The waits put the writes into a later second,
 // because the lock compares seconds.
-func TestQAPDFCacheWriteKeepsRevisionPostgres(t *testing.T) {
+func TestPDFCacheWriteKeepsRevisionPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,template_data) VALUES ('tpl','creator','DRAFT','CONTRACT_TEMPLATE','SINGLE_PARTY','{"x":"hello world"}')`)
 	require.NoError(t, err)

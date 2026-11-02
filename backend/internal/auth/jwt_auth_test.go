@@ -270,7 +270,7 @@ func TestLockoutRefusalCarriesRetryAfter(t *testing.T) {
 	}
 }
 
-// NFR-9, U1: the request budget belongs to the validated caller. Two tokens
+// NFR-9: the request budget belongs to the validated caller. Two tokens
 // of one holder share one budget, and requests whose token does not validate
 // are not counted and write no counter row.
 func TestRateLimitIsPerValidatedCaller(t *testing.T) {

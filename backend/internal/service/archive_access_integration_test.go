@@ -26,16 +26,16 @@ import (
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 )
 
-type qaCapturingExecutor struct{ requests []auditexecutor.Request }
+type capturingExecutor struct{ requests []auditexecutor.Request }
 
-func (e *qaCapturingExecutor) Run(_ context.Context, request auditexecutor.Request) (auditexecutor.Response, []byte, error) {
+func (e *capturingExecutor) Run(_ context.Context, request auditexecutor.Request) (auditexecutor.Response, []byte, error) {
 	e.requests = append(e.requests, request)
 	response := auditexecutor.Response{ContractVersion: request.ContractVersion, AuditID: request.AuditID, CorrelationID: request.CorrelationID, Scope: request.Scope, Resource: request.Resource, ExecutedAt: time.Now().UTC().Format(time.RFC3339)}
 	raw, err := json.Marshal(response)
 	return response, raw, err
 }
 
-func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
+func TestArchiveAccessBypassesPostgres(t *testing.T) {
 	t.Setenv("ORCE_ARCHIVE_AUDIT_LOG_URL", "")
 	database := pgtest.Open(t)
 	ctx := context.Background()
@@ -44,9 +44,9 @@ func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
 	require.NoError(t, err)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	objects := &qaReportObjects{blobs: map[string][]byte{}}
+	objects := &reportObjects{blobs: map[string][]byte{}}
 	keys := &artifactstore.PostgresCEKRepo{DB: database}
-	store := artifactstore.New(objects, keys, qaReportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
+	store := artifactstore.New(objects, keys, reportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
 	repo := &cwepg.PostgresContractRepo{}
 	reader := base.AuditTrailReader{Artifacts: store, ARepo: &basepg.PostgresAuditTrailRepository{}}
 	archiveService := &contractStorageArchivesrvc{DB: database, DIDDocument: *document, CRepo: repo, ATrailReader: reader, Keys: keys, ERepo: &erasepg.PostgresEraseRepository{DB: database}}
@@ -77,12 +77,12 @@ func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, trail, 1)
 	require.Equal(t, own, trail[0].Did)
-	executor := &qaCapturingExecutor{}
+	executor := &capturingExecutor{}
 	auditService := &processAuditAndCompliancesrvc{DB: database, CRepo: repo, ATrailReader: reader, AuditExecutor: executor}
-	_, err = auditService.Audit(manager, &pac.PACAuditRequest{Scope: "archive", Did: &foreign, Justification: "QA"})
+	_, err = auditService.Audit(manager, &pac.PACAuditRequest{Scope: "archive", Did: &foreign, Justification: "Test"})
 	require.ErrorContains(t, err, "not authorized")
 	require.Empty(t, executor.requests)
-	_, err = auditService.Audit(manager, &pac.PACAuditRequest{Scope: "archive", Justification: "QA"})
+	_, err = auditService.Audit(manager, &pac.PACAuditRequest{Scope: "archive", Justification: "Test"})
 	require.NoError(t, err)
 	require.Len(t, executor.requests, 1)
 	evidence := executor.requests[0].Evidence["archive"].([]*auditEvidenceResource)
@@ -92,10 +92,10 @@ func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
 	ownReport, err := auditService.AuditReport(manager, &pac.AuditReportPayload{Scope: &scope})
 	require.NoError(t, err)
 	require.NotEmpty(t, ownReport)
-	_, err = auditService.Audit(manager, &pac.PACAuditRequest{Scope: "archive", Justification: "QA latest own"})
+	_, err = auditService.Audit(manager, &pac.PACAuditRequest{Scope: "archive", Justification: "Latest own"})
 	require.NoError(t, err)
 	latestOwn := executor.requests[len(executor.requests)-1].AuditID
-	_, err = auditService.Audit(auditor, &pac.PACAuditRequest{Scope: "archive", Justification: "QA global"})
+	_, err = auditService.Audit(auditor, &pac.PACAuditRequest{Scope: "archive", Justification: "Global"})
 	require.NoError(t, err)
 	latestGlobal := executor.requests[len(executor.requests)-1].AuditID
 	database.SetMaxOpenConns(1)
@@ -204,7 +204,7 @@ func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
 	cancel()
 	assertTerminal(cancelled, "internal_error")
 	require.Contains(t, scopes, artifactstore.ContractScope(foreign))
-	_, err = keys.Shred(ctx, artifactstore.ContractScope(foreign), "holder", "QA erasure")
+	_, err = keys.Shred(ctx, artifactstore.ContractScope(foreign), "holder", "Erasure")
 	require.NoError(t, err)
 	store.Forget(artifactstore.ContractScope(foreign))
 	assertTerminal(manager, "not_found")

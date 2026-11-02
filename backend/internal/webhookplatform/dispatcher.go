@@ -38,7 +38,7 @@ type WebhookPayload struct {
 
 // Audience reports whether the organization ownerDID may receive event about
 // did. Events carry contract content, so delivery follows the contract read
-// policy (F03).
+// policy.
 type Audience func(ctx context.Context, event, did, ownerDID string) bool
 
 // Owner returns the owner of the contract did as a JSON object, or nil.

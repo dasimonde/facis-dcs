@@ -39,7 +39,7 @@ import (
 	smpg "digital-contracting-service/internal/signingmanagement/db/pg"
 )
 
-func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
+func TestReadHTTPRegressionsPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
@@ -47,11 +47,11 @@ func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
 	require.NoError(t, err)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	objects := &qaReportObjects{blobs: map[string][]byte{}}
-	store := artifactstore.New(objects, &artifactstore.PostgresCEKRepo{DB: database}, qaReportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
+	objects := &reportObjects{blobs: map[string][]byte{}}
+	store := artifactstore.New(objects, &artifactstore.PostgresCEKRepo{DB: database}, reportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
 	repo := &cwepg.PostgresContractRepo{}
 	reader := base.AuditTrailReader{Artifacts: store, ARepo: &basepg.PostgresAuditTrailRepository{}}
-	validator, token := qaSignedTokens(t)
+	validator, token := signedTokens(t)
 	authentication := auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	for _, f := range []struct{ did, owner, data string }{
 		{"own", "did:example:participant", `{}`},

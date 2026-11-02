@@ -35,7 +35,7 @@ import (
 	smpg "digital-contracting-service/internal/signingmanagement/db/pg"
 )
 
-func TestQAContractReadScopePostgres(t *testing.T) {
+func TestContractReadScopePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	peer := "did:web:local"
@@ -164,7 +164,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	_, err = pdfService.ExportContractPdf(userCtx, &pdf.ExportContractPdfPayload{Did: "foreign"})
 	require.ErrorContains(t, err, "not authorized")
 	// Real JWT -> generated HTTP handler -> authorization -> denied access row.
-	validator, token := qaSignedTokens(t)
+	validator, token := signedTokens(t)
 	engine.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	endpoints := cwe.NewEndpoints(engine)
 	endpoints.Use(auth.AccessMetadataMiddleware)
@@ -185,7 +185,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	require.True(t, attempt.Success)
 }
 
-func TestQAArchiveDetailPostgres(t *testing.T) {
+func TestArchiveDetailPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
@@ -195,9 +195,9 @@ func TestQAArchiveDetailPostgres(t *testing.T) {
 	require.NoError(t, err)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	objects := &qaReportObjects{blobs: map[string][]byte{}}
+	objects := &reportObjects{blobs: map[string][]byte{}}
 	keys := &artifactstore.PostgresCEKRepo{DB: database}
-	store := artifactstore.New(objects, keys, qaReportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
+	store := artifactstore.New(objects, keys, reportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
 	service := &contractStorageArchivesrvc{DB: database, DIDDocument: *document, ATrailReader: base.AuditTrailReader{Artifacts: store}}
 	user := middleware.InjectAuthContext(ctx, []string{userrole.ArchiveManager.String()}, "holder", "Org A")
 	raw := datatype.JSON(`{"did":"archived","contract_version":1,"name":"Frozen title","contract_data":{"snapshot":"original"}}`)
@@ -245,12 +245,12 @@ func TestQAArchiveDetailPostgres(t *testing.T) {
 	require.NoError(t, err)
 	_, err = service.Detail(user, &archive.DetailPayload{Did: "archived", ContractVersion: 2})
 	require.ErrorContains(t, err, "identity mismatch")
-	_, err = database.Exec(`UPDATE contract_archive_entries SET archive_status='DELETED',deleted_at=NOW(),deleted_by='holder',deletion_reason='QA' WHERE contract_version=2`)
+	_, err = database.Exec(`UPDATE contract_archive_entries SET archive_status='DELETED',deleted_at=NOW(),deleted_by='holder',deletion_reason='Test' WHERE contract_version=2`)
 	require.NoError(t, err)
 	_, err = service.Detail(user, &archive.DetailPayload{Did: "archived", ContractVersion: 2})
 	require.ErrorContains(t, err, "no rows")
 
-	_, err = keys.Shred(ctx, artifactstore.ContractScope("archived"), "holder", "QA")
+	_, err = keys.Shred(ctx, artifactstore.ContractScope("archived"), "holder", "Test")
 	require.NoError(t, err)
 	store.Forget(artifactstore.ContractScope("archived"))
 	_, err = service.Detail(user, payload)

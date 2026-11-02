@@ -15,7 +15,7 @@ import (
 
 // DCS-FR-CWE-15: rejection returns the contract to draft status. The rejected
 // contract accepts edits like a draft.
-func TestQARejectedContractIsEditablePostgres(t *testing.T) {
+func TestRejectedContractIsEditablePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
@@ -36,7 +36,7 @@ func TestQARejectedContractIsEditablePostgres(t *testing.T) {
 
 // An edit of a rejected contract follows the resubmission rule: a version a
 // signature stands behind is not rewritten.
-func TestQARejectedContractEditKeepsTheSettlementGatePostgres(t *testing.T) {
+func TestRejectedContractEditKeepsTheSettlementGatePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()

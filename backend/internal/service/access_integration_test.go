@@ -28,7 +28,7 @@ import (
 	"digital-contracting-service/migrations"
 )
 
-func TestQAAccessAttemptsPostgres(t *testing.T) {
+func TestAccessAttemptsPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	if err := migrations.Run(database); err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err := database.Get(&plaintext, `SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='pac_audit_runs' AND column_name IN ('response_bytes','response_json','receipt')`); err != nil || plaintext != 0 {
 		t.Fatalf("plaintext columns=%d: %v", plaintext, err)
 	}
-	validator, token := qaSignedTokens(t)
+	validator, token := signedTokens(t)
 	attempts := &pg.PostgresAccessAttemptRepo{}
 	locks := &pg.PostgresLockoutRepo{}
 	service := &processAuditAndCompliancesrvc{DB: database, JWTAuthenticator: auth.NewJWTAuthenticator(validator, database, attempts, locks)}
@@ -79,20 +79,20 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	total := 0
 	for _, role := range []userrole.UserRole{userrole.ContractCreator, userrole.ArchiveManager} {
 		jwt := token(role, time.Now().Add(time.Hour))
-		call("audit", endpoints.Audit, &pac.PACAuditRequest{Token: &jwt, Scope: scope, Did: &did, Justification: "QA denial"}, "forbidden")
+		call("audit", endpoints.Audit, &pac.PACAuditRequest{Token: &jwt, Scope: scope, Did: &did, Justification: "Denial"}, "forbidden")
 		total++
 		row := assertLast(authdb.AccessOutcomeDenied, true, total)
-		if row.Scope != scope || row.DID == nil || *row.DID != did || row.Justification != "QA denial" || row.AttemptBy == nil || *row.AttemptBy != "did:example:holder" {
+		if row.Scope != scope || row.DID == nil || *row.DID != did || row.Justification != "Denial" || row.AttemptBy == nil || *row.AttemptBy != "did:example:holder" {
 			t.Fatalf("lost metadata: %+v", row)
 		}
 	}
 	archiveToken := token(userrole.ArchiveManager, time.Now().Add(time.Hour))
-	call("audit_report", endpoints.AuditReport, &pac.AuditReportPayload{Token: &archiveToken, Scope: &scope, Justification: "QA report denial"}, "forbidden")
+	call("audit_report", endpoints.AuditReport, &pac.AuditReportPayload{Token: &archiveToken, Scope: &scope, Justification: "Report denial"}, "forbidden")
 	total++
 	assertLast(authdb.AccessOutcomeDenied, true, total)
 	for _, role := range []userrole.UserRole{userrole.ArchiveManager, userrole.SystemAuditor} {
 		jwt := token(role, time.Now().Add(time.Hour))
-		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "QA reader denial"}, "forbidden")
+		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "Reader denial"}, "forbidden")
 		total++
 		assertLast(authdb.AccessOutcomeDenied, true, total)
 	}
@@ -111,7 +111,7 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	// one is the normal end of its lifetime (FR-UC-01-4).
 	forged := token(userrole.Auditor, time.Now().Add(time.Hour)) + "x"
 	for range conf.LoginAttemptsThresholdInDuration() {
-		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &forged, Limit: 2, Justification: "QA forged credentials"}, "unauthorized")
+		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &forged, Limit: 2, Justification: "Forged credentials"}, "unauthorized")
 		total++
 		assertLast(authdb.AccessOutcomeFailed, false, total)
 	}
@@ -119,7 +119,7 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	localCount, countErr := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().In(time.FixedZone("QA UTC+2", 2*60*60)).Add(-conf.LoginLockoutDuration()))
+	localCount, countErr := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().In(time.FixedZone("UTC+2", 2*60*60)).Add(-conf.LoginLockoutDuration()))
 	utcCount, utcErr := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().UTC().Add(-conf.LoginLockoutDuration()))
 	if countErr != nil || utcErr != nil || localCount != conf.LoginAttemptsThresholdInDuration() || utcCount != localCount {
 		t.Fatalf("failed credential counts differ: UTC+2=%d (%v), UTC=%d (%v)", localCount, countErr, utcCount, utcErr)
@@ -132,7 +132,7 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 		t.Fatalf("credential failures did not lock IP: %t %v", locked, err)
 	}
 	jwt := token(userrole.Auditor, time.Now().Add(time.Hour))
-	call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "QA locked read"}, "unauthorized")
+	call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "Locked read"}, "unauthorized")
 	total++
 	assertLast(authdb.AccessOutcomeFailed, false, total)
 	tx, err = database.Beginx()
@@ -145,20 +145,20 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	first := call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "QA read"}, "").(*pac.PACAccessAttempts)
+	first := call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "Read"}, "").(*pac.PACAccessAttempts)
 	total++
 	assertLast(authdb.AccessOutcomeSuccess, true, total)
 	if len(first.Attempts) != 2 || first.NextCursor == nil {
 		t.Fatalf("missing first page: %+v", first)
 	}
-	next := call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Cursor: first.NextCursor, Justification: "QA read next"}, "").(*pac.PACAccessAttempts)
+	next := call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Cursor: first.NextCursor, Justification: "Read next"}, "").(*pac.PACAccessAttempts)
 	if len(next.Attempts) != 2 || next.Attempts[0].ID >= first.Attempts[1].ID {
 		t.Fatalf("cursor repeated/skipped ordering: %+v then %+v", first.Attempts, next.Attempts)
 	}
 	call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: " "}, "bad_request")
 }
 
-func qaSignedTokens(t *testing.T) (*middleware.HydraJWTValidator, func(userrole.UserRole, time.Time) string) {
+func signedTokens(t *testing.T) (*middleware.HydraJWTValidator, func(userrole.UserRole, time.Time) string) {
 	t.Helper()
 	t.Setenv("JWT_ALG_NONE_SUPPORTED", "false")
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -172,7 +172,7 @@ func qaSignedTokens(t *testing.T) (*middleware.HydraJWTValidator, func(userrole.
 		if r.URL.Path == "/.well-known/openid-configuration" {
 			body = map[string]any{"issuer": issuer.URL, "jwks_uri": issuer.URL + "/keys", "id_token_signing_alg_values_supported": []string{"RS256"}}
 		} else {
-			body = map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "qa", "alg": "RS256", "use": "sig", "n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()), "e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())}}}
+			body = map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "test-key", "alg": "RS256", "use": "sig", "n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()), "e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())}}}
 		}
 		if err := json.NewEncoder(w).Encode(body); err != nil {
 			t.Error(err)
@@ -189,7 +189,7 @@ func qaSignedTokens(t *testing.T) (*middleware.HydraJWTValidator, func(userrole.
 		if err != nil {
 			t.Fatal(err)
 		}
-		unsigned := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","kid":"qa"}`)) + "." + base64.RawURLEncoding.EncodeToString(claims)
+		unsigned := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","kid":"test-key"}`)) + "." + base64.RawURLEncoding.EncodeToString(claims)
 		digest := sha256.Sum256([]byte(unsigned))
 		signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
 		if err != nil {

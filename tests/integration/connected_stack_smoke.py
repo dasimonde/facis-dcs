@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Connected QA acceptance without Behave or mocked HTTP services.
+"""Connected acceptance run without Behave or mocked HTTP services.
 
 Run against an isolated development stack with QA_DCS_API_BASE (including API
 prefix), ISSUER_BASE_URL and DSS_URL explicitly set. Uses the existing wallet
@@ -40,8 +40,8 @@ def main() -> None:
     base = os.environ["QA_DCS_API_BASE"].rstrip("/")
     os.environ["BDD_DCS_BASE_URL"] = base
     run = uuid4().hex
-    org = f"QA connected {run} A"
-    foreign_org = f"QA connected {run} B"
+    org = f"Connected {run} A"
+    foreign_org = f"Connected {run} B"
     AuthService.DEFAULT_ORGANIZATION = org
     context = SimpleNamespace(base_url=base, http_timeout_seconds=180, session=requests.Session())
 
@@ -78,8 +78,8 @@ def main() -> None:
         templates = {}
         for party in ("SINGLE_PARTY", "MULTI_PARTY"):
             did, _ = TemplateService.create_fresh_template(
-                context, name=f"QA connected {run} {party}", description="Connected classification",
-                title=f"QA connected {run}", party_type=party,
+                context, name=f"Connected {run} {party}", description="Connected classification",
+                title=f"Connected {run}", party_type=party,
             )
             current = request("GET", "/template/retrieve/" + did, "Template Creator").json()
             assert current["party_type"] == party
@@ -105,13 +105,13 @@ def main() -> None:
             for path, role in (("/template/search", "Template Creator"),
                                ("/catalogue/template/search", "Template Manager")):
                 result = request("GET", path, role, params={
-                    "name": f"QA connected {run}", "party_type": party,
+                    "name": f"Connected {run}", "party_type": party,
                     "offset": 1 if path == "/template/search" else 0, "limit": 100,
                 }).json()
                 rows = result["items"] if isinstance(result, dict) else result
                 assert any(row["did"] == did for row in rows), result
                 assert all(row["party_type"] == party for row in rows), result
-        print("P09 create/edit/history/copy and local + real catalogue filters PASS", flush=True)
+        print("Template create/edit/history/copy and local + real catalogue filters PASS", flush=True)
         return templates["MULTI_PARTY"]
 
     def check_access(template):
@@ -129,18 +129,18 @@ def main() -> None:
             dids = {row["did"] for row in rows}
             assert own in dids and foreign not in dids, result
         request("GET", "/contract/retrieve/" + foreign, ["Auditor", "Contract Observer"])
-        justification = f"QA denial {run}"
+        justification = f"Denial {run}"
         for _ in range(6):
             request("GET", "/pac/access-attempts", "Archive Manager",
                     params={"justification": justification}, status=403)
         # Reuse the same principal after crossing the failed-login threshold.
         request("GET", "/archive/search", "Archive Manager", params={"did": own})
         attempts = request("GET", "/pac/access-attempts", "Auditor", params={
-            "justification": f"QA review {run}", "limit": 100,
+            "justification": f"Review {run}", "limit": 100,
         }).json()["attempts"]
         denied = [row for row in attempts if row["justification"] == justification]
         assert len(denied) == 6 and all(row["outcome"] == "DENIED" for row in denied), denied
-        print("F02/F03 organization scope, additive Auditor and six denials without lockout PASS", flush=True)
+        print("Organization scope, additive Auditor and six denials without lockout PASS", flush=True)
         return own
 
     def check_evidence(did):
@@ -156,7 +156,7 @@ def main() -> None:
         assert downloaded["description"] == description
         request("GET", f"/contract/{did}/evidence/{evidence}", "Contract Manager",
                 organization=foreign_org, status=403)
-        print("F10 encrypted evidence exact bytes/hash/description PASS", flush=True)
+        print("Encrypted evidence exact bytes/hash/description PASS", flush=True)
         return evidence
 
     def check_report(did):
@@ -182,7 +182,7 @@ def main() -> None:
                 assert all(row["timestamp"] and row["did"] == did for row in events), events
             else:
                 assert response.content.startswith(b"%PDF-")
-        print("P06 real executor report JSON/CSV/PDF MIME and timeline PASS", flush=True)
+        print("Real executor report JSON/CSV/PDF MIME and timeline PASS", flush=True)
         return report
 
     def sign(did, directory):
@@ -199,7 +199,7 @@ def main() -> None:
         ceremony = request("POST", "/signature/request", "Contract Signer", {
             "contract_did": did, "field_name": field,
         }).json()
-        env = dict(os.environ, E2E_SIGNATORY=f"QA Connected {run}", E2E_SIGN_FIELD=field)
+        env = dict(os.environ, E2E_SIGNATORY=f"Connected {run}", E2E_SIGN_FIELD=field)
         subprocess.run([sys.executable, str(ROOT / "frontend/ClientApp/e2e/complete_signing_webhook.py"),
                         ceremony["wallet_uri"]], env=env, check=True)
         status = request("GET", "/signature/request/" + ceremony["ceremony_id"], "Contract Signer").json()
@@ -245,18 +245,18 @@ def main() -> None:
         report = request("GET", "/pac/report", "Auditor", params=report_params).json()
         for key in ("reportId", "events", "findings"):
             assert report[key] == original_report[key], key
-        print("P04/P05/P06 tags-only summary retention and frozen archive/report PASS", flush=True)
+        print("Tags-only summary retention and frozen archive/report PASS", flush=True)
         # This DID was created above in this run; never accept an external deletion target.
         request("DELETE", "/archive/delete", "Archive Manager", params={
-            "did": did, "justification": f"Erase own isolated QA fixture {run}",
+            "did": did, "justification": f"Erase own isolated fixture {run}",
         })
         request("GET", f"/contract/{did}/evidence/{evidence}", "Contract Manager", status=404)
         request("GET", "/pac/report", "Auditor", params=report_params, status=404)
         request("GET", "/archive/detail", "Contract Observer", params=detail_params, status=404)
-        print("P06/F10 cryptographic erasure: evidence, report and snapshot unavailable PASS", flush=True)
+        print("Cryptographic erasure: evidence, report and snapshot unavailable PASS", flush=True)
 
     source_keys = AuthService.resolve_wallet_keys_dir()
-    with tempfile.TemporaryDirectory(prefix="dcs-qa-connected-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="dcs-connected-") as temporary:
         directory = Path(temporary)
         keys = directory / "wallet-keys"
         keys.mkdir()
@@ -271,7 +271,7 @@ def main() -> None:
         sign(did, directory)
         check_archive_and_erase(did, evidence, report)
     context.session.close()
-    print("P04 P05 P06 P09 F02 F03 F10 connected acceptance PASS", flush=True)
+    print("Connected acceptance PASS", flush=True)
 
 
 if __name__ == "__main__":

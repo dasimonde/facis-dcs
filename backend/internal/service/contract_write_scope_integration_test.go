@@ -19,7 +19,7 @@ import (
 // A contract mutation by an organization that may not read the contract is
 // refused before any command runs. The service has no repositories here, so a
 // call that passed the check would panic.
-func TestQAContractWritesRequireReadAccessPostgres(t *testing.T) {
+func TestContractWritesRequireReadAccessPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()

@@ -259,7 +259,7 @@ func (r *PostgresContractTemplateRepo) ReadProcessDataByDID(ctx context.Context,
 }
 
 // UpdateState keeps the replaced state as a history entry, so the template
-// provenance lists every lifecycle step (F04). A refused change returns an
+// provenance lists every lifecycle step. A refused change returns an
 // error and the caller's rollback removes the entry. The update applies only
 // while the stored state is from: of two concurrent transitions, the second
 // waits for the first and then finds a changed state.

@@ -15,7 +15,7 @@ import (
 // DCS-FR-CWE-09 (ADR-33): the scheduled sweep flags an obligation of a contract
 // in force whose deadline passed without a report. A report received after the
 // deadline does not clear the miss; one received by the deadline does.
-func TestQADeadlineMonitorFlagsUnreportedPassedDeadlinePostgres(t *testing.T) {
+func TestDeadlineMonitorFlagsUnreportedPassedDeadlinePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data) VALUES ('active','','Org A','ACTIVE','tpl',1,
 		'{"dcs:policies":{"odrl:obligation":[{"@id":"urn:uuid:report","odrl:constraint":[{"odrl:leftOperand":{"@id":"odrl:dateTime"},"odrl:operator":{"@id":"odrl:lt"},"odrl:rightOperand":"2026-01-01"}]}]}}')`)
@@ -46,7 +46,7 @@ func TestQADeadlineMonitorFlagsUnreportedPassedDeadlinePostgres(t *testing.T) {
 
 // DCS-FR-SM-13: the sweep flags a contract on its way to signature whose
 // signing deadline passed, and leaves a signed one alone.
-func TestQAMonitorFlagsPassedSigningDeadlinePostgres(t *testing.T) {
+func TestMonitorFlagsPassedSigningDeadlinePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	for did, row := range map[string][2]string{
 		"late-approved":   {"APPROVED", "2026-01-01T00:00:00Z"},

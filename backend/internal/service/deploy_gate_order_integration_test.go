@@ -19,7 +19,7 @@ import (
 // refused as incomplete before the deployment workflow gate is dispatched.
 // The service has no gate configured here, so a call that reached the gate
 // would fail as BLOCKED instead.
-func TestQADeployRefusesIncompleteSigningBeforeTheGatePostgres(t *testing.T) {
+func TestDeployRefusesIncompleteSigningBeforeTheGatePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()

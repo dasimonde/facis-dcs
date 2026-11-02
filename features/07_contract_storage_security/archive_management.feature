@@ -159,7 +159,6 @@ Feature: Contract storage and archive retrieval
   # annotation columns (the archive entry's snapshot/evidence stay immutable,
   # enforced by DB trigger), and is recorded in the archive audit log.
   @UC-07-01 @DCS-FR-CSA-11 @DCS-FR-CSA-25
-  @REQ-qa-fixes-abschluss-AC2
   Scenario: Archive Manager annotates an archived contract with a manual summary and tags
     Given contract "Annotated Archive Contract" has reached contract state "SIGNED"
     When the Archive Manager annotates the archived contract "Annotated Archive Contract" with summary "Pilot supply agreement archived for the BDD suite" and tags "pilot-agreement,bdd-supply"

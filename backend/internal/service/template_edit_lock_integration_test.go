@@ -13,8 +13,8 @@ import (
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
 
-// P07: from Approved onwards a template is changed through a copy, never in place.
-func TestQATemplateEditsLockedFromApprovedPostgres(t *testing.T) {
+// From Approved onwards a template is changed through a copy, never in place.
+func TestTemplateEditsLockedFromApprovedPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	repo := &pg.PostgresContractTemplateRepo{}

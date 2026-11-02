@@ -33,7 +33,7 @@ import (
 	goahttp "goa.design/goa/v3/http"
 )
 
-func TestQAContractEvidencePostgres(t *testing.T) {
+func TestContractEvidencePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
@@ -41,9 +41,9 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 	require.NoError(t, err)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	objects := &qaReportObjects{blobs: map[string][]byte{}}
+	objects := &reportObjects{blobs: map[string][]byte{}}
 	keys := &artifactstore.PostgresCEKRepo{DB: database}
-	store := artifactstore.New(objects, keys, qaReportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
+	store := artifactstore.New(objects, keys, reportAgreement{key}, peer, peer+"#agreement", &key.PublicKey)
 	repo := &cwepg.PostgresContractRepo{}
 	service := &contractWorkflowEnginesrvc{DB: database, DIDDocument: *document, CRepo: repo, ATrailReader: base.AuditTrailReader{Artifacts: store, ARepo: &basepg.PostgresAuditTrailRepository{}}}
 	tx, err := database.BeginTxx(ctx, nil)
@@ -89,7 +89,7 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 	_, err = service.RetrieveEvidence(userCtx, &cwe.RetrieveEvidencePayload{Did: "other-contract", EvidenceID: result.EvidenceID})
 	require.ErrorContains(t, err, "no rows")
 	// The generated endpoints exercise signed JWT role checks before storage/read access.
-	validator, token := qaSignedTokens(t)
+	validator, token := signedTokens(t)
 	service.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	endpoints := cwe.NewEndpoints(service)
 	endpoints.Use(auth.AccessMetadataMiddleware)
@@ -185,7 +185,7 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 	httpEvidence(http.MethodGet, "/contract/"+payload.Did+"/evidence/"+result.EvidenceID, nil, http.StatusInternalServerError)
 	objects.blobs[cid] = original
 	scope := artifactstore.ContractScope(payload.Did)
-	_, err = keys.Shred(ctx, scope, "holder", "QA erasure")
+	_, err = keys.Shred(ctx, scope, "holder", "Erasure")
 	require.NoError(t, err)
 	store.Forget(scope)
 	_, err = service.RetrieveEvidence(userCtx, &cwe.RetrieveEvidencePayload{Did: payload.Did, EvidenceID: result.EvidenceID})

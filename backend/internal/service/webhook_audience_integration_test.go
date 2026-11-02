@@ -13,7 +13,7 @@ import (
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 )
 
-func TestQAContractEventAudiencePostgres(t *testing.T) {
+func TestContractEventAudiencePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	peer := "did:web:local"

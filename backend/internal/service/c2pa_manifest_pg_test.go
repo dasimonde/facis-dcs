@@ -32,8 +32,8 @@ func TestPublicManifestServesTheStoredPDFWithoutWaitingPostgres(t *testing.T) {
 	ctx := context.Background()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	store := artifactstore.New(&qaReportObjects{blobs: map[string][]byte{}}, &artifactstore.PostgresCEKRepo{DB: database},
-		qaReportAgreement{key}, "did:example:instance", "did:example:instance#agreement", &key.PublicKey)
+	store := artifactstore.New(&reportObjects{blobs: map[string][]byte{}}, &artifactstore.PostgresCEKRepo{DB: database},
+		reportAgreement{key}, "did:example:instance", "did:example:instance#agreement", &key.PublicKey)
 
 	// The stored PDF lags the contract: its payload hash names another
 	// document, which is what makes an export wait for the regenerator.

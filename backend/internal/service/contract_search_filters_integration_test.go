@@ -15,7 +15,7 @@ import (
 
 // DCS-IR-CWE-07 and DCS-FR-CWE-13: contract search filters by party, template
 // and jurisdiction.
-func TestQAContractSearchFiltersByPartyTemplateAndJurisdictionPostgres(t *testing.T) {
+func TestContractSearchFiltersByPartyTemplateAndJurisdictionPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	_, err := database.Exec(`
 		INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,responsible,contract_data) VALUES

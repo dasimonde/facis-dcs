@@ -15,7 +15,7 @@ import (
 
 // DCS-FR-SM-10: the counterparty signature that completes an archived
 // contract leaves a proof of execution over every signature.
-func TestQAPeerSignatureCompletingAnArchivedContractLeavesAnExecutionProofPostgres(t *testing.T) {
+func TestPeerSignatureCompletingAnArchivedContractLeavesAnExecutionProofPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	const did, local, peer = "did:web:dcs-a.localhost:contract:proof", "did:web:dcs-a.localhost", "did:web:dcs-b.localhost"
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,responsible,contract_data)
@@ -40,7 +40,7 @@ func TestQAPeerSignatureCompletingAnArchivedContractLeavesAnExecutionProofPostgr
 // DCS-FR-CSA-08: this instance archived the contract when its own signature
 // completed. The counterparty signature that arrives afterwards is added to
 // that archive entry, and the archive trigger permits only that append.
-func TestQAPeerSignatureArrivingAfterArchiveIsAddedToTheEntryPostgres(t *testing.T) {
+func TestPeerSignatureArrivingAfterArchiveIsAddedToTheEntryPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	const did = "did:web:dcs-a.localhost:contract:archived"
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data)

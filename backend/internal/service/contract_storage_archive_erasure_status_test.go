@@ -60,7 +60,7 @@ func TestErasureStatusMapsPendingAndConfirmedPeers(t *testing.T) {
 	}
 }
 
-// U1: an erase the peer refused for good shows as refused, with the peer's
+// An erase that the peer refused for good shows as refused, with the peer's
 // answer, so the Archive Manager sees that the peer's copy stays.
 func TestErasureStatusShowsARefusedPeer(t *testing.T) {
 	requested := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)

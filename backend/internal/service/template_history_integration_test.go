@@ -11,7 +11,7 @@ import (
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
 
-func TestQATemplateHistoryRecordsStateChangesPostgres(t *testing.T) {
+func TestTemplateHistoryRecordsStateChangesPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	tx, err := database.BeginTxx(ctx, nil)

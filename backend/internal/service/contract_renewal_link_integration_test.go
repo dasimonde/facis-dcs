@@ -15,7 +15,7 @@ import (
 
 // DCS-FR-CWE-29: the contract list names the contract a renewal renews, so the
 // structure view can link both ways.
-func TestQAContractListNamesTheRenewedContractPostgres(t *testing.T) {
+func TestContractListNamesTheRenewedContractPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data) VALUES
 		('old','','Org A','EXPIRED','tpl',1,'{}'),

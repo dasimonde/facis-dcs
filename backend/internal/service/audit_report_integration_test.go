@@ -23,15 +23,15 @@ import (
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 )
 
-func TestQAAuditReportPostgres(t *testing.T) {
+func TestAuditReportPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	objects := &qaReportObjects{blobs: map[string][]byte{}}
+	objects := &reportObjects{blobs: map[string][]byte{}}
 	keys := &artifactstore.PostgresCEKRepo{DB: database}
-	store := artifactstore.New(objects, keys, qaReportAgreement{key}, "did:example:instance", "did:example:instance#agreement", &key.PublicKey)
+	store := artifactstore.New(objects, keys, reportAgreement{key}, "did:example:instance", "did:example:instance#agreement", &key.PublicKey)
 	service := &processAuditAndCompliancesrvc{DB: database, ATrailReader: base.AuditTrailReader{Artifacts: store}}
 	ctx := middleware.InjectAuthContext(context.Background(), []string{userrole.Auditor.String()}, "did:example:holder", "did:example:participant")
 	fixture := reportSnapshotFixture(t)
@@ -48,7 +48,7 @@ func TestQAAuditReportPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Requester.Subject = "did:example:holder"
-	request.Justification = "QA frozen evidence"
+	request.Justification = "Frozen evidence"
 	if err := service.persistAuditRun(ctx, request, response, fixture.ResponseBytes); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestQAAuditReportPostgres(t *testing.T) {
 	// Change the caller's evidence after persistence: exports must retain the frozen copy.
 	request.Evidence = map[string]any{"contracts": []any{}}
 	format := "json"
-	payload := &pac.AuditReportPayload{Scope: &request.Scope, Did: &request.Resource.DID, Format: &format, Justification: "QA export"}
+	payload := &pac.AuditReportPayload{Scope: &request.Scope, Did: &request.Resource.DID, Format: &format, Justification: "Export"}
 	content, err := service.AuditReport(ctx, payload)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestQAAuditReportPostgres(t *testing.T) {
 		t.Fatalf("audit/export outbox persistence: count=%d err=%v", events, err)
 	}
 	scope := artifactstore.ContractScope(request.Resource.DID)
-	affected, err := keys.Shred(ctx, scope, "did:example:holder", "QA erasure")
+	affected, err := keys.Shred(ctx, scope, "did:example:holder", "Erasure")
 	if err != nil || affected != 1 {
 		t.Fatalf("shred: affected=%d err=%v", affected, err)
 	}
@@ -127,9 +127,9 @@ func TestQAAuditReportPostgres(t *testing.T) {
 }
 
 // Only the external key provider and blob transport are replaced; CEKs and encryption are real.
-type qaReportAgreement struct{ key *ecdsa.PrivateKey }
+type reportAgreement struct{ key *ecdsa.PrivateKey }
 
-func (a qaReportAgreement) DeriveECDH(peer *ecdsa.PublicKey) ([]byte, error) {
+func (a reportAgreement) DeriveECDH(peer *ecdsa.PublicKey) ([]byte, error) {
 	private, err := a.key.ECDH()
 	if err != nil {
 		return nil, err
@@ -141,9 +141,9 @@ func (a qaReportAgreement) DeriveECDH(peer *ecdsa.PublicKey) ([]byte, error) {
 	return private.ECDH(public)
 }
 
-type qaReportObjects struct{ blobs map[string][]byte }
+type reportObjects struct{ blobs map[string][]byte }
 
-func (o *qaReportObjects) CreateFile(_ context.Context, data any) (*ipfs.IPFSResult, error) {
+func (o *reportObjects) CreateFile(_ context.Context, data any) (*ipfs.IPFSResult, error) {
 	raw, ok := data.([]byte)
 	if !ok {
 		return nil, fmt.Errorf("expected bytes, got %T", data)
@@ -153,7 +153,7 @@ func (o *qaReportObjects) CreateFile(_ context.Context, data any) (*ipfs.IPFSRes
 	o.blobs[cid] = bytes.Clone(raw)
 	return o.FetchFile(cid)
 }
-func (o *qaReportObjects) FetchFile(cid string) (*ipfs.IPFSResult, error) {
+func (o *reportObjects) FetchFile(cid string) (*ipfs.IPFSResult, error) {
 	raw, ok := o.blobs[cid]
 	if !ok {
 		return nil, fmt.Errorf("missing object %s", cid)

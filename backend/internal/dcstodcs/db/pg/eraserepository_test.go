@@ -9,7 +9,7 @@ import (
 	"digital-contracting-service/internal/base/pgtest"
 )
 
-// U1: a failed erase request waits for its backoff before the next attempt,
+// A failed erase request waits for its backoff before the next attempt,
 // and a refused one is not sent again. Both keep the peer's answer.
 func TestPendingErasuresBackOffAndEndOnRefusal(t *testing.T) {
 	repo := &PostgresEraseRepository{DB: pgtest.Open(t)}
