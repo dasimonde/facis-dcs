@@ -27,7 +27,7 @@ function deferred<T>() {
 function render() {
   return shallowMount(ArchiveDashboardView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
 }
-describe('P05 archive search and erasure lifecycle', () => {
+describe('archive search and erasure lifecycle', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mocks.roles = ['ARCHIVE_MANAGER']

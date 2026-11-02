@@ -47,7 +47,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-describe('F10 evidence lifecycle', () => {
+describe('evidence lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.auth.user.roles = ['CONTRACT_MANAGER']

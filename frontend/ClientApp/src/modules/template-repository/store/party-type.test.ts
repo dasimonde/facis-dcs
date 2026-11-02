@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { partyTypes } from '@/types/party-type'
 import { useDcsDraftStore } from './dcsDraftStore'
 
-describe('P09 explicit party classification', () => {
+describe('explicit party classification', () => {
   beforeEach(() => setActivePinia(createPinia()))
   it('requires an explicit selection and clears it on reset', () => {
     const store = useDcsDraftStore()

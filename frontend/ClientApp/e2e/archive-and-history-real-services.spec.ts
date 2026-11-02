@@ -11,7 +11,7 @@ import {
 } from './lifecycle-helpers'
 import { E2E_API_BASE } from '../playwright.config'
 
-test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and complete reports through real services', async ({
+test('archive annotations, exact snapshots, evidence and complete reports persist through real services', async ({
   page,
   loginAs,
 }) => {
@@ -20,7 +20,7 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
   const did = await buildApprovedContract(page, loginAs)
   await signApprovedContractViaViewer(page, loginAs, did)
 
-  await test.step('F10 manager stores and downloads the exact evidence after reload', async () => {
+  await test.step('manager stores and downloads the exact evidence after reload', async () => {
     await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${encodeURIComponent(did)}`)
     await page.getByRole('tab', { name: 'Audit History' }).click()
     await page.getByRole('button', { name: 'Store evidence', exact: true }).click()
@@ -52,7 +52,7 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
   })
 
   let version = ''
-  await test.step('P04 archive summary survives reload and a tags-only update', async () => {
+  await test.step('archive summary survives reload and a tags-only update', async () => {
     await gotoAs(page, loginAs, 'Archive Manager', '/ui/archive/dashboard')
     await page.getByRole('button', { name: 'Additional filters' }).click()
     await page.getByLabel('DID', { exact: true }).fill(did)
@@ -87,7 +87,7 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
     await expect(page.getByTestId(`archive-annotation-${did}`).last()).toContainText('connected-qa')
   })
 
-  await test.step('P05 observer searches and opens the immutable exact archive version', async () => {
+  await test.step('observer searches and opens the immutable exact archive version', async () => {
     await gotoAs(page, loginAs, 'Contract Observer', '/ui/archive/dashboard')
     await expect(page.getByTestId('archive-statistics')).toHaveCount(0)
     await page.getByRole('button', { name: 'Additional filters' }).click()
@@ -117,7 +117,7 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
     await expect(page.getByTestId('machine-readable-payload')).toContainText(FIXTURE_CLAUSE_PROSE)
   })
 
-  await test.step('P06 auditor downloads JSON, CSV and PDF containing the lifecycle', async () => {
+  await test.step('auditor downloads JSON, CSV and PDF containing the lifecycle', async () => {
     await gotoAs(page, loginAs, 'Auditor', '/ui/audit')
     await page.locator('#select-scope').selectOption('contracts')
     await page.getByLabel('DID (optional)').fill(did)
@@ -154,7 +154,7 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
   })
 })
 
-test('U3 P03 F04 show lifecycle history, version actors and template history through real services', async ({
+test('lifecycle history, version actors and template history show through real services', async ({
   page,
   loginAs,
   request,
@@ -168,7 +168,7 @@ test('U3 P03 F04 show lifecycle history, version actors and template history thr
     Authorization: `Bearer ${mintSession('Contract Manager', E2E_API_BASE, organization).token}`,
   })
 
-  await test.step('P03 version picker names who replaced each version and when', async () => {
+  await test.step('version picker names who replaced each version and when', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${did}`)
     await page.getByRole('tab', { name: 'Diff View' }).click()
     await expect(
@@ -176,7 +176,7 @@ test('U3 P03 F04 show lifecycle history, version actors and template history thr
     ).not.toHaveCount(0)
   })
 
-  await test.step('U3 party sees the lifecycle history with actor', async () => {
+  await test.step('party sees the lifecycle history with actor', async () => {
     await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${did}`)
     await page.getByRole('tab', { name: 'Lifecycle History' }).click()
     const history = page.getByTestId('lifecycle-history')
@@ -184,14 +184,14 @@ test('U3 P03 F04 show lifecycle history, version actors and template history thr
     await expect(history.getByText(/^By: \S/).first()).toBeVisible()
   })
 
-  await test.step('U3 lifecycle is refused to a foreign organization', async () => {
+  await test.step('lifecycle is refused to a foreign organization', async () => {
     const own = await request.get(lifecycleURL, { headers: bearer() })
     expect(own.status(), await own.text()).toBe(200)
     const foreign = await request.get(lifecycleURL, { headers: bearer(E2E_ORG_B) })
     expect(foreign.status(), await foreign.text()).toBe(403)
   })
 
-  await test.step('F04 Meta Data lists the template version history', async () => {
+  await test.step('Meta Data lists the template version history', async () => {
     const contract = await request.get(`${E2E_API_BASE}/contract/retrieve/${encodeURIComponent(did)}`, {
       headers: bearer(),
     })

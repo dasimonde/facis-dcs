@@ -41,7 +41,7 @@ function expectNoResult(wrapper: ReturnType<typeof render>) {
   for (const format of ['JSON', 'CSV', 'PDF']) expect(button(wrapper, format).attributes('disabled')).toBeDefined()
 }
 
-describe('P06 audit execution context', () => {
+describe('audit execution context', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     useAuthStore().user = { issuer: 'org', holder: 'user', roles: ['AUDITOR'] }

@@ -76,7 +76,7 @@ async function noOverflow(page: Page) {
   )
 }
 for (const width of [390, 1280]) {
-  test(`P05 Observer searches and reads frozen version without privileged or current-data calls at ${width}px`, async ({
+  test(`Observer searches and reads frozen version without privileged or current-data calls at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 })
@@ -133,7 +133,7 @@ for (const width of [390, 1280]) {
   })
 }
 for (const width of [390, 1440]) {
-  test(`P05 ordered root and nested paragraphs keep inline segments at ${width}px`, async ({ page }) => {
+  test(`archive snapshot: ordered root and nested paragraphs keep inline segments at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await auth(page, 'Contract Observer')
     const richSnapshot = {
@@ -202,7 +202,7 @@ for (const width of [390, 1440]) {
   })
 }
 for (const status of [403, 404, 500]) {
-  test(`P05 detail ${status} leaves no snapshot and retry recovers`, async ({ page }) => {
+  test(`archive detail ${status} leaves no snapshot and retry recovers`, async ({ page }) => {
     await auth(page, 'Contract Observer')
     let failed = true
     await page.route('**/api/archive/detail**', (route) =>
@@ -216,7 +216,9 @@ for (const status of [403, 404, 500]) {
     await expect(page.getByRole('heading', { name: 'Archived agreement — Version 2' })).toBeVisible()
   })
 }
-test('P09 explicit choice is required, persisted independently, and loaded into editable details', async ({ page }) => {
+test('template party type: explicit choice is required, persisted independently, and loaded into editable details', async ({
+  page,
+}) => {
   await auth(page, 'Template Creator')
   const writes: Record<string, unknown>[] = []
   await page.route('**/template/retrieve**', (route) =>
@@ -254,7 +256,7 @@ test('P09 explicit choice is required, persisted independently, and loaded into 
   await expect(page.getByTestId('template-party-type')).toHaveValue('')
 })
 for (const catalogue of [false, true]) {
-  test(`P09 ${catalogue ? 'federated catalogue' : 'repository'} combines visible text and party filters and ignores old responses`, async ({
+  test(`${catalogue ? 'federated catalogue' : 'repository'} combines visible text and party filters and ignores old responses`, async ({
     page,
   }) => {
     await auth(page, catalogue ? 'Template Manager' : 'Template Creator')
@@ -302,7 +304,7 @@ for (const catalogue of [false, true]) {
     await expect(page.getByText(catalogue ? 'Name: Party template' : 'Party template', { exact: true })).toHaveCount(0)
   })
 }
-test('P09 federated details retain party classification when remote template data is unavailable', async ({ page }) => {
+test('federated details retain party classification when remote template data is unavailable', async ({ page }) => {
   await auth(page, 'Template Manager')
   await page.route('**/template/retrieve**', (route) =>
     json(route, { contract_templates: [], review_tasks: [], approval_tasks: [] }),
@@ -315,7 +317,7 @@ test('P09 federated details retain party classification when remote template dat
   await expect(page.getByText(/Party type:.*Multi-party/)).toBeVisible()
 })
 for (const width of [390, 1280]) {
-  test(`F10 validates, retries failed upload, prevents duplicates, refreshes and downloads exact bytes at ${width}px`, async ({
+  test(`evidence upload validates, retries failed upload, prevents duplicates, refreshes and downloads exact bytes at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 })
@@ -407,7 +409,7 @@ for (const width of [390, 1280]) {
     await expect(page.getByText(`SHA-256: ${sha256}`)).toBeVisible()
   })
 }
-test('F10 observers cannot access evidence controls or trigger evidence requests', async ({ page }) => {
+test('observers cannot access evidence controls or trigger evidence requests', async ({ page }) => {
   const evidenceRequests: string[] = []
   page.on('request', (req) => {
     if (/\/evidence|\/contract\/store/.test(req.url())) evidenceRequests.push(req.url())
@@ -429,7 +431,7 @@ test('F10 observers cannot access evidence controls or trigger evidence requests
 
 for (const width of [390, 1440]) {
   for (const status of [403, 404, 500]) {
-    test(`F03 ${status} contract has one feedback and keyboard retry at ${width}px`, async ({ page }, testInfo) => {
+    test(`${status} contract has one feedback and keyboard retry at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await auth(page, 'Contract Manager')
       let retrieveCount = 0

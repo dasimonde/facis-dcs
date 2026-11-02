@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { flattenPolicySet, useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useContractDataPreprocess } from './useContractDataPreprocess'
 
-describe('P05 contract layout preprocessing', () => {
+describe('contract layout preprocessing', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   it.each(['array', '@list'])('reads %s layout without rewriting document data', (format) => {

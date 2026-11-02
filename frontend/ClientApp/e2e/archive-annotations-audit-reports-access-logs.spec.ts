@@ -52,7 +52,7 @@ async function openAnnotation(page: Page, summary?: string) {
 }
 for (const width of [390, 1440]) {
   for (const failed of [false, true]) {
-    test(`P04 annotation ${failed ? 'failure is visible and keeps the input' : 'saves in one dialog and survives reload'}; cancellation sends no POST at ${width}px`, async ({
+    test(`archive annotation ${failed ? 'failure is visible and keeps the input' : 'saves in one dialog and survives reload'}; cancellation sends no POST at ${width}px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
@@ -125,7 +125,9 @@ for (const width of [390, 1440]) {
   }
 }
 for (const width of [390, 1440]) {
-  test(`P04 missing annotations start empty and preserve omission semantics at ${width}px`, async ({ page }) => {
+  test(`archive entries without annotations start empty and preserve omission semantics at ${width}px`, async ({
+    page,
+  }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await archive(page)
     await page.route('**/archive/retrieve', (route) =>
@@ -166,7 +168,7 @@ async function audit(page: Page, findings: Record<string, unknown>[] = []) {
   await page.getByRole('button', { name: 'Execute Audit' }).click()
   await expect(page.getByRole('button', { name: 'JSON', exact: true })).toBeEnabled()
 }
-test('P06 DID changes hide prior findings, filters and opened details', async ({ page }) => {
+test('audit: a DID change hides prior findings, filters and opened details', async ({ page }) => {
   await authenticate(page, 'Auditor')
   await page.route('**/pac/audit', (route) =>
     json(route, {
@@ -201,7 +203,7 @@ for (const [format, contentType, bytes] of [
   ['csv', 'text/csv', 'eventType,occurredAt\r\nARCHIVED,2026-10-15T10:00:00Z\r\n'],
   ['pdf', 'application/pdf', '%PDF-1.4\nQA transport fixture\n%%EOF\n'],
 ] as const) {
-  test(`P06 ${format} download preserves server bytes and filename`, async ({ page }) => {
+  test(`audit report ${format} download preserves server bytes and filename`, async ({ page }) => {
     await audit(page)
     await page.route('**/pac/report?**', async (route) => {
       const params = new URL(route.request().url()).searchParams
@@ -219,7 +221,7 @@ for (const [format, contentType, bytes] of [
 }
 for (const width of [390, 1440]) {
   for (const status of [404, 500]) {
-    test(`P06 report error ${status} preserves findings and details at ${width}px`, async ({ page }) => {
+    test(`audit report error ${status} preserves findings and details at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await audit(page, [{ rule_id: 'Preserved check', result: 'PASSED', reason: 'Preserved evidence' }])
       await page.getByRole('row').filter({ hasText: 'Preserved check' }).press('Enter')
@@ -244,7 +246,7 @@ for (const width of [390, 1440]) {
       expect(attempts).toBe(2)
     })
   }
-  test(`P06 keeps format labels and announces report loading at ${width}px`, async ({ page }) => {
+  test(`audit report keeps format labels and announces report loading at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await audit(page)
     let finish!: () => void
@@ -267,7 +269,7 @@ for (const width of [390, 1440]) {
     await download
     await expect(group.getByRole('status')).toHaveCount(0)
   })
-  test(`P06 empty states show only relevant controls at ${width}px`, async ({ page }) => {
+  test(`audit empty states show only relevant controls at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await authenticate(page, 'Auditor')
     let executions = 0
@@ -315,7 +317,7 @@ const denied = {
   outcome: 'DENIED',
 }
 for (const width of [390, 1280]) {
-  test(`F02 access logs load, page, clear on failure and retry at ${width}px`, async ({ page }) => {
+  test(`access logs load, page, clear on failure and retry at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await authenticate(page, 'Auditor')
     const requests: URLSearchParams[] = []
@@ -376,7 +378,7 @@ for (const width of [390, 1280]) {
   })
 }
 for (const role of ['Archive Manager', 'Compliance Officer']) {
-  test(`F02 ${role} cannot see or request the access log panel`, async ({ page }) => {
+  test(`${role} cannot see or request the access log panel`, async ({ page }) => {
     await authenticate(page, role)
     let requests = 0
     await page.route('**/pac/access-attempts**', (route) => {
@@ -724,9 +726,7 @@ for (const width of [390, 1280, 3440]) {
 }
 
 for (const width of [390, 1440]) {
-  test(`F02 long access logs preserve audit priority and visible outcomes at ${width}px`, async ({
-    page,
-  }, testInfo) => {
+  test(`long access logs preserve audit priority and visible outcomes at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await authenticate(page, 'Auditor')
     await page.route('**/pac/access-attempts?**', (route) =>
