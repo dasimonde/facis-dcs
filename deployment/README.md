@@ -719,6 +719,7 @@ Values (production and acceptance):
 | `signing.issuerDID` (or `signing.issuerDIDSecretRef`) | The DID of this instance (`ISSUER_DID`), `did:web:<host>`. |
 | `networkPolicy.ingressFrom` | The pods of the ingress controller (namespace and pod selector). The backend, ORCE and DSS then admit no client outside the release, the ingress and `networkPolicy.peersFrom` (DCS-NFR-SEC-14). Required when `networkPolicy.enabled` and `ingress.enabled`. |
 | `signing.tsaURL` | The RFC 3161 timestamp authority (`TSA_URL`). The backend does not start without it. A deployment without its own TSA can use the ORCE TSA (`orce.enabled`, `http://<release>-orce:1880/tsa/`); `signing.tsaTrustCertSecret` then names the Secret with its certificate (key `tsa-cert.pem`). |
+| `orce.enabled: true` (both profiles carry it), or `archiveNotary.baseURL`, `auditExecutor.url` and `workflowGateExecutor.url` | The archive notary (`ORCE_ARCHIVE_NOTARY_URL`), which records the RFC 3161 timestamp of every archive entry (DCS-FR-CSA-03), and the PAC audit and workflow-gate executors. The backend does not start without the executor URLs. |
 | `dss.tsp.url` (with `dss.enabled`) | A qualified RFC 3161 timestamp authority for the co-deployed DSS. DSS uses it for signature timestamps and for the document timestamp that makes the archive of a QES contract PAdES-B-LTA ([ADR-40](../docs/adr-40-qes-archives-are-pades-b-lta.md)). Empty, the DSS image uses its own in-process TSA. In production this is the TSA of a qualified trust service provider. A test deployment without one points it at the local TSA of the release's ORCE, which answers RFC 3161 over `POST /tsa` (`http://<release>-orce:1880/tsa`); its timestamps are not qualified. |
 | `messaging.natsURL`, `messaging.secretRef` or `nats.enabled` | The NATS server (`NATS_URL`), with JetStream enabled and a persistent store: the backend creates the stream `DCS_EVENTS` and a durable consumer per consumer group on it (ADR-39). `values.prod.yml` co-deploys none. |
 | `oid4vp.trust.enabled: true`, `oid4vp.trust.existingConfigMap` | The trusted credential issuers ("Credential issuers", "The trust document"). |
@@ -743,6 +744,7 @@ Secrets the profiles reference (create them before install; `values.acceptance.y
 | `dcs-prod-ipfs-credentials` | `IPFS_MFS_BASE_URL` (the Kubo RPC URL, for example `https://<release>-ipfs:8443`) |
 | `dcs-prod-tls` | `tls.crt`, `tls.key` (type `kubernetes.io/tls`, the ingress certificate) |
 | `dcs-prod-did` (`identity.existingSecret`) | `did.json` |
+| `dcs-prod-archive-audit-token` (`global.archiveAuditTokenSecretRef`) | `ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN` (`openssl rand -hex 32`); the backend and ORCE use the same token |
 | the NATS Secret of `messaging.secretRef` | `NATS_URL` |
 
 The chart generates the other credentials (the internal CA and certificate, the PostgreSQL password of a co-deployed server, the Kubo API token, the SoftHSM2 PIN) and keeps them on upgrade.
