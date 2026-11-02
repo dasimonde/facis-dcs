@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -160,6 +161,17 @@ type SignatureRecord struct {
 	// IpfsCID and PDFHash name the signed PDF this signature produced.
 	IpfsCID *string `db:"ipfs_cid"`
 	PDFHash *string `db:"pdf_hash"`
+}
+
+// QualifiedCount returns how many SIGNED signatures in records are QES.
+func QualifiedCount(records []SignatureRecord) int {
+	count := 0
+	for _, rec := range records {
+		if rec.Status == "SIGNED" && strings.EqualFold(rec.CredentialType, "QES") {
+			count++
+		}
+	}
+	return count
 }
 
 type ContractRepo interface {

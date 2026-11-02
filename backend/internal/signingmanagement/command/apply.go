@@ -177,6 +177,16 @@ var ErrJAdESInvalid = errors.New("submitted JAdES signature is invalid")
 // settled yet. It is a retry-later condition, not a rejection of the caller.
 var ErrRegenerationInFlight = errors.New("the contract's PDF is still being regenerated; retry signing shortly")
 
+// ErrLongTermValidationUnavailable reports that the PAdES-B-LTA extension of
+// a contract that carries a QES did not complete: DSS or its TSA did not
+// answer, or the extended PDF did not pass the checks (ADR-40). Nothing was
+// written, so the same submission can be sent again.
+var ErrLongTermValidationUnavailable = errors.New("the long-term validation data of the qualified signatures could not be added; retry signing shortly")
+
+// ltaSignatureLevel is the DSS signature level a contract that carries a QES
+// is stored at (ADR-40).
+const ltaSignatureLevel = "PAdES_BASELINE_LTA"
+
 // regenerationLockWait is how long prepare waits for the background
 // regenerator to release a contract. It is a fraction of
 // conf.TransactionTimeout on purpose: one regeneration takes seconds, so this
@@ -264,6 +274,53 @@ type ApplyCmd struct {
 // development testWallet, whose keys are shared files.
 type SignatureValidator interface {
 	ValidatePDF(ctx context.Context, pdf []byte, name string) (*dss.Report, error)
+}
+
+// LongTermExtender extends a signed PDF to a higher PAdES level and validates
+// every signature of the result (dss.Client satisfies it).
+type LongTermExtender interface {
+	ExtendPDF(ctx context.Context, pdf []byte, level string) ([]byte, error)
+	ValidatePDFSignatures(ctx context.Context, pdf []byte) ([]*dss.Report, error)
+}
+
+// archivePDF returns the PDF that finalize stores for this submission. When
+// the signature completes the local signatures of a contract that carries a
+// QES, that is signedPDF extended to PAdES-B-LTA, so that the QES still
+// validates after its signing certificate expires (ADR-40). In all other
+// cases it is signedPDF.
+//
+// The extended PDF must append to signedPDF, every signature in it must be at
+// an LTA level, and as many of them must validate as QES as the contract
+// records. Any failure is ErrLongTermValidationUnavailable.
+func (h *Applier) archivePDF(ctx context.Context, signedPDF []byte, achievedLevel string, records []db.SignatureRecord, localFields []string, field string) ([]byte, error) {
+	withThis := append(slices.Clone(records), db.SignatureRecord{Status: "SIGNED", CredentialType: achievedLevel, FieldName: &field})
+	qualified := db.QualifiedCount(withThis)
+	if qualified == 0 || !signingCompletes(localFields, withThis, field) {
+		return signedPDF, nil
+	}
+	if h.Extender == nil {
+		return nil, fmt.Errorf("a DSS extender is required to store a contract that carries a QES as PAdES-B-LTA")
+	}
+	extended, err := h.Extender.ExtendPDF(ctx, signedPDF, ltaSignatureLevel)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrLongTermValidationUnavailable, err)
+	}
+	if len(extended) <= len(signedPDF) || !bytes.HasPrefix(extended, signedPDF) {
+		return nil, fmt.Errorf("%w: the extended PDF does not append to the signed PDF", ErrLongTermValidationUnavailable)
+	}
+	reports, err := h.Extender.ValidatePDFSignatures(ctx, extended)
+	if err != nil {
+		return nil, fmt.Errorf("%w: validate the extended PDF: %v", ErrLongTermValidationUnavailable, err)
+	}
+	for i, report := range reports {
+		if !strings.HasSuffix(strings.ToUpper(strings.TrimSpace(report.SignatureFormat)), "-LTA") {
+			return nil, fmt.Errorf("%w: signature %d of the extended PDF is %q, not an LTA level", ErrLongTermValidationUnavailable, i+1, report.SignatureFormat)
+		}
+	}
+	if err := dss.AssertQualifiedSignatures(reports, qualified); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrLongTermValidationUnavailable, err)
+	}
+	return extended, nil
 }
 
 // ContentMatcher compares the visible page content of a submitted PDF against a
@@ -458,6 +515,9 @@ type Applier struct {
 	IPFSStorer    cwecommand.ArchiveSnapshotStorer
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    cwecommand.ArchiveTimestampIssuer
+	// Extender extends the PDF of a contract that carries a QES to
+	// PAdES-B-LTA before it is stored (ADR-40). Required only for a QES.
+	Extender LongTermExtender
 	// Validator validates an externally-produced signature (the signatory's
 	// wallet/QTSP, or a desktop PAdES signer) before the DCS records it. Required
 	// by SubmitSignature; the transitional DCS-signing Handle path does not use it.
@@ -901,6 +961,16 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		}
 	}
 
+	// A contract that carries a QES is stored as PAdES-B-LTA (ADR-40). The DSS
+	// round trip is outside the regeneration lock for the reasons given below.
+	// The signer certificate above is read from cmd.SignedPDF, which holds
+	// only this signatory's incremental update.
+	localFields := localSignatureFields(declaredFields, data.Responsible, h.LocalPeer)
+	storedPDF, err := h.archivePDF(ctx, cmd.SignedPDF, achievedLevel, existingRecords, localFields, ceremony.FieldName)
+	if err != nil {
+		return err
+	}
+
 	// Everything above only read, to decide whether the submission is
 	// acceptable; everything below writes. The per-contract regeneration lock —
 	// the key prepare() and the background regenerator take — covers the write
@@ -984,13 +1054,13 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 
 	if err := h.finalize(ctx, tx, applyCmd, finalizeInput{
 		ceremony:        ceremony,
-		signedPDF:       cmd.SignedPDF,
+		signedPDF:       storedPDF,
 		jadesSignature:  cmd.JAdESSignature,
 		contentHash:     *ceremony.PinnedContentHash,
 		rendererVersion: *ceremony.PinnedRendererVersion,
 		signedAt:        signedAt,
 		contractVersion: *ceremony.PinnedContractVersion,
-		localFields:     localSignatureFields(declaredFields, data.Responsible, h.LocalPeer),
+		localFields:     localFields,
 		fromState:       current.State,
 	}); err != nil {
 		return err

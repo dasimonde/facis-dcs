@@ -70,6 +70,21 @@ func TestNamesMatch(t *testing.T) {
 // all (dss/client.go's report never carries these fields reliably; see
 // signerCertificateFromIncrementalUpdate's doc comment).
 func TestSignerCertificateFromIncrementalUpdate(t *testing.T) {
+	preparedPDF := []byte("%PDF-1.7 fake prepared document\n")
+	signedPDF := append(append([]byte{}, preparedPDF...), signatureUpdate(t, "Instance B Signatory", "BDD-Testperson")...)
+
+	cert, err := signerCertificateFromIncrementalUpdate(signedPDF, preparedPDF)
+	require.NoError(t, err)
+	given, surname := certGivenSurname(cert)
+	require.Equal(t, "Instance B Signatory", given)
+	require.Equal(t, "BDD-Testperson", surname)
+}
+
+// signatureUpdate returns an incremental update that adds a signature
+// dictionary whose /Contents holds a detached CMS SignedData by a leaf
+// certificate with the given GIVENNAME and SURNAME.
+func signatureUpdate(t *testing.T, givenName, surname string) []byte {
+	t.Helper()
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	caTemplate := &x509.Certificate{
@@ -91,10 +106,10 @@ func TestSignerCertificateFromIncrementalUpdate(t *testing.T) {
 	leafTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject: pkix.Name{
-			CommonName: "DCS Signatory Instance B Signatory",
+			CommonName: "DCS Signatory " + givenName,
 			ExtraNames: []pkix.AttributeTypeAndValue{
-				{Type: oidGivenName, Value: "Instance B Signatory"},
-				{Type: oidSurname, Value: "BDD-Testperson"},
+				{Type: oidGivenName, Value: givenName},
+				{Type: oidSurname, Value: surname},
 			},
 		},
 		NotBefore: time.Now().Add(-time.Hour),
@@ -118,16 +133,8 @@ func TestSignerCertificateFromIncrementalUpdate(t *testing.T) {
 	// zero bytes, which a correct DER parse must tolerate.
 	padded := make([]byte, len(cms)+64)
 	copy(padded, cms)
-	preparedPDF := []byte("%PDF-1.7 fake prepared document\n")
-	delta := []byte("12 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /Contents <" +
+	return []byte("12 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /Contents <" +
 		hex.EncodeToString(padded) + "> /ByteRange [0 1 2 3] >>\nendobj\n")
-	signedPDF := append(append([]byte{}, preparedPDF...), delta...)
-
-	cert, err := signerCertificateFromIncrementalUpdate(signedPDF, preparedPDF)
-	require.NoError(t, err)
-	given, surname := certGivenSurname(cert)
-	require.Equal(t, "Instance B Signatory", given)
-	require.Equal(t, "BDD-Testperson", surname)
 }
 
 // TestJWSPayloadAndHeaderRoundTrip proves the nonce-binding and payload-pin

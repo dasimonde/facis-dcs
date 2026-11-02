@@ -170,6 +170,28 @@ func (r *Report) AssertMeetsLevel(required string) error {
 	return r.AssertValidAES()
 }
 
+// AssertQualifiedSignatures enforces that at least qualified of a document's
+// signatures pass AssertValidQES. A contract records how many of its
+// signatures are QES, not where each one is in the document, so the gate
+// counts. A QES signature without long-term validation data fails here once
+// its signing certificate expires.
+func AssertQualifiedSignatures(reports []*Report, qualified int) error {
+	valid := 0
+	var last error
+	for _, report := range reports {
+		err := report.AssertValidQES()
+		if err == nil {
+			valid++
+		} else {
+			last = err
+		}
+	}
+	if valid < qualified {
+		return fmt.Errorf("dss: %d of the document's signatures validate as QES, the contract records %d: %v", valid, qualified, last)
+	}
+	return nil
+}
+
 // ParseSubjectAttributes extracts GIVENNAME/SURNAME/CN/SERIALNUMBER RDN
 // attributes from a certificate subject distinguished name string (DSS's
 // SignedBy, e.g. "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane"). Used as a
@@ -253,10 +275,7 @@ func (c *Client) ValidatePDFSignatures(ctx context.Context, pdf []byte) ([]*Repo
 // validate posts pdf to the DSS validation endpoint and returns the raw
 // response body.
 func (c *Client) validate(ctx context.Context, pdf []byte, name string) ([]byte, error) {
-	if c == nil || c.baseURL == "" {
-		return nil, fmt.Errorf("dss: no base URL configured")
-	}
-	body, err := json.Marshal(map[string]any{
+	return c.post(ctx, "/services/rest/validation/validateSignature", "validation", map[string]any{
 		"signedDocument": map[string]any{
 			"bytes": base64.StdEncoding.EncodeToString(pdf),
 			"name":  name,
@@ -265,6 +284,47 @@ func (c *Client) validate(ctx context.Context, pdf []byte, name string) ([]byte,
 		"policy":            nil,
 		"signatureId":       nil,
 	})
+}
+
+// ExtendPDF submits a signed PDF to POST
+// {base}/services/rest/signature/one-document/extendDocument and returns the
+// PDF that DSS extended to level (e.g. PAdES_BASELINE_LTA). DSS appends the
+// validation data and the document timestamp as an incremental update, with
+// the timestamp from its configured TSP source.
+func (c *Client) ExtendPDF(ctx context.Context, pdf []byte, level string) ([]byte, error) {
+	respBody, err := c.post(ctx, "/services/rest/signature/one-document/extendDocument", "extension", map[string]any{
+		"toExtendDocument": map[string]any{
+			"bytes": base64.StdEncoding.EncodeToString(pdf),
+			"name":  "contract.pdf",
+		},
+		"parameters": map[string]any{
+			"signatureLevel":     level,
+			"signaturePackaging": "ENVELOPED",
+			"digestAlgorithm":    "SHA256",
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var extended struct {
+		Bytes []byte `json:"bytes"`
+	}
+	if err := json.Unmarshal(respBody, &extended); err != nil {
+		return nil, fmt.Errorf("dss: parse extension response: %w", err)
+	}
+	if len(extended.Bytes) == 0 {
+		return nil, fmt.Errorf("dss: extension response carries no document")
+	}
+	return extended.Bytes, nil
+}
+
+// post sends body as JSON to the DSS path and returns the raw response body.
+// what names the call in errors.
+func (c *Client) post(ctx context.Context, path, what string, payload any) ([]byte, error) {
+	if c == nil || c.baseURL == "" {
+		return nil, fmt.Errorf("dss: no base URL configured")
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -275,8 +335,7 @@ func (c *Client) validate(ctx context.Context, pdf []byte, name string) ([]byte,
 	var resp *http.Response
 	deadline := time.Now().Add(90 * time.Second)
 	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			c.baseURL+"/services/rest/validation/validateSignature", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -288,17 +347,17 @@ func (c *Client) validate(ctx context.Context, pdf []byte, name string) ([]byte,
 			break
 		}
 		if ctx.Err() != nil || time.Now().After(deadline) {
-			return nil, fmt.Errorf("dss: validation request failed: %w", err)
+			return nil, fmt.Errorf("dss: %s request failed: %w", what, err)
 		}
 		time.Sleep(3 * time.Second)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("dss: read validation response: %w", err)
+		return nil, fmt.Errorf("dss: read %s response: %w", what, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("dss: validation returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, fmt.Errorf("dss: %s returned HTTP %d: %s", what, resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
 	return respBody, nil
