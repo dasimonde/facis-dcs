@@ -538,6 +538,27 @@ class AuthService:
             if time.time() < expires_at - AuthService._TOKEN_EXPIRY_MARGIN_SECONDS:
                 return token
 
+        # The login is scenario setup, not the behavior under test. A dropped
+        # connection on one of its hops starts the whole login again: the
+        # request_uri and the presentation are single-use, so a request-level
+        # retry would be refused.
+        for attempt in range(1, AuthService._LOGIN_ATTEMPTS + 1):
+            try:
+                access_token, expires_in = AuthService._login(api_base, credentials, timeout)
+                break
+            except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+                if attempt == AuthService._LOGIN_ATTEMPTS:
+                    raise
+                print(f"WARNING: login for roles {credentials.roles} lost its connection, attempt {attempt}: {exc}", file=sys.stderr)
+        if expires_in > 0:
+            AuthService._token_cache[cache_key] = (access_token, time.time() + expires_in)
+        return access_token
+
+    _LOGIN_ATTEMPTS = 3
+
+    @staticmethod
+    def _login(api_base: str, credentials, timeout: float) -> tuple[str, int]:
+        """One headless OID4VP login. Returns the access token and its lifetime."""
         session = requests.Session()
         session.headers.update({
             "User-Agent": "bdd-auth-service",
@@ -571,15 +592,12 @@ class AuthService:
             vp_token=vp_token,
             timeout=timeout,
         )
-        access_token, expires_in = AuthService.complete_session(
+        return AuthService.complete_session(
             session,
             api_base,
             redirect_uri,
             timeout=timeout,
         )
-        if expires_in > 0:
-            AuthService._token_cache[cache_key] = (access_token, time.time() + expires_in)
-        return access_token
 
 
     # ------------------------------------------------------------------

@@ -23,6 +23,10 @@ traefik:
       port: 18080
       exposedPort: 18080
       hostPort: 18080
+  # One line per request with the status of the backend and the size sent to
+  # the client: a failure dump then shows which hop cut a response.
+  accessLog:
+    enabled: true
 
 image:
   pullPolicy: Never

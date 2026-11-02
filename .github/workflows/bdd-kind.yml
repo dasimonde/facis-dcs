@@ -138,6 +138,10 @@ jobs:
           # Every container of every pod in every namespace (issuer releases,
           # Traefik, hook jobs), with the previous run of a restarted one.
           bash tests/bdd/scripts/dump_cluster_logs.sh || true
+          # The whole Traefik log with its access log, as a report file: the
+          # dump above keeps only its tail.
+          mkdir -p tests/bdd/.reports
+          kubectl logs -n kube-system deployment/traefik --tail=-1 > tests/bdd/.reports/traefik.log 2>&1 || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=2000 --prefix || true
           # The backend is not the only container in that pod. A sidecar that
