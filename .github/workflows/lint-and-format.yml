@@ -209,7 +209,9 @@ jobs:
 
   go-tests:
     name: Go unit tests (backend + pdf-core)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 ships pg_dump 16, the major of the postgres service below and
+    # of the backup CronJob. A newer pg_dump writes settings a 16 server refuses.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # The Postgres-backed tests read QA_DATABASE_URL. In CI (CI=true) a test
     # without it fails instead of skipping (internal/base/pgtest.URL).
