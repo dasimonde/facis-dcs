@@ -331,3 +331,27 @@ func TestSubscribeAcceptsPlainHTTPForANamedHost(t *testing.T) {
 		t.Fatalf("POST /webhooks with a named plain-http host = %d %s, want 201", rec.Code, rec.Body)
 	}
 }
+
+// The UI sends the token_type Hydra issues, "bearer". The scheme of an
+// Authorization header is case-insensitive (RFC 7235).
+func TestAuthAcceptsTheBearerSchemeInAnyCase(t *testing.T) {
+	p := newTestPlatform(&fakeSubscriptions{})
+	for _, scheme := range []string{"Bearer", "bearer", "BEARER"} {
+		req := httptest.NewRequest(http.MethodGet, "/webhooks", nil)
+		req.Header.Set("Authorization", scheme+" manager-a")
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /webhooks with scheme %q = %d %s, want 200", scheme, rec.Code, rec.Body)
+		}
+	}
+	for _, header := range []string{"", "Basic manager-a", "Bearer", "Bearer   "} {
+		req := httptest.NewRequest(http.MethodGet, "/webhooks", nil)
+		req.Header.Set("Authorization", header)
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("GET /webhooks with Authorization %q = %d, want 401", header, rec.Code)
+		}
+	}
+}
