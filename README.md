@@ -22,6 +22,7 @@ It is designed for integration with the **European Digital Identity Wallet (EUDI
 | `frontend/ClientApp/` | Vue 3 + Vite + Pinia frontend (:5173 in dev) |
 | `pdf-core/` | PDF assembly service (PAdES envelope, C2PA embedding, :8080 in dev) |
 | `deployment/` | Docker build and Helm chart — [deployment/README.md](./deployment/README.md) |
+| `docs/` | Manuals, decision records, requirements traceability — [docs/README.md](./docs/README.md) |
 | `tests/bdd/`, `features/`, `steps/` | Python/behave BDD suite (runs on kind in CI) |
 | `testWallet/` | Dev wallet used for OpenID4VP presentation flows in dev and tests |
 | `scripts/` | Provisioning helpers (SoftHSM2 token, C2PA/PAdES cert chains, CRL) |
