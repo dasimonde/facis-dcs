@@ -1,10 +1,9 @@
 SHELL := /bin/bash -eu -o pipefail
 
 PYTHON ?= python3
-# Unter WSL gegen /mnt/c liegt das Repo auf dem 9P-Dateisystem — ein venv dort
-# macht jeden Python-Import 5-20x langsamer. Default daher: venv im nativen
-# ext4-Home der Distro. Explizites VENV_PATH=... überschreibt weiterhin;
-# außerhalb von WSL (CI-Runner, macOS) bleibt der bisherige Default .venv.
+# Under WSL with the repo on /mnt/c (9P file system), a venv there makes every
+# Python import 5-20x slower. On WSL the default venv is in the native ext4 home.
+# An explicit VENV_PATH=... wins. Outside WSL (CI runners, macOS) the default is .venv.
 ifneq ($(wildcard /proc/sys/fs/binfmt_misc/WSLInterop),)
 VENV_PATH ?= $(HOME)/.dcs-bdd-venv
 endif
@@ -145,8 +144,8 @@ setup_environment:
 	"$(VENV_PATH)/bin/pip" install -q psycopg2-binary jcs pypdf==5.7.0 pyld
 	"$(VENV_PATH)/bin/pip" install -q -r "$(PROJECT_ROOT)/testWallet/requirements.txt"
 
-# Bootstrappt das venv nur, wenn es fehlt/kaputt ist — der pip-Refresh bei
-# jedem Lauf kostete sonst 10-60s pro Testzyklus.
+# Builds the venv only when it is missing or broken. A pip refresh on every run
+# costs 10-60 s per test cycle.
 ensure_venv:
 	@"$(VENV_ABS)/bin/python" -c 'import eu.xfsc.bdd.core, pypdf, pyld' 2>/dev/null || \
 		$(MAKE) setup_environment
@@ -157,10 +156,9 @@ run_bdd_test: ensure_venv
 	cd "$(PROJECT_ROOT)" && \
 	"$(VENV_ABS)/bin/coverage" run --append -m behave $(ARG_BDD_JUNIT) $(FEATURES_PATH) $(ARG_BDD)
 
-# Schneller Dev-Loop für die Implementierungs-Iteration: kein pip-Refresh,
-# kein coverage, kein junit; stoppt beim ersten Fehlschlag. Scope über
-# T=<tag-expression> (z. B. T=@two-instance) und/oder F=<feature-pfad>.
-# Der vollständige, berichtende Lauf bleibt run_bdd_test.
+# Fast development loop: no pip refresh, no coverage, no junit; stops at the
+# first failure. Scope with T=<tag-expression> (e.g. T=@two-instance) and/or
+# F=<feature-path>. The full run with reports is run_bdd_test.
 run_bdd_fast: ensure_venv
 	@cd "$(PROJECT_ROOT)" && \
 	"$(VENV_ABS)/bin/behave" --stop $(if $(T),--tags=$(T)) $(if $(F),$(F),$(FEATURES_PATH)) $(ARG_BDD)
