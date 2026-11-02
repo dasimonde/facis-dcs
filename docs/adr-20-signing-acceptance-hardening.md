@@ -329,14 +329,9 @@ archival**, i.e. at the same point `archiveSignedContract` already runs
 (first-signature SIGNED transition, `DCS-FR-CWE-20`). AES-level contracts are
 unaffected; PAdES-B-B/B-T remains sufficient for AES's assurance target.
 
-This is **not implemented in this change** — it is a decided position with an
-owner-visible acceptance criterion, tracked as its own follow-on work item:
-*"Archived QES contracts verify successfully against DSS with no external
-timestamp/revocation lookup after their signing certificate's validity
-period has passed."* That criterion, not a code comment, is what closes this
-item. It belongs in a dedicated ADR when implemented (the augmentation touches
-the archive pipeline, not the acceptance path this ADR covers), referencing
-this decision as its origin.
+[ADR-40](adr-40-qes-archives-are-pades-b-lta.md) records the
+implementation: the submission that completes the local signatures of a
+contract that carries a QES stores the PDF that DSS extended to PAdES-B-LTA.
 
 ## Consequences
 
