@@ -78,6 +78,12 @@ spec:
               mountPath: {{ $tomcat }}/lib/dss-custom.properties
               subPath: dss-custom.properties
               readOnly: true
+            {{- if .Values.tsp.url }}
+            - name: dss-custom-properties
+              mountPath: /dss/tsp-config.xml
+              subPath: tsp-config.xml
+              readOnly: true
+            {{- end }}
             {{- range list "webapps" "logs" "temp" "work" }}
             - name: {{ . }}
               mountPath: {{ printf "%s/%s" $tomcat . }}

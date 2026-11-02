@@ -4,6 +4,9 @@
 federatedCatalogue:
   remote:
     acknowledgeAdminAllTrustBoundary: true
+dss:
+  tsp:
+    url: "https://qtsa.example.org/tsr"
 signing:
   issuerDID: "did:web:dcs.example.org"
   tsaURL: "https://tsa.example.org/tsr"

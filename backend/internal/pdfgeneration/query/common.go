@@ -78,9 +78,12 @@ const pdfSignatureSourceDSS = "eu-dss"
 // checkPDFSignatures is the PDF-signature check of the verifier
 // (DCS-OR-C2PA-006): every PAdES signature is validated by the EU DSS and must
 // be a sound advanced electronic signature, by the same criteria the signing
-// path accepts a signature with (dss.Report.AssertValidAES). It returns the
-// status, the source and the indication of each signature.
-func checkPDFSignatures(ctx context.Context, pdf []byte, validator PDFSignatureValidator) (status, source, detail string) {
+// path accepts a signature with (dss.Report.AssertValidAES). A contract that
+// records qualified QES signatures must also have that many signatures that
+// validate as QES (ADR-40), so a QES that lost its long-term validation shows
+// as invalid. It returns the status, the source and the indication of each
+// signature.
+func checkPDFSignatures(ctx context.Context, pdf []byte, validator PDFSignatureValidator, qualified int) (status, source, detail string) {
 	if !provenance.CarriesPAdESSignature(pdf) {
 		return provenance.CheckNotAvailable, "", ""
 	}
@@ -102,6 +105,10 @@ func checkPDFSignatures(ctx context.Context, pdf []byte, validator PDFSignatureV
 		if report.AssertValidAES() != nil {
 			status = provenance.CheckInvalid
 		}
+	}
+	if err := dss.AssertQualifiedSignatures(reports, qualified); err != nil {
+		status = provenance.CheckInvalid
+		details = append(details, err.Error())
 	}
 	return status, pdfSignatureSourceDSS, strings.Join(details, "; ")
 }
@@ -141,7 +148,7 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 
 func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	credentials *provenance.CredentialVerifier, statuses *provenance.CredentialStatusVerifier,
-	signatures PDFSignatureValidator, anchors SignerAnchors, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+	signatures PDFSignatureValidator, anchors SignerAnchors, lifecycleStatus string, qualified int) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
@@ -225,7 +232,7 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		statusListStatus = "UNKNOWN (lifecycle credential proof not verified)"
 	}
 
-	pdfSignatureStatus, pdfSignatureSource, pdfSignatureDetail := checkPDFSignatures(ctx, pdfBytes, signatures)
+	pdfSignatureStatus, pdfSignatureSource, pdfSignatureDetail := checkPDFSignatures(ctx, pdfBytes, signatures, qualified)
 	signerStatus, signerDetail := provenance.CheckNotAvailable, ""
 	if verifyErr == nil {
 		signerStatus, signerDetail = anchorSigners(result.Signers, anchors)

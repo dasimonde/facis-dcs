@@ -137,6 +137,11 @@ ipfs:
 # existing DSS instead, set dss.url and enabled: false.
 dss:
   enabled: true
+  # The operator sets a qualified RFC 3161 timestamp authority here. DSS uses
+  # it for the PAdES-B-LTA archive of a QES contract (ADR-40). The release does
+  # not render without it.
+  tsp:
+    url: ""
 
 # Retention policy of archived contracts (DCS-FR-CSA-14, DCS-FR-CSA-19).
 archive:

@@ -51,11 +51,12 @@ func mapSignatureCommandError(err error) error {
 		return nil
 	}
 	// The background regenerator still holds the contract, so the base document
-	// the signature would cover is not settled yet. The caller is not wrong and
-	// nothing failed: reported as a temporary service_unavailable (503) so a
+	// the signature would cover is not settled yet. Or DSS could not add the
+	// long-term validation data of a QES (ADR-40) and nothing was written. The
+	// caller is not wrong: reported as a temporary service_unavailable (503) so a
 	// client can retry, where internal_error (500, temporary:false) told it the
 	// request would never succeed.
-	if errors.Is(err, command.ErrRegenerationInFlight) {
+	if errors.Is(err, command.ErrRegenerationInFlight) || errors.Is(err, command.ErrLongTermValidationUnavailable) {
 		return goa.NewServiceError(err, "service_unavailable", false, true, false)
 	}
 	if errors.Is(err, command.ErrCeremonyRequired) || errors.Is(err, command.ErrCeremoniesIncomplete) {
@@ -487,8 +488,10 @@ func (s *signatureManagementsrvc) Provenance(ctx context.Context, req *signature
 // signature and confirm it identifies the signatory (sole control, ADR-12).
 func (s *signatureManagementsrvc) newApplier() (command.Applier, error) {
 	var validator command.SignatureValidator
+	var extender command.LongTermExtender
 	if url := dss.URL(); url != "" {
-		validator = dss.New(url)
+		client := dss.New(url)
+		validator, extender = client, client
 	}
 	// The counterparty-settlement gate compares party identities and reads the
 	// settlement this instance itself made, both keyed by this did:web. A
@@ -513,6 +516,7 @@ func (s *signatureManagementsrvc) newApplier() (command.Applier, error) {
 		ArchiveNotary: s.ArchiveNotary,
 		ArchiveTSA:    s.ArchiveTSA,
 		Validator:     validator,
+		Extender:      extender,
 		LocalPeer:     localPeer,
 		Settlements:   s.Settlements,
 		CredentialState: func(ctx context.Context, presentation string) (status.State, error) {

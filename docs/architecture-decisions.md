@@ -359,6 +359,10 @@ ADR-20:
   status. DCS does not accept any crypto or integrity error. DCS records
   the subject and serial of the signing certificate on the ceremony record
   as sole-control evidence (DCS-FR-SM-26).
+- **Rule:** The submission that completes the local signatures of a
+  contract that carries a QES stores the PDF that DSS extended to
+  PAdES-B-LTA, before the regeneration lock. A failed extension writes
+  nothing and is answered as retryable (ADR-40).
 - **Rule:** The verify endpoint reports the PDF signature check as
   `not_available` instead of "passed": the path does not cryptographically
   re-verify the PAdES CMS signature over its /ByteRange, and a check that

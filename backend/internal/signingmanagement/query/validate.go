@@ -160,7 +160,12 @@ func (h *Validator) validate(ctx context.Context, cmd ValidateQry) (*ValidationR
 	findings = append(findings, h.crossCheckEmbeddedPID(ctx, tx, cmd.DID, evidence.Documents)...)
 	findings = append(findings, h.crossCheckSHACLDrift(ctx, tx, cmd.DID, evidence.Documents)...)
 
-	dssReport, dssFindings, err := h.validateWithDSS(ctx, tx, cmd.DID)
+	signatures, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not load signatures: %w", err)
+	}
+
+	dssReport, dssFindings, err := h.validateWithDSS(ctx, tx, cmd.DID, db.QualifiedCount(signatures))
 	if err != nil {
 		// A CONFIGURED DSS is a required validator: its unavailability is an
 		// error the caller sees, never a silently thinner findings list.
@@ -170,10 +175,6 @@ func (h *Validator) validate(ctx context.Context, cmd ValidateQry) (*ValidationR
 
 	signingEvidence := collectSigningEvidence(evidence)
 
-	signatures, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
-	if err != nil {
-		return nil, fmt.Errorf("could not load signatures: %w", err)
-	}
 	signerDIDs := make([]string, 0, len(signatures))
 	for _, sig := range signatures {
 		signerDIDs = append(signerDIDs, sig.SignerDID)
@@ -202,7 +203,11 @@ func (h *Validator) validate(ctx context.Context, cmd ValidateQry) (*ValidationR
 // EN 319 102-1 indication as a finding. No DSS_URL means no DSS leg (the
 // internal PKCS#11-based checks stand alone); a configured-but-failing DSS
 // is an error. An unsigned contract (no stored PDF) yields no DSS finding.
-func (h *Validator) validateWithDSS(ctx context.Context, tx *sqlx.Tx, did string) (*dss.Report, []string, error) {
+//
+// A contract that records qualified QES signatures must still have that many
+// signatures that validate as QES (ADR-40). A QES whose signing certificate
+// expired without long-term validation data shows as a finding here.
+func (h *Validator) validateWithDSS(ctx context.Context, tx *sqlx.Tx, did string, qualified int) (*dss.Report, []string, error) {
 	dssURL := dss.URL()
 	if dssURL == "" {
 		return nil, nil, nil
@@ -211,9 +216,20 @@ func (h *Validator) validateWithDSS(ctx context.Context, tx *sqlx.Tx, did string
 	if err != nil || len(pdfBytes) == 0 {
 		return nil, nil, nil
 	}
-	report, err := dss.New(dssURL).ValidatePDF(ctx, pdfBytes, did+".pdf")
+	client := dss.New(dssURL)
+	report, err := client.ValidatePDF(ctx, pdfBytes, did+".pdf")
 	if err != nil {
 		return nil, nil, fmt.Errorf("EU DSS validation of %s failed: %w", did, err)
+	}
+	var qesFindings []string
+	if qualified > 0 {
+		reports, err := client.ValidatePDFSignatures(ctx, pdfBytes)
+		if err != nil {
+			return nil, nil, fmt.Errorf("EU DSS validation of the signatures of %s failed: %w", did, err)
+		}
+		if err := dss.AssertQualifiedSignatures(reports, qualified); err != nil {
+			qesFindings = append(qesFindings, fmt.Sprintf("EU DSS validation report: %v", err))
+		}
 	}
 	// A wallet-produced signature is an AES (eIDAS Art. 26), not a QES: DSS's
 	// AES acceptance criteria (integrity sound + signatory certificate present)
@@ -228,7 +244,7 @@ func (h *Validator) validateWithDSS(ctx context.Context, tx *sqlx.Tx, did string
 		if report.SubIndication != "" {
 			finding += fmt.Sprintf(" (subIndication=%s)", report.SubIndication)
 		}
-		return report, []string{finding}, nil
+		return report, append([]string{finding}, qesFindings...), nil
 	}
 	finding := ValidAESFinding
 	if report != nil && strings.TrimSpace(report.Indication) != "" {
@@ -238,7 +254,7 @@ func (h *Validator) validateWithDSS(ctx context.Context, tx *sqlx.Tx, did string
 		}
 		finding += ")"
 	}
-	return report, []string{finding}, nil
+	return report, append([]string{finding}, qesFindings...), nil
 }
 
 // ValidAESFinding records what DSS actually reported.

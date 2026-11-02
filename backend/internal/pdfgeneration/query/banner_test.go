@@ -36,7 +36,7 @@ func TestRunVerifyTakesTheBannerFromTheVerifiedCredential(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore,
-				&provenance.CredentialVerifier{Resolve: tc.resolve}, statusList.Verifier, nil, SignerAnchors{}, "draft")
+				&provenance.CredentialVerifier{Resolve: tc.resolve}, statusList.Verifier, nil, SignerAnchors{}, "draft", 0)
 			if err != nil {
 				t.Fatalf("runVerify: %v", err)
 			}

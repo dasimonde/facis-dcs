@@ -129,7 +129,7 @@ func TestRunVerifyReportsTheSignerAnchoring(t *testing.T) {
 	})
 
 	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, nil,
-		SignerAnchors{Roots: roots, Issuers: []string{partyA}}, "active")
+		SignerAnchors{Roots: roots, Issuers: []string{partyA}}, "active", 0)
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}

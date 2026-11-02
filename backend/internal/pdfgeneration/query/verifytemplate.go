@@ -87,5 +87,5 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 		return nil, fmt.Errorf("fetch template PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
 
-	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, nil, h.signerAnchors(), currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, nil, h.signerAnchors(), currentC2PAState, 0)
 }

@@ -82,4 +82,5 @@
 | [37](adr-37-regulatory-rule-pack.md) | Regulatory rules are gate findings, not a legal assessment |
 | [38](adr-38-recorded-deviations-of-the-pilot.md) | Recorded deviations of the pilot |
 | [39](adr-39-durable-event-delivery.md) | Events are delivered through JetStream durable consumers |
+| [40](adr-40-qes-archives-are-pades-b-lta.md) | Archives of QES contracts are PAdES-B-LTA |
 | [OCM-W](adr-ocmw-vc-signing.md) | Why OCM-W NATS services are not used for VC signing in DCS |

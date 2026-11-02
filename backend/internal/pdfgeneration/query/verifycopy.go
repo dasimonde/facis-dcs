@@ -115,7 +115,7 @@ func verifyCopy(
 	}
 
 	if manifest, err := pdfCore.ExtractManifest(ctx, qry.PDF); err == nil && len(manifest) > 0 && bytes.HasPrefix(original, qry.PDF) {
-		result, err := runVerify(ctx, qry.PDF, pdfCore, credentials, statuses, signatures, anchors, lifecycle)
+		result, err := runVerify(ctx, qry.PDF, pdfCore, credentials, statuses, signatures, anchors, lifecycle, 0)
 		if err != nil {
 			return nil, err
 		}

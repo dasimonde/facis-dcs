@@ -9,3 +9,18 @@ data:
   # the Tomcat shared classpath (CATALINA_HOME/lib) in deployment.yaml.
   dss-custom.properties: |
     current.lotl.url={{ .Values.trustedList.lotlURL }}
+    {{- with .Values.tsp.url }}
+    tsp-source=file:/dss/tsp-config.xml
+    {{- end }}
+  {{- with .Values.tsp.url }}
+  # The Spring bean the tsp-source property names: an online TSP source in
+  # place of the in-process TSA of the image (ADR-40).
+  tsp-config.xml: |
+    <beans xmlns="http://www.springframework.org/schema/beans"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.3.xsd">
+      <bean id="tspSource" class="eu.europa.esig.dss.service.tsp.OnlineTSPSource">
+        <constructor-arg name="tspServer" value="{{ . | html }}" />
+      </bean>
+    </beans>
+  {{- end }}
