@@ -91,12 +91,14 @@ func (p *Platform) routes() {
 // auth wraps a handler with JWT Bearer token validation.
 func (p *Platform) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		// The scheme is case-insensitive (RFC 7235): Hydra issues token_type
+		// "bearer", and the UI sends it as given.
+		scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+		token = strings.TrimSpace(token)
+		if !strings.EqualFold(scheme, "Bearer") || token == "" {
 			jsonError(w, http.StatusUnauthorized, "missing Bearer token")
 			return
 		}
-		token := strings.TrimPrefix(header, "Bearer ")
 
 		caller, err := p.validate(r.Context(), token)
 		if err != nil {
