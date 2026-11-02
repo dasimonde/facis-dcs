@@ -61,6 +61,10 @@ spec:
               # The pg_dump major version must be at least the server's.
               image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}{{ with .Values.backup.image.digest }}@{{ . }}{{ end }}"
               imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
+              {{- with .Values.backup.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
               # Writes only to /backup.
               securityContext:
                 allowPrivilegeEscalation: false
