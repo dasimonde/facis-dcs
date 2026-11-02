@@ -58,6 +58,10 @@ func (r *receivedContractRepoFake) RemoteCreate(_ context.Context, _ *sqlx.Tx, d
 
 func (r *receivedContractRepoFake) RemoteUpdate(_ context.Context, _ *sqlx.Tx, data db.Contract) error {
 	copied := data
+	// Like the repository's partial update, an empty state keeps the stored one.
+	if copied.State == "" && r.row != nil {
+		copied.State = r.row.State
+	}
 	r.row = &copied
 	return nil
 }
@@ -75,7 +79,7 @@ func (r *receivedContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db
 	return nil
 }
 
-func (r *receivedContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _ string, state string) error {
+func (r *receivedContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _, _ string, state string) error {
 	r.row.State = state
 	return nil
 }

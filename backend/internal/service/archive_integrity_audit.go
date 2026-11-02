@@ -244,7 +244,10 @@ func (s *processAuditAndCompliancesrvc) archiveIntegrityTrailEntries(
 	for ruleIndex, rule := range archiveIntegrityRules {
 		check := checks[rule]
 		result, reason := "PASSED", "Integrity evidence verified"
-		if check != nil {
+		switch {
+		case errors.Is(check, errArchiveContentErased):
+			result, reason = "ERASED", check.Error()
+		case check != nil:
 			result, reason = "FAILED", check.Error()
 		}
 		kind := "CHECK"
@@ -263,6 +266,56 @@ func (s *processAuditAndCompliancesrvc) archiveIntegrityTrailEntries(
 
 func (s *processAuditAndCompliancesrvc) evaluateArchiveIntegrityChecks(ctx context.Context, entry db.ContractArchiveEntry, archiveStoreEvents []datatype.AuditLogEntry, notaryEvents map[string][]archiveNotaryEvent, chainErr error) map[string]error {
 	checks := make(map[string]error, len(archiveIntegrityRules))
+	erased := archiveContentErased(entry)
+	if erased {
+		checks["ARCHIVE_DB_SNAPSHOT"] = errArchiveContentErased
+		checks["ARCHIVE_CONTENT_HASH"] = errArchiveContentErased
+		checks["ARCHIVE_IPFS_SNAPSHOT"] = errArchiveContentErased
+	} else {
+		s.evaluateArchiveContentChecks(ctx, entry, checks)
+	}
+	archiveEntryID := archiveNotaryEntryID(entry.DID, entry.ContractVersion)
+	_, receipt, eventTSAReceipt, receiptErr := findArchiveStoreEvent(entry, archiveEntryID, archiveStoreEvents)
+	if receiptErr != nil && erased {
+		// The store event body that names the notary receipt is encrypted
+		// under the erased key.
+		checks["ARCHIVE_ORCE_RECEIPT"] = errArchiveContentErased
+		checks["ARCHIVE_TSA_RFC3161"] = errArchiveContentErased
+	} else if receiptErr != nil {
+		checks["ARCHIVE_ORCE_RECEIPT"] = receiptErr
+	}
+	candidates := notaryEvents[archiveEntryID]
+	if chainErr != nil {
+		checks["ARCHIVE_ORCE_CHAIN"] = chainErr
+	} else if len(candidates) == 0 {
+		checks["ARCHIVE_ORCE_CHAIN"] = fmt.Errorf("ORCE chain has no event for %s", archiveEntryID)
+	}
+	if receiptErr == nil && checks["ARCHIVE_ORCE_CHAIN"] == nil {
+		if _, err := selectArchiveNotaryEvent(archiveEntryID, receipt, candidates); err != nil {
+			checks["ARCHIVE_ORCE_RECEIPT"] = err
+		}
+	}
+	if checks["ARCHIVE_TSA_RFC3161"] == nil {
+		if err := verifyArchiveTSAEvidence(entry, receipt, eventTSAReceipt, candidates); err != nil {
+			checks["ARCHIVE_TSA_RFC3161"] = err
+		}
+	}
+	return checks
+}
+
+// errArchiveContentErased marks a check that cannot run because the entry's
+// content was erased with the contract's key (DCS-NFR-SEC-13). The finding is
+// the verdict ERASED, not a tamper finding (ADR-30).
+var errArchiveContentErased = errors.New("archive content was erased with the contract's key")
+
+// archiveContentErased reports an entry whose snapshot was erased. The archive
+// trigger permits the empty snapshot only after the contract's key is
+// shredded.
+func archiveContentErased(entry db.ContractArchiveEntry) bool {
+	return string(bytes.TrimSpace(entry.ContractSnapshot)) == "{}"
+}
+
+func (s *processAuditAndCompliancesrvc) evaluateArchiveContentChecks(ctx context.Context, entry db.ContractArchiveEntry, checks map[string]error) {
 	if !entry.ContractSnapshot.IsNotNullValue() {
 		checks["ARCHIVE_DB_SNAPSHOT"] = errors.New("contract_snapshot is empty")
 	} else if _, err := cwecommand.CanonicalizeArchiveSnapshot(entry.ContractSnapshot); err != nil {
@@ -284,26 +337,6 @@ func (s *processAuditAndCompliancesrvc) evaluateArchiveIntegrityChecks(ctx conte
 	} else if hash, err := cwecommand.HashArchiveSnapshot(datatype.JSON(fetched)); err != nil || hash != entry.ContentHash || !jsonSemanticallyEqual(entry.ContractSnapshot, fetched) {
 		checks["ARCHIVE_IPFS_SNAPSHOT"] = errors.New("IPFS snapshot does not match archived DB snapshot and content hash")
 	}
-	archiveEntryID := archiveNotaryEntryID(entry.DID, entry.ContractVersion)
-	_, receipt, eventTSAReceipt, receiptErr := findArchiveStoreEvent(entry, archiveEntryID, archiveStoreEvents)
-	if receiptErr != nil {
-		checks["ARCHIVE_ORCE_RECEIPT"] = receiptErr
-	}
-	candidates := notaryEvents[archiveEntryID]
-	if chainErr != nil {
-		checks["ARCHIVE_ORCE_CHAIN"] = chainErr
-	} else if len(candidates) == 0 {
-		checks["ARCHIVE_ORCE_CHAIN"] = fmt.Errorf("ORCE chain has no event for %s", archiveEntryID)
-	}
-	if receiptErr == nil && checks["ARCHIVE_ORCE_CHAIN"] == nil {
-		if _, err := selectArchiveNotaryEvent(archiveEntryID, receipt, candidates); err != nil {
-			checks["ARCHIVE_ORCE_RECEIPT"] = err
-		}
-	}
-	if err := verifyArchiveTSAEvidence(entry, receipt, eventTSAReceipt, candidates); err != nil {
-		checks["ARCHIVE_TSA_RFC3161"] = err
-	}
-	return checks
 }
 
 func verifyArchiveTSAEvidence(entry db.ContractArchiveEntry, receipt *archiveNotaryReceiptData, eventReceipt *archiveTSAReceiptData, candidates []archiveNotaryEvent) error {

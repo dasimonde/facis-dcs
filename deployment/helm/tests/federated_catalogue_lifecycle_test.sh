@@ -13,9 +13,21 @@ fail() {
 
 command -v helm >/dev/null || fail "helm is required"
 
+# helm dependency build also packs every local subchart into charts/*.tgz. Helm
+# then loads the copy and the directory, and the copy can hide a later edit of
+# the directory. The packed copies of local subcharts are removed again.
+remove_local_subchart_archives() {
+  local dir
+  for dir in "$CHART_DIR"/charts/*/; do
+    rm -f "$CHART_DIR/charts/$(basename "$dir")"-*.tgz
+  done
+}
+trap 'remove_local_subchart_archives; rm -rf "$TMP_DIR"' EXIT
+
 lock_before="$(sha256sum "$CHART_DIR/Chart.lock")"
 helm dependency build --skip-refresh "$CHART_DIR" >/dev/null
 lock_after="$(sha256sum "$CHART_DIR/Chart.lock")"
+remove_local_subchart_archives
 [[ "$lock_before" == "$lock_after" ]] ||
   fail "helm dependency build changed the authoritative Chart.lock"
 
@@ -25,7 +37,10 @@ helm template lifecycle "$CHART_DIR" \
 helm template lifecycle "$CHART_DIR" \
   -f "$CHART_DIR/values.bdd.yml" \
   --set fcservice.portal.enabled=true >"$TMP_DIR/enabled-b.yaml"
-cmp "$TMP_DIR/enabled-a.yaml" "$TMP_DIR/enabled-b.yaml" ||
+# The in-cluster TLS key material (global.internalTLS) and the Kubo API token
+# are generated on each install, so they are the parts that may differ.
+generated_tls='^[[:space:]]+((ca|tls)\.(crt|key)|token): '
+cmp <(grep -Ev "$generated_tls" "$TMP_DIR/enabled-a.yaml") <(grep -Ev "$generated_tls" "$TMP_DIR/enabled-b.yaml") ||
   fail "identical locked inputs rendered different manifests"
 
 deployment_image() {
@@ -226,9 +241,9 @@ statuslist_proxy_doc="$(awk '
 ' <<<"$backend_doc")"
 grep -q 'readinessProbe:' <<<"$statuslist_proxy_doc" &&
   grep -q 'httpGet:' <<<"$statuslist_proxy_doc" &&
-  grep -q 'path: "/statuslist/v1/tenants/c2pa/status/1"' <<<"$statuslist_proxy_doc" &&
+  grep -q 'path: "/issuer/status-list/1"' <<<"$statuslist_proxy_doc" &&
   grep -q 'port: sl-proxy' <<<"$statuslist_proxy_doc" ||
-  fail "BDD status-list proxy readiness does not verify the required seeded list route"
+  fail "BDD status-list proxy readiness does not verify the issuer status list route"
 if grep -q 'tcpSocket:' <<<"$statuslist_proxy_doc"; then
   fail "status-list proxy still reports ready from TCP reachability alone"
 fi
@@ -242,8 +257,8 @@ default_proxy_doc="$(awk '
   found && /^        - name:/ { exit }
   found { print }
 ' "$TMP_DIR/proxy-default.yaml")"
-grep -q 'path: "/statuslist/health"' <<<"$default_proxy_doc" ||
-  fail "status-list proxy default readiness path is not its functional health route"
+grep -q 'path: "/issuer/status-list/1"' <<<"$default_proxy_doc" ||
+  fail "status-list proxy default readiness path is not the issuer status list"
 
 # The backend needs the PKCS#11 material produced by this post-install hook
 # before /readyz can become successful. The supported deploy path therefore
@@ -285,10 +300,18 @@ grep -q 'readinessProbe:' <<<"$fc_service_doc" ||
 if grep -Eq 'startupProbe:|livenessProbe:' <<<"$fc_service_doc"; then
   fail "fc-service cold start is still bounded by a restart-triggering probe"
 fi
-if awk -v RS='---' '
-  /kind: Job/ && /fc-realm-provision/ && /(sleep [0-9]|for i in|until |while )/ { found=1 }
-  END { exit !found }
-' "$TMP_DIR/enabled-a.yaml"; then
+# Keycloak reports Available before its admin API issues tokens, so the Job
+# retries the admin token, bounded (require_admin_token). No other step polls,
+# retries or sleeps.
+realm_job_doc="$(awk '
+  /^# Source: digital-contracting-service\/templates\/fc-realm-provision-job.yaml$/ { found=1 }
+  found && /^---$/ { exit }
+  found { print }
+' "$TMP_DIR/enabled-a.yaml")"
+grep -q 'for attempt in $(seq 1 60); do' <<<"$realm_job_doc" ||
+  fail "realm provisioning admin token retry is not bounded"
+if sed '/require_admin_token() {/,/^              }$/d' <<<"$realm_job_doc" |
+  grep -Eq '(sleep [0-9]|for i in|until |while )'; then
   fail "realm provisioning retains polling, retry, or artificial sleep"
 fi
 
@@ -300,24 +323,25 @@ if grep -Eqi 'neo4j|n10s(\.graphconfig\.show)?' "$TMP_DIR/enabled-runtime.yaml";
   [[ -z "$offenders" ]] || fail "rendered runtime still references Neo4j/n10s: $offenders"
 fi
 
-helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.dev.yml" >"$TMP_DIR/disabled.yaml"
+# The chart default has the Federated Catalogue off. values.dev.yml turns it on:
+# the development backend syncs its schemas with the co-deployed catalogue.
+helm template lifecycle "$CHART_DIR" >"$TMP_DIR/disabled.yaml"
 if grep -q 'name: FEDERATED_CATALOGUE_API_URL' "$TMP_DIR/disabled.yaml"; then
   fail "disabled deployment still configures the backend FC startup gate"
 fi
 
 if helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.acceptance.yml" >/dev/null 2>"$TMP_DIR/remote-error"; then
+  -f "$CHART_DIR/values.acceptance.yml" -f "$CHART_DIR/tests/acceptance.prerequisites.yml" \
+  --set federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=false >/dev/null 2>"$TMP_DIR/remote-error"; then
   fail "remote ADMIN_ALL catalogue rendered without explicit ADR-18 acknowledgement"
 fi
 grep -q 'acknowledgeAdminAllTrustBoundary' "$TMP_DIR/remote-error" ||
   fail "remote FC rejection does not explain the required ADR-18 acknowledgement"
 helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.acceptance.yml" \
-  --set federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=true \
+  -f "$CHART_DIR/values.acceptance.yml" -f "$CHART_DIR/tests/acceptance.prerequisites.yml" \
   >"$TMP_DIR/remote-acknowledged.yaml"
 
-if rg -n 'helm dependency update' \
+if grep -nE 'helm dependency update' \
   "$REPO_ROOT/dev-stack.sh" "$REPO_ROOT/dev-stack2.sh" "$CHART_DIR/deploy.sh" \
   "$CHART_DIR/values.dev.yml" "$CHART_DIR/values.dev2.yml" >/dev/null; then
   fail "an executable/documented development path bypasses Chart.lock"
@@ -325,13 +349,13 @@ fi
 grep -q 'helm dependency build --skip-refresh "$HELM_CHART_PATH"' \
   "$REPO_ROOT/dev-stack2.sh" ||
   fail "second development entrypoint does not build dependencies from Chart.lock"
-if rg -n 'Waiting for Federated Catalogue|app.kubernetes.io/name=federated-catalogue' \
+if grep -nE 'Waiting for Federated Catalogue|app.kubernetes.io/name=federated-catalogue' \
   "$REPO_ROOT/dev-stack2.sh" >/dev/null; then
   fail "FC-disabled second development entrypoint still performs a blanket FC wait"
 fi
-if rg -n 'SyncWithRetry|FC_SCHEMA_SYNC_(MAX_WAIT|RETRY_INTERVAL)' \
+if grep -rnE 'SyncWithRetry|FC_SCHEMA_SYNC_(MAX_WAIT|RETRY_INTERVAL)' \
   "$REPO_ROOT/backend" "$REPO_ROOT/dev-stack.sh" "$CHART_DIR" \
-  --glob '!federated_catalogue_lifecycle_test.sh' >/dev/null; then
+  --exclude=federated_catalogue_lifecycle_test.sh --exclude-dir=gen --exclude-dir=node_modules >/dev/null; then
   fail "obsolete FC retry/warm-up configuration remains"
 fi
 

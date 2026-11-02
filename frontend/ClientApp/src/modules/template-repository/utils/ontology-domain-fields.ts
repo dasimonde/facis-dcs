@@ -1,5 +1,6 @@
 import { Parser, type Quad } from 'n3'
 import { shallowReactive } from 'vue'
+import { getConfig } from '@/config'
 import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
 import type {
   DomainFieldDefinition,
@@ -103,9 +104,9 @@ function schemaContentRoute(kind: string, name: string): string | null {
   const encoded = encodeURIComponent(name)
   switch (kind) {
     case 'ontology':
-      return `/api/semantic/ontology/${encoded}`
+      return `${getConfig().API_BASE_URL}/semantic/ontology/${encoded}`
     case 'shapes':
-      return `/api/semantic/shapes/${encoded}`
+      return `${getConfig().API_BASE_URL}/semantic/shapes/${encoded}`
     default:
       return null
   }
@@ -405,7 +406,7 @@ async function loadHub(): Promise<{
   constraints: SemanticValueConstraint[]
   partyRoleOptions: ContractPartyRoleOption[]
 }> {
-  const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const inventory = await fetchHubJson<SchemaListEntry[]>(`${getConfig().API_BASE_URL}/semantic/schema/list`)
   hubFingerprint = fingerprintOf(inventory)
   const loadedSources = await Promise.all(
     inventory
@@ -493,7 +494,7 @@ function writeHubCache(fingerprint: string, vocabulary: HubVocabulary): void {
 }
 
 async function loadHubCached(): Promise<HubVocabulary> {
-  const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const inventory = await fetchHubJson<SchemaListEntry[]>(`${getConfig().API_BASE_URL}/semantic/schema/list`)
   const fingerprint = fingerprintOf(inventory)
   const cached = readHubCache(fingerprint)
   if (cached) {
@@ -526,7 +527,7 @@ let refreshInFlight: Promise<void> | null = null
  */
 export function refreshOntologyDomainFields(): Promise<void> {
   refreshInFlight ??= (async () => {
-    const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+    const inventory = await fetchHubJson<SchemaListEntry[]>(`${getConfig().API_BASE_URL}/semantic/schema/list`)
     if (fingerprintOf(inventory) === hubFingerprint) return
     const fresh = await loadHub()
     writeHubCache(hubFingerprint, fresh)

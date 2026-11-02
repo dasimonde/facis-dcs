@@ -396,7 +396,8 @@ Feature: Deterministic re-rendering guarantee across the full document lifecycle
     Then the recompiled PDF page content matches a fresh compile of the amended payload
 
     # Final archive verification of the fully signed amended document.
-    When I verify the "re-signed" PDF through /verify
+    When I re-anchor the "re-signed" PDF through /render/reanchor
+    And I verify the "re-anchored" PDF through /verify
     And I extract and recompile the embedded JSON-LD from the "verified" PDF
     Then the recompiled PDF page content matches a fresh compile of the amended payload
 

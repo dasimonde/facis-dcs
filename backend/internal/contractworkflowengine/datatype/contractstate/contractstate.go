@@ -74,6 +74,18 @@ func (s ContractState) IsValid() bool {
 	return validStates[upper]
 }
 
+// Erasable reports whether a contract in this state may have its archive entry
+// deleted and its keys shredded (DCS-FR-CSA-17): only a contract that is no
+// longer in force or never came into force. The local archive delete and the
+// peer erase both use this predicate.
+func (s ContractState) Erasable() bool {
+	switch ContractState(strings.ToUpper(string(s))) {
+	case Terminated, Expired, Revoked, Rejected, Withdrawn:
+		return true
+	}
+	return false
+}
+
 // String returns the string representation of the ContractState
 func (s ContractState) String() string {
 	return string(s)

@@ -131,3 +131,20 @@ export interface AccessAttemptsResponse {
   attempts: AccessAttempt[]
   next_cursor?: string
 }
+
+/** A Merkle inclusion proof of one audit entry in a timestamped checkpoint (ADR-16). */
+export interface CheckpointProof {
+  entry_cid: string
+  leaf_hash: string
+  leaf_index: number
+  siblings: string[]
+  head: {
+    seq: number
+    root: string
+    prev_root?: string
+    leaf_count: number
+    created_at: string
+    tsa_timestamp?: string
+    timestamped_at?: string
+  }
+}

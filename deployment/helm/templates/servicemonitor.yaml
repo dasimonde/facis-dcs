@@ -1,11 +1,13 @@
-{{- if .Values.serviceMonitor.enabled }}
+{{- /* The alert rules evaluate the series of this scrape, so the ServiceMonitor
+     renders wherever they do (DCS-NFR-SEC-11). */}}
+{{- if or .Values.serviceMonitor.enabled (and .Values.alerts.enabled (include "digital-contracting-service.prometheusOperator" .)) }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: {{ include "digital-contracting-service.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    release: prometheus  # muss so heißen damit kube-prometheus-stack ihn erkennt
+    {{- include "digital-contracting-service.monitoringLabels" . | nindent 4 }}
 spec:
   namespaceSelector:
     matchNames:

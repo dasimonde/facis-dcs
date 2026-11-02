@@ -9,6 +9,7 @@ import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import AuditView from '@contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import {
@@ -20,6 +21,7 @@ import { useContractEditorUiStore } from '@contract-workflow-engine/store/contra
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
 import PeerProposalPendingAlert from '@/components/contract/PeerProposalPendingAlert.vue'
+import NegotiationList from '@/components/lists/contract/negotiation/NegotiationList.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { resolveLocalInstanceDid } from '@/services/did-service'
@@ -30,6 +32,7 @@ import { ContractState } from '@/types/contract-state'
 import { hasPendingPeerProposalAfterSettle } from '@/utils/contract-negotiations'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
+import type { ContractReviewFinding } from '@/models/responses/contract-response'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -58,7 +61,13 @@ const isAuditingAuthorized = computed(
 )
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content', 'audit']),
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
+    'details',
+    'content',
+    'proposals',
+    'diff',
+    'audit',
+  ]),
 )
 
 const story = computed(() =>
@@ -68,6 +77,22 @@ const story = computed(() =>
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const contract: Ref<Contract | null> = ref(null)
+// The reviewer decisions, newest first, inform the approval (DCS-IR-CWE-08, DCS-FR-CWE-25).
+const reviewFindings: Ref<ContractReviewFinding[]> = ref([])
+const highlightedBlockIds = computed(() => reviewFindings.value[0]?.annotations.map((a) => a.block_id) ?? [])
+async function loadReviewFindings(did: string) {
+  reviewFindings.value = []
+  try {
+    const findings = await contractWorkflowService.reviewFindings(did)
+    if (route.params.did === did) reviewFindings.value = findings
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  }
+}
+const blockTitle = (blockId: string) => {
+  const block = dcsDraftStore.blocks.find((candidate) => candidate['@id'] === blockId)
+  return (block && 'dcs:title' in block ? block['dcs:title'] : undefined) ?? blockId
+}
 const compareChangesData: Ref<Contract | null> = ref(null)
 const localInstanceDid = ref('')
 
@@ -95,6 +120,7 @@ watch(
           if (route.params.did !== id) return
           contract.value = loaded
           applyContractDataToDraft(contract.value?.contract_data)
+          void loadReviewFindings(id)
         }
       } catch (err: unknown) {
         reportActionError(err, 'Load contract approval')
@@ -126,12 +152,16 @@ const approve = async () => {
   try {
     const confirmationResult = await confirmationDialog.value?.reveal({
       message: 'Confirm approval',
+      editor: { requiredText: false, placeholder: 'Comment (optional)' },
+      confirmLabel: 'Confirm',
     })
     if (confirmationResult?.isCanceled) return
+    const comment = confirmationResult?.data?.trim()
     isSubmitting.value = true
     const response = await contractWorkflowService.approve({
       did: contract.value.did,
       updated_at: contract.value.updated_at,
+      ...(comment ? { decision_notes: [comment] } : {}),
     })
     if (response.did) {
       await navStore.goToPreviousRoute()
@@ -167,6 +197,33 @@ const reject = async () => {
     }
   } catch (err) {
     reportActionError(err, 'Reject contract')
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+// REVIEWED -> SUBMITTED: the approver sends the contract back for another review
+// round (DCS-IR-CWE-09).
+const resubmit = async () => {
+  if (!contract.value) return
+  try {
+    const confirmationResult = await confirmationDialog.value?.reveal({
+      message: 'Send back for review',
+      editor: { requiredText: false, placeholder: 'Comment (optional)' },
+    })
+    if (confirmationResult?.isCanceled) return
+    const comment = confirmationResult?.data?.trim()
+    isSubmitting.value = true
+    const response = await contractWorkflowService.submit({
+      did: contract.value.did,
+      updated_at: contract.value.updated_at,
+      ...(comment ? { comments: [comment] } : {}),
+    })
+    if (response.did) {
+      await navStore.goToPreviousRoute()
+    }
+  } catch (err) {
+    reportActionError(err, 'Resubmit contract')
   } finally {
     isSubmitting.value = false
   }
@@ -227,7 +284,10 @@ const exportPDF = async () => {
         <!-- Tabs -->
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
-            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Approve Contract</p>
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">
+              <span>Approve Contract</span>
+              <span v-if="isApprover" class="font-normal normal-case">· as Contract Approver</span>
+            </p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
               <button
                 v-for="tab in tabs"
@@ -274,6 +334,38 @@ const exportPDF = async () => {
               </div>
 
               <div v-show="activeTab === 'content'">
+                <section
+                  class="card mb-4 border border-base-300 bg-base-100 shadow-sm"
+                  aria-label="Reviewer findings"
+                  data-testid="reviewer-findings"
+                >
+                  <div class="card-body gap-3">
+                    <h2 class="card-title text-sm">Reviewer findings</h2>
+                    <p v-if="reviewFindings.length === 0" class="text-sm text-base-content/70">
+                      No reviewer comments or annotations.
+                    </p>
+                    <article
+                      v-for="finding in reviewFindings"
+                      :key="`${finding.occurred_at}|${finding.submitted_by}`"
+                      class="space-y-1 rounded-box bg-base-200 p-3"
+                    >
+                      <p class="text-sm font-semibold">
+                        {{ finding.decision === 'REJECT' ? 'Returned to negotiation' : 'Forwarded to approval' }}
+                        · version {{ finding.contract_version }} · {{ finding.submitted_by }} ·
+                        {{ finding.occurred_at }}
+                      </p>
+                      <p v-for="(comment, index) in finding.comments" :key="`c${index}`" class="text-sm">
+                        {{ comment }}
+                      </p>
+                      <ul v-if="finding.annotations.length" class="list-disc pl-5 text-sm">
+                        <li v-for="annotation in finding.annotations" :key="annotation.block_id">
+                          <span class="font-medium">{{ blockTitle(annotation.block_id) }}:</span>
+                          {{ annotation.comment }}
+                        </li>
+                      </ul>
+                    </article>
+                  </div>
+                </section>
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
                     <div>
@@ -284,11 +376,24 @@ const exportPDF = async () => {
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
                         :set-semantic-condition-value="setSemanticConditionValue"
+                        :highlighted-block-ids="highlightedBlockIds"
                         disabled
                       />
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div v-if="contract" v-show="activeTab === 'proposals'">
+                <NegotiationList :contract="contract" :local-instance-did="localInstanceDid" disabled />
+              </div>
+
+              <div v-if="contract" v-show="activeTab === 'diff'">
+                <ContractHistoryDiffView
+                  :contract-did="contract.did"
+                  :contract-state="contract.state"
+                  :current-contract-data="contract.contract_data"
+                />
               </div>
 
               <template v-if="isAuditingAuthorized">
@@ -315,6 +420,14 @@ const exportPDF = async () => {
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
+        <button
+          v-if="contract?.state === ContractState.reviewed"
+          class="btn flex-1 btn-outline"
+          :disabled="!isApprover || isSubmitting"
+          @click="resubmit"
+        >
+          Resubmit
+        </button>
         <button
           v-if="contract?.state === ContractState.reviewed"
           class="btn flex-1 btn-primary"

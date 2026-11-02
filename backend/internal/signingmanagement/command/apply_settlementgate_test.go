@@ -254,7 +254,7 @@ func TestPrepareRefusesAnUnsettledCounterpartyBeforeItWritesAnything(t *testing.
 // bytes covering a version nobody agrees to any more. A signature binds the
 // moment it is made, so the re-check has to precede the writes that record it.
 func TestSubmitSignatureRechecksTheSettlementBeforeRecordingTheSignature(t *testing.T) {
-	body := functionBody(t, "apply.go", "SubmitSignature")
+	body := functionBody(t, "apply.go", "submitSignature")
 
 	gate := lastCallPos(body, "assertCounterpartiesSettled")
 	if gate == token.NoPos {

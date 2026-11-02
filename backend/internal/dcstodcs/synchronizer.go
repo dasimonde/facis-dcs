@@ -11,19 +11,20 @@ package dcstodcs
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	basedb "digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/jades"
@@ -33,6 +34,7 @@ import (
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
 	"digital-contracting-service/internal/semantichub"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 
@@ -41,6 +43,7 @@ import (
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/jmoiron/sqlx"
 	"goa.design/clue/log"
+	goa "goa.design/goa/v3/pkg"
 )
 
 type DCSToDCSSynchronizer struct {
@@ -73,7 +76,7 @@ var shippableStates = map[string]bool{
 	contractstate.Revoked.String():     true,
 }
 
-func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client *event.CloudEventSubClient) {
+func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client *event.DurableSubClient) {
 	syncHandler := func(evt cloudevent.Event) {
 		source, err := componenttype.NewComponentType(evt.Source())
 		if err != nil {
@@ -164,8 +167,14 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 		}
 	}
 
+	// Each ship records its failure for the retry scheduler and skips what a
+	// peer holds already, so every event is acknowledged and a redelivered one
+	// ships nothing twice.
 	go func() {
-		if err := client.Subscribe(syncHandler); err != nil {
+		if err := client.Subscribe(func(evt cloudevent.Event) error {
+			syncHandler(evt)
+			return nil
+		}); err != nil {
 			log.Errorf(ctx, err, "could not start syncHandler")
 		}
 	}()
@@ -234,8 +243,7 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 		return attempts, nil
 	}
 
-	ticker := time.NewTicker(interval)
-	for range ticker.C {
+	retryPass := func() error {
 		log.Printf(ctx, "start retrying failed contract PDF ships")
 		syncFails, err := readSyncFails()
 		if err != nil {
@@ -252,6 +260,16 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 		s.retryUndeliveredSettlements(ctx)
 		s.retryUndeliveredSettlementWithdrawals(ctx)
 		s.retryUndeliveredNegotiationMessages(ctx)
+		return nil
+	}
+
+	// One replica at a time retries, so a peer does not get each retry once
+	// per replica.
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		if _, err := basedb.RunExclusive(ctx, s.DB, "peer-sync-retry", retryPass); err != nil {
+			log.Printf(ctx, "could not retry failed peer deliveries: %v", err)
+		}
 	}
 }
 
@@ -260,7 +278,19 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 // JAdES. A failed ship is recorded in sync_fails for later retry; a clean ship
 // clears any prior failure. Non-shippable states and contracts without a PDF
 // yet are no-ops.
+//
+// The offer event, the PDF-regenerated event and the retry pass can each start
+// a ship of the same contract at the same time, on any replica. The ships of
+// one contract therefore run one after the other, so each one reads what the
+// one before it recorded: the revision a peer already accepted and the
+// trust-gate denial already raised.
 func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) error {
+	return basedb.RunLocked(ctx, s.DB, "contract-ship:"+did, func() error {
+		return s.shipCurrentPDF(ctx, did)
+	})
+}
+
+func (s *DCSToDCSSynchronizer) shipCurrentPDF(ctx context.Context, did string) error {
 	localPeer, err := s.DIDDocument.GetID()
 	if err != nil {
 		return err
@@ -279,6 +309,11 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 	if err != nil {
 		_ = readTx.Rollback()
 		return fmt.Errorf("could not read PDF state for %s: %w", did, err)
+	}
+	deliveries, err := s.SRepo.GetPDFDeliveries(ctx, readTx, did)
+	if err != nil {
+		_ = readTx.Rollback()
+		return fmt.Errorf("could not read PDF deliveries of %s: %w", did, err)
 	}
 	_ = readTx.Rollback()
 
@@ -307,7 +342,10 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 			fmt.Errorf("contract %s holds a PDF rendered from a superseded document; deferring ship until it is re-rendered", did), nil)
 	}
 
-	recipients := contractData.Responsible.GetParties()
+	recipients := peersWithoutRevision(contractData.Responsible.GetParties(), localPeer, deliveries, did, state, pdfState.IPFSCID)
+	if len(recipients) == 0 {
+		return s.recordShipOutcome(ctx, did, nil, nil)
+	}
 
 	pdfBytes, err := s.Artifacts.Get(ctx, artifactstore.ContractScope(did), pdfState.IPFSCID)
 	if err != nil || len(pdfBytes) == 0 {
@@ -330,7 +368,7 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return s.recordShipOutcome(ctx, did, err, nil)
 	}
 
-	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, pinnedShapes, recipients)
+	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfState.IPFSCID, pdfBytes, jadesSignature, pinnedShapes, recipients)
 
 	var gateErr *GateError
 	if errors.As(shipError, &gateErr) && gateErr.Kind == PolicyFailure {
@@ -443,11 +481,21 @@ func (s *DCSToDCSSynchronizer) pinnedShapesForContract(ctx context.Context, cont
 	return entries, nil
 }
 
-func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, pinnedShapes []semantichub.Schema, recipients []string) error {
-	for _, peer := range recipients {
-		if peer == localPeer {
+// peersWithoutRevision returns the parties other than this instance that do
+// not yet hold the contract in this state with this PDF.
+func peersWithoutRevision(parties []string, localPeer string, deliveries []db2.PDFDelivery, did, state, pdfCID string) []string {
+	var pending []string
+	for _, peer := range parties {
+		if peer == localPeer || slices.Contains(deliveries, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}) {
 			continue
 		}
+		pending = append(pending, peer)
+	}
+	return pending
+}
+
+func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state, pdfCID string, pdfBytes []byte, jadesSignature string, pinnedShapes []semantichub.Schema, recipients []string) error {
+	for _, peer := range recipients {
 		if err := s.TrustGate.Check(ctx, peer, Outbound, did, state); err != nil {
 			return err
 		}
@@ -486,13 +534,12 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		if len(segments) > 0 {
 			peerPrefix = "/" + strings.Join(segments, "/")
 		}
-		secretValue := rand.Text()
-		secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
+		secretValue, secretHash, err := SignPeerChallenge(&s.DIDDocument, OpPostPdf, localPeer, peer, did, pdfBytes)
 		if err != nil {
 			return err
 		}
 		client := NewDCSToDCSHttpClient(hostname, peerPrefix)
-		if _, err := client.PostPdf(ctx, &dcstodcs.DCSToDCSContractPdfRequest{
+		if err := s.deliverPdf(ctx, client, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}, &dcstodcs.DCSToDCSContractPdfRequest{
 			FromPeerDid:    localPeer,
 			ContractIri:    did,
 			Pdf:            pdfBytes,
@@ -507,6 +554,69 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		}
 	}
 	return nil
+}
+
+func (s *DCSToDCSSynchronizer) recordPDFDelivery(ctx context.Context, delivery db2.PDFDelivery) error {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.SRepo.UpsertPDFDelivery(ctx, tx, delivery); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deliverPdf posts one revision to delivery.PeerDID. A revision the peer
+// accepted is recorded as delivered and is not posted to that peer again. A
+// revision the peer refused as a signing conflict (ADR-38 §2) is recorded as a
+// conflict on this instance, gets no retry entry and is not recorded as
+// delivered, so the next ship offers it again once the peer resolved the
+// conflict. A peer whose copy is closed (TERMINATED, EXPIRED or WITHDRAWN)
+// takes no ship: the revision is recorded as delivered and not posted again.
+func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, delivery db2.PDFDelivery, req *dcstodcs.DCSToDCSContractPdfRequest) error {
+	peer := delivery.PeerDID
+	if _, err := client.PostPdf(ctx, req); err != nil {
+		switch peerRefusal(err) {
+		case "conflict":
+			log.Printf(ctx, "peer %s refused the copy of %s as a signing conflict: %v", peer, req.ContractIri, err)
+			return s.recordSigningConflict(ctx, req.ContractIri, peer, err)
+		case "gone":
+			log.Printf(ctx, "peer %s holds a closed copy of %s and takes no ship: %v", peer, req.ContractIri, err)
+		default:
+			return err
+		}
+	} else if err := RecordPeerExchange(ctx, s.DB, req.ContractIri, "post_pdf", ExchangeSent, peer); err != nil {
+		log.Printf(ctx, "could not audit the ship of %s to %s: %v", req.ContractIri, peer, err)
+	}
+	if err := s.recordPDFDelivery(ctx, delivery); err != nil {
+		log.Printf(ctx, "could not record the delivery of %s to %s: %v", req.ContractIri, peer, err)
+	}
+	return nil
+}
+
+// peerRefusal returns the name of the error a peer answered with, or "".
+func peerRefusal(err error) string {
+	var serviceErr *goa.ServiceError
+	if errors.As(err, &serviceErr) {
+		return serviceErr.Name
+	}
+	return ""
+}
+
+// recordSigningConflict records on this instance that the peer refused its
+// signed copy, so the compliance monitor reports the conflict here too.
+func (s *DCSToDCSSynchronizer) recordSigningConflict(ctx context.Context, did, peer string, refusal error) error {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := pacevent.RecordSigningConflictTx(ctx, tx, did, peer, pacevent.SigningConflictSent, refusal.Error()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // recordShipOutcome persists a ship attempt's sync_fails side effect and,

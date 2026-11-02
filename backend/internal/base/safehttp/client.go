@@ -7,12 +7,34 @@ package safehttp
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// MinTLSVersion is the lowest TLS version an outbound client of the service
+// negotiates (DCS-IR-CI-01, DCS-NFR-SEC-01).
+const MinTLSVersion = tls.VersionTLS13
+
+// RequireTLS13 sets MinTLSVersion on http.DefaultTransport, which every
+// http.Client without its own Transport uses. Call it before the first request.
+func RequireTLS13() {
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{MinVersion: MinTLSVersion}
+}
+
+// TLS12Transport returns a copy of http.DefaultTransport that also accepts
+// TLS 1.2. Use it only for third-party servers that can offer no TLS 1.3 and
+// whose responses are signed, so that the signature and not the transport
+// protects them: RFC 3161 time-stamp authorities and the EU national trusted
+// lists.
+func TLS12Transport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	return t
+}
 
 // Policy bounds where a client may connect.
 //
@@ -30,6 +52,9 @@ type Policy struct {
 	// a real deployment never does — loopback there is the service's own
 	// admin surface.
 	AllowLoopback bool
+	// DenyPrivate refuses the private ranges (RFC 1918, RFC 4193) too, for a
+	// fetch of a public document whose URL a user types.
+	DenyPrivate bool
 }
 
 // Client returns an HTTP client that refuses redirects and applies p to every
@@ -49,6 +74,7 @@ func Client(timeout time.Duration, p Policy) *http.Client {
 	// for.
 	dialer := &net.Dialer{}
 	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{MinVersion: MinTLSVersion},
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -76,6 +102,9 @@ func Client(timeout time.Duration, p Policy) *http.Client {
 			for _, ip := range ips {
 				if err := permitted(ip.IP, p.AllowLoopback); err != nil {
 					return nil, fmt.Errorf("dial %s: %w", host, err)
+				}
+				if p.DenyPrivate && ip.IP.IsPrivate() {
+					return nil, fmt.Errorf("dial %s: address %s is private", host, ip.IP)
 				}
 			}
 

@@ -4,6 +4,7 @@ import type {
   AccessAttemptsResponse,
   AuditFinding,
   AuditResponse,
+  CheckpointProof,
   PACAuditExecutorResponse,
 } from '@/models/responses/auditing-response'
 import type { AuditingService } from '@/models/services/auditing-service'
@@ -69,5 +70,11 @@ export const auditingService: AuditingService = {
         typeof res.headers['content-type'] === 'string' ? res.headers['content-type'] : 'application/octet-stream',
       filename: `audit-report-${request.scope}.${request.format ?? 'json'}`,
     }))
+  },
+
+  async checkpointProof(entryCid: string) {
+    return http
+      .get<CheckpointProof>(`/pac/audit/checkpoint/proof/${encodeURIComponent(entryCid)}`)
+      .then((res) => res.data)
   },
 }

@@ -18,7 +18,7 @@ import (
 // signature from the stored artifact. This pins the re-read to the window between
 // the lock and the first write.
 func TestSubmitSignatureRechecksTheAlreadySignedGuardUnderTheLock(t *testing.T) {
-	body := functionBody(t, "apply.go", "SubmitSignature")
+	body := functionBody(t, "apply.go", "submitSignature")
 
 	lock := lastCallPos(body, "acquireRegenerationLock")
 	load := lastCallPos(body, "LoadSignatures")

@@ -75,6 +75,9 @@ func seedTargets(ctx context.Context, list listTargetsFn, create createTargetFn,
 		if known[name] {
 			continue
 		}
+		if err := ValidateTargetURL(url); err != nil {
+			return seeded, fmt.Errorf("configured contract target %q: %w", name, err)
+		}
 		enabled := true
 		if entry.Enabled != nil {
 			enabled = *entry.Enabled
@@ -109,6 +112,10 @@ func SeedContractTargets(ctx context.Context, dbx *sqlx.DB, repo db.ContractTarg
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Replicas that start together seed one after the other.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('dcs-contract-target-seed'))`); err != nil {
+		return 0, err
+	}
 
 	seeded, err := seedTargets(ctx,
 		func(ctx context.Context) ([]db.ContractTarget, error) { return repo.ListTargets(ctx, tx) },

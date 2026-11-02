@@ -39,10 +39,34 @@ func (h HubShapeSource) ActiveContext(ctx context.Context) (string, int, error) 
 	return h.active(ctx, ContextName, "context")
 }
 
-// ActiveDomainOntology returns the SLA domain-field ontology — the
-// dcs:DomainField/dcs:ValueConstraint catalog validation indexes by IRI.
+// ActiveDomainOntology returns the dcs:DomainField/dcs:ValueConstraint catalog
+// validation indexes by IRI: the seeded SLA ontology, then the active version
+// of every other registered kind="ontology" entry, the same set the field
+// picker offers. The version is that of the SLA ontology.
 func (h HubShapeSource) ActiveDomainOntology(ctx context.Context) (string, int, error) {
-	return h.active(ctx, SLAOntologyName, "ontology")
+	content, version, err := h.active(ctx, SLAOntologyName, "ontology")
+	if err != nil {
+		return "", 0, err
+	}
+	var others []struct {
+		Name    string `db:"name"`
+		Version int    `db:"version"`
+	}
+	if err := h.DB.SelectContext(ctx, &others, `
+        SELECT name, version FROM semantic_schemas
+        WHERE kind = 'ontology' AND active AND name <> $1 ORDER BY name`, SLAOntologyName); err != nil {
+		return "", 0, fmt.Errorf("semantic hub: active ontologies: %w", err)
+	}
+	for _, other := range others {
+		extra, err := h.versionContent(ctx, other.Name, "ontology", other.Version)
+		if err != nil {
+			return "", 0, err
+		}
+		// Each document carries its own @prefix headers, so the concatenation
+		// parses as one Turtle graph.
+		content += "\n\n" + extra
+	}
+	return content, version, nil
 }
 
 // ShapesAt returns one shapes graph a document declares in sh:shapesGraph:

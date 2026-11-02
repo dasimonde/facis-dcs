@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	baseevent "digital-contracting-service/internal/base/event"
+	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
@@ -46,13 +48,17 @@ type contractStorageArchivesrvc struct {
 	Eraser        contractEraser
 	Keys          artifactstore.CEKRepository
 	ERepo         dcstodcsdb.EraseRepository
+	Artifacts     archiveArtifacts
+	ArchiveNotary cwecommand.ArchiveNotary
+	ArchiveTSA    cwecommand.ArchiveTimestampIssuer
 	auth.JWTAuthenticator
 }
 
 // NewContractStorageArchive returns the ContractStorageArchive service implementation.
 func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, didDocument identity.DIDDocument, auditTrailReader base.AuditTrailReader, snapshotStore archiveSnapshotStore,
-	eraser contractEraser, keys artifactstore.CEKRepository, eraseRepo dcstodcsdb.EraseRepository) contractstoragearchive.Service {
-	return &contractStorageArchivesrvc{
+	eraser contractEraser, keys artifactstore.CEKRepository, eraseRepo dcstodcsdb.EraseRepository,
+	archiveNotary cwecommand.ArchiveNotary, archiveTSA cwecommand.ArchiveTimestampIssuer) contractstoragearchive.Service {
+	svc := &contractStorageArchivesrvc{
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
 		CRepo:            cRepo,
@@ -62,10 +68,17 @@ func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo
 		Eraser:           eraser,
 		Keys:             keys,
 		ERepo:            eraseRepo,
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
 	}
+	if auditTrailReader.Artifacts != nil {
+		svc.Artifacts = auditTrailReader.Artifacts
+	}
+	return svc
 }
 
 func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractstoragearchive.ArchiveRetrieveRequest) (res *contractstoragearchive.ArchiveRetrieveResponse, err error) {
+	defer func() { s.auditFailure(ctx, "retrieve", "", err) }()
 	ctx, err = contractReadContext(ctx, s.DIDDocument)
 	if err != nil {
 		return nil, err
@@ -76,6 +89,8 @@ func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractst
 
 	qry := contract.GetArchivedContractsQry{
 		RetrievedBy: middleware.GetParticipantID(ctx),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		UserRoles:   middleware.GetUserRoles(ctx),
 	}
 
 	queryHandler := contract.GetArchivedContractsHandler{
@@ -99,6 +114,7 @@ func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractst
 }
 
 func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstoragearchive.ArchiveSearchRequest) (res []*contractstoragearchive.ContractItem, err error) {
+	defer func() { s.auditFailure(ctx, "search", stringValue(p.Did), err) }()
 	ctx, err = contractReadContext(ctx, s.DIDDocument)
 	if err != nil {
 		return nil, err
@@ -111,7 +127,7 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 	if p.State != nil {
 		tState, err := contractstate.NewContractState(*p.State)
 		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
+			return nil, contractstoragearchive.MakeBadRequest(err)
 		}
 		state = &tState
 	}
@@ -130,6 +146,8 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		ContractVersion: intValue(p.ContractVersion),
 		State:           state,
 		RetrievedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:       middleware.GetHolderDID(ctx),
+		UserRoles:       middleware.GetUserRoles(ctx),
 		Name:            stringValue(p.Name),
 		Description:     stringValue(p.Description),
 		ContractData:    stringValue(p.ContractData),
@@ -137,6 +155,7 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		Party:           stringValue(p.Party),
 		ValidFrom:       validFrom,
 		ValidUntil:      validUntil,
+		Jurisdiction:    stringValue(p.Jurisdiction),
 	}
 	queryHandler := contract.GetArchivedContractsHandler{
 		DB:    s.DB,
@@ -156,19 +175,22 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 	return contracts, nil
 }
 
-func (s *contractStorageArchivesrvc) Store(ctx context.Context, p *contractstoragearchive.StorePayload) (res string, err error) {
-	log.Printf(ctx, "contractStorageArchive.store")
-	return
-}
-
 // Delete soft-deletes every not-yet-deleted archive entry for the given DID
-// (DCS-FR-CSA-17): the row is marked deleted_at/deleted_by/deletion_reason,
-// never physically removed, and the operation is itself logged as an audit
-// event under the ContractStorageArchive component so it shows up through
-// Audit below. Once the soft-delete is committed, the entries' archived
-// snapshots are removed from the IPFS store — secure data disposal per
-// DCS-NFR-SEC-13 — and a removal failure is a hard error.
+// (DCS-FR-CSA-17) and erases the contract. The caller must be able to read the
+// contract, and the contract must no longer be in force
+// (contractstate.Erasable). The row is marked deleted_at/deleted_by/
+// deletion_reason, never physically removed, and the operation is logged as an
+// audit event under the ContractStorageArchive component. After the commit the
+// contract's keys are shredded first: the archived objects are encrypted under
+// them, so the shred alone makes them unreadable. The removal of the objects
+// from IPFS (DCS-NFR-SEC-13) follows on a best-effort basis. A repeated delete
+// of an already deleted entry runs the erasure again, so an erasure that
+// failed can be completed.
 func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstoragearchive.DeletePayload) (res int, err error) {
+	defer func() { s.auditFailure(ctx, "delete", p.Did, err) }()
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		return 0, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -179,15 +201,31 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// The snapshot CIDs must be captured before the soft-delete: afterwards
-	// there is no other record of which IPFS objects the entries pointed at
-	// for this deletion.
-	// Delete is a role-authorized write; F03 party scoping applies to reads only.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM contracts WHERE did = $1 FOR UPDATE`, p.Did); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+	var state contractstate.ContractState
+	if err := tx.GetContext(ctx, &state, `SELECT state FROM contracts_effective WHERE did = $1`, p.Did); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+	if !state.Erasable() {
+		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf(
+			"contract %q is %s; only a TERMINATED, EXPIRED, REVOKED, REJECTED or WITHDRAWN contract can be deleted from the archive", p.Did, state))
+	}
+
+	// The object CIDs must be captured before the soft-delete: afterwards
+	// there is no other record of which IPFS objects the entries pointed at.
 	entries, err := s.CRepo.ReadArchiveEntries(contractreadpolicy.WithSystemScope(ctx), tx)
 	if err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
-	snapshotCIDs := snapshotCIDsForDeletion(entries, p.Did)
+	objectCIDs := snapshotCIDsForDeletion(entries, p.Did)
+	var evidenceCIDs []string
+	if err := tx.SelectContext(ctx, &evidenceCIDs, `SELECT content_cid FROM contract_archive_evidence WHERE did = $1
+		UNION SELECT content_cid FROM contract_archive_sections WHERE did = $1`, p.Did); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+	objectCIDs = append(objectCIDs, evidenceCIDs...)
 	if until := retainedUntil(entries, p.Did, time.Now().UTC()); until != nil {
 		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf(
 			"archive entry for DID %q is retained until %s (retention policy)", p.Did, until.Format(time.RFC3339)))
@@ -198,40 +236,36 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	if err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
-	if affected == 0 {
-		return 0, contractstoragearchive.MakeBadRequest(
-			fmt.Errorf("no archive entry found for DID %q (or it was already deleted)", p.Did))
+	if affected == 0 && !hasArchiveEntry(entries, p.Did) {
+		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf("no archive entry found for DID %q", p.Did))
 	}
-
-	evt := contractevents.DeleteArchivedEvent{
-		DID:           p.Did,
-		DeletedBy:     deletedBy,
-		Justification: p.Justification,
-		EntriesMarked: affected,
-		OccurredAt:    time.Now().UTC(),
+	if affected > 0 {
+		evt := contractevents.DeleteArchivedEvent{
+			DID:           p.Did,
+			DeletedBy:     deletedBy,
+			Justification: p.Justification,
+			EntriesMarked: affected,
+			OccurredAt:    time.Now().UTC(),
+		}
+		if err := baseevent.Create(ctx, tx, evt, componenttype.ContractStorageArchive); err != nil {
+			return 0, contractstoragearchive.MakeInternalError(err)
+		}
 	}
-	if err := baseevent.Create(ctx, tx, evt, componenttype.ContractStorageArchive); err != nil {
-		return 0, contractstoragearchive.MakeInternalError(err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 
-	// Secure disposal (DCS-NFR-SEC-13): the archived snapshots leave the
-	// IPFS store now that their entries are deleted.
-	if err := removeArchivedSnapshots(s.SnapshotStore, snapshotCIDs); err != nil {
-		return 0, contractstoragearchive.MakeInternalError(err)
+	// Erasure (DCS-NFR-COMP-03): the contract's wrapped CEKs are shredded
+	// locally with a KEY_SHREDDED event and via the peer erase handshake on
+	// every counterparty instance. The deletion justification is the recorded
+	// shred reason. An unreachable peer leaves a pending contract_erasures row
+	// for the retry scheduler. A repeated shred changes nothing.
+	if err := s.Eraser.EraseContract(ctx, p.Did, deletedBy, p.Justification); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(fmt.Errorf("archive entry deleted, erasure failed (repeat the delete to retry): %w", err))
 	}
 
-	// Erasure (DCS-NFR-COMP-03): with the archive entries soft-deleted (so
-	// the integrity audit no longer covers them), the contract's wrapped CEKs
-	// are shredded — locally with a KEY_SHREDDED event, and via the peer
-	// erase handshake on every counterparty instance. The deletion
-	// justification is the recorded shred reason. An unreachable peer leaves
-	// a pending contract_erasures row for the retry scheduler.
-	if err := s.Eraser.EraseContract(ctx, p.Did, deletedBy, p.Justification); err != nil {
-		return 0, contractstoragearchive.MakeInternalError(err)
+	if err := removeArchivedSnapshots(s.SnapshotStore, objectCIDs); err != nil {
+		log.Printf(ctx, "archive delete of %s: IPFS disposal incomplete, the objects stay encrypted under the shredded key: %v", p.Did, err)
 	}
 
 	return affected, nil
@@ -290,10 +324,16 @@ func erasureStatusResponse(did string, records []artifactstore.CEKRecord, reques
 			RequestedAt: request.RequestedAt.UTC().Format(time.RFC3339),
 			RetryCount:  request.RetryCount,
 		}
-		if request.ConfirmedAt != nil {
+		switch {
+		case request.ConfirmedAt != nil:
 			peer.Status = "confirmed"
 			confirmedAt := request.ConfirmedAt.UTC().Format(time.RFC3339)
 			peer.ConfirmedAt = &confirmedAt
+		case request.RefusedAt != nil:
+			peer.Status = "refused"
+			peer.LastError = request.LastError
+		default:
+			peer.LastError = request.LastError
 		}
 		if request.LastTriedAt != nil {
 			lastTriedAt := request.LastTriedAt.UTC().Format(time.RFC3339)
@@ -305,16 +345,43 @@ func erasureStatusResponse(did string, records []artifactstore.CEKRecord, reques
 	return response
 }
 
+// auditFailure records an archive operation that did not complete
+// (DCS-FR-CSA-18). A failure to record it is logged; the operation's own error
+// stays the answer to the caller.
+func (s *contractStorageArchivesrvc) auditFailure(ctx context.Context, operation, did string, cause error) {
+	if cause == nil {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		log.Printf(ctx, "could not record failed archive %s: %v", operation, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	evt := contractevents.ArchiveOperationFailedEvent{
+		DID:        did,
+		Operation:  operation,
+		Actor:      middleware.GetParticipantID(ctx),
+		Outcome:    "FAILURE",
+		Reason:     cause.Error(),
+		OccurredAt: time.Now().UTC(),
+	}
+	if err := baseevent.Create(ctx, tx, evt, componenttype.ContractStorageArchive); err != nil {
+		log.Printf(ctx, "could not record failed archive %s: %v", operation, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf(ctx, "could not record failed archive %s: %v", operation, err)
+	}
+}
+
 // archiveSnapshotStore is the slice of the IPFS client the delete path needs
 // for snapshot disposal (DCS-NFR-SEC-13).
 type archiveSnapshotStore interface {
 	DeleteFile(cid string) error
 }
 
-// snapshotCIDsForDeletion collects the distinct snapshot CIDs of the given
-// DID's live (not yet soft-deleted) archive entries — the IPFS objects a
-// delete of that DID must dispose of. Entries without a stored snapshot CID
-// carry nothing in IPFS and are skipped.
 // retainedUntil returns the latest future retention_until of did's live
 // archive entries, or nil when the retention policy permits deletion
 // (DCS-FR-CSA-17). The archive trigger refuses the deletion as well; this
@@ -332,11 +399,25 @@ func retainedUntil(entries []db.ContractArchiveEntry, did string, now time.Time)
 	return latest
 }
 
+// hasArchiveEntry reports whether did has an archive entry, live or deleted.
+func hasArchiveEntry(entries []db.ContractArchiveEntry, did string) bool {
+	for _, entry := range entries {
+		if entry.DID == did {
+			return true
+		}
+	}
+	return false
+}
+
+// snapshotCIDsForDeletion collects the distinct snapshot CIDs of the given
+// DID's archive entries, deleted ones included, so that a repeated delete
+// removes what an earlier attempt left. Entries without a stored snapshot CID
+// carry nothing in IPFS and are skipped.
 func snapshotCIDsForDeletion(entries []db.ContractArchiveEntry, did string) []string {
 	seen := map[string]bool{}
 	cids := []string{}
 	for _, entry := range entries {
-		if entry.DID != did || entry.DeletedAt != nil || entry.SnapshotCID == "" {
+		if entry.DID != did || entry.SnapshotCID == "" {
 			continue
 		}
 		if seen[entry.SnapshotCID] {
@@ -348,15 +429,16 @@ func snapshotCIDsForDeletion(entries []db.ContractArchiveEntry, did string) []st
 	return cids
 }
 
-// removeArchivedSnapshots removes each snapshot CID from the IPFS store,
-// failing hard on the first removal error (DCS-NFR-SEC-13).
+// removeArchivedSnapshots removes every CID from the IPFS store
+// (DCS-NFR-SEC-13). It tries each CID and returns the joined removal errors.
 func removeArchivedSnapshots(store archiveSnapshotStore, cids []string) error {
+	var errs []error
 	for _, cid := range cids {
 		if err := store.DeleteFile(cid); err != nil {
-			return fmt.Errorf("remove archived snapshot %s from IPFS: %w", cid, err)
+			errs = append(errs, fmt.Errorf("remove archived object %s from IPFS: %w", cid, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Annotate sets an archived contract's summary and tags (DCS-FR-CSA-11).
@@ -367,6 +449,10 @@ func removeArchivedSnapshots(store archiveSnapshotStore, cids []string) error {
 // evidence stay immutable (DB-trigger enforced) — and the operation is
 // recorded in the archive audit log.
 func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractstoragearchive.AnnotatePayload) (res *contractstoragearchive.ArchiveAnnotationResponse, err error) {
+	defer func() { s.auditFailure(ctx, "annotate", p.Did, err) }()
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -377,7 +463,6 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Annotate is a role-authorized write; F03 party scoping applies to reads only.
 	rows, err := s.CRepo.ReadArchivedContractsByFilter(contractreadpolicy.WithSystemScope(ctx), tx, db.SearchValues{DID: p.Did})
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
@@ -441,36 +526,45 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 	}, nil
 }
 
-// Audit returns the archive component's audit log (DCS-IR-CSA-04,
-// UC-07-03): every event recorded under componenttype.ContractStorageArchive
-// (store/retrieve/search/delete), across every DID's chain plus the
-// DID-less "*" chain used by component-wide operations (retrieve/search) —
-// reusing the same cross-component reader process_audit_and_compliance's
-// own audit method is built on (qry.Auditor / ReadAuditLogEntriesByComponent).
+// Audit returns, per readable archived contract, the archive operation log
+// (DCS-IR-CSA-04, UC-07-03): every event recorded under
+// componenttype.ContractStorageArchive, with the entry summaries and the
+// integrity checks. The DID-less "*" chain of the component-wide operations
+// (retrieve/search) is returned to a caller who may read every contract. A
+// did filter applies before the integrity checks run.
 func (s *contractStorageArchivesrvc) Audit(ctx context.Context, p *contractstoragearchive.AuditPayload) (res []*contractstoragearchive.PACAuditResponse, err error) {
 	ctx, err = contractReadContext(ctx, s.DIDDocument)
 	if err != nil {
 		return nil, err
 	}
-	if p.Did != nil && strings.TrimSpace(*p.Did) != "" {
-		if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, strings.TrimSpace(*p.Did)); err != nil {
+	did := strings.TrimSpace(stringValue(p.Did))
+	if did != "" {
+		if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, did); err != nil {
 			return nil, err
 		}
+	}
+	allowed, err := readableContractDIDs(ctx, s.DB)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	core := processAuditAndCompliancesrvc{DB: s.DB, CRepo: s.CRepo, ATrailReader: s.ATrailReader}
-	entriesByDID, err := core.auditArchiveTrailEntries(ctx)
+	entriesByDID, err := core.auditArchiveTrailEntries(ctx, did)
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
+	chains, err := s.readArchiveChains(ctx)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	for chainDID, operations := range archiveOperationLog(chains, did, allowed) {
+		entriesByDID[chainDID] = append(operations, entriesByDID[chainDID]...)
+	}
 	result := make([]*contractstoragearchive.PACAuditResponse, 0, len(entriesByDID))
 	for did, entries := range entriesByDID {
-		if p.Did != nil && strings.TrimSpace(*p.Did) != "" && did != strings.TrimSpace(*p.Did) {
-			continue
-		}
 		trail := make([]*contractstoragearchive.PACResourceAuditTrailEntry, 0, len(entries))
 		for _, entry := range entries {
 			trail = append(trail, &contractstoragearchive.PACResourceAuditTrailEntry{ID: entry.ID, Component: entry.Component, EventType: entry.EventType, EventData: entry.EventData, Did: entry.Did, CreatedAt: entry.CreatedAt, ResLogPredCid: entry.ResLogPredCid, Kind: entry.Kind, Result: entry.Result, RuleID: entry.RuleID, Reason: entry.Reason})
@@ -478,6 +572,16 @@ func (s *contractStorageArchivesrvc) Audit(ctx context.Context, p *contractstora
 		result = append(result, &contractstoragearchive.PACAuditResponse{Did: did, Component: componenttype.ContractStorageArchive.String(), CreatedAt: time.Now().UTC().Format(time.RFC3339), AuditTrail: trail})
 	}
 	return result, nil
+}
+
+// readArchiveChains reads the ContractStorageArchive audit chains.
+func (s *contractStorageArchivesrvc) readArchiveChains(ctx context.Context) ([][]datatype.AuditLogEntry, error) {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	return s.ATrailReader.ReadAuditLogEntriesByComponent(ctx, tx, componenttype.ContractStorageArchive)
 }
 
 func toArchiveContractItem(item db.ContractMetadata) *contractstoragearchive.ContractItem {
@@ -500,23 +604,34 @@ func toArchiveContractItem(item db.ContractMetadata) *contractstoragearchive.Con
 	}
 
 	return &contractstoragearchive.ContractItem{
-		Did:             item.DID,
-		ContractVersion: item.ContractVersion,
-		State:           item.State,
-		Name:            item.Name,
-		Description:     item.Description,
-		CreatedBy:       item.CreatedBy,
-		CreatedAt:       item.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       item.UpdatedAt.Format(time.RFC3339),
-		StartDate:       startDate,
-		ExpDate:         expDate,
-		ExpPolicy:       expPolicy,
-		ExpNoticePeriod: item.ExpNoticePeriod,
-		Responsible:     item.Responsible,
-		Evidence:        archiveEvidenceValue(item.Evidence),
-		ArchiveSummary:  item.ArchiveSummary,
-		ArchiveTags:     decodeArchiveTags(item.ArchiveTags),
+		Did:               item.DID,
+		ContractVersion:   item.ContractVersion,
+		State:             item.State,
+		Name:              item.Name,
+		Description:       item.Description,
+		CreatedBy:         item.CreatedBy,
+		CreatedAt:         item.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:         item.UpdatedAt.Format(time.RFC3339),
+		StartDate:         startDate,
+		ExpDate:           expDate,
+		ExpPolicy:         expPolicy,
+		ExpNoticePeriod:   item.ExpNoticePeriod,
+		Responsible:       item.Responsible,
+		Evidence:          archiveEvidenceValue(item.Evidence),
+		ArchiveSummary:    item.ArchiveSummary,
+		ArchiveTags:       decodeArchiveTags(item.ArchiveTags),
+		TerminationReason: item.TerminationReason,
+		TerminatedAt:      formatOptionalTimePtr(item.TerminatedAt),
+		TerminationRole:   item.TerminationRole,
 	}
+}
+
+func formatOptionalTimePtr(value *time.Time) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := value.UTC().Format(time.RFC3339)
+	return &formatted
 }
 
 // generateArchiveSummary derives the automatic half of DCS-FR-CSA-11 from

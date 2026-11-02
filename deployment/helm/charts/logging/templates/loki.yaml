@@ -1,0 +1,160 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+{{- $name := printf "%s-loki" .Release.Name }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 1
+  serviceName: {{ $name }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loki
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/loki-config.yaml") . | sha256sum }}
+        checksum/gateway: {{ include (print $.Template.BasePath "/gateway-config.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loki
+          image: "{{ .Values.loki.image.repository }}:{{ .Values.loki.image.tag }}{{ with .Values.loki.image.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: {{ .Values.loki.image.pullPolicy }}
+          args: ["-config.file=/etc/loki/loki.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- with .Values.loki.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+              readOnly: true
+            - name: data
+              mountPath: /var/loki
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}{{ with .Values.gateway.image.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          command: ["nginx", "-c", "/etc/nginx-gateway/nginx.conf", "-g", "daemon off;"]
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 3100
+            - name: push
+              containerPort: 3101
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+              {{- if $tls }}
+              scheme: HTTPS
+              {{- end }}
+            initialDelaySeconds: 15
+          {{- with .Values.gateway.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: gateway
+              mountPath: /etc/nginx-gateway
+              readOnly: true
+            - name: gateway-tmp
+              mountPath: /tmp
+            {{- if $tls }}
+            - name: internal-tls
+              mountPath: /etc/dcs-internal-tls
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: gateway
+          configMap:
+            name: {{ .Release.Name }}-loki-gateway
+        - name: gateway-tmp
+          emptyDir: {}
+        {{- if $tls }}
+        - name: internal-tls
+          secret:
+            secretName: {{ .Release.Name }}-internal-tls
+        {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.loki.persistence.size }}
+        {{- with .Values.loki.persistence.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3100
+      targetPort: http
+    - name: push
+      port: 3101
+      targetPort: push
+  selector:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+# Access control: only the collector writes (push port) and only queryFrom
+# (Grafana, which has its own login) reads (http port). Loki itself has no
+# authentication; the gateway admits nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: log-collector
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 3101
+          protocol: TCP
+    {{- with .Values.queryFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 3100
+          protocol: TCP
+    {{- end }}

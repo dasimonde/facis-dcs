@@ -18,6 +18,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/signingmanagement/db"
 )
 
@@ -99,16 +100,8 @@ func (r *PostgresContractRepo) ReadProcessDataByDID(ctx context.Context, tx *sql
 	return &processData, nil
 }
 
-// UpdateState is unconditional: the caller (command/apply.go) already
-// validated the transition against contractstate.Transitions before calling
-// this, so no hardcoded SQL state guard is needed here anymore.
-func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contracts SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
+func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	return cwepg.UpdateContractState(ctx, tx, did, from, to)
 }
 
 // UpdateContractData persists the sealed contract document the first
@@ -154,7 +147,7 @@ func (r *PostgresContractRepo) SetSignedPDF(ctx context.Context, tx *sqlx.Tx, di
 	// stamping (no fresh renderer version) — keep the stored one.
 	_, err := tx.ExecContext(ctx, `
 		UPDATE contracts
-		   SET pdf_ipfs_cid = $2, pdf_renderer_version = COALESCE(NULLIF($3, ''), pdf_renderer_version), pdf_c2pa_state = $4, pdf_payload_hash = $5
+		   SET pdf_ipfs_cid = $2, pdf_renderer_version = COALESCE(NULLIF($3, ''), pdf_renderer_version), pdf_c2pa_state = $4, pdf_payload_hash = $5, pdf_signed = true
 		 WHERE did = $1`,
 		did, ipfsCID, rendererVersion, c2paState, payloadHash,
 	)
@@ -185,7 +178,8 @@ func (r *PostgresContractRepo) RevokeSignature(ctx context.Context, tx *sqlx.Tx,
 	return nil
 }
 
-// ReadLatestEnvelopeByContractDID retrieves the most recent non-revoked signature record for did.
+// ReadLatestEnvelopeByContractDID retrieves the most recent signature record
+// for did, of any status and any field.
 func (r *PostgresContractRepo) ReadLatestEnvelopeByContractDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractSignatureEnvelope, error) {
 	var signature db.ContractSignature
 	err := tx.GetContext(ctx, &signature,
@@ -316,7 +310,7 @@ func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx
 func (r *PostgresContractRepo) LoadSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]db.SignatureRecord, error) {
 	var records []db.SignatureRecord
 	err := tx.SelectContext(ctx, &records,
-		`SELECT signer_did, credential_type, status, signed_at, revoked_at, cert_revoked_at, field_name, jades_signature, ceremony_id
+		`SELECT signer_did, credential_type, status, signed_at, revoked_at, cert_revoked_at, field_name, jades_signature, ceremony_id, ipfs_cid, pdf_hash
 		   FROM contract_signatures
 		  WHERE contract_did = $1
 		  ORDER BY created_at`, did,
@@ -338,6 +332,14 @@ func (r *PostgresContractRepo) ReadPeerSignatureEvidence(ctx context.Context, tx
 		return nil, err
 	}
 	return evidence, nil
+}
+
+func (r *PostgresContractRepo) ReadPeerSigners(ctx context.Context, tx *sqlx.Tx, did string) ([]db.PeerSigner, error) {
+	var signers []db.PeerSigner
+	if err := tx.SelectContext(ctx, &signers, `SELECT from_peer_did, received_at FROM contract_sync_signatures WHERE did = $1`, did); err != nil {
+		return nil, fmt.Errorf("read the peer signers of %s: %w", did, err)
+	}
+	return signers, nil
 }
 
 func (r *PostgresContractRepo) CollectComplianceFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error) {

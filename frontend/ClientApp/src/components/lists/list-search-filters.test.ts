@@ -18,7 +18,7 @@ function setup() {
   })
   return { wrapper, searchFn }
 }
-describe('P09 shared combined search request', () => {
+describe('shared combined search request', () => {
   it('keeps text when party changes and keeps party when text is cleared', async () => {
     const { wrapper, searchFn } = setup()
     await wrapper.get('input').setValue('did:test:template')

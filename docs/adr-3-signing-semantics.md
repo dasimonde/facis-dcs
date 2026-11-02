@@ -61,19 +61,14 @@ are externally unsettled.
 
 - A verifier who trusts the PAdES signature transitively trusts the
   identity binding — there is no way to have one without the other.
-- This ordering (embed-then-sign, never sign-then-mutate) is also what
-  makes the PDF pass external PAdES validators (pyHanko, Adobe): any
-  post-signature mutation of the signed byte range is illegal under PAdES,
-  so every C2PA/lifecycle stamp must land before the signing call, not
-  after.
-  **(Amended by [ADR-26](adr-26-provenance-reanchored-after-signing.md)
-  (2026-07-27): the clause "not after" is withdrawn. The lifecycle manifest
-  still lands before signing, so the signature commits to the provenance it
-  covers — that part stands. But one further C2PA action now runs *after*
-  the signing call: a provenance-only update manifest re-anchoring the hard
-  binding over the signed bytes, appended as a PDF incremental update that
-  leaves the signature's `/ByteRange` untouched. The sentence above remains
-  true as written of the *signed byte range*; it is false as a blanket
-  prohibition on post-signature C2PA stamps. Do not remove the re-anchor on
-  the authority of this bullet — without it every signed contract reports
-  `assertion.dataHash.mismatch`.)**
+- Embed-then-sign: nothing a signature covers is changed after signing,
+  which is what makes the PDF pass external PAdES validators (pyHanko,
+  Adobe). The "active" lifecycle manifest lands before the signing call, so
+  the signature commits to the provenance it covers. C2PA updates after
+  signing are appended as PDF incremental updates that leave every
+  signature's `/ByteRange` untouched
+  ([ADR-26](adr-26-provenance-reanchored-after-signing.md)): the re-anchor
+  that binds the signed bytes, and the lifecycle manifest with its
+  credential of each state reached after signing (suspended, terminated,
+  expired). Without the re-anchor every signed contract reports
+  `assertion.dataHash.mismatch`.

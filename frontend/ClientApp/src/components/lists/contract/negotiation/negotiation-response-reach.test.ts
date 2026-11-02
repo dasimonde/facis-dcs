@@ -240,3 +240,17 @@ describe('decision order', () => {
     expect(decisions.map((decision) => decision.negotiator)).toEqual(['did:web:z.example', 'did:web:a.example'])
   })
 })
+
+// DCS-IR-CWE-03: the comment a party sent with its proposal is shown to the other party.
+it('shows the comment that came with a proposal', () => {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useAuthStore().user = { issuer: USER_ISSUER, holder: 'user', roles: ['CONTRACT_NEGOTIATOR'] }
+  const withComment = contract({})
+  withComment.negotiations?.forEach((negotiation) => (negotiation.change_request = { comment: 'Extend the term.' }))
+  const wrapper = mount(NegotiationList, {
+    props: { contract: withComment, localInstanceDid: LOCAL_INSTANCE, participantId: USER_ISSUER },
+    global: { plugins: [pinia] },
+  })
+  expect(wrapper.get('[data-testid="proposal-comment"]').text()).toBe('Comment: Extend the term.')
+})

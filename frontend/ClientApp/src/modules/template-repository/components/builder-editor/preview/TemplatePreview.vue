@@ -23,9 +23,12 @@ const props = withDefaults(
     verificationResult?: VerificationResult | null
     setSemanticConditionValue?: SemanticConditionValueSetter
     disabled?: boolean
+    /** Blocks a reviewer marked; each is rendered highlighted (DCS-FR-CWE-25). */
+    highlightedBlockIds?: string[]
   }>(),
   {
     sectionLevel: 1,
+    highlightedBlockIds: () => [],
     semanticConditionValues: () => [],
     verificationResult: null,
     setSemanticConditionValue: null,
@@ -34,6 +37,8 @@ const props = withDefaults(
 )
 
 const hasBlockId = computed(() => props.blockId != null)
+
+const isHighlighted = computed(() => !!props.blockId && props.highlightedBlockIds.includes(props.blockId))
 
 const rootChildren = computed(() => {
   const root = props.layout.find((n) => n['dcs:isRoot'])
@@ -93,11 +98,16 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
         :verification-result="verificationResult"
         :set-semantic-condition-value="setSemanticConditionValue"
         :disabled="disabled"
+        :highlighted-block-ids="highlightedBlockIds"
       />
     </template>
   </div>
   <!-- Nested blocks -->
-  <template v-else>
+  <ConditionalWrapper
+    v-else
+    :enabled="isHighlighted"
+    wrapper-class="review-highlight rounded-box bg-warning/20 ring-2 ring-warning"
+  >
     <!-- Section block -->
     <ConditionalWrapper
       v-if="block && block['@type'] === 'dcs:Section'"
@@ -117,6 +127,7 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
             :verification-result="verificationResult"
             :set-semantic-condition-value="setSemanticConditionValue"
             :disabled="disabled"
+            :highlighted-block-ids="highlightedBlockIds"
           />
         </template>
       </PreviewSectionBlock>
@@ -137,5 +148,5 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
         :disabled="disabled"
       />
     </div>
-  </template>
+  </ConditionalWrapper>
 </template>

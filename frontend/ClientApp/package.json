@@ -48,6 +48,7 @@
     "vue-router": "^5.0.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.0",
     "@types/jsonld": "^1.5.15",

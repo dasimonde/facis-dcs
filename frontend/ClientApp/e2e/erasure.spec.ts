@@ -95,7 +95,7 @@ async function expectErasureBadge(inst: Instance, contractDid: string, badge: st
 
 /** Export attempt on a shredded contract: the button must yield the defined
  *  "Content erased" message — a clean end state, not a crash. */
-async function expectErasedExportMessage(inst: Instance, contractDid: string, contractName: string): Promise<void> {
+async function expectErasedExportMessage(inst: Instance, contractDid: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
   const detailsTab = inst.page.getByRole('tab', { name: /contract details/i })
   if (await detailsTab.isVisible().catch(() => false)) {
@@ -107,8 +107,10 @@ async function expectErasedExportMessage(inst: Instance, contractDid: string, co
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
   await exportAnswered
   await expect(inst.page.getByText('Content erased. Encryption keys destroyed.')).toBeVisible({ timeout: 30_000 })
-  // Metadata on Details proves the Postgres row survived the shred.
-  await expect(inst.page.getByTestId('contract-global-name')).toHaveValue(contractName)
+  // The Postgres row survives the shred with its state; the erasure blanks the
+  // plaintext name with the content (DCS-NFR-SEC-13).
+  await expect(inst.page.getByTestId('contract-state-badge')).toHaveText('TERMINATED')
+  await expect(inst.page.getByTestId('contract-global-name')).toHaveValue('')
 }
 
 test('archive deletion shreds the encryption keys on both instances', async ({ page, context, browser }) => {
@@ -191,6 +193,22 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
 
     await expect(a.page.getByTestId(`erasure-badge-${contractDid}`)).toHaveText(/Keys live/)
 
+    // Only a contract out of force can be erased (DCS-FR-CSA-17), on this
+    // instance and on the peer: the Archive Manager terminates it first, and
+    // the termination notice brings B's copy to TERMINATED.
+    await expect(a.page.getByTestId(`archive-delete-${contractDid}`)).toHaveCount(0)
+    await a.page.getByTestId(`archive-terminate-${contractDid}`).click()
+    const terminateDialog = a.page.getByRole('dialog').filter({ hasText: 'Confirmation' })
+    await terminateDialog.getByPlaceholder('Termination reason').fill('Contract ended before the erasure request (E2E)')
+    const terminated = a.page.waitForResponse(
+      (r) => r.url().includes('/contract/terminate') && r.request().method() === 'POST' && r.ok(),
+    )
+    await a.page.getByTestId('confirmation-confirm').click()
+    await terminated
+    await assertReceivedInState(a, contractDid, 'TERMINATED')
+    await assertReceivedInState(b, contractDid, 'TERMINATED')
+
+    await a.gotoAs('Archive Manager', '/ui/archive/dashboard')
     await a.page.getByTestId(`archive-delete-${contractDid}`).click()
     const dialog = a.page.getByRole('dialog').filter({ hasText: 'Confirmation' })
     await expect(dialog).toBeVisible()
@@ -235,14 +253,7 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
   })
 
   await test.step('export attempts surface "Content erased" on both instances — no crash', async () => {
-    await expectErasedExportMessage(a, contractDid, templateName)
-    await expectErasedExportMessage(b, contractDid, templateName)
-  })
-
-  await test.step('the contract list still serves the metadata (erasure ≠ row deletion)', async () => {
-    await a.gotoAs('Contract Manager', '/ui/contracts')
-    // The list keys rows by DID but renders a Name column, so the name is the
-    // surviving metadata that is actually on screen.
-    await expect(a.page.getByText(templateName).first()).toBeVisible({ timeout: 30_000 })
+    await expectErasedExportMessage(a, contractDid)
+    await expectErasedExportMessage(b, contractDid)
   })
 })

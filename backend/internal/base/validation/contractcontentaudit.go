@@ -281,7 +281,7 @@ func loadDefaultContractContentPolicyDocument() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := os.ReadFile(path)
+	bytes, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read contract content policy file %q: %w", path, err)
 	}

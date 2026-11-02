@@ -502,12 +502,25 @@ export async function saveArtifact(inst: Instance, contractDid: string, label: s
   persistArtifact(await exportContractPdf(inst, contractDid), label)
 }
 
-/** The C2PA manifest-history URL for a contract on an instance. The C2PA
- *  service is mounted on the API muxer (backend cmd/dcs/http.go), so it lives
- *  under DCS_API_PATH (/digital-contracting-service/api) like every other app
- *  endpoint — not at the service root (that is did.json, on the raw mux). */
-function manifestHistoryUrl(inst: Instance, contractDid: string): string {
-  return `${inst.apiBase}/c2pa/manifest/${encodeURIComponent(contractDid)}?history=true`
+/** The C2PA provenance chain of a contract on an instance, read by its
+ *  Contract Manager. The public /c2pa/manifest endpoint serves signed contracts
+ *  only, and the chain grows before signing too. The session is minted without
+ *  navigating, so the page stays where the spec left it. */
+async function manifestChain(
+  inst: Instance,
+  contractDid: string,
+  auth: { Authorization: string },
+): Promise<{ status: number; chain: unknown[] | null }> {
+  const resp = await inst.page.request.get(`${inst.apiBase}/signature/provenance/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  if (!resp.ok()) return { status: resp.status(), chain: null }
+  const body = (await resp.json()) as { chain?: unknown[] }
+  return { status: resp.status(), chain: Array.isArray(body.chain) ? body.chain : null }
+}
+
+function managerAuth(inst: Instance): { Authorization: string } {
+  return { Authorization: `Bearer ${mintSession('Contract Manager', inst.apiBase, inst.organization).token}` }
 }
 
 /**
@@ -523,18 +536,16 @@ export async function assertManifestChainGrew(inst: Instance, contractDid: strin
   // the export route reports "being regenerated" (backend exportcontract.go), so
   // poll the manifest history until the chain grows past prevCount, tolerating
   // the transient not-ready response.
+  const auth = managerAuth(inst)
   const deadline = Date.now() + 45_000
   let lastStatus = 0
   let lastLen = -1
   while (Date.now() < deadline) {
-    const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
-    lastStatus = resp.status()
-    if (resp.ok()) {
-      const chain = (await resp.json()) as unknown[]
-      if (Array.isArray(chain)) {
-        lastLen = chain.length
-        if (chain.length > prevCount) return chain.length
-      }
+    const { status, chain } = await manifestChain(inst, contractDid, auth)
+    lastStatus = status
+    if (chain) {
+      lastLen = chain.length
+      if (chain.length > prevCount) return chain.length
     }
     await inst.page.waitForTimeout(1500)
   }
@@ -548,10 +559,8 @@ export async function assertManifestChainGrew(inst: Instance, contractDid: strin
 /** Current length of the contract's C2PA manifest chain on an instance (0 if
  *  none yet), for seeding assertManifestChainGrew. */
 export async function manifestChainLength(inst: Instance, contractDid: string): Promise<number> {
-  const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
-  if (!resp.ok()) return 0
-  const chain = (await resp.json()) as unknown[]
-  return Array.isArray(chain) ? chain.length : 0
+  const { chain } = await manifestChain(inst, contractDid, managerAuth(inst))
+  return chain ? chain.length : 0
 }
 
 /**

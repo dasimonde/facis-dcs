@@ -4,6 +4,10 @@ image:
   repository: "[registry]"
   pullPolicy: IfNotPresent
   tag: ""
+  # Optional "sha256:<hex>". When set, the image is pulled as
+  # <repository>:<tag>@<digest>, so the registry cannot serve other content
+  # under the tag. Each image of the chart and its subcharts has this key.
+  digest: ""
 
 imagePullSecrets: []
 
@@ -22,8 +26,22 @@ serviceAccount:
 
 podAnnotations: {}
 podLabels: {}
-podSecurityContext: {}
-securityContext: {}
+# Security context of the backend pod, the compliance monitor and the SoftHSM2
+# provisioning job (DCS-NFR-SEC-05). 10001 is the user of the DCS image
+# (deployment/docker/Dockerfile). The containers write only to /tmp (emptyDir)
+# and the token volume.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 service:
   type: ClusterIP
@@ -31,8 +49,44 @@ service:
   # Prometheus /metrics, on its own ClusterIP Service (<fullname>-metrics).
   metricsPort: 9464
 
+# A ServiceMonitor for /metrics. It renders anyway wherever the alert rules
+# render (alerts below), because they evaluate its series.
 serviceMonitor:
   enabled: false
+
+# NetworkPolicies (templates/networkpolicy.yaml; DCS-NFR-SEC-03, DCS-NFR-SEC-14,
+# DCS-NFR-SF-02). Every pod the chart owns gets ingress only from its clients:
+# the Hydra admin API, the IPFS RPC API, pdf-core and NATS only from the
+# backend; PostgreSQL only from the backend, Hydra, the backup and the
+# compliance monitor. The backend API, the Hydra public API, ORCE, DSS and the
+# Federated Catalogue stay open: the ingress routes them and they authenticate
+# their callers. A CNI that enforces NetworkPolicy is a prerequisite.
+networkPolicy:
+  enabled: true
+  # Peers that may scrape /metrics (port metrics).
+  metricsFrom:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+  # More peers for every restricted rule, for example the node CIDR as an
+  # ipBlock where the CNI does not admit kubelet probes from the node.
+  extraFrom: []
+  # The pods of the ingress controller, as NetworkPolicy peers. When set, the
+  # backend, ORCE and DSS admit only the ingress, the pods of this release and
+  # peersFrom, on their plain and TLS ports (DCS-NFR-SEC-14). Required for a
+  # production-like release with an ingress (templates/prerequisites.yaml).
+  # Example for Traefik in kube-system:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: kube-system
+  #     podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: traefik
+  ingressFrom: []
+  # Other clients of the backend, ORCE and DSS when ingressFrom is set, for
+  # example another release that shares this release's ORCE and DSS.
+  peersFrom: []
 
 ingress:
   enabled: false
@@ -42,20 +96,15 @@ ingress:
   hosts: []
   tls: []
 
-  # Mindestversion fuer TLS (DCS-IR-CI-01, DCS-NFR-SEC-01). Wirkt nur, wo
-  # Traefik aus diesem Chart terminiert: die Ressource ist eine Traefik-
-  # TLSOption, und der Ingress muss sie ueber die Annotation
-  #   traefik.ingress.kubernetes.io/router.tls.options: <ns>-<name>@kubernetescrd
-  # referenzieren, sonst bleibt sie wirkungslos.
-  #
-  # Terminiert der Ingress der Plattform (className leer, wie in
-  # values.prod.yml), gehoert die Einstellung dorthin. Der Deployment-Leitfaden
-  # nennt unter "TLS-Version erzwingen" die Entsprechung je Controller und den
-  # Befehl, mit dem sich das Ergebnis nachmessen laesst.
+  # Minimum TLS version (DCS-IR-CI-01, DCS-NFR-SEC-01). The chart writes a
+  # Traefik TLSOption and names it on the ingress when the ingress terminates
+  # TLS (ingress.tls is set) and Traefik serves it (the TLSOption CRD exists or
+  # traefik.enabled). For other ingress controllers, set the minimum on the
+  # controller: deployment/README.md, "TLS".
   tlsOptions:
-    enabled: false
+    enabled: true
     minVersion: "VersionTLS13"
-    # Leer lassen: eine Obergrenze schliesst kuenftige Versionen aus.
+    # Leave empty: an upper bound excludes future versions.
     maxVersion: ""
     cipherSuites: []
     sniStrict: false
@@ -123,10 +172,17 @@ customCA:
 hostAliases: []
 nodeSelector: {}
 tolerations: []
+# Backend pods and the SoftHSM2 provisioning Job, which mounts their token volume.
 affinity: {}
 
 extraEnv: []
 extraEnvFrom: []
+
+# Retention policy of archived contracts (DCS-FR-CSA-14, DCS-FR-CSA-19), in
+# years: DCS_ARCHIVE_RETENTION_YEARS. An archive entry cannot be deleted before
+# its retention ends. 0 sets no retention policy.
+archive:
+  retentionYears: 0
 
 # Archive notary / ORCE integration
 archiveNotary:
@@ -168,6 +224,44 @@ global:
   workflowGateTokenSecretRef:
     name: ""
     key: "PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"
+  # In-cluster TLS (DCS-NFR-SEC-14, DCS-NFR-SEC-01). The chart generates a CA on
+  # install (Secret <release>-internal-ca, kept on upgrade) and a server
+  # certificate for the co-deployed services (<release>-internal-tls).
+  #   - PostgreSQL accepts TLS 1.3 connections only (hostssl); the derived
+  #     DATABASE_URL uses sslmode=verify-full.
+  #   - NATS requires TLS; the derived NATS_URL is tls://.
+  #   - IPFS RPC, pdf-core, DSS and ORCE serve plain HTTP only. A TLS proxy
+  #     container in their pods serves TLS 1.3 on proxy.port, and the backend
+  #     calls them there. Their plain ports stay for probes, ingress and
+  #     port-forwards.
+  #   - The backend API and the Hydra admin API have the same TLS proxy for
+  #     in-cluster callers (ORCE, the backend, the Hydra client job).
+  #   - The backend calls the Hydra public API on hydra.service.publicTLSPort.
+  #   - The ingress reaches the backend, the Hydra public API (port
+  #     hydra.service.publicTLSPort) and the Federated Catalogue on their TLS
+  #     proxies and verifies the internal CA, when ingress.className is
+  #     traefik or nginx, or empty with the Traefik ServersTransport CRD
+  #     (deployment/README.md, "TLS").
+  # The backend, the backup and the compliance monitor trust the CA. Another
+  # client of the co-deployed PostgreSQL or NATS (Hydra, statuslist-service)
+  # needs sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt in its
+  # DSN; Hydra mounts the CA there. URLs set explicitly in values (tsaURL,
+  # auditExecutor.url, ...) are used as given.
+  internalTLS:
+    enabled: true
+    proxy:
+      port: 8443
+      image:
+        repository: nginx
+        tag: "1.27-alpine"
+        digest: ""
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 128Mi
 
 # Route and path configuration
 route:
@@ -185,16 +279,30 @@ paths:
   api: ""
   ui: ""
 
-# DID identity Secret mount (DCS_DID). Disabled by default: most deployments
-# derive their signing identity from the PKCS#11 token directly. Enabled by
-# the BDD kind harness, where a post-install hsm-provision Job publishes
-# did.json (freshly derived from the in-cluster SoftHSM2 token key) into the
-# Secret named by the 'identitySecretName' helper.
+# DID document of this instance (DCS_DID, fatal at startup when missing). It
+# publishes the public key of the HSM key dcs-did.
+#   - enabled: did.json comes from the hsm-provision Job of the co-deployed
+#     SoftHSM2 token (pkcs11.provisioning), published into the Secret named by
+#     the 'identitySecretName' helper, or read off the token volume.
+#   - existingSecret: did.json from a Secret the operator creates (key
+#     did.json). Required with a real HSM (provisioning disabled); create it
+#     with gendid against that HSM (deployment/README.md, "Production
+#     prerequisites").
 identity:
   enabled: false
   # Override the auto-derived <fullname>-identity Secret name.
   secretName: ""
+  existingSecret: ""
   mountPath: "/app/identity"
+  # eIDAS trust (DCS_FORCE_EIDAS_CERT, DCS-IR-CI-01): the backend builds the EU
+  # trust pool from the LOTL and the national trusted lists (XAdES signatures
+  # verified) and requires the x5c certificate of its own did:web document and
+  # of every peer to chain to a qualified trust service in it. It needs a
+  # qualified certificate for this instance's DID, or the backend does not
+  # start. Off: the certificate must name the DID host and carry the DID key,
+  # and peer trust rests on the did:web fetch over HTTPS (ADR-38).
+  eidas:
+    enforce: false
 
 # Application readiness is intentionally distinct from process liveness.
 # /readyz remains 503 on the bootstrap server until initialization, including
@@ -211,6 +319,44 @@ readinessProbe:
   failureThreshold: 3
   successThreshold: 1
 
+# Process liveness (DCS-NFR-PER-03). /livez answers 200 while the process
+# serves HTTP, also during initialization, so a slow HSM or catalogue gate does
+# not cause a restart; a process that stops serving is restarted. The startup
+# probe gives the steps before the listener opens (database connection,
+# migrations) up to 5 minutes.
+startupProbe:
+  httpGet:
+    path: /livez
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 60
+livenessProbe:
+  httpGet:
+    path: /livez
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Keeps at least one backend pod during voluntary disruptions (node drain,
+# cluster upgrade) when more than one replica runs (DCS-NFR-PER-03).
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Config file integrity (DCS-NFR-SEC-04). The backend hashes its mounted config
+# files at startup and refuses to start when a pinned file does not match its
+# SHA-256 pin (DCS_CONFIG_SHA256_PINS). Names: did-document, oid4vp-trust-data,
+# x5c-trust-anchors-poa, x5c-trust-anchors-pid, oid4vp-trust-policy.
+#   pins:
+#     x5c-trust-anchors-poa: <sha256sum of the file>
+# Pin oid4vp-trust-data to the SHA-256 of the trust document of
+# oid4vp.trust.existingConfigMap (required in production): an edit of that
+# ConfigMap outside a release then stops the backend at its next start.
+configIntegrity:
+  pins: {}
+
 # Keycloak realm URL for Federated Catalogue.
 fcKeycloak:
   realmURL: ""
@@ -222,6 +368,8 @@ database:
   user: ""
   password: ""
   name: ""
+  # Mode of a URL the chart derives. Ignored for the co-deployed postgresql with
+  # global.internalTLS.enabled, which uses verify-full.
   sslmode: "disable"
   secretRef:
     name: ""
@@ -273,7 +421,9 @@ signing:
     name: ""
     key: "ISSUER_DID"
 
-  # RFC 3161 Timestamp Authority (optional; activates real timestamps on C2PA manifests).
+  # RFC 3161 Timestamp Authority (TSA_URL). Required: the backend does not
+  # start without it, and every C2PA manifest and archive entry carries a
+  # timestamp from it.
   tsaURL: ""
   # Optional: Secret (key tsa-cert.pem) holding the TSA certificate to trust
   # for RFC3161 token verification, overriding the embedded certs/tsa.crt
@@ -290,7 +440,9 @@ pkcs11:
   modulePath: "/usr/lib/softhsm/libsofthsm2.so"
   tokenLabel: "dcs"
   # PIN for the auto-created Secret. Ignored when pinSecretRef.name is set.
-  pin: "1234"
+  # Empty: the chart generates a random PIN on install and keeps the one in the
+  # existing Secret on upgrade (DCS-NFR-SEC-12).
+  pin: ""
   pinSecretRef:
     name: ""
     key: "PKCS11_PIN"
@@ -308,7 +460,8 @@ pkcs11:
     # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
     tokenDir: "/var/lib/softhsm"
     # SO (security officer) PIN used only during token initialization.
-    soPin: "12345678"
+    # Empty: a random SO PIN is used for the initialization and not kept.
+    soPin: ""
     persistence:
       # 1Gi rather than the ~10Mi the token actually needs: several CSI drivers
       # refuse to provision below 1Gi and the claim then never binds, which
@@ -335,6 +488,13 @@ pkcs11:
       # provisioner never created.
       pullPolicy: ""
 
+# Webhook subscriptions (/orce/webhooks, DCS-IR-SI-02). A delivery carries
+# contract content (DCS-IR-CI-01), so a callback URL is https. Plain http is
+# accepted only for loopback, a host DCS_DIDWEB_INSECURE_HOSTS names, or a
+# host:port listed here (comma-separated).
+webhooks:
+  insecureHosts: ""
+
 # ---- Co-deployed dependencies ----------------------------------------
 # Each sub-chart owns its full set of configurable values.
 # Only fields referenced by the parent chart's helpers are listed here.
@@ -349,13 +509,17 @@ postgresql:
   enabled: false
   auth:
     username: dcs
-    password: dcs
+    # Empty: the chart generates a random password on install and keeps the one
+    # in the <release>-postgresql Secret on upgrade (DCS-NFR-SEC-12). The
+    # backend then gets it as PGPASSWORD.
+    password: ""
     database: dcs
   # Pointing another component's DSN at this server is not enough to create its
   # database — list it here as well. Hydra in particular only runs
   # `hydra migrate sql`, which assumes the database already exists; without an
   # entry it stays unready and the backend cannot discover the OIDC provider.
-  additionalDatabases: []
+  # "hydra" is the database of hydra.config.coDeployedPostgresql.
+  additionalDatabases: ["hydra"]
   # Defaults to an emptyDir, which loses every contract on a pod restart. Enable
   # for anything longer-lived than a test cluster.
   persistence:
@@ -394,8 +558,10 @@ hydra:
 #       roles: ["Sys. Contract Creator"]
 #
 # Valid roles: Sys. Contract Creator, Sys. Contract Reviewer, Sys. Contract
-# Approver, Sys. Contract Manager, Sys. Auditor, Sys. Contract Signer. The
-# strings must match exactly; an unknown one stops the backend at startup.
+# Approver, Sys. Contract Manager, Sys. Auditor, Sys. Contract Signer,
+# Sys. Integration Manager (manages the webhook subscriptions of its
+# organization, /orce/webhooks). The strings must match exactly; an unknown one
+# stops the backend at startup.
 # Sys. Contract Signer holds no signing scope (ADR-17), so a signature always
 # needs a person with a wallet.
 #
@@ -422,6 +588,7 @@ statusListLocalhostProxy:
   image:
     repository: nginx
     tag: alpine
+    digest: ""
     pullPolicy: IfNotPresent
   listenPort: 18080
   upstream: ""
@@ -436,12 +603,11 @@ statusListLocalhostProxy:
   # published once at one origin (ADR-34), so its prefix names that origin
   # outright and stays right for a release answering on some other host.
   paths:
-    - prefix: /statuslist/
     - prefix: /issuer/
       host: localhost
-  # Functional HTTP route used by the sidecar readiness probe. Environments
-  # that require a particular seeded status list can override this path.
-  readinessPath: "/statuslist/health"
+  # Functional HTTP route used by the sidecar readiness probe: the status list
+  # the login credentials name (the credential issuer release, ADR-34).
+  readinessPath: "/issuer/status-list/1"
 
 # XFSC Status List Service.
 # Nothing points at it: the credentials this deployment issues name the status
@@ -591,7 +757,21 @@ pdfCore:
   image:
     repository: ""     # set to your registry image, e.g. registry.example.com/facis/pdf-core
     tag: ""            # set to the image tag; falls back to .Chart.AppVersion
+    digest: ""
     pullPolicy: IfNotPresent
+  # 10001 is the user of the pdf-core image (pdf-core/Dockerfile). pdf-core
+  # writes no files (DCS-NFR-SEC-05).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
   replicaCount: 1
   service:
     port: 8080
@@ -618,6 +798,17 @@ ipfs:
   mfsBaseURLSecretRef:
     name: ""
     key: "IPFS_MFS_BASE_URL"
+  # The co-deployed Kubo accepts RPC calls only with the bearer token of the
+  # Secret <release>-ipfs-api, which the backend gets as IPFS_API_TOKEN
+  # (DCS-NFR-SF-02). The NetworkPolicy also admits only the backend.
+  api:
+    auth:
+      enabled: true
+  # Token of a Kubo outside this release (API.Authorizations "bearer:<token>").
+  # Set it when mfsBaseURL or mfsBaseURLSecretRef names such a node.
+  apiTokenSecretRef:
+    name: ""
+    key: "IPFS_API_TOKEN"
   persistence:
     enabled: false
     size: 5Gi
@@ -627,49 +818,52 @@ ipfs:
     storageClassName: ""
 
 # ---- Optional monitoring stack (Prometheus, Grafana, Alertmanager) ----------------
+# monitoring.enabled co-deploys kube-prometheus-stack. Its values go under the
+# kube-prometheus-stack key; top-level grafana/prometheus keys do not reach it.
 monitoring:
   enabled: false
 
-grafana:
-  enabled: false
-  adminPassword: YourStrongPassword
-  persistence:
-    enabled: true
-    storageClassName: local-path
-    size: 5Gi
+kube-prometheus-stack:
+  grafana:
+    # No adminPassword (DCS-NFR-SEC-12): the grafana chart generates a random
+    # one on install and keeps it in the <release>-grafana Secret on upgrade.
+    #   kubectl get secret <release>-grafana -o jsonpath='{.data.admin-password}' | base64 -d
+    persistence:
+      enabled: true
+      size: 5Gi
+  prometheus:
+    prometheusSpec:
+      retention: 15d
 
-prometheus:
+# ---- Optional log store (DCS-NFR-SEC-09) -----------------------------------
+# logging.enabled co-deploys Loki and a collector (Alloy) that stores the logs
+# of every pod in the release namespace. Loki keeps a line for `retention`; the
+# audit trail itself stays in the database without expiry. Only the collector
+# and Grafana (queryFrom, NetworkPolicy) can connect to Loki; Grafana requires a
+# login. The chart writes a Grafana data source ConfigMap
+# (label grafana_datasource: "1"), which the Grafana of monitoring.enabled
+# loads. Values: charts/logging/values.yaml.
+logging:
   enabled: false
-  prometheusSpec:
-    retention: 15d
-    storageSpec:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: local-path
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 10Gi
-    serviceMonitorSelectorNilUsesHelmValues: true
-    podMonitorSelectorNilUsesHelmValues: true
+  retention: 2160h
+  loki:
+    persistence:
+      size: 10Gi
+      # Set an encrypted StorageClass: logs can hold personal data.
+      storageClassName: ""
 
-alertmanager:
-  enabled: false
-  alertmanagerSpec:
-    storage:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: local-path
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 2Gi
-
-nodeExporter:
-  enabled: false
-
-kubeStateMetrics:
-  enabled: false
+# Alert rules (DCS-NFR-SEC-11), written as a PrometheusRule together with the
+# ServiceMonitor they read when the Prometheus Operator CRD exists or
+# monitoring.enabled. labels go on both and must match the ruleSelector and
+# serviceMonitorSelector of the Prometheus that loads them. Empty: release:
+# <this release> with monitoring.enabled (the co-deployed
+# kube-prometheus-stack), else release: prometheus.
+alerts:
+  enabled: true
+  labels: {}
+  serverErrorRatio: 0.05
+  authFailuresPerSecond: 1
+  p95LatencySeconds: 2
 
 # EU DSS demonstration webapp (AdES validation alongside the PKCS#11 signing
 # path — DCS-FR-SM-18, DCS-IR-SI-10, DCS-IR-CI-08). DISABLED by default:
@@ -768,6 +962,32 @@ complianceMonitor:
       cpu: 200m
       memory: 256Mi
 
+# ---- Database backup (DCS-NFR-SF-03) ------------------------------------
+# A CronJob dumps the DCS database (DATABASE_URL) and a persistent Hydra
+# database to a PersistentVolumeClaim.
+# The schedule is the recovery point objective. Restore, the IPFS snapshot and
+# the erasure obligations of the retention: docs/backup-integration-guide.md.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  # Also the time until an erased contract's keys are gone from every backup
+  # (guide, section 4.1).
+  retentionDays: 14
+  image:
+    repository: postgres
+    # At least the major version of the database server.
+    tag: "16-alpine"
+    digest: ""
+    pullPolicy: IfNotPresent
+  persistence:
+    # Empty: the chart creates <fullname>-db-backup (kept on uninstall).
+    existingClaim: ""
+    size: 10Gi
+    # Set an encrypted StorageClass: a dump holds the wrapped content keys
+    # (guide, section 2.1).
+    storageClassName: ""
+  resources: {}
+
 # ---- Shared supporting services for a resource-constrained peer -------
 # Exposes this instance's stateless services under https://<host>/shared/<name>
 # so a peer that cannot run its own can consume them. Disabled by default: doing
@@ -806,8 +1026,10 @@ sharedServices:
 # in the UI. Removing an entry here does not remove it from a running instance.
 #
 # Each entry: name (unique), url (endpoint the payload is POSTed to),
-# description (optional), enabled (optional, default true).
+# description (optional), enabled (optional, default true). The payload holds
+# the signed contract, so url is https; plain http is accepted only for
+# loopback and a host:port that DCS_DIDWEB_INSECURE_HOSTS names.
 contractTargets: []
 #  - name: "Reference ORCE target"
-#    url: "http://my-release-orce:1880/contract-target/deploy"
+#    url: "https://my-release-orce:8443/contract-target/deploy"
 #    description: "The shipped ORCE contract-target flow."

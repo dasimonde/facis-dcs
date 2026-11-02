@@ -52,6 +52,13 @@ type Negotiator struct {
 }
 
 func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
+	var change negotiationmerging.ChangeRequest
+	if cmd.ChangeRequest != nil {
+		var err error
+		if change, _, err = negotiationmerging.Decode(*cmd.ChangeRequest); err != nil {
+			return err
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -146,11 +153,9 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// free-text (a comment / redline note kept only for the negotiation audit
 	// trail — stored raw above) or a structured ChangeRequest carrying a
 	// contract_data redline. Only a structured redline is validated here; a
-	// free-text note (which does not decode into the struct) has nothing to
-	// validate, so it is skipped.
+	// free-text note has nothing to validate, so it is skipped.
 	if cmd.ChangeRequest != nil {
-		var change negotiationmerging.ChangeRequest
-		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
+		if change.ContractData != nil {
 			// A redline on a settled agreement is the wedge: the document changes
 			// but the artifact is the peer's signed PDF and cannot be re-rendered,
 			// so the proposal would ship the OLD signed bytes while this copy's own
@@ -203,7 +208,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 		if err := contractstate.ValidateOutcome(currentState, contractstate.EventNegotiate, contractstate.Negotiation); err != nil {
 			return err
 		}
-		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Negotiation.String()); err != nil {
+		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Negotiation.String()); err != nil {
 			return fmt.Errorf("could not persist negotiation state: %w", err)
 		}
 	}

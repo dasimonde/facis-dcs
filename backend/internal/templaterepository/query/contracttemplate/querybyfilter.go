@@ -21,18 +21,24 @@ import (
 )
 
 type GetAllMetadataByFilterQry struct {
-	RetrievedBy  string
-	DID          string
-	Version      int
-	State        *contracttemplatestate.ContractTemplateState
-	TemplateType *contracttemplatetype.ContractTemplateType
-	PartyType    string
-	Name         string
-	Description  string
-	TemplateData string
-	HolderDID    string
-	Pagination   datatype.Pagination
-	UserRoles    userrole.UserRoles
+	RetrievedBy      string
+	DID              string
+	Version          int
+	State            *contracttemplatestate.ContractTemplateState
+	TemplateType     *contracttemplatetype.ContractTemplateType
+	PartyType        string
+	Name             string
+	Description      string
+	TemplateData     string
+	Jurisdiction     string
+	Industry         string
+	ComplianceStatus string
+	CreatedBy        string
+	CreatedFrom      string
+	CreatedTo        string
+	HolderDID        string
+	Pagination       datatype.Pagination
+	UserRoles        userrole.UserRoles
 }
 
 type GetAllMetadataByFilterResult struct {
@@ -43,9 +49,12 @@ type GetAllMetadataByFilterResult struct {
 	PartyType    string
 	Name         *string
 	Description  *string
+	CreatedBy    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	MetaData     datatype.JSON
+	db.SearchableMetadata
+	db.Structure
 }
 
 type GetAllMetaDataByFilterHandler struct {
@@ -84,6 +93,13 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		Name:         query.Name,
 		Description:  query.Description,
 		TemplateData: query.TemplateData,
+
+		Jurisdiction:     query.Jurisdiction,
+		Industry:         query.Industry,
+		ComplianceStatus: query.ComplianceStatus,
+		CreatedBy:        query.CreatedBy,
+		CreatedFrom:      query.CreatedFrom,
+		CreatedTo:        query.CreatedTo,
 	}
 
 	contractTemplates, err := h.CTRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues, query.Pagination)
@@ -128,8 +144,12 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 			PartyType:    data.PartyType,
 			Name:         data.Name,
 			Description:  data.Description,
+			CreatedBy:    data.CreatedBy,
 			CreatedAt:    data.CreatedAt,
 			UpdatedAt:    data.UpdatedAt,
+
+			SearchableMetadata: data.SearchableMetadata,
+			Structure:          data.Structure,
 		}
 	}
 

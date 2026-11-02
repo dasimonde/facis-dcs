@@ -119,7 +119,7 @@ func (h *Offerer) Handle(ctx context.Context, cmd OfferCmd) error {
 		return err
 	}
 
-	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Offered.String())
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Offered.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}

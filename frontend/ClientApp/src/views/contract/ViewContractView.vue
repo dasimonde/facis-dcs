@@ -7,6 +7,7 @@ import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import AuditView from '@contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import ContractLifecycleHistory from '@contract-workflow-engine/components/ContractLifecycleHistory.vue'
 import ContractStructureTree from '@contract-workflow-engine/components/ContractStructureTree.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
@@ -15,6 +16,7 @@ import { useContractContentValuesStore } from '@contract-workflow-engine/store/c
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import ContractPdfVerifierPanel from '@/components/contract/ContractPdfVerifierPanel.vue'
 import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import ExpiredPolicyNotice from '@/components/contract/ExpiredPolicyNotice.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
@@ -27,6 +29,8 @@ import { ContractState } from '@/types/contract-state'
 import { contractWithAcceptedProposals } from '@/utils/contract-negotiations'
 import { claimReportedHttpError, reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
+import type { ContractEvidence } from '@/models/contract/contract-evidence'
+import type { UserRole } from '@/types/user-role'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 
 const route = useRoute()
@@ -79,14 +83,26 @@ const isAuditingAuthorized = computed(
   () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
+// The contract roles hold the list, history and lifecycle reads. Auditor and
+// Compliance Officer open the contract for its details, content and audit
+// trail with the evidence (DCS-IR-CWE-12) and hold none of these reads.
+const contractReadRoles: readonly UserRole[] = [
+  'CONTRACT_CREATOR',
+  'CONTRACT_NEGOTIATOR',
+  'CONTRACT_REVIEWER',
+  'CONTRACT_APPROVER',
+  'CONTRACT_MANAGER',
+  'CONTRACT_OBSERVER',
+]
+const canReadHistory = computed(() => contractReadRoles.some((role) => authStore.user?.roles?.includes(role)))
+
 // Proposals belong on Negotiate — View is read-only and must not expose them.
 const tabs = computed(() =>
   contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
     'details',
     'content',
     'audit',
-    'history',
-    'structure',
+    ...(canReadHistory.value ? (['diff', 'history', 'structure'] as const) : []),
   ]),
 )
 
@@ -156,6 +172,37 @@ const ancestors = computed(() => {
 
 const childContracts = computed(() => contracts.value.filter((c) => c.parent_contract_did === contract.value?.did))
 
+// Renewal links (DCS-FR-CWE-29): the contract this one renews and the contracts
+// that renew it.
+const renewedContract = computed(() => {
+  const did = contracts.value.find((c) => c.did === contract.value?.did)?.renews_contract_did
+  return did ? (contracts.value.find((c) => c.did === did) ?? ({ did, name: did } as Contract)) : null
+})
+const renewals = computed(() => contracts.value.filter((c) => c.renews_contract_did === contract.value?.did))
+
+// Related documents (DCS-FR-CWE-29): the evidence documents stored for this
+// contract, for the roles that may list them.
+const relatedDocuments = ref<ContractEvidence[]>([])
+const documentRoles: readonly UserRole[] = [...contractAuditRoles, 'CONTRACT_CREATOR']
+const canListDocuments = computed(() => documentRoles.some((role) => authStore.user?.roles?.includes(role)))
+watch(
+  [activeTab, () => contract.value?.did],
+  async ([tab, did]) => {
+    relatedDocuments.value = []
+    if (tab !== 'structure' || !did) return
+    // Children and renewals can be created after the list was loaded.
+    if (canReadHistory.value) void contractsStore.loadContracts()
+    if (!canListDocuments.value) return
+    try {
+      const documents = await contractWorkflowService.listEvidence(did)
+      if (contract.value?.did === did) relatedDocuments.value = documents
+    } catch {
+      // the shared http interceptor already surfaced the server's error
+    }
+  },
+  { immediate: true },
+)
+
 const contractTitle = computed(
   () =>
     shownContract.value?.name ??
@@ -172,7 +219,7 @@ const reloadContract = () => {
 
 onMounted(() => {
   templateEditorUiStore.reset({ workflow: 'contract', isTemplateEditable: false })
-  if (contracts.value.length === 0) void contractsStore.loadContracts()
+  if (canReadHistory.value && contracts.value.length === 0) void contractsStore.loadContracts()
 })
 
 onUnmounted(() => {
@@ -274,6 +321,9 @@ const exportBundle = async () => {
                     <ContractTargetPicker :contract="contract" @designated="reloadContract" />
                   </div>
                 </div>
+
+                <!-- C2PA verifier: the stored PDF or a copy (DCS-OR-C2PA-006, -008) -->
+                <ContractPdfVerifierPanel :did="contract.did" class="mt-4" />
 
                 <!-- Deployment KPIs with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) -->
                 <div
@@ -387,7 +437,15 @@ const exportBundle = async () => {
                 </div>
               </template>
 
-              <div v-show="activeTab === 'history'">
+              <div v-if="canReadHistory" v-show="activeTab === 'diff'">
+                <ContractHistoryDiffView
+                  :contract-did="contract.did"
+                  :contract-state="contract.state"
+                  :current-contract-data="contract.contract_data"
+                />
+              </div>
+
+              <div v-if="canReadHistory" v-show="activeTab === 'history'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body">
                     <h2 class="card-title text-sm">Lifecycle History</h2>
@@ -441,6 +499,56 @@ const exportBundle = async () => {
                     <p v-else-if="ancestors.length === 0" class="text-sm text-base-content/40">
                       This contract has no parent or child contracts.
                     </p>
+
+                    <ul
+                      v-if="relatedDocuments.length > 0"
+                      :style="{ paddingLeft: `${ancestors.length + 1}rem` }"
+                      class="space-y-1 border-l border-base-300 pl-4"
+                      aria-label="Related documents"
+                      data-testid="structure-documents"
+                    >
+                      <li v-for="document in relatedDocuments" :key="document.evidence_id" class="text-sm">
+                        <span class="text-base-content/60">Document</span>
+                        <span class="ml-2 font-medium">{{ document.filename }}</span>
+                        <span v-if="document.description" class="ml-2 text-base-content/60">
+                          {{ document.description }}
+                        </span>
+                      </li>
+                    </ul>
+
+                    <div v-if="renewedContract || renewals.length > 0" class="space-y-1 border-t border-base-300 pt-3">
+                      <div
+                        v-if="renewedContract"
+                        class="flex items-center gap-2 text-sm"
+                        data-testid="structure-renews"
+                      >
+                        <span class="text-base-content/60">Renews</span>
+                        <RouterLink
+                          :to="{ name: ROUTES.CONTRACTS.VIEW, params: { did: renewedContract.did } }"
+                          class="link font-medium link-hover"
+                        >
+                          {{ renewedContract.name ?? renewedContract.did }}
+                        </RouterLink>
+                        <span v-if="renewedContract.state" class="badge badge-ghost badge-xs">
+                          {{ renewedContract.state }}
+                        </span>
+                      </div>
+                      <div
+                        v-for="renewal in renewals"
+                        :key="renewal.did"
+                        class="flex items-center gap-2 text-sm"
+                        data-testid="structure-renewed-by"
+                      >
+                        <span class="text-base-content/60">Renewed by</span>
+                        <RouterLink
+                          :to="{ name: ROUTES.CONTRACTS.VIEW, params: { did: renewal.did } }"
+                          class="link font-medium link-hover"
+                        >
+                          {{ renewal.name ?? renewal.did }}
+                        </RouterLink>
+                        <span class="badge badge-ghost badge-xs">{{ renewal.state }}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

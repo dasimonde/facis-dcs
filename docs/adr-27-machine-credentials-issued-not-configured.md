@@ -86,6 +86,28 @@ callback and nothing else, and it is carried by an issued credential rather than
 configured by hand. It remains impossible to configure a machine caller that can
 sign: `Sys. Contract Signer` holds no signing scope (ADR-17).
 
+### Organization scope of System Users
+
+One instance can host several organizations (ADR-31). The `participant_did` of
+a System User names the organization it acts for, and every action is
+attributed to it. The scope differs for reads and writes:
+
+- **Reads.** A `Sys.*` role reads the contracts of every organization on the
+  instance (the privileged roles of the contract read policy). Automation that
+  lists or monitors contracts needs this.
+- **Writes.** A `Sys.*` role has no privilege. A contract write (update,
+  submit, negotiate, respond, offer, withdraw, approve, reject, terminate,
+  renew, deploy, target designation, evidence) is admitted only when the
+  caller's organization created the contract or is named in its `dcs:parties`,
+  the same rule as for a person. A System User whose `participant_did` is the
+  instance DID acts for the operator of the instance and writes on every
+  contract the instance holds.
+- **Owner-only writes.** A content edit (update, submit with `contract_data`)
+  and the catalogue registration are admitted only for the creating
+  organization, or for the operator identity on a contract this instance
+  originated. A party that did not create the contract does not edit it or
+  publish it.
+
 ## Alternatives considered
 
 **Per-target shared secrets, hashed at rest.** Fixes the blast radius and allows

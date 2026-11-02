@@ -262,6 +262,7 @@ func (c *Client) RevokeRefreshToken(ctx context.Context, refreshToken string) er
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

@@ -16,30 +16,35 @@ const data: Ref<ContractAuditResponse> = ref([])
 
 const isLoading = ref(false)
 const loadError = ref('')
+const justification = ref('')
 
-watch(
-  [() => editorStore.activeTab, () => route.params.did],
-  async ([tab, did], _, onCleanup) => {
-    let current = true
-    onCleanup(() => {
-      current = false
-    })
-    data.value = []
-    loadError.value = ''
-    isLoading.value = false
-    if (tab !== 'audit' || typeof did !== 'string') return
-    isLoading.value = true
-    try {
-      const result = await contractWorkflowService.audit({ did })
-      if (current) data.value = result
-    } catch (err) {
-      if (current) loadError.value = err instanceof Error ? err.message : 'The audit trail could not be loaded'
-    } finally {
-      if (current) isLoading.value = false
-    }
-  },
-  { immediate: true },
-)
+// A response that arrives after the tab or the contract changed is dropped.
+let requestSequence = 0
+
+const loadAudit = async () => {
+  const did = route.params.did
+  if (typeof did !== 'string') return
+  const sequence = ++requestSequence
+  data.value = []
+  loadError.value = ''
+  isLoading.value = true
+  try {
+    const result = await contractWorkflowService.audit({ did, justification: justification.value.trim() })
+    if (sequence === requestSequence) data.value = result
+  } catch (err) {
+    if (sequence === requestSequence)
+      loadError.value = err instanceof Error ? err.message : 'The audit trail could not be loaded'
+  } finally {
+    if (sequence === requestSequence) isLoading.value = false
+  }
+}
+
+watch([() => editorStore.activeTab, () => route.params.did], () => {
+  requestSequence++
+  data.value = []
+  loadError.value = ''
+  isLoading.value = false
+})
 </script>
 
 <template>
@@ -48,6 +53,15 @@ watch(
     :key="props.contract.did"
     :contract="props.contract"
   />
+  <form class="mb-3 flex items-end gap-2" @submit.prevent="loadAudit">
+    <label class="form-control grow">
+      <span class="label-text mb-1">Audit justification</span>
+      <input v-model="justification" class="input-bordered input input-sm" required />
+    </label>
+    <button type="submit" class="btn btn-sm btn-primary" :disabled="isLoading || !justification.trim()">
+      Load audit trail
+    </button>
+  </form>
   <div v-if="isLoading" class="loading loading-sm loading-spinner"></div>
   <div v-else-if="loadError" role="alert" class="alert alert-error">{{ loadError }}</div>
   <div v-else-if="data.length < 1">No audit data</div>

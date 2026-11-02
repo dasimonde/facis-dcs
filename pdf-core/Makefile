@@ -4,9 +4,8 @@ VENV_PATH := .venv
 VENV_PYTHON        := $(VENV_PATH)/bin/python3
 BEHAVE              := $(VENV_PATH)/bin/behave
 
-# Die Ontologie-Artefakte, die server.go per //go:embed einbindet. go:embed
-# darf nicht aus dem Elternverzeichnis lesen, deshalb werden sie aus ../docs
-# erzeugt und hierher kopiert.
+# The ontology artefacts that server.go embeds with //go:embed. go:embed cannot
+# read from the parent directory, so they are generated in ../docs and copied here.
 ONTOLOGY_DIR       := docs/semantic-ontology/linkml/output
 ONTOLOGY_ARTEFACTS := $(ONTOLOGY_DIR)/linkml.yaml.context.jsonld \
                       $(ONTOLOGY_DIR)/linkml.yaml.shacl.merged.ttl
@@ -14,24 +13,20 @@ ONTOLOGY_ARTEFACTS := $(ONTOLOGY_DIR)/linkml.yaml.context.jsonld \
 # Default: ontology + build
 all: docs build
 
-# Ein Dateiziel, kein Phony: so laeuft die Erzeugung einmal und wird danach
-# uebersprungen, und jedes Ziel, das die Artefakte braucht, kann sie einfach
-# als Voraussetzung nennen. Vorher hing nur `all` und `docker` an `docs`,
-# `test` und `build` nicht — beide brachen im frischen Checkout ab, weil
-# go:embed die Dateien nicht fand.
+# A file target, not a phony one: generation runs once and is then skipped, and
+# every target that needs the artefacts (`test`, `build`, `docker`) names them as
+# a prerequisite. go:embed fails in a fresh checkout without them.
 $(ONTOLOGY_ARTEFACTS):
 	$(MAKE) -C ../docs/semantic-ontology/linkml/ all
 	rm -rf docs
 	mkdir -p $(ONTOLOGY_DIR)
 	cp -r ../$(ONTOLOGY_DIR)/. $(ONTOLOGY_DIR)/
 
-# Kopiert wird nur das Ontologie-Ergebnis, nicht ../docs als Ganzes. Der Baum
-# dort ist ueber 150 MB gross (Handbuecher, Screenshots, PDFs und das
-# LinkML-venv); gebraucht werden zwei Dateien von zusammen 18 KB. Die
-# Gesamtkopie hat `make test` auf mehrere Minuten gebracht, obwohl das Ziel
-# fuer schnelle Rueckmeldung gedacht ist.
+# Only the ontology output is copied, not ../docs as a whole. That tree is over
+# 150 MB (manuals, PDFs, the LinkML venv); pdf-core needs two files of 18 KB
+# together. A full copy makes `make test` take minutes.
 #
-# Erzwingt die Neuerzeugung, wenn sich die Ontologie geaendert hat.
+# Forces regeneration after a change to the ontology.
 docs:
 	rm -f $(ONTOLOGY_ARTEFACTS)
 	$(MAKE) $(ONTOLOGY_ARTEFACTS)

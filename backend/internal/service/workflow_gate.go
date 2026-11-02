@@ -29,9 +29,21 @@ func (s *processAuditAndCompliancesrvc) WorkflowGateRun(ctx context.Context, p *
 	return workflowGateRunResponse(run), nil
 }
 
+// WorkflowGateReview records the decision on a REVIEW run of a contract the
+// caller may read (DCS-FR-PACM-03, ADR-31).
 func (s *processAuditAndCompliancesrvc) WorkflowGateReview(ctx context.Context, p *processauditandcompliance.WorkflowGateReviewPayload) (*processauditandcompliance.PACWorkflowGateReviewDecision, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
+	run, err := s.WorkflowGate.Read(ctx, p.RunID, "", "")
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, processauditandcompliance.MakeNotFound(fmt.Errorf("workflow gate run %s not found", p.RunID))
+	}
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	if err := s.authorizeContract(ctx, run.ContractDID); err != nil {
+		return nil, err
+	}
 	decision, err := s.WorkflowGate.DecideReview(ctx, p.RunID, p.Decision, p.Justification, middleware.GetParticipantID(ctx))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, processauditandcompliance.MakeNotFound(err)
@@ -46,12 +58,47 @@ func (s *processAuditAndCompliancesrvc) WorkflowGateReview(ctx context.Context, 
 	}, nil
 }
 
+// WorkflowGateRuns lists the gate runs of the contracts the caller may read,
+// by default the REVIEW runs that wait for a decision (DCS-FR-PACM-03).
+func (s *processAuditAndCompliancesrvc) WorkflowGateRuns(ctx context.Context, p *processauditandcompliance.WorkflowGateRunsPayload) ([]*processauditandcompliance.PACWorkflowGateRun, error) {
+	scoped, err := s.contractAuditContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(scoped, s.DB)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+	status, pending := "REVIEW", true
+	if p.Status != nil {
+		status = *p.Status
+	}
+	if p.Pending != nil {
+		pending = *p.Pending
+	}
+	runs, err := s.WorkflowGate.List(ctx, status, pending && status == "REVIEW")
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	result := make([]*processauditandcompliance.PACWorkflowGateRun, 0, len(runs))
+	for _, run := range runs {
+		if allowed == nil || allowed[run.ContractDID] {
+			result = append(result, workflowGateRunResponse(run))
+		}
+	}
+	return result, nil
+}
+
 func workflowGateRunResponse(run workflowgate.Run) *processauditandcompliance.PACWorkflowGateRun {
+	createdAt := run.CreatedAt.UTC().Format(time.RFC3339)
 	result := &processauditandcompliance.PACWorkflowGateRun{
 		RunID: run.RunID, CorrelationID: run.CorrelationID, SnapshotID: run.SnapshotID,
 		ContractDid: run.ContractDID, ContractVersion: run.ContractVersion,
 		Gate: run.Gate, Status: run.Status, ContentHash: run.ContentHash,
 		EffectiveShapes: run.EffectiveShapes, ProfileVersion: run.ProfileVersion,
+		Findings: run.Findings, CreatedAt: &createdAt,
 	}
 	if run.Status == "REVIEW" {
 		review := &processauditandcompliance.PACWorkflowGateReview{Status: "PENDING"}

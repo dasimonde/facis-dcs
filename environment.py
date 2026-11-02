@@ -64,18 +64,22 @@ def cleanup_database(context):
 
 
 def _cleanup_database(cursor):
-	cursor.execute("DELETE FROM access_attempts")
-	cursor.execute("DELETE FROM ip_lockouts")
+	# TRUNCATE bypasses the append-only row triggers of the audit tables.
+	cursor.execute("TRUNCATE access_attempts")
+	cursor.execute("DELETE FROM lockouts")
 
 	cursor.execute("DELETE FROM contract_negotiation_task")
 	cursor.execute("DELETE FROM contract_approval_task")
 	cursor.execute("DELETE FROM contract_review_task")
 	cursor.execute("DELETE FROM contract_negotiations")
-	cursor.execute("TRUNCATE contract_archive_entry_events, contract_archive_entries")
+	cursor.execute("TRUNCATE contract_archive_sections, contract_archive_entry_events, contract_archive_entries")
 	cursor.execute("DELETE FROM contract_kpis")
 	cursor.execute("DELETE FROM contract_deployments")
 	cursor.execute("DELETE FROM contract_signatures")
 	cursor.execute("DELETE FROM signature_ceremonies")
+	cursor.execute("TRUNCATE contract_archive_evidence")
+	cursor.execute("TRUNCATE contract_execution_proofs")
+	cursor.execute("DELETE FROM contract_peer_terminations")
 	cursor.execute("DELETE FROM contracts")
 
 	cursor.execute("DELETE FROM contract_templates_approval_task")
@@ -85,12 +89,30 @@ def _cleanup_database(cursor):
 
 
 
+def reset_ip_lockout(context):
+	# The suite sends every request from one address, so a lockout one
+	# scenario provokes (FR-UC-01-4) would refuse every scenario after it.
+	# Ending the lock now, as the administrator unlock does, also stops the
+	# failures before it from counting toward the next lock.
+	cursor = context.db.cursor()
+	try:
+		cursor.execute("UPDATE lockouts SET locked_until = NOW() WHERE locked_until > NOW()")
+		context.db.commit()
+	except Exception:
+		context.db.rollback()
+		raise
+	finally:
+		cursor.close()
+
+
 def before_scenario(context, scenario):
 	if _scenario_has_skip_tag(scenario):
 		scenario.skip('Skipped by scenario tag "@skip"')
 
 	if "clean_db" in scenario.tags:
 		cleanup_database(context)
+	else:
+		reset_ip_lockout(context)
 
 
 def before_all(context):

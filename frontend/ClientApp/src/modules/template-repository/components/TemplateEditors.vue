@@ -12,10 +12,9 @@ import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
 import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
 import TemplateProvenance from '@template-repository/components/TemplateProvenance.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { templateAuditRoles, useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import { useAuthStore } from '@/stores/auth-store'
 import AuditView from './AuditView.vue'
-import type { UserRole } from '@/types/user-role'
 
 withDefaults(
   defineProps<{
@@ -39,12 +38,8 @@ const tabs = computed(() => {
   })
 })
 const currentTabNumber = computed(() => 1 + tabs.value.map((tab) => tab.id).indexOf(activeTab.value))
-// Matches the audit tab's own gate in templateEditorUiStore.availableTabs and
-// the roles design/template_repository.go audit() accepts.
 const isAuditingAuthorized = computed(
-  () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => useAuthStore().user?.roles?.includes(role)) ??
-    false,
+  () => templateAuditRoles.some((role) => useAuthStore().user?.roles?.includes(role)) ?? false,
 )
 </script>
 
@@ -55,16 +50,18 @@ const isAuditingAuthorized = computed(
         {{ title }}
       </p>
       <div role="tablist" class="tabs-border tabs tabs-lg">
-        <a
+        <button
           v-for="(tab, _index) in tabs"
           :key="tab.id"
+          type="button"
           role="tab"
+          :aria-selected="activeTab === tab.id"
           class="tab text-base-content/70"
           :class="{ 'tab-active text-primary': activeTab === tab.id }"
           @click="templateEditorUiStore.setActiveTab(tab.id)"
         >
           {{ tab.label }}
-        </a>
+        </button>
       </div>
     </div>
   </div>

@@ -1,3 +1,4 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,10 +23,33 @@ spec:
         app.kubernetes.io/name: postgresql
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: postgresql
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $tls }}
+          # TLS 1.3 only, and no connection over TCP without TLS
+          # (DCS-NFR-SEC-14). PostgreSQL reads the key only when the postgres
+          # user owns it with mode 0600, which a Secret volume does not give.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              install -m 0600 /etc/dcs-internal-tls/tls.key /var/run/postgresql/tls.key
+              exec docker-entrypoint.sh postgres \
+                -c ssl=on \
+                -c ssl_cert_file=/etc/dcs-internal-tls/tls.crt \
+                -c ssl_key_file=/var/run/postgresql/tls.key \
+                -c ssl_min_protocol_version=TLSv1.3 \
+                -c hba_file=/etc/postgresql-hba/pg_hba.conf
+          {{- end }}
           ports:
             - name: postgres
               containerPort: 5432
@@ -53,13 +77,26 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            # Unix socket, and the TLS key with the owner PostgreSQL requires.
+            - name: run
+              mountPath: /var/run/postgresql
             {{- if .Values.additionalDatabases }}
             - name: initdb-scripts
               mountPath: /docker-entrypoint-initdb.d
             {{- end }}
+            {{- if $tls }}
+            - name: internal-tls
+              mountPath: /etc/dcs-internal-tls
+              readOnly: true
+            - name: hba
+              mountPath: /etc/postgresql-hba
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        - name: run
+          emptyDir: {}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
@@ -72,4 +109,12 @@ spec:
           configMap:
             name: {{ .Release.Name }}-postgresql-initdb
             defaultMode: 0755
+        {{- end }}
+        {{- if $tls }}
+        - name: internal-tls
+          secret:
+            secretName: {{ .Release.Name }}-internal-tls
+        - name: hba
+          configMap:
+            name: {{ .Release.Name }}-postgresql-hba
         {{- end }}

@@ -13,11 +13,11 @@ import (
 // minimalDoc returns a documentModel suitable for PDF/A compliance tests.
 func minimalDoc() documentModel {
 	return documentModel{
-		Title:         "pdfa-compliance-test",
+		Title:           "pdfa-compliance-test",
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
-		NamespaceMap:  map[string]string{},
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
+		NamespaceMap:    map[string]string{},
 	}
 }
 
@@ -154,10 +154,10 @@ func TestGlossaryURIArrowIsASCII(t *testing.T) {
 			Definition: "An entity",
 			TermURI:    "http://www.w3.org/ns/prov#Entity",
 		}},
-		NamespaceMap:  map[string]string{"prov": "http://www.w3.org/ns/prov#"},
+		NamespaceMap:    map[string]string{"prov": "http://www.w3.org/ns/prov#"},
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
 	}
 
 	pdf, err := renderPDF(testSigningContext(), doc)

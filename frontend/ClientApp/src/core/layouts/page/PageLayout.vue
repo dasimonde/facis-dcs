@@ -50,7 +50,7 @@ onMounted(() => {
 
     <!-- Sidebar -->
     <div :class="[drawerClasses.sidebar, 'z-40']">
-      <label :for="pageSidebarId" aria-label="close sidebar" class="drawer-overlay"></label>
+      <label :for="pageSidebarId" class="drawer-overlay"><span class="sr-only">Close sidebar</span></label>
       <aside
         :class="[
           'flex min-h-full flex-col border-r border-base-content/5 bg-base-200 transition-all duration-300 ease-in-out',

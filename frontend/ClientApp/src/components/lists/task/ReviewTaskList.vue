@@ -123,7 +123,7 @@ onUnmounted(() => stateFilterStore.reset())
           class="w-full min-w-0 lg:w-auto lg:flex-1"
           :tasks="tasks"
           placeholder="Search contracts"
-          :contract-search-defaults="{ state: ContractState.submitted }"
+          :contract-search-defaults="{ state: [ContractState.submitted] }"
           @search-result="applySearchResult"
         />
         <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">

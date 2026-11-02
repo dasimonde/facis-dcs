@@ -130,3 +130,22 @@ export function signatureLevelBadgeClass(level: string): string {
       return 'badge-ghost'
   }
 }
+
+// A credential status the trust registry or a status list could not provide.
+const REGISTRY_UNREACHABLE = /(could not be determined|unreachable|status list|revocation list|trust registry)/i
+
+// The findings and per-signature reasons that report such a status, without
+// duplicates.
+export function registryUnreachableReasons(
+  findings: string[],
+  signatures: { credential_status?: string; credential_status_reason?: string }[],
+): string[] {
+  const reasons = findings.filter((f) => findingVerdict(f) !== 'pass' && REGISTRY_UNREACHABLE.test(f))
+  for (const sig of signatures) {
+    const reason = sig.credential_status_reason ?? ''
+    if (credentialStatusIndicator(sig.credential_status).label === 'UNKNOWN' && REGISTRY_UNREACHABLE.test(reason)) {
+      reasons.push(reason)
+    }
+  }
+  return [...new Set(reasons)]
+}

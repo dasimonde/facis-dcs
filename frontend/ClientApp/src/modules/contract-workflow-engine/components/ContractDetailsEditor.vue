@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
+import { setSigningDeadline, setSigningOrder, signatureFieldNames, signingWorkflow } from '@/utils/signing-workflow'
 import type { Contract } from '@/models/contract/contract'
 
 const props = defineProps<{
@@ -73,6 +74,29 @@ const expDateInput = computed({
   set: (value: string) => {
     if (inserted.value) return
     contract.value.exp_date = fromDateInputValue(value)
+  },
+})
+
+// DCS-FR-SM-13: the signing order and deadline live in the contract document,
+// where the signing workflow reads and enforces them.
+const signingDeadlineId = useId()
+const signatureFields = computed(() => signatureFieldNames(contract.value.contract_data))
+const workflow = computed(() => signingWorkflow(contract.value.contract_data))
+
+function signingPosition(field: string): number | undefined {
+  return workflow.value.order.find((entry) => entry.field === field)?.position
+}
+
+function onSigningPosition(field: string, event: Event) {
+  if (!contract.value.contract_data) return
+  const value = (event.target as HTMLInputElement).value
+  setSigningOrder(contract.value.contract_data, field, value === '' ? undefined : Number(value))
+}
+
+const signingDeadlineInput = computed({
+  get: () => workflow.value.deadline?.toISOString().slice(0, 10) ?? '',
+  set: (value: string) => {
+    if (contract.value.contract_data) setSigningDeadline(contract.value.contract_data, value)
   },
 })
 </script>
@@ -248,6 +272,41 @@ const expDateInput = computed({
           disabled
         />
       </fieldset>
+
+      <template v-if="!inserted && contract.contract_data">
+        <fieldset class="fieldset border-none p-0">
+          <legend class="fieldset-legend">Signing deadline</legend>
+          <label :for="signingDeadlineId" class="sr-only">Signing deadline</label>
+          <input
+            :id="signingDeadlineId"
+            v-model="signingDeadlineInput"
+            type="date"
+            class="input-bordered input w-full"
+            data-testid="contract-signing-deadline"
+            :disabled="disabled"
+          />
+          <p class="label">No signature is accepted after this day (UTC).</p>
+        </fieldset>
+
+        <fieldset v-if="signatureFields.length > 0" class="fieldset border-none p-0">
+          <legend class="fieldset-legend">Signing order</legend>
+          <p class="label">Lower positions sign first. Leave a position empty to sign at any time.</p>
+          <label v-for="field in signatureFields" :key="field" class="flex items-center gap-2">
+            <input
+              :value="signingPosition(field) ?? ''"
+              type="number"
+              min="1"
+              step="1"
+              class="input-bordered input w-24"
+              :aria-label="`Signing position of ${field}`"
+              :data-testid="`contract-signing-order-${field}`"
+              :disabled="disabled"
+              @change="onSigningPosition(field, $event)"
+            />
+            <span class="font-mono text-xs break-all">{{ field }}</span>
+          </label>
+        </fieldset>
+      </template>
     </div>
   </div>
 </template>

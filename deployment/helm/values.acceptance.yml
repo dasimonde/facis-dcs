@@ -4,11 +4,35 @@
 #
 # Every field below was checked against the actual chart schema
 # (deployment/helm/values.yaml + templates), not guessed. Secrets audit
-# (E5): every credential below resolves via secretKeyRef — no plaintext
-# secret is committed in this file — with ONE documented exception (Hydra),
-# noted where it occurs.
+# (E5): every credential below resolves via secretKeyRef; no plaintext secret
+# is committed in this file.
+#
+# Like values.prod.yml it does not render as shipped: the chart names every
+# value the backend needs to start (templates/prerequisites.yaml), and
+# deployment/README.md, "Production prerequisites", lists them with the
+# Secrets and their keys. deployment/argocd/application.yaml fills them for
+# an example.
 
 replicaCount: 2
+
+# The co-deployed SoftHSM2 token (pkcs11.provisioning) is a ReadWriteOnce volume
+# that every backend pod mounts, so all backend pods run on one node: a pod on
+# another node could not attach the volume and would stay Pending. Prod uses a
+# real HSM and has no such volume.
+affinity:
+  podAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: digital-contracting-service
+            app.kubernetes.io/component: backend
+
+# A node drain must evict both pods: a replacement cannot start on another node
+# while the other pod still holds the token volume on the drained node, so a
+# budget of one would stop the drain.
+podDisruptionBudget:
+  maxUnavailable: 2
 
 image:
   repository: "[registry]/digital-contracting-service"
@@ -35,15 +59,15 @@ database:
     name: dcs-acceptance-db-credentials
     key: DATABASE_URL
 
-# Hydra (OAuth2/OIDC): the system secret comes from a Kubernetes Secret
-# (create it before install, high-entropy value):
+# Hydra (OAuth2/OIDC): the system secret, the DSN of its own PostgreSQL
+# database and the client secret come from a Kubernetes Secret (create it
+# before install, high-entropy values):
 #   kubectl create secret generic dcs-acceptance-hydra-secrets \
-#     --from-literal=secretsSystem="$(openssl rand -hex 32)"
-# For an existing Hydra with a persistent database, append the previous
-# system secret after a comma (see deployment/README.md, Hydra).
-# `clients[].client_secret` has no secretKeyRef equivalent: populate it via
-# `--set` from your secret manager at deploy time, never committed to a values
-# file.
+#     --from-literal=secretsSystem="$(openssl rand -hex 32)" \
+#     --from-literal=dsn='postgres://hydra:<password>@<host>:5432/hydra?sslmode=verify-full' \
+#     --from-literal=dcs-client-secret="$(openssl rand -hex 32)"
+# To rotate the system secret, append the previous one after a comma (see
+# deployment/README.md, Hydra).
 hydra:
   enabled: true
   secrets:
@@ -51,11 +75,28 @@ hydra:
       name: dcs-acceptance-hydra-secrets
   config:
     dev: false
+    dsnSecretRef:
+      name: dcs-acceptance-hydra-secrets
+      key: dsn
     selfIssuerURL: "https://acceptance.dcs.example.org"
-    loginURL: "https://acceptance.dcs.example.org/ui/"
-    consentURL: "https://acceptance.dcs.example.org/api/auth/consent"
-    logoutURL: "https://acceptance.dcs.example.org/api/auth/logout-complete"
-  clients: []
+    loginURL: "https://acceptance.dcs.example.org/digital-contracting-service/ui/"
+    consentURL: "https://acceptance.dcs.example.org/digital-contracting-service/api/auth/consent"
+    logoutURL: "https://acceptance.dcs.example.org/digital-contracting-service/api/auth/logout-complete"
+    # DCS-IR-CI-09, DCS-NFR-BR-06: an access token issued before a credential
+    # revocation stays valid for at most 5 minutes.
+    accessTokenTTL: "5m"
+  clients:
+    - client_id: dcs-client
+      client_secretSecretRef:
+        name: dcs-acceptance-hydra-secrets
+        key: dcs-client-secret
+      grant_types: ["authorization_code", "refresh_token"]
+      response_types: ["code"]
+      scope: "openid offline_access"
+      redirect_uris: ["https://acceptance.dcs.example.org/digital-contracting-service/api/auth/callback"]
+      post_logout_redirect_uris: ["https://acceptance.dcs.example.org/digital-contracting-service/api/auth/logout-complete"]
+      token_endpoint_auth_method: client_secret_post
+      skip_consent: true
 
 # PKCS#11: acceptance still runs against the co-deployed SoftHSM2 token
 # (provisioning.enabled=true, same as values.bdd.yml) rather than a real HSM
@@ -66,6 +107,11 @@ pkcs11:
   pinSecretRef:
     name: dcs-acceptance-hsm-pin
     key: PKCS11_PIN
+
+# DCS_DID: did.json of the SoftHSM2 key dcs-did, published by the
+# hsm-provision Job.
+identity:
+  enabled: true
 
 federatedCatalogue:
   enabled: true
@@ -84,3 +130,26 @@ ipfs:
   mfsBaseURLSecretRef:
     name: dcs-acceptance-ipfs-credentials
     key: IPFS_MFS_BASE_URL
+
+# EU DSS validates the wallet-produced signature on /signature/submit (ADR-12,
+# DCS-FR-SM-18). Without a DSS_URL the backend refuses every signature, so
+# signing needs it. enabled deploys the in-cluster DSS; to validate against an
+# existing DSS instead, set dss.url and enabled: false.
+dss:
+  enabled: true
+
+# Retention policy of archived contracts (DCS-FR-CSA-14, DCS-FR-CSA-19).
+archive:
+  retentionYears: 10
+
+# Daily dump of the DCS database (DCS-NFR-SF-03): docs/backup-integration-guide.md.
+# Set persistence.storageClassName to an encrypted class.
+backup:
+  enabled: true
+
+# Log store with retention (DCS-NFR-SEC-09): values.yaml, logging. Set
+# loki.persistence.storageClassName to an encrypted class. Logs are read
+# through Grafana (monitoring.enabled, or a Grafana in this namespace that
+# loads labelled data source ConfigMaps).
+logging:
+  enabled: true

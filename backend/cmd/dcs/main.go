@@ -45,6 +45,7 @@ import (
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
+	basedb "digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/db/pq"
 	"digital-contracting-service/internal/base/envelope"
 	"digital-contracting-service/internal/base/event"
@@ -52,9 +53,11 @@ import (
 	"digital-contracting-service/internal/base/hsm"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/safehttp"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
+	"digital-contracting-service/internal/contractworkflowengine/changefeed"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/contractworkflowengine/deployevent"
@@ -80,6 +83,12 @@ import (
 	"goa.design/clue/debug"
 	"goa.design/clue/log"
 )
+
+// Every outbound HTTPS client of the service negotiates TLS 1.3 or later
+// (DCS-IR-CI-01, DCS-NFR-SEC-01).
+func init() {
+	safehttp.RequireTLS13()
+}
 
 // computeListenURL derives the HTTP listen address from the same flags/env
 // var handleHTTPServer's caller used to compute inline just before binding.
@@ -239,6 +248,11 @@ func main() {
 	if err := service.RefreshValidationAnchors(ctx, db); err != nil {
 		log.Fatalf(ctx, err, "Could not anchor validation to the Semantic Hub's active schemas")
 	}
+	if err := service.FollowHubActivations(ctx, os.Getenv("DATABASE_URL"), func(ctx context.Context) error {
+		return service.RefreshValidationAnchors(ctx, db)
+	}); err != nil {
+		log.Fatalf(ctx, err, "Could not follow Semantic Hub activations of other replicas")
+	}
 
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: db})
 
@@ -346,11 +360,12 @@ func main() {
 	if mfsBaseURL == "" {
 		log.Fatalf(ctx, nil, "IPFS configuration missing: the IPFS_MFS_BASE_URL environment variable must be specified")
 	}
-	ipfsAPIClient := ipfs.NewClient(mfsBaseURL)
+	ipfsAPIClient := ipfs.NewClient(mfsBaseURL).WithBearerToken(os.Getenv("IPFS_API_TOKEN"))
 
 	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
-	lockRepo := &pg.PostgresIPLockoutRepo{}
+	lockRepo := &pg.PostgresLockoutRepo{}
 	jwtAuth := auth.NewJWTAuthenticator(hydraJWTValidator, db, aAttemptRepo, lockRepo)
+	jwtAuth.Limiter = middleware.NewRateLimiter(db, conf.APIRateLimitPerMinute())
 
 	ctRepo := tplrepo.PostgresContractTemplateRepo{}
 	ctRTRepo := tplrepo.PostgresReviewTaskRepo{}
@@ -400,8 +415,6 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "could not read DID")
 	}
-	// A login credential attests authority for one organization; this instance
-	// only grants access to itself.
 	authCfg.ParticipantDID = did
 
 	// Encrypting artifact store (DCS-NFR-SEC-14): every IPFS artifact is
@@ -463,11 +476,11 @@ func main() {
 		log.Fatalf(ctx, err, "failed to start outbox processor")
 	}
 
-	cepSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	cepSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".dcstodcs")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events bus")
 	}
-	defer func(client *event.CloudEventSubClient) {
+	defer func(client *event.DurableSubClient) {
 		err := client.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close cloud event bus client")
@@ -504,17 +517,43 @@ func main() {
 	eraseRepo := &pq2.PostgresEraseRepository{DB: db}
 	shredder := &dcstodcs2.AuditedShredder{DB: db, Keys: cekRepo, Artifacts: artifactStore}
 	contractEraser := &dcstodcs2.ContractEraser{
+		DB:          db,
 		DIDDocument: *didDocument,
 		Shredder:    shredder,
-		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo},
+		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo, SRepo: &syncRepo},
 		ERepo:       eraseRepo,
 		Sender:      dcstodcs2.HTTPPeerEraseSender{},
 	}
-	contractEraser.StartEraseRetryJob(ctx, conf.SyncFailCronJobTimeOut())
+	contractEraser.StartEraseRetryJob(ctx, db, conf.SyncFailCronJobTimeOut())
+
+	// Termination propagation (DCS-NFR-BR-06): notices queued by the terminate
+	// command go to every counterparty instance and are retried until confirmed.
+	terminationNotifier := &dcstodcs2.TerminationNotifier{DB: db, DIDDocument: *didDocument, Sender: dcstodcs2.HTTPPeerTerminationSender{}}
+	terminationNotifier.Start(ctx, 5*time.Second)
 
 	if os.Getenv("DCS_DEBUG_EVENTING") == "true" {
-		event.StartEventLogger(ctx, cepSubClient)
+		// No queue group: every replica prints every event.
+		logSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+		if err != nil {
+			log.Fatalf(ctx, err, "Could not create event logger NATS subscriber")
+		}
+		defer func() { _ = logSubClient.Close() }()
+		event.StartEventLogger(ctx, logSubClient)
 	}
+
+	// Live dashboard updates (DCS-FR-CWE-24): no queue group, so every replica
+	// receives every event for the streams it serves.
+	contractChanges := changefeed.New()
+	changeSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not create contract change NATS subscriber")
+	}
+	defer func() { _ = changeSubClient.Close() }()
+	go func() {
+		if err := contractChanges.Listen(changeSubClient); err != nil {
+			log.Errorf(ctx, err, "contract change subscriber stopped")
+		}
+	}()
 
 	auditTrailReader := base.AuditTrailReader{
 		IPFSClient: ipfsAPIClient,
@@ -548,7 +587,7 @@ func main() {
 	// recreated every run. Entries already present are left untouched, so an
 	// administrator who repoints one is not overruled by the next restart.
 	if seedPath := strings.TrimSpace(os.Getenv("CONTRACT_TARGETS_FILE")); seedPath != "" {
-		raw, err := os.ReadFile(seedPath)
+		raw, err := os.ReadFile(seedPath) // #nosec G304 G703 -- path comes from operator configuration (environment), not from a request
 		if err != nil {
 			log.Fatalf(ctx, err, "could not read CONTRACT_TARGETS_FILE %s", seedPath)
 		}
@@ -601,9 +640,16 @@ func main() {
 		if err := templateCatalogueClient.CheckReadiness(ctx, requireFCHealth); err != nil {
 			log.Fatalf(ctx, err, "federated catalogue readiness gate failed")
 		}
-		if err := fcschemas.Sync(ctx, templateCatalogueClient); err != nil {
+		// Replicas that start together sync one after the other, so they do
+		// not create the same schema in the catalogue twice.
+		if err := basedb.RunLocked(ctx, db, "fc-schema-sync", func() error {
+			return fcschemas.Sync(ctx, templateCatalogueClient)
+		}); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
+		// A terminated, expired or revoked contract is withdrawn from the
+		// catalogue (DCS-FR-CWE-23).
+		(&cwecommand.CatalogueWithdrawer{DB: db, FCClient: templateCatalogueClient}).Start(ctx, time.Minute)
 	}
 
 	// Initialize the webhook platform (ORCE integration).
@@ -611,8 +657,8 @@ func main() {
 		DB:      db,
 		Secrets: webhookplatform.SecretBox{Agreement: hsmAgreement, MethodID: keyAgreementMethod.ID, Pub: keyAgreementPub},
 	}
-	webhookStore := webhookplatform.NewDeliveryLog()
-	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore, service.ContractEventAudience(db, did))
+	webhookStore := webhookplatform.PostgresDeliveries{DB: db}
+	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore, service.ContractEventAudience(db, did), service.ContractEventOwner(db))
 	webhookPlatform := webhookplatform.New(
 		webhookSubs,
 		webhookStore,
@@ -629,11 +675,11 @@ func main() {
 
 	// Start the NATS→Webhook bridge: automatically fans out to all registered
 	// webhook subscribers whenever a DCS lifecycle event fires on the event bus.
-	webhookSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	webhookSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".webhook")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create webhook NATS subscriber")
 	}
-	defer func(webhookSubClient *event.CloudEventSubClient) {
+	defer func(webhookSubClient *event.DurableSubClient) {
 		err := webhookSubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "failed to close webhook subscriber")
@@ -642,6 +688,25 @@ func main() {
 	go func() {
 		if err := webhookplatform.StartNATSBridge(webhookSubClient, webhookDispatcher); err != nil {
 			log.Fatalf(ctx, err, "Could not start webhook NATS bridge")
+		}
+	}()
+	// A delivery the subscriber did not accept, or that a stopped replica did
+	// not send, is sent again by one replica at a time (DCS-IR-SI-02).
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := basedb.RunExclusive(ctx, db, "webhook-retry", func() error {
+					webhookDispatcher.RetryDue(ctx)
+					return nil
+				}); err != nil {
+					log.Errorf(ctx, err, "webhook delivery retry")
+				}
+			}
 		}
 	}()
 
@@ -716,7 +781,7 @@ func main() {
 	// material: it prepares the COSE Sig_structures, this process signs them with
 	// the dcs-c2pa key, and the certificate naming that key travels with each
 	// request rather than being configured into a renderer several instances share.
-	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv))
+	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv)) // #nosec G703 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		log.Fatalf(ctx, err, "read %s: pdf-core signs this instance's manifests under this chain", issuerX5ChainPathEnv)
 	}
@@ -828,15 +893,15 @@ func main() {
 		workflowGateCoordinator = &workflowgate.Coordinator{DB: db, Client: workflowGateClient}
 
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
-		authSvc, err = service.NewAuth(db, presentationRepo, authCfg)
+		authSvc, err = service.NewAuth(db, presentationRepo, jwtAuth, authCfg)
 		if err != nil {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}
 
-		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo)
+		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo, archiveNotaryClient, tsaClient)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
-			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
-		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
+			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL(), contractChanges)
+		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder, archiveNotaryClient, tsaClient)
 		// The credentials this instance issued verify against its own published
 		// document without a round trip; a peer's lifecycle or signing-summary
 		// credential — carried inside a verbatim-stored inbound PDF — resolves to
@@ -849,12 +914,15 @@ func main() {
 		// uses, so an issuer trusted for a presented credential and an issuer
 		// trusted for a provenance credential cannot become two different sets.
 		credentialStatusVerifier := provenance.NewCredentialStatusVerifier(oid4vp.StatusListVerifier())
-		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier, credentialStatusVerifier)
-		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
+		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient), did, credentialVerifier, credentialStatusVerifier,
+			// The anchors a peer's chain is verified against, which include the
+			// root of this deployment's own C2PA chain (auth_config.go).
+			authCfg.Trust.For(oid4vp.PurposePeer).X5CTrustRoots())
+		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient)
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, &pacRiskRepo, auditExecutorClient, workflowGateCoordinator)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier, credentialStatusVerifier, statusListPublisher, *didDocument, &syncRepo)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier, credentialStatusVerifier, statusListPublisher, *didDocument, &syncRepo)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
-		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
+		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID, credentialVerifier)
 		didSrv = didService
 		semanticHubSvc = service.NewSemanticHub(db, jwtAuth)
 		keyInventorySvc = service.NewKeyInventory(db, jwtAuth)
@@ -867,11 +935,11 @@ func main() {
 	// Start the PDF lifecycle C2PA subscriber (appends C2PA assertions on state changes).
 	// Only start when a real signing URL is configured; without one, the subscriber
 	// would attempt signing on every CWE event and log spurious HTTP errors.
-	pdfSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	pdfSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".pdfgeneration")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create PDF generation NATS subscriber")
 	}
-	defer func(pdfSubClient *event.CloudEventSubClient) {
+	defer func(pdfSubClient *event.DurableSubClient) {
 		err := pdfSubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close PDF subscriber")
@@ -885,7 +953,7 @@ func main() {
 		PDFCore:   pdfCoreClient,
 		IssuerDID: issuerDID,
 		LocalPeer: did,
-		VCIssuer:  provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher),
+		VCIssuer:  provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient),
 	}
 	go func() {
 		if err := pdfSub.Start(pdfSubClient); err != nil {
@@ -896,11 +964,11 @@ func main() {
 	// Start the auto-deploy subscriber (DCS-FR-CWE-06): once the signing
 	// workflow completes (APPLIED_SIGNATURE), it calls the same
 	// cwecommand.Deployer the manual POST /contract/deploy endpoint uses.
-	deploySubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	deploySubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".deploy")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create contract-deployment NATS subscriber")
 	}
-	defer func(deploySubClient *event.CloudEventSubClient) {
+	defer func(deploySubClient *event.DurableSubClient) {
 		err := deploySubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close contract-deployment subscriber")
@@ -915,6 +983,7 @@ func main() {
 			TargetRepo:     &cweTargetRepo,
 			Target:         contractTargetClient,
 			PeerSigs:       &syncRepo,
+			Artifacts:      artifactStore,
 		},
 		LocalPeer: did,
 	}
@@ -1012,7 +1081,7 @@ func main() {
 		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
 	serveMetrics(ctx, &wg)
-	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, infoEndpoints, webhookPlatform, statusListSigner, &wg, errc, *dbgF)
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, infoEndpoints, webhookPlatform, statusListSigner, db, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)

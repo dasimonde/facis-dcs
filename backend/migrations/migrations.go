@@ -23,7 +23,18 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 // Run executes all SQL migration files that haven't been applied yet.
 // Files are sorted alphabetically (use naming like 20260128_*, 20260206_*, etc).
+// Replicas that start at the same time run it one after the other: the
+// first applies the pending files, the others then find them applied.
 func Run(db *sqlx.DB) error {
+	lock, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT pg_advisory_xact_lock(hashtext('dcs-migrations:' || current_schema()))`); err != nil {
+		return err
+	}
+
 	// Ensure migrations tracking table exists
 	if _, err := db.Exec(createMigrationsTable); err != nil {
 		return err

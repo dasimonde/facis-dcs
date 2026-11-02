@@ -427,10 +427,15 @@ def template_verify_pdf_url(context, did: str) -> str:
 
 
 # C2PA remote-manifest URL: a public, unauthenticated sibling of
-# GET /.well-known/did.json (DCS-OR-C2PA-008).
+# GET /.well-known/did.json (DCS-OR-C2PA-008), served for signed contracts.
 
 def c2pa_manifest_url(context, did: str) -> str:
     return f"{context.base_url}/c2pa/manifest/{did}"
+
+
+# The C2PA provenance chain of a contract for its parties (authenticated).
+def signature_provenance_url(context, did: str) -> str:
+    return f"{context.base_url}/signature/provenance/{did}"
 
 
 # Bundle export URLs: one ZIP per contract/template with an integrity

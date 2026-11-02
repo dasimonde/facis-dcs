@@ -44,7 +44,6 @@ import base64
 import hashlib
 import json
 import os
-import uuid
 from datetime import datetime, timedelta, timezone
 
 import requests as _requests
@@ -268,8 +267,8 @@ def _own_rules_hash(context) -> str:
 
 def publish_trusted_peer(context):
     """Mints and publishes the identity, and returns the peer DID plus a
-    challenge-response pair signed with its own signing key — the shape
-    PostPdf's from_peer_did/secret_value/secret_hash expects."""
+    function that signs a peer challenge with its own signing key and returns
+    the base64 secret_hash."""
     did = trusted_peer_did()
     signing_key = ec.generate_private_key(ec.SECP256R1())
     vc_key = ec.generate_private_key(ec.SECP256R1())
@@ -289,6 +288,7 @@ def publish_trusted_peer(context):
         f"orce.syntheticPeer.enabled set? Got {resp.status_code}: {resp.text}"
     )
 
-    secret_value = str(uuid.uuid4())
-    signature = signing_key.sign(secret_value.encode(), ec.ECDSA(hashes.SHA256()))
-    return did, secret_value, base64.b64encode(signature).decode()
+    def sign(secret_value: str) -> str:
+        return base64.b64encode(signing_key.sign(secret_value.encode(), ec.ECDSA(hashes.SHA256()))).decode()
+
+    return did, sign

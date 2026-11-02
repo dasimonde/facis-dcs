@@ -192,11 +192,12 @@ func TestAnAcceptedNoticePeriodChangeSurvivesSubmitAndTheSnapshotNamesTheActor(t
 }
 
 // A Draft save keeps its row fields and snapshots the replaced version under
-// the editor who saved, not under the contract's creator.
+// the organization that saved it. Only the creating organization saves a
+// draft (ErrNotCreator).
 func TestADraftSaveSnapshotsTheReplacedVersionUnderTheEditor(t *testing.T) {
 	contracts := &taskContractRepoFake{process: inboundOffer(1), stored: taskStoredContract()}
 	contracts.stored.Origin = localPeerDID
-	contracts.stored.CreatedBy = "Contract Creator"
+	contracts.stored.CreatedBy = "Editing User"
 	contracts.stored.State = contractstate.Draft.String()
 	updater := &Updater{
 		DB:          taskTestDB(t),

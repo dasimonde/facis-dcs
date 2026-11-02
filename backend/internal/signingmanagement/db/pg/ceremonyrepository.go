@@ -15,12 +15,23 @@ import (
 // PostgresCeremonyRepo persists signing ceremonies in Postgres.
 type PostgresCeremonyRepo struct{}
 
+// ceremonyColumns are the columns of db.SignatureCeremony.
+const ceremonyColumns = `id, contract_did, field_name, requested_by, requested_holder_did, status, wallet_uri, nonce,
+		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
+		       prepared_pdf, prepared_pdf_sha256, request_nonce, request_expires_at, credential_type,
+		       published_by, published_holder_did, published_roles, consumed_at,
+		       poa_organization, poa_roles, poa_vp_token,
+		       pinned_payload, pinned_payload_sha256, pinned_content_hash, pinned_renderer_version,
+		       pinned_signed_count, pinned_contract_version, required_credential_type,
+		       signer_cert_subject, signer_cert_serial,
+		       last_refusal_code, last_refusal, last_refusal_at`
+
 func (r *PostgresCeremonyRepo) CreateCeremony(ctx context.Context, tx *sqlx.Tx, c db.SignatureCeremony) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO signature_ceremonies
-			(id, contract_did, field_name, requested_by, status, wallet_uri, nonce, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		c.ID, c.ContractDID, c.FieldName, c.RequestedBy, c.Status, c.WalletURI, c.Nonce, c.ExpiresAt,
+			(id, contract_did, field_name, requested_by, requested_holder_did, status, wallet_uri, nonce, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		c.ID, c.ContractDID, c.FieldName, c.RequestedBy, c.RequestedHolderDID, c.Status, c.WalletURI, c.Nonce, c.ExpiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create signature ceremony: %w", err)
@@ -30,18 +41,7 @@ func (r *PostgresCeremonyRepo) CreateCeremony(ctx context.Context, tx *sqlx.Tx, 
 
 func (r *PostgresCeremonyRepo) GetCeremonyByID(ctx context.Context, tx *sqlx.Tx, id string) (*db.SignatureCeremony, error) {
 	var c db.SignatureCeremony
-	err := tx.GetContext(ctx, &c, `
-		SELECT id, contract_did, field_name, requested_by, status, wallet_uri, nonce,
-		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
-		       prepared_pdf, prepared_pdf_sha256, request_nonce, request_expires_at, credential_type,
-		       published_by, published_holder_did, published_roles, consumed_at,
-		       poa_organization, poa_roles, poa_vp_token,
-		       pinned_payload, pinned_payload_sha256, pinned_content_hash, pinned_renderer_version,
-		       pinned_signed_count, pinned_contract_version, required_credential_type,
-		       signer_cert_subject, signer_cert_serial
-		  FROM signature_ceremonies
-		 WHERE id = $1`, id,
-	)
+	err := tx.GetContext(ctx, &c, `SELECT `+ceremonyColumns+` FROM signature_ceremonies WHERE id = $1`, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -62,8 +62,8 @@ func (r *PostgresCeremonyRepo) StorePreparedRequest(ctx context.Context, tx *sql
 		UPDATE signature_ceremonies
 		   SET request_nonce = $2, request_expires_at = $3, credential_type = $4,
 		       published_by = $5, published_holder_did = $6, published_roles = $7,
-		       consumed_at = NULL
-		 WHERE id = $1 AND status = $8`,
+		       last_refusal_code = NULL, last_refusal = NULL, last_refusal_at = NULL
+		 WHERE id = $1 AND status = $8 AND consumed_at IS NULL`,
 		req.CeremonyID, req.RequestNonce, req.RequestExpiresAt, req.CredentialType,
 		req.PublishedBy, req.HolderDID, req.Roles, db.CeremonyVerified,
 	)
@@ -75,7 +75,7 @@ func (r *PostgresCeremonyRepo) StorePreparedRequest(ctx context.Context, tx *sql
 		return fmt.Errorf("store prepared request for ceremony %s rows: %w", req.CeremonyID, err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("ceremony %s is not in %q state", req.CeremonyID, db.CeremonyVerified)
+		return fmt.Errorf("ceremony %s is not in %q state or its signing request is consumed", req.CeremonyID, db.CeremonyVerified)
 	}
 	return nil
 }
@@ -166,11 +166,9 @@ func (r *PostgresCeremonyRepo) MarkCeremonyVerified(ctx context.Context, tx *sql
 func (r *PostgresCeremonyRepo) FindVerifiedCeremonyByField(ctx context.Context, tx *sqlx.Tx, contractDID, fieldName string) (*db.SignatureCeremony, error) {
 	var c db.SignatureCeremony
 	err := tx.GetContext(ctx, &c, `
-		SELECT id, contract_did, field_name, requested_by, status, wallet_uri, nonce,
-		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
-		       poa_organization, poa_roles, poa_vp_token
+		SELECT `+ceremonyColumns+`
 		  FROM signature_ceremonies
-		 WHERE contract_did = $1 AND field_name = $2 AND status = $3
+		 WHERE contract_did = $1 AND field_name = $2 AND status = $3 AND consumed_at IS NULL
 		 ORDER BY verified_at DESC NULLS LAST
 		 LIMIT 1`,
 		contractDID, fieldName, db.CeremonyVerified,
@@ -184,17 +182,16 @@ func (r *PostgresCeremonyRepo) FindVerifiedCeremonyByField(ctx context.Context, 
 	return &c, nil
 }
 
-func (r *PostgresCeremonyRepo) FindVerifiedCeremony(ctx context.Context, tx *sqlx.Tx, contractDID, signerDID string) (*db.SignatureCeremony, error) {
+func (r *PostgresCeremonyRepo) FindVerifiedCeremony(ctx context.Context, tx *sqlx.Tx, contractDID, signerDID, fieldName string) (*db.SignatureCeremony, error) {
 	var c db.SignatureCeremony
 	err := tx.GetContext(ctx, &c, `
-		SELECT id, contract_did, field_name, requested_by, status, wallet_uri, nonce,
-		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
-		       poa_organization, poa_roles, poa_vp_token
+		SELECT `+ceremonyColumns+`
 		  FROM signature_ceremonies
-		 WHERE contract_did = $1 AND signer_did = $2 AND status = $3
+		 WHERE contract_did = $1 AND signer_did = $2 AND status = $3 AND consumed_at IS NULL
+		   AND ($4 = '' OR field_name = $4)
 		 ORDER BY verified_at DESC NULLS LAST
 		 LIMIT 1`,
-		contractDID, signerDID, db.CeremonyVerified,
+		contractDID, signerDID, db.CeremonyVerified, fieldName,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -203,6 +200,43 @@ func (r *PostgresCeremonyRepo) FindVerifiedCeremony(ctx context.Context, tx *sql
 		return nil, fmt.Errorf("find verified ceremony for %s/%s: %w", contractDID, signerDID, err)
 	}
 	return &c, nil
+}
+
+func (r *PostgresCeremonyRepo) RecordRefusal(ctx context.Context, tx *sqlx.Tx, ceremonyID, code, reason string, interval time.Duration) (bool, error) {
+	var audit bool
+	err := tx.GetContext(ctx, &audit, `
+		WITH previous AS (
+			SELECT last_refusal_at FROM signature_ceremonies WHERE id = $1 FOR UPDATE
+		)
+		UPDATE signature_ceremonies c
+		   SET last_refusal_code = $2, last_refusal = $3, last_refusal_at = now() AT TIME ZONE 'UTC'
+		  FROM previous
+		 WHERE c.id = $1
+		RETURNING previous.last_refusal_at IS NULL
+		       OR previous.last_refusal_at < (now() AT TIME ZONE 'UTC') - make_interval(secs => $4)`,
+		ceremonyID, code, reason, interval.Seconds(),
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("record the refusal for ceremony %s: %w", ceremonyID, err)
+	}
+	return audit, nil
+}
+
+func (r *PostgresCeremonyRepo) MarkDocumentRetrieved(ctx context.Context, tx *sqlx.Tx, ceremonyID, sha256 string) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE signature_ceremonies SET document_retrieved_sha256 = $2
+		 WHERE id = $1 AND document_retrieved_sha256 IS DISTINCT FROM $2`, ceremonyID, sha256)
+	if err != nil {
+		return false, fmt.Errorf("record the document retrieval for ceremony %s: %w", ceremonyID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("record the document retrieval for ceremony %s: %w", ceremonyID, err)
+	}
+	return n == 1, nil
 }
 
 // RecordSummaryVC retains the signing summary issued for a ceremony. The

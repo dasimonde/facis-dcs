@@ -20,7 +20,6 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
-	"digital-contracting-service/internal/pdfgeneration/provenance"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -33,6 +32,10 @@ var ErrContractNotRenewable = errors.New("contract is not in a renewable state")
 // ErrInvalidRenewalTerm is returned when the renewal's term dates are
 // inconsistent. Mapped to a client error by service.mapContractCommandError.
 var ErrInvalidRenewalTerm = errors.New("invalid renewal term")
+
+// ErrRenewalExists is returned when the original already has a renewal that
+// is not withdrawn, revoked, terminated or expired. It is mapped to 409.
+var ErrRenewalExists = errors.New("the contract already has an open renewal")
 
 // renewableStates are the original-contract states from which a renewal
 // instance may be created. A contract must at least have been agreed
@@ -113,6 +116,18 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	}
 	if !renewableStates[originalState] {
 		return nil, fmt.Errorf("%w: original contract is in state %s", ErrContractNotRenewable, originalState)
+	}
+	// One open renewal per original (DCS-FR-CWE-22). The lock serializes two
+	// renewals of the same original that run at the same time.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('contract-renewal:' || $1))`, cmd.OriginalDID); err != nil {
+		return nil, fmt.Errorf("could not lock the original contract: %w", err)
+	}
+	renewal, err := h.CRepo.ReadOpenRenewalDID(ctx, tx, cmd.OriginalDID)
+	if err != nil {
+		return nil, fmt.Errorf("could not look up open renewals: %w", err)
+	}
+	if renewal != "" {
+		return nil, fmt.Errorf("%w: %s", ErrRenewalExists, renewal)
 	}
 
 	localPeer, err := h.DIDDocument.GetID()
@@ -306,6 +321,10 @@ func unsignRenewedDocument(raw *datatype.JSON) (*datatype.JSON, error) {
 		}
 	}
 
+	// The signing deadline belongs to the previous term (DCS-FR-SM-13); the
+	// renewal's parties set their own.
+	delete(doc, "dcs:signingDeadline")
+
 	// Break the seal: the first signature retyped the offered policy set into
 	// the odrl:Agreement those signatures bind. A renewal is a fresh offer of
 	// the same terms, and nobody has accepted it yet.
@@ -359,7 +378,7 @@ func signatureReferences(raw *datatype.JSON) ([]any, error) {
 // PDF when that artifact holds a signature, else "". The PDF carries every
 // PAdES signature of the original, the counterparty's included.
 func signedDocumentReference(state *db.ContractPDFState) string {
-	if state == nil || state.IPFSCID == "" || !provenance.ArtifactCarriesSignature(state.C2PAState) {
+	if state == nil || state.IPFSCID == "" || !state.Signed {
 		return ""
 	}
 	return "ipfs://" + state.IPFSCID

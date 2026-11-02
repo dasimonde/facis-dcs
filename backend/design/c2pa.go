@@ -22,7 +22,7 @@ var _ = Service("C2PAService", func() {
 
 	// GetManifest — GET /c2pa/manifest/{contract_did}
 	Method("GetManifest", func() {
-		Description("Returns the raw C2PA JUMBF manifest store bytes for a signed/exported contract (Content-Type application/c2pa, HTTP 200). With ?history=true, returns a parsed JSON enumeration of the manifest chain (labels + dcs.lifecycle assertions) instead of the raw store.")
+		Description("Returns the raw C2PA JUMBF manifest store bytes for a signed contract (Content-Type application/c2pa, HTTP 200); a contract that is not signed is not found, its parties read the chain through GET /signature/provenance/{did}. With ?history=true, returns a parsed JSON enumeration of the manifest chain (labels + dcs.lifecycle assertions) instead of the raw store.")
 		Meta("dcs:requirements", "DCS-OR-C2PA-008")
 
 		Payload(func() {

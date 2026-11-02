@@ -539,10 +539,20 @@ class ContractService:
             retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
             assert retrieve.status_code == 200, retrieve.text
             updated_at = retrieve.json().get("updated_at")
+            payload = ContractService._contract_reviewer_submit_payload(context, did, updated_at)
+            # The reviewer forwards with a finding: a comment and an annotation
+            # on the first document block, which the approver reads back.
+            structure = (retrieve.json().get("contract_data") or {}).get("dcs:documentStructure") or {}
+            blocks = (structure.get("dcs:blocks") or {}).get("@list") or []
+            payload["comments"] = ["BDD review: payment terms checked"]
+            context.review_comments = payload["comments"]
+            if blocks and blocks[0].get("@id"):
+                payload["annotations"] = [{"block_id": blocks[0]["@id"], "comment": "Check this clause"}]
+                context.review_annotation_block_ids = [blocks[0]["@id"]]
             review_submit = post_json(
                 context,
                 contract_submit_url(context),
-                ContractService._contract_reviewer_submit_payload(context, did, updated_at),
+                payload,
                 headers=reviewer_h,
             )
             if review_submit.status_code != 409 and "updated elsewhere" not in review_submit.text.lower():

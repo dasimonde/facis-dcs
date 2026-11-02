@@ -40,16 +40,18 @@ func TestAccessFinalizerRecordsFinalDecisionOnce(t *testing.T) {
 		{"success", nil, db.AccessOutcomeSuccess},
 		{"forbidden", goa.PermanentError("forbidden", "role"), db.AccessOutcomeDenied},
 		{"unauthorized", fmt.Errorf("wrapped: %w", goa.PermanentError("unauthorized", "scope")), db.AccessOutcomeDenied},
-		{"business error", goa.PermanentError("internal_error", "executor"), db.AccessOutcomeSuccess},
+		{"business error", goa.PermanentError("internal_error", "executor"), db.AccessOutcomeFailed},
+		{"bad request", goa.PermanentError("bad_request", "state"), db.AccessOutcomeFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
 			endpoint := AccessMetadataMiddleware(func(ctx context.Context, _ any) (any, error) {
-				ctx.Value(accessFinalizerKey{}).(*accessFinalizer).record = func(err error) {
+				ctx.Value(accessFinalizerKey{}).(*accessFinalizer).record = func(err error) error {
 					calls++
 					if outcome := accessOutcome(err); outcome != tc.outcome {
 						t.Fatalf("outcome = %s", outcome)
 					}
+					return nil
 				}
 				if calls != 0 {
 					t.Fatal("attempt finalized before endpoint returned")
@@ -77,5 +79,25 @@ func TestAccessMetadataStringDIDAndResourceAlias(t *testing.T) {
 			return nil, nil
 		})
 		_, _ = endpoint(context.Background(), request)
+	}
+}
+
+// CSA-PACM-17 (DCS-FR-PACM-04): an audit read, which states a justification,
+// is not answered when its access record cannot be written. Another request
+// is answered.
+func TestAnAuditReadIsNotServedWithoutItsAccessRecord(t *testing.T) {
+	endpoint := AccessMetadataMiddleware(func(ctx context.Context, _ any) (any, error) {
+		ctx.Value(accessFinalizerKey{}).(*accessFinalizer).record = func(error) error {
+			return fmt.Errorf("database unavailable")
+		}
+		return "audit log", nil
+	})
+
+	result, err := endpoint(context.Background(), &accessMetadataRequest{Justification: "investigation"})
+	if err == nil || result != nil {
+		t.Fatalf("the audit read was served without its access record: %v, %v", result, err)
+	}
+	if result, err := endpoint(context.Background(), &accessMetadataRequest{}); err != nil || result != "audit log" {
+		t.Fatalf("a request without a justification was refused: %v, %v", result, err)
 	}
 }

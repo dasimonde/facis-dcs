@@ -111,10 +111,52 @@ never cross an instance boundary.
   as the sync recipient list (`GetUniqueResponsibleList` for routing). The
   party set for signature-field seeding is `[origin, counterparty]`.
 
+## Peer request authentication
+
+Every peer endpoint (`post_pdf`, `post_settlement`,
+`post_settlement_withdrawal`, `post_negotiation`, `erase`,
+`get_contract_info`, `terminate`) carries a challenge in the request body:
+`secret_value` is the string the sender signed, and `secret_hash` is its
+ECDSA P-256 signature with a key the sender's did:web document publishes for
+authentication. The signed string is
+
+```
+<op>|<contract_iri>|dcs-peer-v1|POST <route>|<from_did>|<to_did>|<iat>|<nonce>|<body digest>
+```
+
+- `op` is the goa method name and `route` its design path
+  (`/peer/contracts/erase`), without `DCS_API_PATH` or a did:web path prefix.
+- `iat` is the signing time in Unix seconds; `nonce` is random per request.
+- The body digest is the SHA-256 (hex) of the field the operation carries: the
+  PDF of `post_pdf`, the JAdES of a settlement or a withdrawal, the RFC 8785
+  form of a negotiation message without its challenge fields, the reason of a
+  termination notice. It is empty for `erase` and `get_contract_info`.
+
+The receiver checks the challenge in one shared verifier
+(`dcstodcs.VerifyPeerRequest`) before it reads or writes anything else: the
+operation and route are its own, the contract and the sender are the ones the
+request names, the receiver is this instance (`identity.SameDIDWeb`), the
+body digest matches, `iat` is within 120 seconds of its clock (both instances
+need NTP), and the signature verifies against the sender's did:web document
+and certificate chain. Then it records `(from_did, nonce)` in
+`peer_challenge_nonces`, which every replica shares; a nonce it already holds
+is a replay and the request is refused. A row expires 240 seconds after
+`iat`. So a signed request authenticates one operation on one contract, from
+one sender to one receiver, once.
+
+The sender signs a new challenge for every attempt, including the retries of
+the ship, erase and termination ledgers. Both instances of a federation run
+the same challenge version; a receiver refuses a challenge in any other form.
+
+The peer client reaches a peer over https. It falls back to plain http only
+after a transport failure and only for a host that did:web may be resolved
+from over http (`identity.DIDWebSchemes`: loopback, or a host
+`DCS_DIDWEB_INSECURE_HOSTS` names).
+
 ## What is kept
 
-- did:web + eIDAS peer authentication (challenge-response over the JAdES
-  envelope) — the sender of a PDF is a verified, trusted peer.
+- did:web + eIDAS peer authentication (the challenge above) — the sender of a
+  PDF is a verified, trusted peer.
 - The JAdES artifact — now the **signature** exchanged after signing (SM-02),
   not a transport envelope around a JSON broadcast.
 - pdf-core as the sole owner of PDF byte work (embed, extract, deterministic
@@ -132,6 +174,21 @@ never cross an instance boundary.
   its per-instance states; the cross-instance transitions (offer, negotiate,
   sign) are driven by shipping/receiving a PDF, and review/approval become
   purely local.
+- Termination is the one transition that crosses as a notice, not a PDF
+  (DCS-NFR-BR-06): the terminating instance queues a signed notice per
+  counterparty that holds a copy (the origin it received the contract from,
+  or a peer a revision was delivered to) in `contract_peer_terminations` and
+  re-delivers it to `POST /peer/contracts/terminate` with backoff until the
+  peer confirms. The challenge binds the reason. The receiver accepts it only
+  from a party of the contract that passes the trust gate, and applies it
+  through its own transition table. A peer that holds no copy shared with the
+  sender answers `not_found`; the notice is then refused for good and the
+  contract's lifecycle shows the refusal. The peer erase ledger
+  (`contract_erasures`) follows the same rules, and its state shows in the
+  archive erasure status.
+- A ship that reaches a local copy that is TERMINATED, EXPIRED or WITHDRAWN is
+  refused with `gone`: the copy keeps its content, version, PDF and tasks, and
+  the sender does not ship that revision again.
 
 ## Implementation state (verified shipped 2026-07-30)
 

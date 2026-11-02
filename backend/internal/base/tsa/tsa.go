@@ -38,6 +38,8 @@ import (
 
 	"github.com/digitorus/pkcs7"
 	"github.com/digitorus/timestamp"
+
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 //go:embed certs/tsa.crt
@@ -64,7 +66,7 @@ func loadTrustedTSACertificate() (*x509.Certificate, error) {
 	if path == "" {
 		return embeddedTSACert, nil
 	}
-	pemBytes, err := os.ReadFile(path)
+	pemBytes, err := os.ReadFile(path) // #nosec G304 G703 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("TSA_TRUST_CERT_FILE %s is unreadable: %w", path, err)
 	}
@@ -107,8 +109,10 @@ func NewClient(url string) (*APIClient, error) {
 	}
 	return &APIClient{
 		url: strings.TrimSpace(url),
+		// A time-stamp token is signed by the TSA, and not every TSA offers TLS 1.3.
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:   10 * time.Second,
+			Transport: safehttp.TLS12Transport(),
 		},
 		trustedCert: trustedCert,
 	}, nil

@@ -31,6 +31,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/expirationpolicy"
 	database "digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"digital-contracting-service/internal/pdfgeneration/statuspublication"
 )
 
 type CronJob struct {
@@ -126,7 +127,10 @@ func (t expiryTask) handle(ctx context.Context, tx *sqlx.Tx, expiredContract dat
 	if err := event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine); err != nil {
 		return fmt.Errorf("could not create event: %w", err)
 	}
-	return nil
+	// The expiry reaches the status list in the same transaction as the state
+	// (DCS-OR-C2PA-005), as termination and revocation do.
+	return statuspublication.EnqueueTx(ctx, tx, expiredContract.DID, contractstate.Expired.String(),
+		"Contract reached expiration date", evt.OccurredAt)
 }
 
 func newExpiredEvent(c database.ContractMetadata, now time.Time) (contractevents.ContractExpired, error) {

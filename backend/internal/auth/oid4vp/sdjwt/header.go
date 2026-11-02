@@ -9,12 +9,12 @@ import (
 
 // CredentialTyp is the JWT typ RFC 9901 registers for SD-JWT VCs, and the one
 // this deployment's own issuer stamps.
-const CredentialTyp = "dc+sd-jwt"
+const CredentialTyp = "dc+sd-jwt" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 // LegacyCredentialTyp is the typ SD-JWT VC carried before it was renamed. Most
 // issuers and wallets in the field still emit it, and a credential is not worse
 // for being stamped with the name its issuer's library was written against.
-const LegacyCredentialTyp = "vc+sd-jwt"
+const LegacyCredentialTyp = "vc+sd-jwt" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 // KBJWTTyp is the JWT typ for holder key-binding JWTs.
 const KBJWTTyp = "kb+jwt"

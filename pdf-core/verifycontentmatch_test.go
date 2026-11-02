@@ -3,23 +3,32 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 )
 
 // buildContentMatchBody builds the multipart body /verify/content-match takes:
 // the submitted PDF and the reference PDF its pages must still reproduce.
-func buildContentMatchBody(t *testing.T, submitted, reference []byte) (io.Reader, string) {
+func buildContentMatchBody(t *testing.T, submitted, reference []byte, exact ...string) (io.Reader, string) {
 	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	for _, field := range []struct {
+	fields := []struct {
 		name string
 		data []byte
-	}{{"pdf", submitted}, {"reference", reference}} {
+	}{{"pdf", submitted}, {"reference", reference}}
+	for _, value := range exact {
+		fields = append(fields, struct {
+			name string
+			data []byte
+		}{"exact", []byte(value)})
+	}
+	for _, field := range fields {
 		fw, err := mw.CreateFormField(field.name)
 		if err != nil {
 			t.Fatalf("multipart CreateFormField %s: %v", field.name, err)
@@ -34,9 +43,9 @@ func buildContentMatchBody(t *testing.T, submitted, reference []byte) (io.Reader
 	return &buf, "multipart/form-data; boundary=" + mw.Boundary()
 }
 
-func postContentMatch(t *testing.T, submitted, reference []byte) (bool, string, int) {
+func postContentMatch(t *testing.T, submitted, reference []byte, exact ...string) (bool, string, int) {
 	t.Helper()
-	body, ct := buildContentMatchBody(t, submitted, reference)
+	body, ct := buildContentMatchBody(t, submitted, reference, exact...)
 	rec := doRequest(http.MethodPost, "/verify/content-match", body, ct)
 	if rec.Code != http.StatusOK {
 		return false, rec.Body.String(), rec.Code
@@ -82,6 +91,27 @@ func TestVerifyContentMatch_DifferentDocumentDiverges(t *testing.T) {
 	}
 	if !strings.Contains(mismatch, "page 1 content does not match") {
 		t.Errorf("mismatch must name what diverged, got: %q", mismatch)
+	}
+}
+
+// A filled signature widget passes the default comparison, which a PAdES
+// signer's revision must pass, and fails the exact one a copy is held to.
+func TestVerifyContentMatch_ExactComparesSignatureWidgets(t *testing.T) {
+	withField := strings.Replace(minimalPayload, `"metadata":`,
+		`"signatureFields": [{"@type": "SignatureField", "@id": "urn:doc:svc-test#Signer", "signatoryName": "Signer"}], "metadata":`, 1)
+	reference := signPrepared(t, doRequest(http.MethodPost, "/render", strings.NewReader(withField), "application/ld+json"))
+	widget := regexp.MustCompile(`(?m)^(\d+) 0 obj\n(<< /Type /Annot /Subtype /Widget /FT /Sig[^\n]*) >>`).FindSubmatch(reference)
+	if widget == nil {
+		t.Fatal("test setup: no signature widget in the compiled PDF")
+	}
+	signed := append(append([]byte(nil), reference...),
+		fmt.Sprintf("\n%s 0 obj\n%s /V 4242 0 R >>\nendobj\nstartxref\n0\n%%%%EOF\n", widget[1], widget[2])...)
+
+	if match, mismatch, _ := postContentMatch(t, signed, reference); !match {
+		t.Fatalf("a filled signature widget must pass the default comparison: %s", mismatch)
+	}
+	if match, _, _ := postContentMatch(t, signed, reference, "true"); match {
+		t.Fatal("a filled signature widget passed the exact comparison")
 	}
 }
 

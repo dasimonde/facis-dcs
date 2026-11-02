@@ -9,7 +9,26 @@ image:
   # never :latest.
   repository: conectx/dss-demo
   tag: "6.2.1"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# The image runs Tomcat as root. The chart runs it as 1000 on a read-only root
+# filesystem (DCS-NFR-SEC-05): Tomcat writes to emptyDir volumes for webapps
+# (the WAR, copied in by an init container, and its expanded tree), logs,
+# temp, work, conf/Catalina and /tmp.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 service:
   type: ClusterIP

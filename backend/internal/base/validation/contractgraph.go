@@ -2,6 +2,7 @@ package validation
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -72,6 +73,50 @@ func materializeContractDataFields(contract map[string]any) map[string]any {
 		}
 	}
 	return copied
+}
+
+// fieldLeaves maps the @id of a contract-data object to the local names of
+// its properties that reference an unfilled declared field.
+type fieldLeaves map[string][]string
+
+// unfilledFieldLeaves returns the properties of the contract-data objects
+// that reference a declared field without a value.
+func unfilledFieldLeaves(document map[string]any) fieldLeaves {
+	fields := contractFieldFills(document)
+	leaves := fieldLeaves{}
+	contractData, _ := topLevelValue(document, "contractData").([]any)
+	for _, rawObject := range contractData {
+		object, ok := rawObject.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := object["@id"].(string)
+		for property, rawValue := range object {
+			members, isArray := rawValue.([]any)
+			if !isArray {
+				members = []any{rawValue}
+			}
+			for _, member := range members {
+				if _, drop := materializeFieldRef(member, fields); drop {
+					leaves[id] = append(leaves[id], property[strings.LastIndexAny(property, "#/:")+1:])
+					break
+				}
+			}
+		}
+	}
+	return leaves
+}
+
+// has reports whether the SHACL focus node and the local path name are an
+// unfilled field leaf. A focus node is the @id resolved against the
+// document base, so a relative @id matches as its suffix.
+func (l fieldLeaves) has(focusNode, path string) bool {
+	for id, properties := range l {
+		if id != "" && strings.HasSuffix(focusNode, id) && slices.Contains(properties, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // contractFieldFills indexes the document's declared fields:

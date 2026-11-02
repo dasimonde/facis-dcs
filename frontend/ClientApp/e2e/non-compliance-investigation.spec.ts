@@ -129,7 +129,8 @@ test.describe('non-compliance incident report submission', () => {
   }) => {
     await gotoAs(page, loginAs, 'Compliance Officer', '/ui/non-compliance')
 
-    await page.getByTestId('incident-contract-did').fill(fixture.contractDid)
+    await expect(page.getByTestId('incident-linked-to')).toHaveValue('contract')
+    await page.getByTestId('incident-did').fill(fixture.contractDid)
     await page.getByTestId('incident-risk-type').fill('MISSING_APPROVAL')
     await page.getByTestId('incident-detail').fill('Non-compliance investigation UI e2e finding.')
 
@@ -149,7 +150,8 @@ test.describe('non-compliance incident report submission', () => {
   }) => {
     await gotoAs(page, loginAs, 'Compliance Officer', '/ui/non-compliance')
 
-    await page.getByTestId('incident-contract-did').fill(fixture.contractDid)
+    await expect(page.getByTestId('incident-linked-to')).toHaveValue('contract')
+    await page.getByTestId('incident-did').fill(fixture.contractDid)
     await page.getByTestId('incident-risk-type').fill('MISSING_APPROVAL')
     await page.getByTestId('incident-detail').fill('Non-compliance investigation UI e2e typed-link finding.')
 

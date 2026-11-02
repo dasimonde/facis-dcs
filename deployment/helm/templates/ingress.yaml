@@ -2,24 +2,43 @@
 {{- if eq (len .Values.ingress.hosts) 0 -}}
 {{- fail "ingress.enabled=true requires at least one entry in ingress.hosts" -}}
 {{- end -}}
+{{- /* DCS-NFR-SEC-01, DCS-NFR-SEC-14: with a backend TLS controller the routes
+     go to the TLS proxies of the pods, else to the plain ports. */}}
+{{- $backendTLS := include "digital-contracting-service.ingressBackendTLS" . -}}
+{{- $backendPort := .Values.service.port | int -}}
+{{- $hydraPort := dig "service" "publicPort" 4444 .Values.hydra | int -}}
+{{- $fcPort := 8081 -}}
+{{- if $backendTLS -}}
+{{- $backendPort = .Values.global.internalTLS.proxy.port | int -}}
+{{- $hydraPort = dig "service" "publicTLSPort" 8444 .Values.hydra | int -}}
+{{- $fcPort = .Values.global.internalTLS.proxy.port | int -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "digital-contracting-service.fullname" . }}
   labels:
     {{- include "digital-contracting-service.labels" . | nindent 4 }}
-  {{- if or .Values.ingress.annotations .Values.ingress.tlsOptions.enabled }}
+  {{- if or .Values.ingress.annotations (include "digital-contracting-service.tlsOptionEnforced" .) (eq $backendTLS "nginx") }}
   annotations:
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    {{- if .Values.ingress.tlsOptions.enabled }}
+    {{- if include "digital-contracting-service.tlsOptionEnforced" . }}
     {{/*
-    Die TLSOption gilt erst, wenn der Router sie nennt. Ohne diese Annotation
-    liegt die Ressource im Cluster und Traefik handelt trotzdem TLS 1.2 aus —
-    deshalb wird sie hier gesetzt und nicht dem Betreiber ueberlassen.
+    The TLSOption applies only when the router names it. Without this
+    annotation the resource exists in the cluster and Traefik still negotiates
+    TLS 1.2, so the chart sets it here.
     */}}
     traefik.ingress.kubernetes.io/router.tls.options: {{ printf "%s-%s-tls13@kubernetescrd" .Release.Namespace (include "digital-contracting-service.fullname" .) | quote }}
+    {{- end }}
+    {{- if eq $backendTLS "nginx" }}
+    {{- /* The proxies serve one certificate for all internal names, so one name verifies every backend. */}}
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-ssl-secret: {{ printf "%s/%s" .Release.Namespace (include "digital-contracting-service.internalTLSSecretName" .) | quote }}
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "on"
+    nginx.ingress.kubernetes.io/proxy-ssl-name: {{ printf "%s.%s.svc" (include "digital-contracting-service.fullname" .) .Release.Namespace | quote }}
+    nginx.ingress.kubernetes.io/proxy-ssl-protocols: "TLSv1.3"
     {{- end }}
   {{- end }}
 spec:
@@ -51,7 +70,7 @@ spec:
               service:
                 name: {{ include "digital-contracting-service.fullname" $ }}
                 port:
-                  number: {{ $.Values.service.port | int }}
+                  number: {{ $backendPort }}
           {{- end }}
           {{- else }}
           - path: {{ include "digital-contracting-service.baseRoutePath" $ }}
@@ -60,7 +79,7 @@ spec:
               service:
                 name: {{ include "digital-contracting-service.fullname" $ }}
                 port:
-                  number: {{ $.Values.service.port | int }}
+                  number: {{ $backendPort }}
           {{- end }}
           {{- /* Vendored fc-service route on same host when enabled with route.path —
                lets another DCS instance's backend reach this one's FC across clusters.
@@ -73,7 +92,7 @@ spec:
               service:
                 name: fc-service
                 port:
-                  number: 8081
+                  number: {{ $fcPort }}
           {{- end }}
           {{- /* This instance's own /.well-known documents, routed to the backend BEFORE
                Hydra's blanket /.well-known prefix below. A peer resolves this instance's
@@ -90,7 +109,7 @@ spec:
               service:
                 name: {{ include "digital-contracting-service.fullname" $ }}
                 port:
-                  number: {{ $.Values.service.port | int }}
+                  number: {{ $backendPort }}
           {{- end }}
           {{- /* The status list this instance serves for the credentials it issues
                (ADR-34). Root-mounted for the same reason the documents above are: a
@@ -108,14 +127,14 @@ spec:
               service:
                 name: {{ include "digital-contracting-service.fullname" $ }}
                 port:
-                  number: {{ $.Values.service.port | int }}
+                  number: {{ $backendPort }}
           - path: /status-list/
             pathType: Prefix
             backend:
               service:
                 name: {{ include "digital-contracting-service.fullname" $ }}
                 port:
-                  number: {{ $.Values.service.port | int }}
+                  number: {{ $backendPort }}
           {{- /* Hydra public OAuth2/OIDC routes — keeps Hydra off the edge; browser traffic
                proxied through this ingress. selfIssuerURL must match the ingress host. */}}
           {{- if and $.Values.hydra.enabled $.Values.hydra.route.paths }}
@@ -126,7 +145,7 @@ spec:
               service:
                 name: {{ $.Release.Name }}-hydra
                 port:
-                  number: {{ $.Values.hydra.service.publicPort | int }}
+                  number: {{ $hydraPort }}
           {{- end }}
           {{- end }}
     {{- end }}

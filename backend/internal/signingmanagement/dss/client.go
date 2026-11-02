@@ -210,9 +210,49 @@ func (r *Report) SubjectSurname() string {
 }
 
 // ValidatePDF submits pdf to POST {base}/services/rest/validation/validateSignature
-// and returns the simple report's indication. Any transport or protocol
+// and returns the report of its last signature. Any transport or protocol
 // failure is an error — the caller treats a configured DSS as required.
 func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Report, error) {
+	respBody, err := c.validate(ctx, pdf, name)
+	if err != nil {
+		return nil, err
+	}
+	return parseReport(respBody)
+}
+
+// ValidatePDFSignatures submits pdf to the same DSS validation and returns one
+// report per signature, in the order the document carries them. A PDF whose
+// report names no signature is an error.
+func (c *Client) ValidatePDFSignatures(ctx context.Context, pdf []byte) ([]*Report, error) {
+	respBody, err := c.validate(ctx, pdf, "contract.pdf")
+	if err != nil {
+		return nil, err
+	}
+	var doc any
+	if err := json.Unmarshal(respBody, &doc); err != nil {
+		return nil, fmt.Errorf("dss: parse validation response: %w", err)
+	}
+	var reports []*Report
+	for _, entry := range signatureEntries(doc) {
+		report := &Report{}
+		walkReport(entry.signature, report)
+		if cert := resolveSigningCertificate(doc, entry.id); cert != nil {
+			walkReport(cert, report)
+		}
+		if report.Indication == "" {
+			return nil, fmt.Errorf("dss: a signature in the validation response carries no Indication")
+		}
+		reports = append(reports, report)
+	}
+	if len(reports) == 0 {
+		return nil, fmt.Errorf("dss: validation response names no signature")
+	}
+	return reports, nil
+}
+
+// validate posts pdf to the DSS validation endpoint and returns the raw
+// response body.
+func (c *Client) validate(ctx context.Context, pdf []byte, name string) ([]byte, error) {
 	if c == nil || c.baseURL == "" {
 		return nil, fmt.Errorf("dss: no base URL configured")
 	}
@@ -261,11 +301,7 @@ func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Rep
 		return nil, fmt.Errorf("dss: validation returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
-	report, err := parseReport(respBody)
-	if err != nil {
-		return nil, err
-	}
-	return report, nil
+	return respBody, nil
 }
 
 // parseReport extracts the Indication/SubIndication pair — and everything
@@ -322,28 +358,44 @@ func parseReport(raw []byte) (*Report, error) {
 // callers can cross-reference the rest of the response for this exact
 // signature. "" if the entry carries no (string) Id.
 func latestSignatureEntry(doc any) (any, string) {
+	entries := signatureEntries(doc)
+	if len(entries) == 0 {
+		return nil, ""
+	}
+	last := entries[len(entries)-1]
+	return last.signature, last.id
+}
+
+// signatureEntry is one Signature entry of a simple report and its Id.
+type signatureEntry struct {
+	signature any
+	id        string
+}
+
+// signatureEntries returns every Signature-typed entry of
+// simpleReport.signatureOrTimestampOrEvidenceRecord, in report order.
+func signatureEntries(doc any) []signatureEntry {
 	root, ok := doc.(map[string]any)
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	simpleReportAny, ok := lookupCI(root, "simpleReport")
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	simpleReport, ok := simpleReportAny.(map[string]any)
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	entriesAny, ok := lookupCI(simpleReport, "signatureOrTimestampOrEvidenceRecord")
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	entries, ok := entriesAny.([]any)
 	if !ok {
-		return nil, ""
+		return nil
 	}
-	var last any
-	var lastID string
+	var out []signatureEntry
 	for _, entry := range entries {
 		obj, ok := entry.(map[string]any)
 		if !ok {
@@ -353,13 +405,13 @@ func latestSignatureEntry(doc any) (any, string) {
 		if !ok {
 			continue
 		}
-		last = sigAny
-		lastID = ""
+		id := ""
 		if sig, ok := sigAny.(map[string]any); ok {
-			lastID = idString(sig)
+			id = idString(sig)
 		}
+		out = append(out, signatureEntry{signature: sigAny, id: id})
 	}
-	return last, lastID
+	return out
 }
 
 // resolveSigningCertificate returns the diagnosticData.UsedCertificates entry

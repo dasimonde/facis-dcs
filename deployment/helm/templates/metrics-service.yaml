@@ -6,7 +6,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "digital-contracting-service.fullname" . | trunc 55 | trimSuffix "-" }}-metrics
+  name: {{ include "digital-contracting-service.metricsServiceName" . }}
   labels:
     {{- include "digital-contracting-service.labels" . | nindent 4 }}
     app.kubernetes.io/component: metrics

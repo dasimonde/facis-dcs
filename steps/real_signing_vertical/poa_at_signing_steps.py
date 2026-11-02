@@ -19,7 +19,6 @@ import os
 import socket
 import subprocess
 import time
-import uuid
 
 from behave import given, then, when
 
@@ -76,6 +75,39 @@ def step_when_presentation_wrong_poa(context):
         context, c["id"], c["presentation"], c["subject_did"], "PoA Signatory", "BDD-Testperson",
         poa_organization="did:web:some-other-org.example", nonce=c["nonce"],
     )
+
+
+@when('the ceremony presentation is completed with a revoked Power of Attorney')
+def step_when_presentation_revoked_poa(context):
+    """Present a PoA whose status-list bit is revoked first. The PoA names a
+    dedicated probe organization with a reserved index of its own
+    (dcs_wallet.status_list.RESERVED_INDEX), so the revocation reaches no
+    login credential of the suite. The PoA is verified, status list included,
+    before its organization is compared with the signed party."""
+    from steps.support.status_list_probe import revoke_credential_bit  # noqa: PLC0415
+    from steps.real_signing_vertical.dcs_real_signing_vertical_steps import _build_poa_presentation  # noqa: PLC0415
+
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.credential import decode_jwt_payload  # noqa: PLC0415
+    from dcs_wallet.sdjwt import split_sd_jwt  # noqa: PLC0415
+
+    c = context.poa_ceremony
+    poa = _build_poa_presentation(
+        organization="BDD PoA Revocation Probe Org", roles=["Contract Signer"], aud=ceremony_aud(context), nonce=c["nonce"],
+    )
+    issuer_jwt, _disclosures, _kb = split_sd_jwt(poa)
+    revoke_credential_bit(context, decode_jwt_payload(issuer_jwt))
+    context.requests_response = _complete_ceremony_via_presentation(
+        context, c["id"], c["presentation"], c["subject_did"], "PoA Signatory", "BDD-Testperson",
+        nonce=c["nonce"], poa_presentation=poa,
+    )
+
+
+@then('the ceremony presentation is refused for the revoked Power of Attorney')
+def step_then_presentation_refused_revoked_poa(context):
+    from steps.support.status_list_probe import assert_refused_for_the_revoked_bit  # noqa: PLC0415
+
+    assert_refused_for_the_revoked_bit(context, context.requests_response, "the Power of Attorney at the ceremony")
 
 
 @then('the signing request is rejected because the Power of Attorney does not authorize this signature')
@@ -316,6 +348,7 @@ def step_when_a_ships_bad_poa_to_b(context, name):
         _own_identity,
         _sign_secret_value_with_dev_key,
     )
+    from steps.support.peer_challenge import peer_challenge  # noqa: PLC0415
     from steps.support.services.pdf_service import PDFService  # noqa: PLC0415
 
     did, _ = ContractService._contract_data(context, name)
@@ -332,7 +365,8 @@ def step_when_a_ships_bad_poa_to_b(context, name):
         "poa_presentation": _poa_presentation_from_untrusted_issuer(party_did),
     })
 
-    secret_value = str(uuid.uuid4())
+    # The challenge names instance B as receiver and binds the shipped PDF.
+    secret_value = peer_challenge("post_pdf", did, party_did, context.peer_did_b, shipped_pdf)
     secret_hash = base64.b64encode(_sign_secret_value_with_dev_key(token_dir, secret_value)).decode()
 
     payload = {
@@ -441,7 +475,7 @@ def step_then_audit_records_poa(context, name):
     event_types = []
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
-        resp = requests.get(signature_audit_url(context), params={"did": did}, headers=auditor_h, timeout=context.http_timeout_seconds)
+        resp = requests.get(signature_audit_url(context), params={"did": did, "justification": "BDD signature audit"}, headers=auditor_h, timeout=context.http_timeout_seconds)
         assert resp.status_code == 200, f"signature audit read failed: {resp.status_code} {resp.text}"
         entries = resp.json()
         event_types = [str(e.get("event_type", "")).upper() for e in entries]

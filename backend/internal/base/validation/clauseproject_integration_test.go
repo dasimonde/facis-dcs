@@ -311,16 +311,16 @@ func TestClauseReport_SharedFieldRefIsAmbiguous(t *testing.T) {
 	}
 }
 
-// TestClauseReport_PACM07GapsDocumentsOpenWork records that appendices and
-// clause-level credential metadata are not yet projected — PACM-07 remains
-// partial until those are implemented.
-func TestClauseReport_PACM07GapsDocumentsOpenWork(t *testing.T) {
+// TestClauseReport_ProjectsClausesNotAppendices: the clause report (PACM-07)
+// projects the clauses of a contract. An appendix is not a clause-report
+// component, and a projected section carries no credential metadata.
+func TestClauseReport_ProjectsClausesNotAppendices(t *testing.T) {
 	restore := installClauseReportShapes(t)
 	defer restore()
 
 	doc := map[string]any{
 		"@context": map[string]any{"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
-		"@id":      "urn:facis:dcs:contract:appendix-gap",
+		"@id":      "urn:facis:dcs:contract:appendix",
 		"@type":    "dcs:Contract",
 		"dcs:documentStructure": map[string]any{
 			"dcs:blocks": map[string]any{
@@ -341,11 +341,11 @@ func TestClauseReport_PACM07GapsDocumentsOpenWork(t *testing.T) {
 	}
 	clauses, err := ExtractClauseComponents(doc)
 	require.NoError(t, err)
-	require.Len(t, clauses, 1, "appendices are not yet segmented as clause-report components")
+	require.Len(t, clauses, 1, "an appendix is not a clause-report component")
 	require.Equal(t, "Clause 01", clauses[0].Title)
 
 	sections := projectForTest(t, doc)
 	require.Len(t, sections, 1)
-	// ClauseSectionProjection has no credential-metadata fields by design today.
+	// ClauseSectionProjection has no credential-metadata fields.
 	require.Equal(t, ClauseStatusNotAssessed, sections[0].Status)
 }

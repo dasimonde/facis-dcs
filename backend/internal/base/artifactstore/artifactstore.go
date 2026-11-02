@@ -186,18 +186,20 @@ func (s *Store) Decrypt(ctx context.Context, scope Scope, blob []byte) ([]byte, 
 
 // cek returns the scope's plaintext CEK, creating and persisting a wrapped
 // record on first use when create is set. A shredded scope never yields a key
-// again — not even for writes.
+// again — not even for writes. The record is read on every call, also when
+// the plaintext CEK is cached: another replica can shred the scope, and only
+// the shared record tells this replica so.
 func (s *Store) cek(ctx context.Context, scope Scope, create bool) ([]byte, error) {
-	if cek := s.cached(scope); cek != nil {
-		return cek, nil
-	}
-
 	record, err := s.keys.Fetch(ctx, scope, s.ownDID)
 	if err != nil {
 		return nil, fmt.Errorf("read wrapped cek for %s %s: %w", scope.Kind, scope.ID, err)
 	}
 	if record != nil && record.ShreddedAt != nil {
+		s.Forget(scope)
 		return nil, &ShreddedError{Scope: scope}
+	}
+	if cek := s.cached(scope); cek != nil && record != nil {
+		return cek, nil
 	}
 
 	if record == nil {

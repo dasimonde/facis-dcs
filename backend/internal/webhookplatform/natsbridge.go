@@ -11,18 +11,21 @@ import (
 	"digital-contracting-service/internal/base/event"
 )
 
-func StartNATSBridge(subClient *event.CloudEventSubClient, d *Dispatcher) error {
-	return subClient.Subscribe(func(evt cloudevent.Event) {
+func StartNATSBridge(subClient *event.DurableSubClient, d *Dispatcher) error {
+	return subClient.Subscribe(func(evt cloudevent.Event) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		handleNATSEvent(ctx, evt, d)
+		return handleNATSEvent(ctx, evt, d)
 	})
 }
 
-func handleNATSEvent(ctx context.Context, evt cloudevent.Event, d *Dispatcher) {
+// handleNATSEvent dispatches one event. The CloudEvent id is the webhook event
+// id, so a redelivered event is not dispatched a second time. It returns an
+// error only when a redelivery can succeed.
+func handleNATSEvent(ctx context.Context, evt cloudevent.Event, d *Dispatcher) error {
 	eventType := evt.Type()
 	if _, known := DCSEventMap[eventType]; !known {
-		return
+		return nil
 	}
 
 	// The outbox publisher passes the domain event straight through as
@@ -35,8 +38,8 @@ func handleNATSEvent(ctx context.Context, evt cloudevent.Event, d *Dispatcher) {
 	}
 	if err := json.Unmarshal(rawPayload, &envelope); err != nil {
 		log.Printf("webhookplatform: unmarshal DID from %s payload: %v", eventType, err)
-		return
+		return nil
 	}
 
-	d.DispatchFromDCS(ctx, eventType, envelope.DID, json.RawMessage(rawPayload))
+	return d.DispatchFromDCS(ctx, evt.ID(), eventType, envelope.DID, json.RawMessage(rawPayload))
 }

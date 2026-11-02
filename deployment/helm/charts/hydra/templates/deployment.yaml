@@ -4,8 +4,16 @@
 {{- $logout := .Values.config.logoutURL -}}
 {{- $systemRef := .Values.secrets.systemSecretRef | default dict -}}
 {{- $dev := eq (toString .Values.config.dev) "true" -}}
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) -}}
 {{- if and (not $dev) (not $systemRef.name) -}}
 {{- fail "hydra.secrets.systemSecretRef.name is required when hydra.config.dev is false: create a Secret with a high-entropy value (e.g. openssl rand -hex 32) and reference it; hydra.secrets.system is for dev mode only" -}}
+{{- end -}}
+{{- $memory := include "hydra.inMemory" . -}}
+{{- if and $memory (not $dev) -}}
+{{- fail "hydra.config.dsn is memory: Hydra then loses its clients, signing keys and sessions on every restart. Set hydra.config.dsnSecretRef.name (a Secret key holding the DSN) or hydra.config.coDeployedPostgresql.enabled; memory is for dev mode only" -}}
+{{- end -}}
+{{- if and $memory (gt (int .Values.replicaCount) 1) -}}
+{{- fail "hydra.replicaCount > 1 needs a persistent DSN: replicas with dsn memory do not share clients, keys or sessions" -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -15,7 +23,7 @@ metadata:
     app.kubernetes.io/name: hydra
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: hydra
@@ -26,10 +34,18 @@ spec:
         app.kubernetes.io/name: hydra
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: hydra
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["sh", "-ec"]
           args:
             - |
@@ -37,8 +53,7 @@ spec:
               hydra migrate sql --yes "$DSN"
               exec hydra serve all {{- if $dev }} --dev{{- end }}
           env:
-            - name: DSN
-              value: {{ .Values.config.dsn | quote }}
+            {{- include "hydra.dsnEnv" (dict "name" "DSN" "release" .Release.Name "config" .Values.config "tls" $tls) | nindent 12 }}
             - name: SECRETS_SYSTEM
               {{- if $systemRef.name }}
               valueFrom:
@@ -78,18 +93,112 @@ spec:
             # DCS validates access tokens against Hydra's JWKS, which requires JWTs.
             - name: STRATEGIES_ACCESS_TOKEN
               value: "jwt"
+            {{- with .Values.config.accessTokenTTL }}
+            - name: TTL_ACCESS_TOKEN
+              value: {{ . | quote }}
+            {{- end }}
           ports:
             - name: public
               containerPort: {{ .Values.service.publicPort }}
             - name: admin
               containerPort: {{ .Values.service.adminPort }}
+          # The public port serves the health endpoints too. The admin port is
+          # open only to the backend (templates/networkpolicy.yaml of the
+          # parent chart).
           readinessProbe:
             httpGet:
               path: /health/ready
-              port: admin
+              port: public
           livenessProbe:
             httpGet:
               path: /health/alive
-              port: admin
+              port: public
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if $tls }}
+          # Internal CA for a DSN to the co-deployed PostgreSQL with
+          # sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt.
+          volumeMounts:
+            - name: internal-ca
+              mountPath: /etc/dcs-internal-tls
+              readOnly: true
+          {{- end }}
+        {{- if .Values.clients }}
+        # Registers hydra.clients through the admin API on loopback when the pod
+        # starts (upsert by client_id), then waits. A restart or a new replica
+        # therefore has every client without a Helm hook.
+        - name: register-clients
+          image: "{{ .Values.jobImage.repository }}:{{ .Values.jobImage.tag }}{{ with .Values.jobImage.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: {{ .Values.jobImage.pullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- with (.Values.jobResources | default .Values.resources) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: HYDRA_ADMIN
+              value: http://127.0.0.1:{{ .Values.service.adminPort }}
+            {{- range $i, $c := .Values.clients }}
+            - name: CLIENT_SECRET_{{ $i }}
+              valueFrom:
+                secretKeyRef:
+                  {{- include "hydra.clientSecretKeyRef" (dict "release" $.Release.Name "client" $c) | nindent 18 }}
+            {{- end }}
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              trap 'exit 0' TERM INT
+              register() {
+                payload="$(printf '%s' "$2" | jq -c --arg s "$3" '. + {client_secret: $s}')" || return 1
+                if curl -sf -o /dev/null "$HYDRA_ADMIN/admin/clients/$1"; then
+                  curl -sf -X PUT "$HYDRA_ADMIN/admin/clients/$1" -H "Content-Type: application/json" -d "$payload" >/dev/null
+                else
+                  curl -sf -X POST "$HYDRA_ADMIN/admin/clients" -H "Content-Type: application/json" -d "$payload" >/dev/null
+                fi
+              }
+              register_all() {
+                until curl -sf "$HYDRA_ADMIN/health/ready" >/dev/null; do sleep 2; done
+                {{- range $i, $c := .Values.clients }}
+                until register {{ $c.client_id | squote }} {{ omit $c "client_secret" "client_secretSecretRef" | toJson | squote }} "$CLIENT_SECRET_{{ $i }}"; do
+                  echo "Client {{ $c.client_id }} not registered, retrying"; sleep 5
+                done
+                echo "Client {{ $c.client_id }} registered."
+                {{- end }}
+              }
+              register_all
+              # A restarted Hydra container on an in-memory DSN has no clients:
+              # register them again.
+              while :; do
+                sleep 30 & wait $!
+                curl -sf -o /dev/null "$HYDRA_ADMIN/admin/clients/{{ (last .Values.clients).client_id }}" || register_all
+              done
+          # The pod is ready when the last client exists, so the Service sends
+          # no login to a replica that has not registered the clients yet.
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "curl -sf -o /dev/null http://127.0.0.1:{{ .Values.service.adminPort }}/admin/clients/{{ (last .Values.clients).client_id }}"]
+            periodSeconds: 5
+        {{- end }}
+        {{- if $tls }}
+        # In-cluster callers reach the admin API over TLS 1.3 on the https port,
+        # the ingress reaches the public API on the https-public port
+        # (DCS-NFR-SEC-14).
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" .Values.service.adminPort "extra" (list (dict "name" "https-public" "port" .Values.service.publicTLSPort "upstreamPort" .Values.service.publicPort))) | nindent 8 }}
+      volumes:
+        - name: internal-ca
+          secret:
+            secretName: {{ .Release.Name }}-internal-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- end }}

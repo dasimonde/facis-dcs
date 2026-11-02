@@ -21,6 +21,12 @@ const props = defineProps<{
   formalContractData?: ContractData
   formalDetails?: ContractDetailsSnapshot | null
   formalOptionLabel?: string
+  /** Offers to restore the left history version as a new version (DCS-FR-CWE-08). */
+  restorable?: boolean
+}>()
+
+const emit = defineEmits<{
+  restore: [item: ContractHistoryItem]
 }>()
 
 const loading = ref(false)
@@ -96,8 +102,9 @@ const compareOptions = computed<CompareOption[]>(() => {
   return opts
 })
 
+// Several saves can snapshot one contract version, so the entry id names the option.
 function historyOptionId(item: ContractHistoryItem): string {
-  return `h:${item.did}:${item.contract_version}:${item.updated_at ?? ''}`
+  return `h:${item.id}`
 }
 
 function formatDateTime(iso?: string): string {
@@ -150,6 +157,8 @@ function resolveDetails(id: string): ContractDetailsSnapshot | null {
   const row = sortedHistory.value.find((item) => historyOptionId(item) === id)
   return row ? snapshotFromHistory(row) : null
 }
+
+const leftHistoryItem = computed(() => sortedHistory.value.find((item) => historyOptionId(item) === leftPick.value))
 
 const leftContractData = computed((): ContractData | undefined => resolveData(leftPick.value))
 const rightContractData = computed((): ContractData | undefined => resolveData(rightPick.value))
@@ -286,6 +295,17 @@ watch([leftPick, rightPick], () => ensureDistinctPicks())
           <span class="select-none">Highlight changes</span>
           <input id="contract-diff-highlight" v-model="highlightDiff" type="checkbox" class="checkbox mt-1" />
         </label>
+      </div>
+
+      <div v-if="restorable && leftHistoryItem" class="mt-4 border-t border-base-300 pt-4">
+        <button
+          type="button"
+          class="btn btn-sm btn-secondary"
+          data-testid="restore-history-version"
+          @click="emit('restore', leftHistoryItem)"
+        >
+          Restore left version
+        </button>
       </div>
 
       <p v-if="loading" class="mt-3 text-sm text-base-content/70">Loading history…</p>

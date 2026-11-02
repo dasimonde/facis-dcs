@@ -1,0 +1,49 @@
+# Time Loki keeps a log line. The compactor deletes older lines.
+retention: 2160h
+
+loki:
+  image:
+    repository: grafana/loki
+    tag: "3.5.7"
+    # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+    digest: ""
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 10Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class: the
+    # logs can hold personal data.
+    storageClassName: ""
+  resources: {}
+
+# nginx gateway in the Loki pod (templates/gateway-config.yaml).
+gateway:
+  image:
+    repository: nginx
+    tag: "1.27-alpine"
+    digest: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 128Mi
+
+collector:
+  image:
+    repository: grafana/alloy
+    tag: "v1.10.2"
+    # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+    digest: ""
+    pullPolicy: IfNotPresent
+  resources: {}
+
+# Only these pods can query Loki (port 3100); only the collector pushes (port
+# 3101). The default is the Grafana of the monitoring stack in the same
+# namespace. For a Grafana in another namespace, add a namespaceSelector entry.
+# Without a Grafana the logs have no reader: production needs one
+# (monitoring.enabled, or a Grafana the operator runs).
+queryFrom:
+  - podSelector:
+      matchLabels:
+        app.kubernetes.io/name: grafana

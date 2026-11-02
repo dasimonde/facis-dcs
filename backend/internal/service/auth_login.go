@@ -11,9 +11,11 @@ import (
 	"time"
 
 	genauth "digital-contracting-service/gen/auth"
+	"digital-contracting-service/internal/auth"
 	authdb "digital-contracting-service/internal/auth/db"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/middleware"
 
 	goa "goa.design/goa/v3/pkg"
 )
@@ -228,27 +230,38 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 		return nil, goa.PermanentError("bad_request", "invalid dcql_query: %v", err)
 	}
 
+	// Repeated invalid presentations lock out the holder key they name, or
+	// the caller address when they name none (FR-UC-01-4). A holder key
+	// that is locked is refused before the presentation is verified.
+	ip := middleware.IPFromContext(ctx)
+	lockKey := ip
+	var verified *oid4vp.VerifiedLoginClaims
 	presentation, err := extractSinglePresentation(vpToken, queryIDs...)
-	if err != nil {
-		return nil, goa.PermanentError("bad_request", "invalid vp_token: %v", err)
-	}
-
-	verified, err := oid4vp.NewVerifier(s.trust, oid4vp.PurposeLogin).Verify(presentation, oid4vp.PresentationContext{
-		Nonce:    attempt.Nonce,
-		ClientID: s.oid4vpClientID,
-	})
-
-	if err != nil {
-		_ = s.presentations.MarkFailed(ctx, attempt.PresentationState, err.Error())
-		oid4vp.RecordPresentationAudit(ctx, oid4vp.PresentationAuditEvent{
-			PresentationState: attempt.PresentationState,
-			Success:           false,
-			ErrorMessage:      err.Error(),
+	if err == nil {
+		if holder := oid4vp.HolderLockoutKey(presentation, s.trust, oid4vp.PurposeLogin); holder != "" {
+			lockKey = holder
+		}
+		if until, locked := s.LockedUntil(ctx, lockKey); locked {
+			s.refusePresentation(ctx, attempt.PresentationState, "the holder key is locked out after repeated invalid credentials")
+			return nil, auth.LockedOut(ctx, until)
+		}
+		verified, err = oid4vp.NewVerifier(s.trust, oid4vp.PurposeLogin).Verify(presentation, oid4vp.PresentationContext{
+			Nonce:    attempt.Nonce,
+			ClientID: s.oid4vpClientID,
 		})
-		return nil, goa.PermanentError("unauthorized", "vp verification failed: %v", err)
+	}
+	if err != nil {
+		s.RecordInvalidCredential(ctx, lockKey, ip, nil)
+		s.refusePresentation(ctx, attempt.PresentationState, err.Error())
+		return nil, goa.PermanentError("unauthorized", auth.CredentialRefused)
 	}
 
 	grantedRoles := verified.GrantedRoles
+
+	credentialStatus, err := oid4vp.StatusReference(verified.RawClaims)
+	if err != nil {
+		return nil, goa.PermanentError("unauthorized", "credential status reference: %v", err)
+	}
 
 	redirectTo, err := s.hydra.AcceptLoginAndConsent(
 		ctx,
@@ -256,6 +269,7 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 		verified.SubjectDID,
 		verified.ParticipantDID,
 		grantedRoles,
+		credentialStatus,
 	)
 
 	if err != nil {
@@ -286,6 +300,18 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 	})
 
 	return &genauth.PresentationCallbackResult{}, nil
+}
+
+// refusePresentation marks a login presentation failed with the FR-UC-01-4
+// refusal, which the login page shows, and keeps the detail in the audit
+// trail only.
+func (s *authSvc) refusePresentation(ctx context.Context, state, detail string) {
+	_ = s.presentations.MarkFailed(ctx, state, auth.CredentialRefused)
+	oid4vp.RecordPresentationAudit(ctx, oid4vp.PresentationAuditEvent{
+		PresentationState: state,
+		Success:           false,
+		ErrorMessage:      detail,
+	})
 }
 
 func pointerString(v *string) string {

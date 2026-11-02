@@ -178,8 +178,15 @@ pdp_url="$(backend_env DCS_TRUST_PDP_URL)"
 if [ -z "$pdp_url" ]; then
   echo "  note: DCS_TRUST_PDP_URL unset — this instance will not federate (see federation.trustPdpURL)"
 else
+  # curl (OpenSSL) reads only hashed files from SSL_CERT_DIR, so it does not
+  # find the internal CA there as the Go backend does. Give it the system
+  # bundle plus the internal CA.
   code="$(kubectl -n "$NAMESPACE" exec "$BACKEND" -- sh -c \
-    "curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+    "ca=/etc/ssl/certs/ca-certificates.crt
+     if [ -r /etc/dcs-internal-tls/ca.crt ]; then
+       cat \$ca /etc/dcs-internal-tls/ca.crt > /tmp/deploy-sh-ca.crt && ca=/tmp/deploy-sh-ca.crt
+     fi
+     curl -s --cacert \$ca -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
      -d '{\"peerDID\":\"did:web:deploy-sh-probe\",\"direction\":\"inbound\"}' '$pdp_url'" 2>/dev/null || echo 000)"
   case "$code" in
     2*) echo "  ok: trust policy endpoint answered $code" ;;
@@ -196,9 +203,11 @@ fi
 # install silently does nothing — assert the bound class against the class the
 # rendered manifest asked for. No configured class means the cluster default
 # was used: that is an operator prerequisite this script cannot assert.
+# $1: name of the object that asks for the claim; $2: its kind (a
+# PersistentVolumeClaim, or the StatefulSet whose volumeClaimTemplates make it).
 manifest_pvc_storageclass() {
-  helm -n "$NAMESPACE" get manifest "$RELEASE" 2>/dev/null | awk -v pvc="$1" '
-    function flush() { if (kind == "PersistentVolumeClaim" && name == pvc) { gsub(/"/, "", sc); print sc } }
+  helm -n "$NAMESPACE" get manifest "$RELEASE" 2>/dev/null | awk -v pvc="$1" -v want="${2:-PersistentVolumeClaim}" '
+    function flush() { if (kind == want && name == pvc) { gsub(/"/, "", sc); print sc } }
     /^---/   { flush(); kind = ""; name = ""; sc = ""; next }
     /^kind:/ { kind = $2 }
     /^  name:/ { if (name == "") name = $2 }
@@ -206,10 +215,11 @@ manifest_pvc_storageclass() {
     END      { flush() }'
 }
 
+# $3, $4: the object and kind that ask for the claim, when not the claim itself.
 storageclass_check() {
   local label="$1" pvc="$2" desired actual
   kubectl -n "$NAMESPACE" get pvc "$pvc" >/dev/null 2>&1 || return 0
-  desired="$(manifest_pvc_storageclass "$pvc")"
+  desired="$(manifest_pvc_storageclass "${3:-$pvc}" "${4:-PersistentVolumeClaim}")"
   actual="$(kubectl -n "$NAMESPACE" get pvc "$pvc" -o jsonpath='{.spec.storageClassName}' 2>/dev/null)"
   if [ -z "$desired" ]; then
     echo "  note: $label PVC has no StorageClass configured (bound: ${actual:-cluster default}) — encrypted storage is an operator prerequisite, not asserted"
@@ -223,7 +233,11 @@ storageclass_check() {
 log "Checking StorageClass of the at-rest-relevant PVCs"
 storageclass_check "postgres"  "${RELEASE}-postgresql"
 storageclass_check "ipfs"      "${RELEASE}-ipfs"
+storageclass_check "nats"      "${RELEASE}-nats"
 storageclass_check "hsm-token" "${RELEASE}-digital-contracting-service-hsm-token"
+# The dumps hold the wrapped content keys, the logs can hold personal data.
+storageclass_check "backup"    "${RELEASE}-digital-contracting-service-db-backup"
+storageclass_check "loki"      "data-${RELEASE}-loki-0" "${RELEASE}-loki" "StatefulSet"
 
 # A peer resolves this instance by appending /.well-known/did.json to the bare
 # hostname. Anything else claiming /.well-known on the ingress (Hydra's OIDC

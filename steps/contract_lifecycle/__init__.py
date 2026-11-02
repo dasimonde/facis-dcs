@@ -2,3 +2,4 @@
 
 # Import the step module to register it with behave
 from . import contract_renewal_steps  # noqa: F401
+from . import dcs_restart_steps  # noqa: F401

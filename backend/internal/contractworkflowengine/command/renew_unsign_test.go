@@ -217,11 +217,17 @@ func TestRenewalOfAnUnsignedContractReferencesNoSignatures(t *testing.T) {
 }
 
 // A countersignature on an already signed PDF stamps no party node, so the
-// signed artifact is the only reference to it. An unsigned render is not one.
+// signed artifact is the only reference to it. An unsigned render is not one,
+// whatever lifecycle state it asserts: a contract terminated or expired before
+// signing renders that state unsigned, and a signed one asserts it after signing.
 func TestSignedDocumentReferenceNamesOnlyASignedArtifact(t *testing.T) {
-	require.Equal(t, "ipfs://bafy-signed", signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-signed", C2PAState: "active"}))
-	require.Empty(t, signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-draft", C2PAState: "draft"}))
-	require.Empty(t, signedDocumentReference(&db.ContractPDFState{C2PAState: "active"}))
+	for _, asserted := range []string{"active", "suspended", "terminated", "expired"} {
+		require.Equal(t, "ipfs://bafy-signed", signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-signed", C2PAState: asserted, Signed: true}), asserted)
+	}
+	for _, asserted := range []string{"draft", "terminated", "expired"} {
+		require.Empty(t, signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-unsigned", C2PAState: asserted}), asserted)
+	}
+	require.Empty(t, signedDocumentReference(&db.ContractPDFState{C2PAState: "active", Signed: true}))
 	require.Empty(t, signedDocumentReference(nil))
 }
 
@@ -230,4 +236,21 @@ func mustJSON(t *testing.T, v any) string {
 	b, err := json.Marshal(v)
 	require.NoError(t, err)
 	return string(b)
+}
+
+// DCS-FR-SM-13: a renewal does not inherit the previous term's signing
+// deadline, which has usually passed and would refuse every signature.
+func TestRenewalDropsThePreviousSigningDeadline(t *testing.T) {
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(*signedTermDocument(t), &doc))
+	doc["dcs:signingDeadline"] = map[string]any{"@value": "2020-01-31", "@type": "xsd:date"}
+	withDeadline, err := datatype.NewJSON(doc)
+	require.NoError(t, err)
+
+	renewal, err := unsignRenewedDocument(&withDeadline)
+	require.NoError(t, err)
+
+	var renewed map[string]any
+	require.NoError(t, json.Unmarshal(*renewal, &renewed))
+	require.NotContains(t, renewed, "dcs:signingDeadline")
 }

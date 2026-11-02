@@ -16,8 +16,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// minRSAKeyBits is the smallest RSA issuer key accepted from an x5c leaf.
-const minRSAKeyBits = 2048
+// MinRSAKeyBits is the smallest RSA key accepted from a party outside this
+// instance (BSI TR-02102-1: at least 3000 bits; DCS-NFR-SEC-02).
+const MinRSAKeyBits = 3000
 
 // JWK is an EC P-256 public key used for SD-JWT verification.
 type JWK struct {
@@ -342,8 +343,8 @@ func leafVerificationKey(leaf *x509.Certificate) (any, error) {
 		}
 		return nil, fmt.Errorf("x5c leaf certificate uses unsupported curve %q", pk.Curve.Params().Name)
 	case *rsa.PublicKey:
-		if pk.N.BitLen() < minRSAKeyBits {
-			return nil, fmt.Errorf("x5c leaf certificate rsa key is %d bits, below the %d-bit minimum", pk.N.BitLen(), minRSAKeyBits)
+		if pk.N.BitLen() < MinRSAKeyBits {
+			return nil, fmt.Errorf("x5c leaf certificate rsa key is %d bits, below the %d-bit minimum", pk.N.BitLen(), MinRSAKeyBits)
 		}
 		return pk, nil
 	default:

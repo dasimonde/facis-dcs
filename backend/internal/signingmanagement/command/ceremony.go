@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/signingmanagement/db"
 )
 
@@ -27,7 +29,10 @@ type StartCeremonyCmd struct {
 	ContractDID string
 	FieldName   string
 	RequestedBy string
-	BaseURL     string
+	// RequestedHolderDID is the holder of the session that starts the
+	// ceremony; only that session may later prepare, publish and submit.
+	RequestedHolderDID string
+	BaseURL            string
 	// ClientID is the OpenID4VP client identifier this deployment presents
 	// itself to a wallet with — the x509_san_dns identifier its own certificate
 	// backs. It is the audience the presented KB-JWTs bind to, so it travels
@@ -73,15 +78,16 @@ func (h *StartCeremonyHandler) Handle(ctx context.Context, cmd StartCeremonyCmd)
 	expiresAt := now.Add(ceremonyTTL)
 
 	ceremony := db.SignatureCeremony{
-		ID:          id,
-		ContractDID: cmd.ContractDID,
-		FieldName:   cmd.FieldName,
-		RequestedBy: cmd.RequestedBy,
-		Status:      db.CeremonyPending,
-		WalletURI:   &walletURI,
-		Nonce:       nonce,
-		CreatedAt:   now,
-		ExpiresAt:   expiresAt,
+		ID:                 id,
+		ContractDID:        cmd.ContractDID,
+		FieldName:          cmd.FieldName,
+		RequestedBy:        cmd.RequestedBy,
+		RequestedHolderDID: cmd.RequestedHolderDID,
+		Status:             db.CeremonyPending,
+		WalletURI:          &walletURI,
+		Nonce:              nonce,
+		CreatedAt:          now,
+		ExpiresAt:          expiresAt,
 	}
 	if err := h.CeremonyRepo.CreateCeremony(ctx, tx, ceremony); err != nil {
 		return nil, err
@@ -122,7 +128,10 @@ type PresentationCmd struct {
 	VpToken         string
 	PidClaims       any
 	PoAOrganization string
-	PoARoles        any
+	PoARoles        []string
+	// PoASubjectDID is the holder the PoA is issued to. It must be the
+	// signatory the PID identifies (SignerDID).
+	PoASubjectDID string
 	// PoAVpToken is the Power-of-Attorney presentation as the wallet delivered
 	// it, retained so the counterparty can verify this signature's authority
 	// for itself rather than reading an unbacked claim (ADR-31).
@@ -186,11 +195,17 @@ func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd Pres
 	if poaOrganization != ceremony.FieldName {
 		return nil, fmt.Errorf("%w: Power of Attorney authorizes %q, not the signed party %q", ErrPoAUnauthorized, poaOrganization, ceremony.FieldName)
 	}
-	var poaRoles []byte
-	if cmd.PoARoles != nil {
-		if b, mErr := json.Marshal(cmd.PoARoles); mErr == nil {
-			poaRoles = b
-		}
+	// The PoA authorizes the person the PID identifies, and it authorizes
+	// that person to sign (FR-SM-03): natural persons sign (ADR-17).
+	if strings.TrimSpace(cmd.PoASubjectDID) != signerDID {
+		return nil, fmt.Errorf("%w: Power of Attorney is issued to %q, not to the signatory %q", ErrPoAUnauthorized, cmd.PoASubjectDID, signerDID)
+	}
+	if !slices.Contains(cmd.PoARoles, userrole.ContractSigner.String()) {
+		return nil, fmt.Errorf("%w: Power of Attorney grants %v, not the %q role", ErrPoAUnauthorized, cmd.PoARoles, userrole.ContractSigner)
+	}
+	poaRoles, err := json.Marshal(cmd.PoARoles)
+	if err != nil {
+		return nil, fmt.Errorf("encode Power of Attorney roles: %w", err)
 	}
 
 	if err := h.CeremonyRepo.MarkCeremonyVerified(ctx, tx, db.VerifiedPresentation{

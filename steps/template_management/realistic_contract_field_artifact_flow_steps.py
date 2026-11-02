@@ -18,11 +18,18 @@ anchor it — that is what features/fixtures/facis-sla-hosting-shapes.ttl does
 for the SLA federation pack. Do not read this flow as evidence that the
 demo's domain vocabulary is enforced; it is evidence that the envelope and
 the field bindings are.
+
+Each contract field binds a domain field (dcs:shape): one of the seeded SLA
+ontology, or one of features/fixtures/facis-service-agreement-ontology.ttl,
+which the Given step publishes to the hub. The template policy audit at
+approval then knows every field (FACIS-TPL-DOMAIN-001), the template is
+COMPLIANT, and contract creation accepts it (DCS-FR-TR-07).
 """
 
 import json
 from pathlib import Path
 
+import requests
 from behave import given, then, when
 
 from steps.support.api_client import (
@@ -61,6 +68,27 @@ FIELD_SPECS = (
     ("reaction-time-hours", "Reaktionszeit in Stunden", "xsd:integer", 4),
     ("venue", "Gerichtsstand", "xsd:string", "Berlin"),
 )
+
+_SLA = "https://w3id.org/facis/dcs/taxonomy/v1#"
+_SERVICE_AGREEMENT = "https://w3id.org/facis/service-agreement/v1#"
+
+# The domain field each contract field binds, and the value constraint the
+# audit requires where the domain field has one (FACIS-TPL-CONSTRAINT-001).
+FIELD_SHAPES = {
+    "customer-name": (_SLA + "field-company-legalName", None),
+    "provider-name": (_SLA + "field-company-legalName", None),
+    "service-description": (_SLA + "field-service-description", None),
+    "monthly-fee": (_SLA + "field-contract-payment-amount", None),
+    "currency": (_SLA + "field-contract-payment-currency", {"format": "iso-4217"}),
+    "payment-term-days": (_SERVICE_AGREEMENT + "field-payment-termDays", None),
+    "term-months": (_SERVICE_AGREEMENT + "field-contract-termMonths", None),
+    "availability": (_SLA + "field-service-sla-availability", {"format": "percentage", "min": 0, "max": 100}),
+    "reaction-time-hours": (_SERVICE_AGREEMENT + "field-service-reactionTimeHours", None),
+    "venue": (_SERVICE_AGREEMENT + "field-contract-venue", None),
+}
+
+SERVICE_AGREEMENT_ONTOLOGY = Path("features/fixtures/facis-service-agreement-ontology.ttl")
+SERVICE_AGREEMENT_ONTOLOGY_NAME = "facis-service-agreement"
 
 SECTION_CHILDREN = {
     "parties": ("clause-parties",),
@@ -102,17 +130,21 @@ def _layout_node(name, children, *, root=False):
 
 
 def _realistic_template_document():
-    fields = [
-        {
+    fields = []
+    for name, label, datatype, value in FIELD_SPECS:
+        shape, constraint = FIELD_SHAPES[name]
+        field = {
             "@id": f"urn:uuid:field-{name}",
             "@type": "dcs:ContractField",
             "dcs:label": label,
             "dcs:datatype": datatype,
             "dcs:required": True,
             "dcs:value": value,
+            "dcs:shape": {"@id": shape},
         }
-        for name, label, datatype, value in FIELD_SPECS
-    ]
+        if constraint:
+            field["dcs:valueConstraint"] = constraint
+        fields.append(field)
     blocks = [
         _section("parties", "1. Vertragsparteien"),
         _clause(
@@ -282,8 +314,40 @@ def _layout_by_suffix(document):
     return {node["@id"].rsplit("#block-", 1)[-1]: node for node in layout}
 
 
+def _publish_service_agreement_ontology(context):
+    """Publish the service agreement domain fields to the hub, version 1.
+
+    Idempotent: hub versions are immutable rows in a run-durable database, so a
+    later run finds version 1 already there and publishes nothing.
+    """
+    installed = requests.get(
+        f"{context.base_url}/semantic/schema/retrieve",
+        params={"name": SERVICE_AGREEMENT_ONTOLOGY_NAME, "kind": "ontology", "version": 1},
+        timeout=context.http_timeout_seconds,
+    )
+    if installed.status_code == 200:
+        return
+    response = post_json(
+        context,
+        f"{context.base_url}/semantic/schema/register",
+        {
+            "name": SERVICE_AGREEMENT_ONTOLOGY_NAME,
+            "kind": "ontology",
+            "media_type": "text/turtle",
+            "content": SERVICE_AGREEMENT_ONTOLOGY.read_text(encoding="utf-8"),
+            "version": 1,
+            "activate": True,
+        },
+        headers=_template_headers("Template Manager"),
+    )
+    assert response.status_code == 200 or "already registered" in response.text.lower(), (
+        f"publishing the service agreement ontology failed: {response.status_code} {response.text}"
+    )
+
+
 @given("a realistic service agreement template with contract fields is prepared")
 def step_given_realistic_template_prepared(context):
+    _publish_service_agreement_ontology(context)
     context.realistic_template_fixture = _realistic_template_document()
 
 
@@ -480,15 +544,20 @@ def step_then_contract_provenance_and_rebase(context):
     )
     assert context.realistic_contract_response.get("template_did") == context.realistic_template_did
 
+    # dcs:shape points at a domain field of a published ontology; that IRI
+    # is external and keeps its namespace.
+    domain_shapes = {shape for shape, _ in FIELD_SHAPES.values()}
     template_internal_ids = [
         node_id
         for node_id in _document_ids(context.realistic_template_data)
-        if "#block-" in node_id or "#field-" in node_id or "#data-" in node_id
+        if ("#block-" in node_id or "#field-" in node_id or "#data-" in node_id)
+        and node_id not in domain_shapes
     ]
     contract_internal_ids = [
         node_id
         for node_id in _document_ids(context.realistic_contract_data)
-        if "#block-" in node_id or "#field-" in node_id or "#data-" in node_id
+        if ("#block-" in node_id or "#field-" in node_id or "#data-" in node_id)
+        and node_id not in domain_shapes
     ]
     assert template_internal_ids and all(
         _scoped_to_did(node_id, context.realistic_template_did) for node_id in template_internal_ids

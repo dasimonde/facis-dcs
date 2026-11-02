@@ -362,7 +362,7 @@ func LoadTrustConfig(path string) (*TrustConfig, error) {
 		return nil, fmt.Errorf("trust config path is empty")
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read trust config %q: %w", path, err)
 	}
@@ -883,7 +883,7 @@ func LoadX5CTrustAnchors(path string) ([]*x509.Certificate, error) {
 		return nil, fmt.Errorf("x5c trust anchors path is empty")
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read x5c trust anchors %q: %w", path, err)
 	}

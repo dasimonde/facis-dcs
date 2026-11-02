@@ -107,13 +107,15 @@ func extractJSONLDStream(pdf []byte, lastOccurrence bool) ([]byte, error) {
 		return nil, fmt.Errorf("embedded JSON-LD object id invalid: %w", err)
 	}
 
-	var streamStart, streamEnd int
-	var ok bool
 	if lastOccurrence {
-		streamStart, streamEnd, ok = lastObjectStreamData(pdf, objID)
-	} else {
-		streamStart, streamEnd, ok = firstObjectStreamData(pdf, objID)
+		// Decoded, so a copy whose attachment a re-save compressed still yields it.
+		obj, err := resolvePDFObject(pdf, objID)
+		if err != nil || obj.stream == nil {
+			return nil, fmt.Errorf("embedded JSON-LD stream not found in object %d", objID)
+		}
+		return append([]byte(nil), obj.stream...), nil
 	}
+	streamStart, streamEnd, ok := firstObjectStreamData(pdf, objID)
 	if !ok {
 		return nil, fmt.Errorf("embedded JSON-LD stream not found in object %d", objID)
 	}
@@ -205,7 +207,7 @@ func buildVerificationAppendixBytes(baseLen int, previousStartXref int, witnessH
 	appendix.WriteString("\nendobj\n")
 
 	witnessObjOffset := baseLen + appendix.Len()
-	appendix.WriteString(fmt.Sprintf("9000 0 obj\n<< /Type /Sig /Name (verification-witness) /Reason (symmetric-rerender-match) /M (D:19700101000000Z) /Contents <%s> >>\nendobj\n", witnessHashHex))
+	fmt.Fprintf(&appendix, "9000 0 obj\n<< /Type /Sig /Name (verification-witness) /Reason (symmetric-rerender-match) /M (D:19700101000000Z) /Contents <%s> >>\nendobj\n", witnessHashHex)
 
 	// Pre-record the offset of the XRef stream object so we can include it in
 	// the stream data (self-referential cross-reference entry for obj 9001).
@@ -234,32 +236,43 @@ func buildVerificationAppendixBytes(baseLen int, previousStartXref int, witnessH
 	appendix.Write(streamObject(xrefBytes, xrefStreamDict))
 	appendix.WriteString("\nendobj\n")
 
-	appendix.WriteString(fmt.Sprintf("startxref\n%d\n%%%%EOF\n", xrefObjOffset))
+	fmt.Fprintf(&appendix, "startxref\n%d\n%%%%EOF\n", xrefObjOffset)
 	return appendix.Bytes()
 }
 
 func extractEmbeddedStreamByFileSpecName(pdf []byte, fileName string) ([]byte, error) {
+	streamStart, streamEnd, err := embeddedStreamRangeByFileSpecName(pdf, fileName)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), pdf[streamStart:streamEnd]...), nil
+}
+
+// embeddedStreamRangeByFileSpecName returns the range of the raw stream data of
+// the embedded file the filespec named fileName points at, in the definition a
+// reader resolves.
+func embeddedStreamRangeByFileSpecName(pdf []byte, fileName string) (int, int, error) {
 	needle := []byte(fmt.Sprintf("/F (%s)", fileName))
 	fileSpecPos := bytes.Index(pdf, needle)
 	if fileSpecPos < 0 {
-		return nil, fmt.Errorf("filespec %s not found", fileName)
+		return 0, 0, fmt.Errorf("filespec %s not found", fileName)
 	}
 	efPos := bytes.Index(pdf[fileSpecPos:], []byte("/EF << /F "))
 	if efPos < 0 {
-		return nil, fmt.Errorf("embedded stream reference for %s not found", fileName)
+		return 0, 0, fmt.Errorf("embedded stream reference for %s not found", fileName)
 	}
 	efPos += fileSpecPos + len("/EF << /F ")
 	refEnd := bytes.Index(pdf[efPos:], []byte(" 0 R"))
 	if refEnd < 0 {
-		return nil, fmt.Errorf("embedded stream reference for %s malformed", fileName)
+		return 0, 0, fmt.Errorf("embedded stream reference for %s malformed", fileName)
 	}
 	objID, err := strconv.Atoi(strings.TrimSpace(string(pdf[efPos : efPos+refEnd])))
 	if err != nil {
-		return nil, fmt.Errorf("embedded stream object id invalid for %s: %w", fileName, err)
+		return 0, 0, fmt.Errorf("embedded stream object id invalid for %s: %w", fileName, err)
 	}
 	streamStart, streamEnd, ok := lastObjectStreamData(pdf, objID)
 	if !ok {
-		return nil, fmt.Errorf("embedded stream not found in object %d for %s", objID, fileName)
+		return 0, 0, fmt.Errorf("embedded stream not found in object %d for %s", objID, fileName)
 	}
-	return append([]byte(nil), pdf[streamStart:streamEnd]...), nil
+	return streamStart, streamEnd, nil
 }

@@ -103,6 +103,8 @@ type Bundler struct {
 	VCIssuer  provenance.VCIssuer
 	IssuerDID string
 	LocalPeer string
+	// templatePDF replaces the template PDF rendering in tests.
+	templatePDF func(ctx context.Context, did string) ([]byte, error)
 }
 
 // ExportContext carries the caller identity used for the FR-CSA-18 audit
@@ -453,42 +455,79 @@ func (b *Bundler) fetchContractPDF(ctx context.Context, did string) ([]byte, err
 	return io.ReadAll(reader)
 }
 
-// ExportTemplate builds the flat template bundle ZIP: template JSON-LD,
-// rendered PDF, and bundle manifest. No parent/frame chain (no frame-type
-// taxonomy exists at template level).
+// ExportTemplate builds the template bundle ZIP (DCS-FR-TR-24): the template
+// JSON-LD, its rendered PDF and its provenance credentials, and the same for
+// every template it requires, directly or through a required template
+// (DCS-FR-TR-23), under required/<did>/, with the bundle manifest.
 func (b *Bundler) ExportTemplate(ctx context.Context, did string) (io.ReadCloser, error) {
-	tx, err := b.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	tpl, err := b.TRepo.ReadDataByID(ctx, tx, did)
-	if err != nil {
-		_ = tx.Rollback()
-		return nil, &ErrRefused{Findings: []string{fmt.Sprintf("template %s: not found or unreadable", did)}}
-	}
-	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-		log.Printf("bundleexport: rollback: %v", err)
-	}
-
 	files := bundleFiles{}
-	if tpl.TemplateData != nil {
-		files["template.jsonld"] = []byte(*tpl.TemplateData)
-	} else {
-		files["template.jsonld"] = []byte("{}")
+	var components []componentInfo
+	seen := map[string]bool{}
+	var add func(did, prefix, role, dependent string) error
+	add = func(did, prefix, role, dependent string) error {
+		if seen[did] {
+			return nil
+		}
+		seen[did] = true
+		tpl, credentials, err := b.readTemplate(ctx, did)
+		if err != nil {
+			return &ErrRefused{Findings: []string{fmt.Sprintf("template %s: not found or unreadable", did)}}
+		}
+		files[prefix+"template.jsonld"] = []byte("{}")
+		if tpl.TemplateData != nil {
+			files[prefix+"template.jsonld"] = []byte(*tpl.TemplateData)
+		}
+		renderPDF := b.fetchTemplatePDF
+		if b.templatePDF != nil {
+			renderPDF = b.templatePDF
+		}
+		pdfBytes, err := renderPDF(ctx, did)
+		if err != nil {
+			return &ErrRefused{Findings: []string{fmt.Sprintf("template %s: rendered PDF could not be produced: %v", did, err)}}
+		}
+		files[prefix+"template.pdf"] = pdfBytes
+		// DCS-FR-TR-09: the provenance credential of every version.
+		for _, credential := range credentials {
+			files[fmt.Sprintf("%sprovenance/v%d.vc.json", prefix, credential.Version)] = []byte(credential.Credential)
+		}
+		components = append(components, componentInfo{DID: did, ContractVersion: tpl.Version, State: tpl.State, Role: role, ParentDID: dependent})
+		for _, required := range tpl.RequiredTemplates {
+			if err := add(required, "required/"+sanitizeSegment(required)+"/", "required", did); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := add(did, "", "root", ""); err != nil {
+		return nil, err
 	}
 
-	pdfBytes, err := b.fetchTemplatePDF(ctx, did)
-	if err != nil {
-		return nil, &ErrRefused{Findings: []string{fmt.Sprintf("template %s: rendered PDF could not be produced: %v", did, err)}}
-	}
-	files["template.pdf"] = pdfBytes
-
-	components := []componentInfo{{DID: did, State: tpl.State, Role: "root"}}
 	zipBytes, err := zipWithManifest(files, "template", did, components)
 	if err != nil {
 		return nil, err
 	}
 	return io.NopCloser(bytes.NewReader(zipBytes)), nil
+}
+
+func (b *Bundler) readTemplate(ctx context.Context, did string) (*tpldb.ContractTemplate, []tpldb.TemplateProvenanceCredential, error) {
+	tx, err := b.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("bundleexport: rollback: %v", err)
+		}
+	}()
+	tpl, err := b.TRepo.ReadDataByID(ctx, tx, did)
+	if err != nil {
+		return nil, nil, err
+	}
+	credentials, err := b.TRepo.ReadProvenanceCredentials(ctx, tx, did)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tpl, credentials, nil
 }
 
 func (b *Bundler) fetchTemplatePDF(ctx context.Context, did string) ([]byte, error) {

@@ -11,7 +11,6 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
-	"digital-contracting-service/internal/pdfgeneration/provenance"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -90,7 +89,7 @@ func requireUnsettledAgreement(
 	if err != nil {
 		return fmt.Errorf("could not read the stored artifact's lifecycle state for %s: %w", did, err)
 	}
-	if provenance.ArtifactCarriesSignature(pdfState.C2PAState) {
+	if pdfState.Signed {
 		return ErrAgreementSettled
 	}
 

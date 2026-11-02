@@ -67,9 +67,11 @@ func (h *ExportContractPdfHandler) Handle(ctx context.Context, qry ExportContrac
 			return nil, fmt.Errorf("read contract PDF state for %s: %w", qry.DID, err)
 		}
 
-		// A PAdES-signed PDF is frozen: serve it as-is regardless of later
-		// lifecycle bookkeeping — post-signature mutation breaks PAdES validators.
-		if pdfState.IPFSCID != "" && provenance.IsFrozenC2PAState(pdfState.C2PAState) {
+		// A frozen PDF is never re-rendered: serve it as it is stored, once the
+		// regenerator has appended the lifecycle manifest of a state the
+		// contract reached after signing (suspended, terminated, expired).
+		if pdfState.IPFSCID != "" && provenance.IsFrozenC2PAState(pdfState.C2PAState) &&
+			!provenance.SignedLifecycleAppendPending(pdfState.Signed, pdfState.C2PAState, currentC2PAState) {
 			return h.fetch(ctx, qry.DID, pdfState.IPFSCID)
 		}
 		// Serve only when the cached PDF reflects the current content and state.

@@ -52,8 +52,20 @@ export interface SignatureContract {
 
 export interface SignatureContractDetail {
   contract: SignatureContract
-  // Absent for an APPROVED-unsigned contract with no signature yet (ADR-12).
+  // The most recent signature record of any status; absent for an
+  // APPROVED-unsigned contract with no signature yet (ADR-12).
   signature_envelope?: SignatureEnvelope
+  // Signing status of every declared signature field (DCS-FR-SM-07/-24).
+  signature_fields?: SignatureFieldStatus[]
+}
+
+export interface SignatureFieldStatus {
+  field_name: string
+  status: 'SIGNED' | 'UNSIGNED'
+  // A counterparty signs this field on its own instance.
+  remote: boolean
+  signer_did?: string
+  signed_at?: string
 }
 
 export interface SignatureEnvelope {
@@ -207,6 +219,20 @@ export interface CeremonyStatusResult {
   status: CeremonyStatus
   signer_did?: string
   expires_at?: string
+  // Set once a signature submitted for this ceremony was accepted.
+  signed_at?: string
+  // Set once a signing request is published for this ceremony.
+  request_expires_at?: string
+  // The last wallet response the DCS refused for this ceremony.
+  refusal_code?: string
+  refusal?: string
+}
+
+export interface SignatureRequestPublishResult {
+  ceremony_id: string
+  wallet_uri: string
+  request_uri: string
+  expires_at: string
 }
 
 export const signatureManagementService = {
@@ -231,6 +257,16 @@ export const signatureManagementService = {
 
   async getCeremonyStatus(ceremonyId: string): Promise<CeremonyStatusResult> {
     return http.get<CeremonyStatusResult>(`/signature/request/${ceremonyId}`).then((res) => res.data)
+  },
+
+  // Wallet signing (ADR-12, DCS-FR-SM-06/-23): prepares the to-be-signed
+  // document for a verified ceremony and returns the OID4VP Document-Retrieval
+  // deep link. The wallet signs the document and posts it back to the DCS; the
+  // level defaults to the contract's own requirement for the field.
+  async publishSignatureRequest(ceremonyId: string): Promise<SignatureRequestPublishResult> {
+    return http
+      .post<SignatureRequestPublishResult>(`/signature/request/${encodeURIComponent(ceremonyId)}/publish`, {})
+      .then((res) => res.data)
   },
 
   // The DCS holds no signing key (ADR-12). Signing is two steps: prepare the
@@ -320,8 +356,10 @@ export const signatureManagementService = {
     await http.post('/signature/revoke', { did, signer_did: signerDid, reason })
   },
 
-  async getAudit(did: string): Promise<SignatureAuditEntry[]> {
-    return http.get<SignatureAuditEntry[]>('/signature/audit', { params: { did } }).then((res) => res.data ?? [])
+  async getAudit(did: string, justification: string): Promise<SignatureAuditEntry[]> {
+    return http
+      .get<SignatureAuditEntry[]>('/signature/audit', { params: { did, justification } })
+      .then((res) => res.data ?? [])
   },
 
   /** PACM-07 clause projection: live SHACL findings mapped conservatively to clause @ids. */

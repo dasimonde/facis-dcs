@@ -4,11 +4,13 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { type ArchiveErasureStatus, archiveService } from '@/services/archive-service'
 import { auditingService } from '@/services/auditing-service'
+import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob as saveBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 import ActionHistoryPanel from '@/views/audit/ActionHistoryPanel.vue'
 import AccessAttempts from './AccessAttempts.vue'
+import CheckpointProofPanel from './CheckpointProofPanel.vue'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
 
@@ -31,7 +33,7 @@ const activeTab = ref<AuditPageTab>('compliance')
 const route = useRoute()
 if (
   typeof route.query.scope === 'string' &&
-  ['templates', 'contracts', 'archive', 'signatures'].includes(route.query.scope)
+  ['templates', 'contracts', 'archive', 'signatures', 'PROCESS_AUDIT_AND_COMPLIANCE'].includes(route.query.scope)
 ) {
   selectedScope.value = route.query.scope as AuditScope
 }
@@ -54,6 +56,11 @@ const canSeeActionHistory = computed(
   () => !!authStore.user?.roles.some((role) => role === 'AUDITOR' || role === 'COMPLIANCE_OFFICER'),
 )
 const showAuditTabList = computed(() => canSeeComplianceAudit.value && canSeeActionHistory.value)
+// DCS-FR-PACM-05: the Compliance Officer exports the latest audit report of the
+// contracts and the archive it may read; it does not run audits.
+const canExportReportOnly = computed(
+  () => !canSeeComplianceAudit.value && !!authStore.user?.roles.includes('COMPLIANCE_OFFICER'),
+)
 
 watch(
   [canSeeComplianceAudit, canSeeActionHistory],
@@ -90,9 +97,13 @@ const allScopeOptions: { value: AuditScope; label: string }[] = [
   { value: 'contracts', label: 'Contracts' },
   { value: 'signatures', label: 'Signatures' },
   { value: 'archive', label: 'Archive' },
+  { value: 'PROCESS_AUDIT_AND_COMPLIANCE', label: 'Configuration and compliance' },
 ]
 const scopeOptions = computed(() =>
   isArchiveManagerOnly.value ? allScopeOptions.filter((scope) => scope.value === 'archive') : allScopeOptions,
+)
+const reportOnlyScopeOptions = allScopeOptions.filter(
+  (scope) => scope.value === 'contracts' || scope.value === 'archive',
 )
 watch(
   isArchiveManagerOnly,
@@ -214,6 +225,33 @@ watch(currentAuditQuery, () => {
 watch(selectedScope, () => {
   selectedFindingId.value = null
 })
+
+// DCS-FR-CSA-24: the Auditor reads the contract itself from this view. The
+// read is an explicit action because the backend audits every retrieval.
+const isAuditor = computed(() => authStore.user?.roles.includes('AUDITOR') ?? false)
+const inspectedContract = ref<Awaited<ReturnType<typeof contractWorkflowService.retrieveById>>>(null)
+const contractLoading = ref(false)
+const contractNotFound = ref(false)
+watch(didFilter, () => {
+  inspectedContract.value = null
+  contractNotFound.value = false
+})
+
+async function loadInspectedContract() {
+  contractLoading.value = true
+  try {
+    inspectedContract.value = await contractWorkflowService.retrieveById({ did: didFilter.value.trim() })
+    contractNotFound.value = inspectedContract.value === null
+  } finally {
+    contractLoading.value = false
+  }
+}
+
+function exportInspectedContract() {
+  const contract = inspectedContract.value
+  if (!contract) return
+  saveBlob(new Blob([JSON.stringify(contract, null, 2)], { type: 'application/json' }), 'contract.json')
+}
 
 // Key-erasure state of the inspected archive entry (DCS-NFR-SEC-13): shown
 // whenever the archive scope is filtered to one contract DID, so the entry's
@@ -535,7 +573,50 @@ function formatDateTime(value?: string): string {
   </div>
 
   <section v-if="activeTab === 'action-history' && canSeeActionHistory" class="space-y-4 px-4 pb-8">
-    <ActionHistoryPanel />
+    <section
+      v-if="canExportReportOnly"
+      class="space-y-3 rounded-box border border-base-content/10 bg-base-100 p-4"
+      data-testid="audit-report-export"
+    >
+      <h3 class="font-bold">Audit report</h3>
+      <p class="text-sm opacity-70">Export the latest audit run of the contracts or the archive.</p>
+      <div class="grid min-w-0 gap-3 sm:grid-cols-3">
+        <label class="form-control flex min-w-0 flex-col">
+          <span class="label-text mb-1">Scope</span>
+          <select id="select-report-scope" v-model="selectedScope" class="select-bordered select w-full rounded-box">
+            <option v-for="scope in reportOnlyScopeOptions" :key="scope.value" :value="scope.value">
+              {{ scope.label }}
+            </option>
+          </select>
+        </label>
+        <label class="form-control flex min-w-0 flex-col">
+          <span class="label-text mb-1">DID (optional)</span>
+          <input id="input-report-did" v-model="didFilter" class="input-bordered input w-full rounded-box" />
+        </label>
+        <label class="form-control flex min-w-0 flex-col">
+          <span class="label-text mb-1">Report justification</span>
+          <input
+            id="input-report-justification"
+            v-model="justification"
+            class="input-bordered input w-full rounded-box"
+          />
+        </label>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="format in ['json', 'csv', 'pdf'] as const"
+          :key="format"
+          class="btn rounded-box btn-outline btn-sm"
+          :disabled="reportLoading || !justification.trim()"
+          :data-testid="`audit-report-export-${format}`"
+          @click="generateReport(format)"
+        >
+          {{ format.toUpperCase() }}
+        </button>
+      </div>
+      <p v-if="reportError" role="alert" class="text-sm text-error">{{ reportError }}</p>
+    </section>
+    <ActionHistoryPanel :initial-did="didFilter" />
   </section>
 
   <section v-if="activeTab === 'compliance' && canSeeComplianceAudit" class="space-y-4 px-4">
@@ -693,6 +774,45 @@ function formatDateTime(value?: string): string {
     <div v-if="auditIsEmpty" class="alert rounded-box alert-info" role="status">
       Audit completed. No matching entries were found.
     </div>
+
+    <!-- Contract content for the Auditor (DCS-FR-CSA-24) -->
+    <section
+      v-if="isAuditor && didFilter.trim()"
+      class="rounded-box border border-base-content/10 bg-base-100 p-4"
+      data-testid="audit-contract"
+    >
+      <div class="flex flex-wrap items-center gap-3">
+        <h3 class="font-bold">Contract</h3>
+        <button
+          class="btn btn-sm"
+          :disabled="contractLoading"
+          data-testid="audit-contract-load"
+          @click="loadInspectedContract"
+        >
+          Show contract
+        </button>
+        <button v-if="inspectedContract" class="btn btn-ghost btn-sm" @click="exportInspectedContract">
+          Export JSON
+        </button>
+      </div>
+      <div v-if="inspectedContract" class="mt-2 space-y-2 text-sm" data-testid="audit-contract-details">
+        <div>
+          <span class="font-medium">{{ inspectedContract.name || inspectedContract.did }}</span>
+          · version {{ inspectedContract.contract_version }} · {{ inspectedContract.state }}
+        </div>
+        <div class="opacity-70">
+          Created {{ formatDateTime(inspectedContract.created_at) }} by {{ inspectedContract.created_by }}
+          <template v-if="inspectedContract.start_date || inspectedContract.exp_date">
+            · valid {{ formatDateTime(inspectedContract.start_date) }} to
+            {{ formatDateTime(inspectedContract.exp_date) }}
+          </template>
+        </div>
+        <pre class="max-h-96 overflow-auto rounded-box bg-base-200 p-2 text-xs">{{
+          JSON.stringify(inspectedContract.contract_data, null, 2)
+        }}</pre>
+      </div>
+      <p v-else-if="contractNotFound" class="mt-2 text-sm opacity-70">No contract with this DID can be read.</p>
+    </section>
 
     <!-- Erasure state of the inspected archive entry (DCS-NFR-SEC-13) -->
     <section
@@ -904,6 +1024,7 @@ function formatDateTime(value?: string): string {
         </div>
       </aside>
     </div>
+    <CheckpointProofPanel v-if="isAuditor" />
     <AccessAttempts />
   </section>
 </template>

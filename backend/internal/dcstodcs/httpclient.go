@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
 	dcstodcsc "digital-contracting-service/gen/http/dcs_to_dcs/client"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/identity"
 
 	goahttp "goa.design/goa/v3/http"
 )
@@ -24,12 +26,13 @@ func (d *prefixDoer) Do(req *http.Request) (*http.Response, error) {
 }
 
 // schemeFallbackDoer sends over https and retries over http only when the
-// transport itself failed, mirroring the order identity.FetchDIDDocument already
-// resolves did.json in. A peer named by did:web is reached over TLS wherever it
-// terminates TLS — shipping a contract to a public peer must not put the PDF and
-// its challenge-response signature on the wire in the clear, and an ingress that
-// redirects http to https would otherwise be relied on to repair that after the
-// fact — while a plain-http deployment (the BDD two-instance suite) still works.
+// transport itself failed and the host is one did:web may be resolved from
+// over plain http (identity.DIDWebSchemes: loopback, or named in
+// DCS_DIDWEB_INSECURE_HOSTS). That is the rule identity.FetchDIDDocument
+// resolves did.json by. Any other peer is reached over TLS only: a TLS failure
+// toward it is an error, never a plain-http copy of the PDF and its signed
+// challenge. A plain-http deployment (the BDD two-instance suite) names its
+// hosts and still works.
 //
 // Only connection-level failures fall back: an HTTP response, whatever its
 // status, means the peer already handled this request and must not receive a
@@ -43,6 +46,9 @@ func (d *schemeFallbackDoer) Do(req *http.Request) (*http.Response, error) {
 	resp, err := d.inner.Do(req)
 	if err == nil {
 		return resp, nil
+	}
+	if !slices.Contains(identity.DIDWebSchemes(req.URL.Host), "http") {
+		return resp, err
 	}
 	// A body that cannot be rewound makes the request unreplayable, so the https
 	// failure is the only answer we can honestly give.
@@ -96,6 +102,8 @@ func NewDCSToDCSHttpClient(host string, pathPrefix string) *dcstodcs.Client {
 	postSettlementWithdrawal := c.PostSettlementWithdrawal()
 	postNegotiation := c.PostNegotiation()
 	erase := c.Erase()
+	getContractInfo := c.GetContractInfo()
+	terminate := c.Terminate()
 	getProvenance := c.GetProvenance()
-	return dcstodcs.NewClient(postPdf, postSettlement, postSettlementWithdrawal, postNegotiation, erase, getProvenance)
+	return dcstodcs.NewClient(postPdf, postSettlement, postSettlementWithdrawal, postNegotiation, erase, getContractInfo, terminate, getProvenance)
 }

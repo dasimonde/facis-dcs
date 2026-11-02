@@ -8,7 +8,7 @@ process.env.PYTHONWARNINGS ??= 'ignore'
 
 /**
  * E2E suite against a running DCS instance (default: the BDD kind cluster's
- * instance A). The dev server proxies /api to E2E_DCS_API_TARGET with the
+ * instance A). The UI server proxies /api to E2E_DCS_API_TARGET with the
  * instance's API base path, and each test mints its role tokens through the
  * instance's real OID4VP headless login (reusing the BDD suite's
  * AuthService), so specs drive the UI exactly as an authenticated user.
@@ -60,6 +60,15 @@ export const E2E_API_BASE_B =
 const apiTarget = new URL(E2E_API_BASE)
 const apiTargetB = new URL(E2E_API_BASE_B)
 
+/**
+ * E2E_BUILT_UI=1 (set by the kind e2e run, tests/bdd/scripts/run_bdd_helm.sh)
+ * serves the production build in dist/ through `vite preview`, with the same
+ * /api proxy and the /ui/ base path. A page then loads a few bundles instead
+ * of hundreds of dev-server modules. Run `npx vite build` first. Without the
+ * switch, the dev server serves the UI.
+ */
+const uiServerCommand = process.env.E2E_BUILT_UI ? 'npx vite preview --port ' : 'npx vite --port '
+
 export default defineConfig({
   testDir: './e2e',
   // Generous per-test budget: tests run fully parallel against one shared
@@ -71,7 +80,7 @@ export default defineConfig({
   // authors its own in a beforeAll, so tests within a file are as independent
   // as tests across files — run them all in parallel.
   fullyParallel: true,
-  // One shared kind-cluster backend and one vite dev server serve every
+  // One shared kind-cluster backend and one vite server serve every
   // worker — beyond ~6 local workers, page loads start starving instead of
   // parallelizing. CI keeps Playwright's own core-based default.
   workers: process.env.CI ? undefined : 6,
@@ -85,7 +94,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: 'npx vite --port ' + FRONTEND_PORT,
+      command: uiServerCommand + FRONTEND_PORT,
       url: `http://localhost:${FRONTEND_PORT}`,
       reuseExistingServer: !process.env.CI,
       env: {
@@ -95,7 +104,7 @@ export default defineConfig({
       },
     },
     {
-      command: 'npx vite --port ' + FRONTEND_B_PORT,
+      command: uiServerCommand + FRONTEND_B_PORT,
       url: E2E_FRONTEND_B_ORIGIN,
       reuseExistingServer: !process.env.CI,
       env: {

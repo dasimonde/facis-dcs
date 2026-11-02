@@ -27,7 +27,7 @@ function deferred<T>() {
 function render() {
   return shallowMount(ArchiveDashboardView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
 }
-describe('P05 archive search and erasure lifecycle', () => {
+describe('archive search and erasure lifecycle', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mocks.roles = ['ARCHIVE_MANAGER']
@@ -106,12 +106,20 @@ describe('archive layout and filters', () => {
       expect(additional.isVisible()).toBe(false)
       await toggle.trigger('click')
       const inputs = additional.findAll('input')
-      for (const [index, value] of ['did:test:archive', 'party', 'tag', '2', '2026-10-01', '2026-10-31'].entries()) {
+      for (const [index, value] of [
+        'did:test:archive',
+        'party',
+        'tag',
+        '2',
+        '2026-10-01',
+        '2026-10-31',
+        'Germany',
+      ].entries()) {
         await inputs[index]!.setValue(value)
       }
       await wrapper.get('input[placeholder="Search by contract name"]').setValue('Archived')
       await wrapper.get('select').setValue('SIGNED')
-      expect(toggle.text()).toContain('6')
+      expect(toggle.text()).toContain('7')
       await toggle.trigger('click')
       expect(additional.isVisible()).toBe(false)
       await wrapper.get('form').trigger('submit')
@@ -125,6 +133,7 @@ describe('archive layout and filters', () => {
         contract_version: 2,
         valid_from: '2026-10-01T00:00:00.000Z',
         valid_until: '2026-10-31T00:00:00.000Z',
+        jurisdiction: 'Germany',
       })
       await toggle.trigger('click')
       expect((inputs[0]!.element as HTMLInputElement).value).toBe('did:test:archive')
@@ -135,7 +144,7 @@ describe('archive layout and filters', () => {
         .trigger('click')
       await flushPromises()
       expect(mocks.retrieve).toHaveBeenCalledTimes(2)
-      expect(toggle.text()).not.toContain('6')
+      expect(toggle.text()).not.toContain('7')
       expect(inputs.every((input) => (input.element as HTMLInputElement).value === '')).toBe(true)
       wrapper.unmount()
     },
@@ -154,9 +163,9 @@ describe('archive layout and filters', () => {
     })
     const wrapper = render()
     await flushPromises()
-    expect(wrapper.find('[data-testid="archive-entries"]').exists()).toBe(role !== 'AUDITOR')
+    expect(wrapper.find('[data-testid="archive-entries"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="archive-statistics"]').exists()).toBe(role !== 'CONTRACT_OBSERVER')
-    expect(mocks.retrieve).toHaveBeenCalledTimes(role === 'AUDITOR' ? 0 : 1)
+    expect(mocks.retrieve).toHaveBeenCalledTimes(1)
     expect(mocks.statistics).toHaveBeenCalledTimes(role === 'CONTRACT_OBSERVER' ? 0 : 1)
     expect(mocks.erasureStatus).toHaveBeenCalledTimes(role === 'ARCHIVE_MANAGER' ? 1 : 0)
     wrapper.unmount()

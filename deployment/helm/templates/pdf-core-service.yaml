@@ -13,6 +13,9 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.global.internalTLS.enabled }}
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    {{- end }}
   selector:
     {{- include "digital-contracting-service.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: pdf-core

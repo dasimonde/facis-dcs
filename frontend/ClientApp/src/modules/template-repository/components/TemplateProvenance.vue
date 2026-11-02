@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
+import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { contractTemplateService } from '@/services/contract-template-service'
 import type { ContractTemplateHistoryResponse } from '@/models/responses/template-response'
 
 const store = useDcsDraftStore()
 const { did, created_by, created_at, updated_at } = storeToRefs(store)
+const { hasTemplateRole } = useTemplatePermissions()
 
 function formatWhen(value: string | null | undefined): string {
   if (!value) return '—'
@@ -31,7 +33,7 @@ watch(
   async (value) => {
     history.value = []
     historyError.value = ''
-    if (!value) return
+    if (!value || !hasTemplateRole.value) return
     try {
       const entries = await contractTemplateService.retrieveHistory(value)
       if (value !== did.value) return
@@ -55,7 +57,7 @@ watch(
     </template>
   </dl>
 
-  <div class="overflow-x-auto">
+  <div v-if="hasTemplateRole" class="overflow-x-auto">
     <h3 class="mb-2 text-sm font-medium">Version history</h3>
     <div v-if="historyError" role="alert" class="alert text-sm alert-error">{{ historyError }}</div>
     <p v-else-if="history.length === 0" class="text-sm text-base-content/60">No history entries recorded.</p>

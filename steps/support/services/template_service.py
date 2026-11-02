@@ -49,7 +49,7 @@ class TemplateService:
                         {
                             "@id": "urn:uuid:block-clause-1",
                             "@type": "dcs:Clause",
-                            "dcs:content": {"@list": [clause_text]},
+                            "dcs:content": {"@list": [clause_text, {"@id": "urn:uuid:field-service-description"}]},
                         }
                     ]
                 },
@@ -62,6 +62,20 @@ class TemplateService:
                     }
                 ],
             },
+            # The clause binds a filled contract field, so the template policy
+            # audit (FACIS-TPL-CLAUSE-001) finds no error and the template is COMPLIANT.
+            "dcs:contractFields": [
+                {
+                    "@id": "urn:uuid:field-service-description",
+                    "@type": "dcs:ContractField",
+                    "dcs:label": "Service description",
+                    "dcs:datatype": "xsd:string",
+                    "dcs:shape": {"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-service-description"},
+                    "dcs:required": True,
+                    "dcs:value": "BDD fixture service",
+                }
+            ],
+            "dcs:policies": [],
         }
 
     @staticmethod

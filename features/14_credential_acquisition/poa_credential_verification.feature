@@ -10,31 +10,29 @@
 # attributes are mapped into the Hydra session, and the credential's
 # revocation status is checked in every verify path. Presentation + status
 # verification are therefore exercised by every authenticated scenario in
-# this suite. What remains open (deliberately deferred roadmap work, backed
-# by SRS TBD-B: the XFSC PCM wallet ecosystem is not yet available for
-# testing) is the ISSUER CHAIN-WALK: verifying that the PoA's issuer is
-# itself legitimized up to a trust anchor. The scenarios below assert
-# exactly that chain-walk and stay @skip until it lands.
+# this suite.
+#
+# Delegation chain (DCS-FR-SM-04): a counterparty's Power of Attorney may be
+# delegated. The receiving instance walks the chain up to an issuer trusted
+# for `peer` (at most 3 links) and verifies each link: the delegator's key
+# signed it, the delegator permits delegation (may_delegate), the
+# organization is the same, the roles are a subset, the link expires no later
+# than its delegator, and no link is revoked. The Go tests in
+# backend/internal/auth/oid4vp/poa_chain_test.go generate such chains. The
+# testWallet issues no delegated credentials, and the local ceremony verifies
+# the signer's PoA against the login issuer of this instance (ADR-35), so the
+# delegated-authority scenario below stays @skip.
 
 @UC-14 @DCS-FR-SM-03 @DCS-FR-SM-04
 Feature: Power-of-Attorney credential verification at signing
 
-  # @skip: asserts the PoA issuer chain-walk to a trusted root — deferred
-  # roadmap work; presentation + status check of the PoA itself happen at
-  # login and are covered suite-wide.
-  @skip @UC-14-01 @DCS-FR-SM-03
-  Scenario: Signer presents a PoA credential proving delegated signing authority
-    Given I hold a PoA credential compliant with eIDAS framework for organization "BDD Org"
-    When I present the PoA credential during the signing ceremony
-    Then the PoA credential chain is verified to a trusted root
-    And the signature is bound to the delegated authority
-
-  # @skip: distinguishing a chain-invalid PoA (issuer not anchored) from a
-  # merely revoked one needs the same chain-walk verifier — the same
-  # deferred roadmap item. Plain revocation blocking is live in every
-  # verify path.
-  @skip @UC-14-01 @DCS-FR-SM-04
+  # The PoA presented at the ceremony has its status-list bit revoked on the
+  # issuer first; the refusal must name that bit. A revoked link of a
+  # counterparty's chain is refused in
+  # TestVerifyCounterpartyPoA_RevokedLinkRefusesTheChain.
+  @UC-14-01 @DCS-FR-SM-03 @DCS-FR-SM-04
   Scenario: A revoked PoA credential blocks signing
-    Given I hold a revoked PoA credential for organization "BDD Org"
-    When I attempt to initiate signing for contract "PoA Revoked Contract"
-    Then the request is denied with a client error
+    Given contract "PoA Revoked Contract" has reached contract state "APPROVED"
+    When a signing ceremony is started for the signing party of contract "PoA Revoked Contract"
+    And the ceremony presentation is completed with a revoked Power of Attorney
+    Then the ceremony presentation is refused for the revoked Power of Attorney

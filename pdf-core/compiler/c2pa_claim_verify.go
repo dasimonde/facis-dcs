@@ -49,6 +49,64 @@ func VerifyC2PAClaimSignatures(pdf []byte) error {
 	return nil
 }
 
+// VerifyHardBinding checks the c2pa.hash.data assertion of the LAST manifest in
+// the embedded manifest store against the whole file. That assertion hashes
+// every byte of the file except its own manifest stream, so any byte appended
+// after the last manifest was written, or changed before it, fails here. The
+// only exclusion accepted is the manifest stream a reader resolves: an
+// exclusion that names any other range would leave bytes outside the binding.
+//
+// A PAdES signature appended after the last manifest also fails here until the
+// provenance is re-anchored over it (ADR-26).
+func VerifyHardBinding(pdf []byte) error {
+	streamStart, streamEnd, err := embeddedStreamRangeByFileSpecName(pdf, "content_credential.c2pa")
+	if err != nil {
+		return fmt.Errorf("locate C2PA manifest store: %w", err)
+	}
+	manifests, err := extractTopLevelManifestBoxes(pdf[streamStart:streamEnd])
+	if err != nil {
+		return fmt.Errorf("read C2PA manifest store: %w", err)
+	}
+	if len(manifests) == 0 {
+		return fmt.Errorf("C2PA manifest store carries no manifests")
+	}
+	assertionStore, err := extractLabeledChildJUMBFBox(manifests[len(manifests)-1], "c2pa.assertions")
+	if err != nil {
+		return fmt.Errorf("last manifest: find assertion store: %w", err)
+	}
+	box, err := extractLabeledChildJUMBFBox(assertionStore, "c2pa.hash.data")
+	if err != nil {
+		return fmt.Errorf("last manifest: find c2pa.hash.data: %w", err)
+	}
+	payload, err := jumbfCBORPayload(box)
+	if err != nil {
+		return fmt.Errorf("last manifest: read c2pa.hash.data: %w", err)
+	}
+	assertion, _, err := decodeCBOR(payload)
+	if err != nil {
+		return fmt.Errorf("last manifest: decode c2pa.hash.data: %w", err)
+	}
+	hash, ok := assertion.entry("hash")
+	if !ok || hash.major != cborMajorBytes {
+		return fmt.Errorf("last manifest: c2pa.hash.data carries no hash")
+	}
+	exclusions, ok := assertion.entry("exclusions")
+	if !ok || exclusions.major != cborMajorArray || len(exclusions.array) != 1 {
+		return fmt.Errorf("last manifest: c2pa.hash.data must exclude exactly the manifest stream")
+	}
+	start, startOK := exclusions.array[0].entry("start")
+	length, lengthOK := exclusions.array[0].entry("length")
+	if !startOK || !lengthOK || start.major != cborMajorUint || length.major != cborMajorUint ||
+		start.arg != uint64(streamStart) || length.arg != uint64(streamEnd-streamStart) {
+		return fmt.Errorf("last manifest: c2pa.hash.data exclusion is not the manifest stream")
+	}
+	actual := sha256WithExclusions(pdf, buildC2PAExclusions(streamStart, streamEnd-streamStart))
+	if string(actual[:]) != string(hash.bytes) {
+		return fmt.Errorf("assertion.dataHash.mismatch: the last manifest's hard binding does not cover the file as it stands")
+	}
+	return nil
+}
+
 // verifyManifestClaim checks one manifest's claim signature and the assertion
 // hashes its claim commits to.
 func verifyManifestClaim(manifest []byte) error {

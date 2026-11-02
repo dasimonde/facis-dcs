@@ -29,13 +29,9 @@ Feature: Contract Approval
     And the contract status shows "Rejected"
     And the contract is returned for revision
 
-  # "All required approvals gathered" (partial-quorum proof) lives in
-  # 17_peer_trust/two_instance_peer_trust.feature's approval-quorum scenario: approvers are PEERS
-  # (CauserDID is always the executing instance's own peer DID and
-  # UpdateState matches WHERE approver = CauserDID), so two observably
-  # distinct approvals require two instances — that scenario approves
-  # from A, proves the contract stays REVIEWED, approves from B, and proves
-  # APPROVED replicates with both approval tasks recorded.
+  # Approvers are peers: CauserDID is the executing instance's own peer DID
+  # and UpdateState matches WHERE approver = CauserDID, so two distinct
+  # approvals need two instances.
 
   @DCS-FR-CWE-19
   Scenario: Contract transitions to signing phase upon approval

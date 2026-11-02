@@ -1,0 +1,27 @@
+# Example values that complete values.acceptance.yml for the chart tests
+# (templates/prerequisites.yaml; deployment/README.md, "Production
+# prerequisites").
+federatedCatalogue:
+  remote:
+    acknowledgeAdminAllTrustBoundary: true
+signing:
+  issuerDID: "did:web:acceptance.dcs.example.org"
+  tsaURL: "https://tsa.example.org/tsr"
+messaging:
+  secretRef:
+    name: dcs-acceptance-nats
+oid4vp:
+  trust:
+    enabled: true
+    existingConfigMap: dcs-acceptance-trust
+configIntegrity:
+  pins:
+    oid4vp-trust-data: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik

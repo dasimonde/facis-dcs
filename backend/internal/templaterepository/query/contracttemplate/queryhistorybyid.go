@@ -40,6 +40,8 @@ type GetHistoryByIDResult struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	TemplateData *datatype.JSON
+	db.SearchableMetadata
+	db.Structure
 }
 
 type GetHistoryByIDHandler struct {
@@ -108,6 +110,9 @@ func (h *GetHistoryByIDHandler) Handle(ctx context.Context, query GetHistoryByID
 			TemplateData: entry.TemplateData,
 			TemplateType: ctType,
 			PartyType:    entry.PartyType,
+
+			SearchableMetadata: entry.SearchableMetadata,
+			Structure:          entry.Structure,
 		}
 	}
 

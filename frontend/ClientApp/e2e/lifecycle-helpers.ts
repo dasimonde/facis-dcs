@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applySession, type DcsRole, expect, mintSession, test } from './dcs-test'
 import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_ISSUER_BASE_URL } from '../playwright.config'
-import type { Browser, Locator, Page } from '@playwright/test'
+import type { Browser, Locator, Page, Response } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -200,14 +200,23 @@ export async function authorPaymentComponent(
   return componentDid
 }
 
+/** The hierarchy level of a contract template and the name of the template a
+ *  parent contract must come from (DCS-FR-TR-02, DCS-FR-TR-23). */
+export interface TemplateStructureInput {
+  level: 'FRAME_AGREEMENT' | 'AGREEMENT' | 'SUB_AGREEMENT' | 'ADDENDUM'
+  requires?: string
+}
+
 /** Composes a Contract template by inlining an approved component's blocks,
  *  placeholders and policies into the Builder outline (flatten-on-compose).
- *  Returns its DID. */
-async function authorContractTemplateFrom(
+ *  With `structure`, the details editor also sets the hierarchy level and
+ *  selects the required template. Returns its DID. */
+export async function authorContractTemplateFrom(
   page: Page,
   loginAs: LoginAs,
   name: string,
   componentName: string,
+  structure?: TemplateStructureInput,
 ): Promise<string> {
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /parent for other contracts/ }).click()
@@ -218,6 +227,18 @@ async function authorContractTemplateFrom(
     .filter({ hasText: 'Base Description' })
     .getByRole('textbox')
     .fill('Contract template composed for the fixture lifecycle e2e.')
+
+  if (structure) {
+    // The level first: changing it drops the required templates it cannot require.
+    await page.getByTestId('template-level').selectOption(structure.level)
+    if (structure.requires) {
+      const required = page
+        .getByTestId('template-required-templates')
+        .getByRole('checkbox', { name: new RegExp(structure.requires) })
+      await required.check()
+      await expect(required).toBeChecked()
+    }
+  }
 
   await page.getByRole('tab', { name: /Builder/ }).click()
   await page
@@ -256,13 +277,26 @@ export async function registerContractTemplate(page: Page, loginAs: LoginAs, did
 }
 
 /** Derives a purely local contract from a registered template (no counterparty:
- *  the R6 dialog is applied empty). The contract lands in DRAFT. Returns its DID. */
-export async function deriveLocalContract(page: Page, loginAs: LoginAs, templateName: string): Promise<string> {
+ *  the R6 dialog is applied empty). The contract lands in DRAFT. With
+ *  `parentContractName`, the new contract is added to that DRAFT contract
+ *  (dcs:parentContract), which the UI sets with an update right after the
+ *  create. Returns its DID. */
+export async function deriveLocalContract(
+  page: Page,
+  loginAs: LoginAs,
+  templateName: string,
+  parentContractName?: string,
+): Promise<string> {
   await gotoAs(page, loginAs, 'Contract Creator', '/ui/contracts/new')
   const picker = page.locator('select').first()
   const option = picker.locator('option', { hasText: templateName })
   await expect(option).toHaveCount(1)
   await picker.selectOption({ label: (await option.textContent())!.trim() })
+  if (parentContractName) {
+    await page
+      .getByRole('combobox', { name: 'Add to existing contract (optional)' })
+      .selectOption({ label: parentContractName })
+  }
 
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   const created = page.waitForResponse((r) => r.url().includes('/contract/create') && r.request().method() === 'POST')
@@ -369,8 +403,17 @@ export async function submitDraftIntoNegotiation(page: Page, loginAs: LoginAs, c
  * a component template with a semantic clause → a contract template composing
  * it → registration → contract derivation → negotiation, review, approval.
  * Returns the approved contract's DID.
+ *
+ * The review and approval pages name the role the user acts in
+ * (DCS-FR-CWE-25). With `reviewFinding`, the reviewer also annotates the
+ * Payment clause: the clause shows highlighted in the contract content, and
+ * the annotation goes with the forward to approval (DCS-IR-CWE-06).
  */
-export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promise<string> {
+export async function buildApprovedContract(
+  page: Page,
+  loginAs: LoginAs,
+  options: { reviewFinding?: string } = {},
+): Promise<string> {
   const unique = Date.now()
   const componentName = `SCV Component ${unique}`
   const contractTemplateName = `SCV Contract ${unique}`
@@ -420,6 +463,20 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
 
   await test.step('review contract', async () => {
     await gotoAs(page, loginAs, 'Contract Reviewer', `/ui/contracts/review/${contractDid}`)
+    await expect(page.getByText('· as Contract Reviewer')).toBeVisible()
+    if (options.reviewFinding) {
+      await page.getByRole('tab', { name: /content/i }).click()
+      const annotations = page.getByTestId('review-block-annotations')
+      await annotations
+        .getByRole('button')
+        .filter({ hasText: /provider invoices/ })
+        .first()
+        .click()
+      const highlighted = page.locator('.review-highlight')
+      await expect(highlighted).toHaveCount(1)
+      await expect(highlighted).toContainText(/provider invoices the agreed payment amount/)
+      await annotations.getByPlaceholder('Annotation…').fill(options.reviewFinding)
+    }
     const forwarded = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
@@ -428,11 +485,15 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
       .getByRole('dialog', { name: /local semantic precheck/i })
       .getByRole('button', { name: 'Confirm approval', exact: true })
       .click()
-    await forwarded
+    const forward = await forwarded
+    if (options.reviewFinding) {
+      expect(JSON.stringify(forward.request().postDataJSON())).toContain(options.reviewFinding)
+    }
   })
 
   await test.step('approve contract', async () => {
     await gotoAs(page, loginAs, 'Contract Approver', `/ui/contracts/approve/${contractDid}`)
+    await expect(page.getByText('· as Contract Approver')).toBeVisible()
     const approved = page.waitForResponse(
       (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
     )
@@ -540,18 +601,8 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
   return contractDid
 }
 
-/**
- * Opens an APPROVED contract in the Secure Contract Viewer, verifies it, and
- * runs the ceremony (wallet PID+PoA presentation, then /signature/prepare) up
- * to — but not including — signing the downloaded PDF. Shared by the correct
- * happy-path signing flow and the deliberate-rejection variants below, which
- * differ only in what they do with the prepared bytes.
- */
-async function startCeremonyAndPrepareDocument(
-  page: Page,
-  loginAs: LoginAs,
-  contractDid: string,
-): Promise<{ preparedPath: string; signField: string; ceremonyId: string }> {
+/** Opens an APPROVED contract from the signing list in the Secure Contract Viewer and verifies it (step 2). */
+async function openAndVerifyInViewer(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
   await gotoAs(page, loginAs, 'Contract Signer', '/ui/signing')
   const row = page.getByRole('row').filter({ hasText: contractDid })
   await expect(row).toBeVisible()
@@ -570,16 +621,21 @@ async function startCeremonyAndPrepareDocument(
     page.getByText('Verified', { exact: true }),
     `the integrity check of ${contractDid} did not pass, so the ceremony stays closed: HTTP ${verifyResponse.status()} ${await verifyResponse.text().catch(() => '')}`,
   ).toBeVisible()
+}
 
-  const ceremonyStarted = page.waitForResponse(
-    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST',
-    { timeout: 30_000 },
-  )
-  const preparedResponse = page.waitForResponse((r) => r.url().includes('/signature/prepare'), {
-    timeout: 180_000,
-  })
+/** Matches the POST /signature/request that starts the PID ceremony (not its /publish sub-resource). */
+function isCeremonyStart(r: Response): boolean {
+  return new URL(r.url()).pathname.endsWith('/signature/request') && r.request().method() === 'POST'
+}
 
-  await page.getByRole('button', { name: /download document to sign/ }).click()
+/**
+ * Plays the wallet's PID + PoA presentation for the ceremony the viewer
+ * started (ceremonyStarted is the armed response of that start). Returns the
+ * ceremony and the signature field it binds.
+ */
+async function presentPidForCeremony(
+  ceremonyStarted: Promise<Response>,
+): Promise<{ ceremonyId: string; signField: string }> {
   const ceremonyResponse = await ceremonyStarted
   expect(
     ceremonyResponse.ok(),
@@ -603,6 +659,30 @@ async function startCeremonyAndPrepareDocument(
     },
     stdio: 'pipe',
   })
+  return { ceremonyId: ceremony.ceremony_id, signField }
+}
+
+/**
+ * Opens an APPROVED contract in the Secure Contract Viewer, verifies it, and
+ * runs the ceremony (wallet PID+PoA presentation, then /signature/prepare) up
+ * to — but not including — signing the downloaded PDF. Shared by the correct
+ * happy-path signing flow and the deliberate-rejection variants below, which
+ * differ only in what they do with the prepared bytes.
+ */
+async function startCeremonyAndPrepareDocument(
+  page: Page,
+  loginAs: LoginAs,
+  contractDid: string,
+): Promise<{ preparedPath: string; signField: string; ceremonyId: string }> {
+  await openAndVerifyInViewer(page, loginAs, contractDid)
+
+  const ceremonyStarted = page.waitForResponse(isCeremonyStart, { timeout: 30_000 })
+  const preparedResponse = page.waitForResponse((r) => r.url().includes('/signature/prepare'), {
+    timeout: 180_000,
+  })
+
+  await page.getByRole('button', { name: /download document to sign/ }).click()
+  const { ceremonyId, signField } = await presentPidForCeremony(ceremonyStarted)
 
   const prepared = await preparedResponse
   expect(
@@ -613,10 +693,84 @@ async function startCeremonyAndPrepareDocument(
   const preparedEnvelope = (await prepared.json()) as { document: string }
   const preparedBytes = Buffer.from(preparedEnvelope.document, 'base64')
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
-  const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
+  const preparedPath = path.join(tmpdir(), `prepared-${ceremonyId}.pdf`)
   fs.writeFileSync(preparedPath, preparedBytes)
 
-  return { preparedPath, signField, ceremonyId: ceremony.ceremony_id }
+  return { preparedPath, signField, ceremonyId }
+}
+
+/**
+ * Signs an APPROVED contract with "Sign with wallet" in the Secure Contract
+ * Viewer (ADR-12, DCS-FR-SM-06, DCS-FR-SM-23): after the PID ceremony the
+ * viewer publishes the OID4VP signing request and shows its openid4vp:// QR.
+ * The test wallet consumes that request headlessly with the Document-Retrieval
+ * driver the BDD suite uses (testWallet/dcs_wallet/oid4vp_signing.py): it
+ * fetches the request object and the document, signs the document via the DSS
+ * SCA and posts it to the response_uri. The viewer waits until the DCS accepted
+ * the signature and shows SIGNED. No download or upload takes place.
+ */
+export async function signApprovedContractWithWallet(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
+  await openAndVerifyInViewer(page, loginAs, contractDid)
+
+  const ceremonyStarted = page.waitForResponse(isCeremonyStart, { timeout: 30_000 })
+  const publishedResponse = page.waitForResponse(
+    (r) => /\/signature\/request\/[^/]+\/publish$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST',
+    { timeout: 180_000 },
+  )
+  await page.getByRole('button', { name: 'Sign with wallet', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Sign with your wallet' })
+  await expect(dialog.getByText('present your PID and Power of Attorney')).toBeVisible()
+
+  const { ceremonyId, signField } = await presentPidForCeremony(ceremonyStarted)
+
+  const published = await publishedResponse
+  expect(
+    published.ok(),
+    `publish the signing request: HTTP ${published.status()} ${await published.text().catch(() => '')}`,
+  ).toBeTruthy()
+  const signingRequest = (await published.json()) as { ceremony_id: string; wallet_uri: string; request_uri: string }
+  expect(signingRequest.ceremony_id).toBe(ceremonyId)
+  expect(signingRequest.wallet_uri).toMatch(/^openid4vp:/)
+  expect(signingRequest.request_uri).toContain(`/signature/request/${ceremonyId}/object`)
+
+  await expect(dialog.getByText('Scan the QR code with your wallet to sign the document.')).toBeVisible()
+  await expect(dialog.getByRole('img', { name: 'Signing ceremony QR code' })).toBeVisible()
+  await expect(dialog.getByText('Waiting for the wallet signature…')).toBeVisible()
+
+  // The wallet reads the request object on the origin this harness reaches,
+  // as the BDD step does: the DCS builds request_uri from its advertised
+  // public base, which need not equal the host route.
+  const wallet = `
+import json, sys
+sys.path.insert(0, ${JSON.stringify(repoRoot)})
+from steps.support.services.auth_service import AuthService
+AuthService._ensure_dcs_wallet_importable()
+from dcs_wallet.oid4vp_signing import sign_via_document_retrieval
+request_uri, user, dss_url, field = sys.argv[1:5]
+print(json.dumps(sign_via_document_retrieval(
+    request_uri=request_uri, user=user, dss_url=dss_url, field=field,
+    keys_dir=AuthService.resolve_wallet_keys_dir(),
+)))
+`
+  const stdout = execFileSync(
+    python,
+    [
+      '-c',
+      wallet,
+      `${E2E_API_BASE}/signature/request/${ceremonyId}/object`,
+      E2E_SIGNATORY_NAME,
+      E2E_DSS_URL,
+      signField,
+    ],
+    { cwd: repoRoot, encoding: 'utf-8', timeout: 180_000 },
+  )
+  const callback = JSON.parse(stdout.trim().split('\n').pop() ?? '{}') as { status?: string }
+  expect(callback.status, `wallet callback: ${stdout}`).toBe('SIGNED')
+
+  // The dialog polls the ceremony until the DCS accepted the signature; the viewer then reloads the envelope.
+  await expect(dialog).toBeHidden({ timeout: 60_000 })
+  await expect(page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText('Signed document accepted and recorded.')).toBeVisible()
 }
 
 /**

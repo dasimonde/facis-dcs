@@ -66,9 +66,12 @@ func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo
 	}
 	for _, changeRequest := range changeRequests {
 
-		var change ChangeRequest
-		if err := json.Unmarshal(*changeRequest.ChangeRequest, &change); err != nil {
-			return nil, nil, fmt.Errorf("could not unmarshal change request: %w", err)
+		change, note, err := Decode(*changeRequest.ChangeRequest)
+		if err != nil {
+			return nil, nil, fmt.Errorf("negotiation %s: %w", changeRequest.ID, err)
+		}
+		if note {
+			continue
 		}
 
 		discarded.claim(changeRequest.ID, fieldsSetBy(change))

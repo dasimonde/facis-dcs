@@ -33,6 +33,7 @@ func TestLifecycleEventsKeepsOnlyTransitionsWithActorAndTime(t *testing.T) {
 		lifecycleEntry("AUDIT_CONTRACT", start.Add(8*time.Hour), `{"audited_by":"Auditor Org"}`),
 		lifecycleEntry("CONTRACT_ACCESS_DENIED", start.Add(7*time.Hour), `{"retrieved_by":"Org D"}`),
 		lifecycleEntry("RECORD_EVIDENCE", start.Add(6*time.Hour), `{"recorded_by":"Org A"}`),
+		lifecycleEntry("ACTIVATE_CONTRACT", start.Add(10*time.Hour), `{"activated_by":"dcs-target-t-1","occurred_at":"2026-10-01T18:00:00Z","previous_state":"SIGNED","new_state":"ACTIVE","correlation_id":"corr-1"}`),
 		lifecycleEntry("CONTRACT_EXPIRED", start.Add(5*time.Hour), `{"occurred_at":"2026-10-01T13:00:00Z"}`),
 		lifecycleEntry("APPROVE_CONTRACT", start.Add(3*time.Hour), `{"erased":true}`),
 		lifecycleEntry("SUBMIT_CONTRACT", start, `{"submitted_by":"Org B","occurred_at":"2026-10-01T10:30:00.5Z","previous_state":"SUBMITTED","new_state":"REVIEWED","comments":["confidential finding"]}`),
@@ -44,12 +45,24 @@ func TestLifecycleEventsKeepsOnlyTransitionsWithActorAndTime(t *testing.T) {
 
 	str := func(s string) *string { return &s }
 	require.Equal(t, []*cwe.ContractLifecycleEvent{
+		{EventType: "ACTIVATE_CONTRACT", Actor: str("dcs-target-t-1"), OccurredAt: "2026-10-01T18:00:00Z", PreviousState: str("SIGNED"), NewState: str("ACTIVE")},
 		{EventType: "CONTRACT_EXPIRED", OccurredAt: "2026-10-01T13:00:00Z"},
 		{EventType: "APPLIED_SIGNATURE", Actor: str("Org B"), OccurredAt: "2026-10-01T12:00:00Z"},
 		{EventType: "APPROVE_CONTRACT", OccurredAt: "2026-10-01T11:00:00Z"},
 		{EventType: "SUBMIT_CONTRACT", Actor: str("Org B"), OccurredAt: "2026-10-01T10:30:00Z", PreviousState: str("SUBMITTED"), NewState: str("REVIEWED")},
 		{EventType: "CREATE_CONTRACT", Actor: str("Org A"), OccurredAt: "2026-10-01T08:00:00Z"},
 	}, got)
+}
+
+// CWE-14: a termination notice the counterparty refused for good shows on the
+// contract, naming the counterparty and not the refusal text.
+func TestLifecycleShowsARefusedTerminationNotice(t *testing.T) {
+	at := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	got := lifecycleEvents([]datatype.AuditLogEntry{lifecycleEntry("PEER_EXCHANGE_REFUSED", at,
+		`{"exchange":"terminate","peer_did":"did:web:peer.example","reason":"not_found","occurred_at":"2026-10-01T08:00:00Z"}`)})
+
+	peer := "did:web:peer.example"
+	require.Equal(t, []*cwe.ContractLifecycleEvent{{EventType: "PEER_EXCHANGE_REFUSED", Actor: &peer, OccurredAt: "2026-10-01T08:00:00Z"}}, got)
 }
 
 func TestLifecycleAuthorizesContractPartyOnly(t *testing.T) {

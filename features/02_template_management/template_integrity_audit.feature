@@ -25,12 +25,11 @@ Feature: Template integrity verification and audit log
     Then get http 200:Success code
     And the template audit log for "Audit Log Template" includes an action of type "VERIFY_CONTRACT_TEMPLATE"
 
-  # DCS-FR-TR-21: the audit log records creation, modification, approval, and
-  # deletion activities — one full lifecycle pass, then each action type is
-  # asserted in the template's own audit trail. Deleting from Approved is a
-  # hard archive (state DELETED); only REGISTERED/PUBLISHED archive to
-  # DEPRECATED (backend command/archive.go), so the ARCHIVE event covers the
-  # deletion activity here.
+  # DCS-FR-TR-21: the audit log records creation, modification, approval,
+  # deprecation and deletion activities — one full lifecycle pass, then each
+  # action type is asserted in the template's own audit trail. A registered
+  # template is deprecated (ARCHIVE event), a deprecated one is deleted
+  # (DELETE event, backend command/archive.go).
   @clean_db @DCS-FR-TR-21
   Scenario: Template audit log records creation, modification, approval, and deletion
     Given I am authenticated with roles: "Template Creator"
@@ -43,8 +42,11 @@ Feature: Template integrity verification and audit log
     And I am authenticated with roles: "Template Approver"
     And I approve template "Audit Lifecycle Template"
     And I am authenticated with roles: "Template Manager"
+    And I register template "Audit Lifecycle Template"
+    And I deprecate template "Audit Lifecycle Template"
     And I delete template "Audit Lifecycle Template"
     Then the template audit log for "Audit Lifecycle Template" includes an action of type "CREATE_CONTRACT_TEMPLATE"
     And the template audit log for "Audit Lifecycle Template" includes an action of type "UPDATE_CONTRACT_TEMPLATE"
     And the template audit log for "Audit Lifecycle Template" includes an action of type "APPROVE_CONTRACT_TEMPLATE"
     And the template audit log for "Audit Lifecycle Template" includes an action of type "ARCHIVE_CONTRACT_TEMPLATE"
+    And the template audit log for "Audit Lifecycle Template" includes an action of type "DELETE_CONTRACT_TEMPLATE"

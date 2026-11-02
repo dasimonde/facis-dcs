@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 const odrlProfileFixture = `
   @prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
@@ -26,6 +27,7 @@ async function authenticate(page: Page) {
   await page.route('**/semantic/ontology/dcs-odrl-profile', (route) =>
     route.fulfill({ json: { content: odrlProfileFixture } }),
   )
+  await withholdUnsignedToken(page)
   await page.addInitScript((token) => {
     localStorage.setItem('token_type', 'Bearer')
     localStorage.setItem('access_token', token)

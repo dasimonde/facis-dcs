@@ -48,7 +48,7 @@ func TestTheServedTokenHasTheShapeAVerifierRoutesOn(t *testing.T) {
 	assert.NotNil(t, claims["iat"])
 	statusList, ok := claims["status_list"].(map[string]any)
 	require.True(t, ok)
-	assert.EqualValues(t, 1, statusList["bits"])
+	assert.EqualValues(t, 2, statusList["bits"])
 	assert.NotEmpty(t, statusList["lst"])
 }
 
@@ -63,6 +63,24 @@ func TestARevokedEntryReadsRevokedThroughTheOrdinaryVerifier(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, provenance.StatusRevoked, state)
 	assert.True(t, list.Fetched())
+}
+
+// A suspended entry reads suspended, not revoked, through the same verifier,
+// and its neighbours keep their own states (two bits per entry).
+func TestASuspendedEntryReadsSuspendedThroughTheOrdinaryVerifier(t *testing.T) {
+	list := provenancetest.NewSignedStatusList(t, 12)
+	list.Suspend(13)
+
+	for index, want := range map[uint32]string{
+		11: provenance.StatusActive,
+		12: provenance.StatusRevoked,
+		13: provenance.StatusSuspended,
+		14: provenance.StatusActive,
+	} {
+		state, err := list.Verifier.State(context.Background(), list.Credential(index))
+		require.NoError(t, err)
+		assert.Equal(t, want, state, "entry %d", index)
+	}
 }
 
 func TestAClearEntryReadsActiveThroughTheOrdinaryVerifier(t *testing.T) {

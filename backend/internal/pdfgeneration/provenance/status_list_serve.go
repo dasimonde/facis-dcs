@@ -183,15 +183,16 @@ func (s *StatusListSigner) Token(ctx context.Context) ([]byte, error) {
 		"typ": "statuslist+jwt",
 		"x5c": s.Chain,
 	}
-	// One bit per entry, zlib-compressed and base64url-encoded: the encoding the
+	// Two bits per entry, zlib-compressed and base64url-encoded: the encoding the
 	// IETF Token Status List defines and the one the verifier's IETF handler
-	// decodes (codec.ZLIBDecompressLimited, codec.LSBFirst).
+	// decodes (codec.ZLIBDecompressLimited, codec.LSBFirst). The values are the
+	// ones that list defines: 0 valid, 1 invalid, 2 suspended.
 	payload := map[string]any{
 		"iss": s.Issuer,
 		"sub": s.ListURI(s.ListID),
 		"iat": now.Unix(),
 		"status_list": map[string]any{
-			"bits": 1,
+			"bits": statusBits,
 			"lst":  base64.RawURLEncoding.EncodeToString(deflate(bitstring)),
 		},
 	}
@@ -214,22 +215,42 @@ func (s *StatusListSigner) Token(ctx context.Context) ([]byte, error) {
 	return []byte(signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)), nil
 }
 
-// bitstring renders the list's revoked entries as one bit each, LSB-first —
-// bit N at bit (N%8) of byte N/8.
+// statusBits is the width of one entry of the served list, and the values an
+// entry takes are the IETF Token Status List's.
+const (
+	statusBits      = 2
+	statusInvalid   = 0x01
+	statusSuspended = 0x02
+)
+
+// bitstring renders the list's entries two bits each, LSB-first — entry N's
+// value at bits 2N and 2N+1. A revoked entry reads invalid; a suspended one
+// reads suspended unless it is also revoked.
 func (s *StatusListSigner) bitstring(ctx context.Context) ([]byte, error) {
 	size := s.Size
 	if size <= 0 {
 		size = ListSize
 	}
-	bits := make([]byte, (size+7)/8)
+	bits := make([]byte, (size*statusBits+7)/8)
 	if s.Revocations == nil {
 		return nil, fmt.Errorf("status list signer has no revocation store: it would serve every entry as valid")
 	}
-	indices, err := s.Revocations.RevokedIndices(ctx, s.ListID)
+	suspended, err := s.Revocations.SuspendedIndices(ctx, s.ListID)
+	if err != nil {
+		return nil, fmt.Errorf("read suspended entries of status list %d: %w", s.ListID, err)
+	}
+	revoked, err := s.Revocations.RevokedIndices(ctx, s.ListID)
 	if err != nil {
 		return nil, fmt.Errorf("read revoked entries of status list %d: %w", s.ListID, err)
 	}
-	for _, index := range indices {
+	values := map[uint32]byte{}
+	for _, index := range suspended {
+		values[index] = statusSuspended
+	}
+	for _, index := range revoked {
+		values[index] = statusInvalid
+	}
+	for index, value := range values {
 		if int(index) >= size {
 			// The allocator refuses an index past the list's registered size, so
 			// one here means the list was shrunk under credentials that already
@@ -239,7 +260,8 @@ func (s *StatusListSigner) bitstring(ctx context.Context) ([]byte, error) {
 				"status list %d holds entry %d but is served with only %d entries: credentials naming it would read as valid",
 				s.ListID, index, size)
 		}
-		bits[index/8] |= 1 << (index % 8)
+		bit := int(index) * statusBits
+		bits[bit/8] |= value << (bit % 8)
 	}
 	return bits, nil
 }
@@ -328,16 +350,58 @@ func (s *PostgresStatusListRevocations) Revoke(ctx context.Context, subjectID st
 	return nil
 }
 
+// Suspend sets subjectID's suspension. A revoked entry is left as it is: the
+// revocation is final and is what the list serves for it.
+func (s *PostgresStatusListRevocations) Suspend(ctx context.Context, subjectID string) error {
+	return s.setSuspension(ctx, subjectID, `UPDATE status_list_entries
+            SET suspended_at = CURRENT_TIMESTAMP
+          WHERE subject_id = $1 AND suspended_at IS NULL AND revoked_at IS NULL`)
+}
+
+// Resume ends subjectID's suspension.
+func (s *PostgresStatusListRevocations) Resume(ctx context.Context, subjectID string) error {
+	return s.setSuspension(ctx, subjectID, `UPDATE status_list_entries
+            SET suspended_at = NULL
+          WHERE subject_id = $1 AND suspended_at IS NOT NULL`)
+}
+
+func (s *PostgresStatusListRevocations) setSuspension(ctx context.Context, subjectID, query string) error {
+	subjectID = strings.TrimSpace(subjectID)
+	if subjectID == "" {
+		return fmt.Errorf("status list suspension needs a subject id")
+	}
+	if _, err := s.DB.ExecContext(ctx, query, subjectID); err != nil {
+		return fmt.Errorf("change the suspension of the status list entry of %s: %w", subjectID, err)
+	}
+	var exists bool
+	if err := s.DB.GetContext(ctx, &exists,
+		`SELECT EXISTS (SELECT 1 FROM status_list_entries WHERE subject_id = $1)`, subjectID); err != nil {
+		return fmt.Errorf("confirm status list entry of %s: %w", subjectID, err)
+	}
+	if !exists {
+		return fmt.Errorf("%s holds no status list entry to suspend or resume", subjectID)
+	}
+	return nil
+}
+
+func (s *PostgresStatusListRevocations) SuspendedIndices(ctx context.Context, listID int) ([]uint32, error) {
+	return s.indices(ctx, `SELECT entry_index FROM status_list_entries
+          WHERE list_id = $1 AND suspended_at IS NOT NULL`, listID)
+}
+
 func (s *PostgresStatusListRevocations) RevokedIndices(ctx context.Context, listID int) ([]uint32, error) {
+	return s.indices(ctx, `SELECT entry_index FROM status_list_entries
+          WHERE list_id = $1 AND revoked_at IS NOT NULL`, listID)
+}
+
+func (s *PostgresStatusListRevocations) indices(ctx context.Context, query string, listID int) ([]uint32, error) {
 	var rows []int64
-	if err := s.DB.SelectContext(ctx, &rows,
-		`SELECT entry_index FROM status_list_entries
-          WHERE list_id = $1 AND revoked_at IS NOT NULL`, listID); err != nil {
+	if err := s.DB.SelectContext(ctx, &rows, query, listID); err != nil {
 		return nil, err
 	}
 	indices := make([]uint32, 0, len(rows))
 	for _, row := range rows {
-		indices = append(indices, uint32(row))
+		indices = append(indices, uint32(row)) // #nosec G115 -- entry_index is a non-negative INTEGER (CHECK constraint)
 	}
 	return indices, nil
 }

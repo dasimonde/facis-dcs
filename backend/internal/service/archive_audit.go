@@ -3,14 +3,20 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"time"
 
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
-func (s *processAuditAndCompliancesrvc) auditArchiveTrailEntries(ctx context.Context) (map[string][]*processauditandcompliance.PACResourceAuditTrailEntry, error) {
+// auditArchiveTrailEntries returns, per archived DID, the entry summaries and
+// the integrity checks of the readable archive entries. A non-empty did keeps
+// that DID only, before any check runs.
+func (s *processAuditAndCompliancesrvc) auditArchiveTrailEntries(ctx context.Context, did string) (map[string][]*processauditandcompliance.PACResourceAuditTrailEntry, error) {
 	result := map[string][]*processauditandcompliance.PACResourceAuditTrailEntry{}
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -21,6 +27,9 @@ func (s *processAuditAndCompliancesrvc) auditArchiveTrailEntries(ctx context.Con
 	entries, err := s.CRepo.ReadArchiveEntries(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	if did != "" {
+		entries = slices.DeleteFunc(entries, func(entry db.ContractArchiveEntry) bool { return entry.DID != did })
 	}
 	if len(entries) == 0 {
 		if err := tx.Commit(); err != nil {
@@ -86,9 +95,42 @@ func (s *processAuditAndCompliancesrvc) auditArchiveTrailEntries(ctx context.Con
 	return result, nil
 }
 
+// archiveOperationLog returns, per DID, the archive operations recorded in the
+// ContractStorageArchive audit chains (DCS-IR-CSA-04, DCS-FR-CSA-18): store,
+// retrieve, search, annotate, delete, evidence, sections, failures and key
+// erasure. allowed limits the DIDs as readableContractDIDs does; the chain of
+// the operations that name no single contract ("*") is kept only for a
+// caller without that limit and without a did filter.
+func archiveOperationLog(chains [][]datatype.AuditLogEntry, did string, allowed map[string]bool) map[string][]*processauditandcompliance.PACResourceAuditTrailEntry {
+	result := map[string][]*processauditandcompliance.PACResourceAuditTrailEntry{}
+	for _, chain := range chains {
+		for _, entry := range chain {
+			if entry.DID == nil || !base.IsAuditVisibleEventType(entry.EventType) {
+				continue
+			}
+			entryDID := *entry.DID
+			if (did != "" && entryDID != did) || (allowed != nil && !allowed[entryDID]) {
+				continue
+			}
+			result[entryDID] = append(result[entryDID], &processauditandcompliance.PACResourceAuditTrailEntry{
+				ID: entry.ID, Component: entry.Component, EventType: entry.EventType, EventData: entry.EventData,
+				Did: entry.DID, CreatedAt: entry.CreatedAt.UTC().Format(time.RFC3339), ResLogPredCid: entry.ResLogPredCID,
+				Kind: stringPointer("TIMELINE"),
+			})
+		}
+	}
+	return result
+}
+
 func stringPointer(value string) *string { return &value }
 
 func archiveJSONStatus(raw *datatype.JSON) string {
+	return archiveJSONField(raw, "status")
+}
+
+// archiveJSONField returns a string field of an archive evidence document;
+// empty when the document or the field is absent.
+func archiveJSONField(raw *datatype.JSON, key string) string {
 	if raw == nil {
 		return ""
 	}
@@ -100,8 +142,8 @@ func archiveJSONStatus(raw *datatype.JSON) string {
 	if err := json.Unmarshal(bytes, &data); err != nil {
 		return ""
 	}
-	status, _ := data["status"].(string)
-	return status
+	value, _ := data[key].(string)
+	return value
 }
 
 func formatOptionalTime(value *time.Time) string {

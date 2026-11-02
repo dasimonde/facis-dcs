@@ -37,8 +37,15 @@ extraEnv:
   # declare that, so no deployment inherits it by omission.
   - name: DCS_ALLOW_DEV_TRUST
     value: "true"
-  - name: JWT_ALG_NONE_SUPPORTED
-    value: "true"
+  # Access token signatures are checked. The expired-credential scenarios sign
+  # their tokens with the development key steps/support/keys/
+  # access-token-dev.key.pem; this is its public half (UC-IF-20).
+  - name: DCS_DEV_ACCESS_TOKEN_KEY
+    value: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3STLc7Ky2vgK+BpZR5qRzK5Lldg8
+      MOm5sT6tCbop7Anb5Umo6nTNXdNfvkzccGlxKsckiufjhjYuZz6MFlql5g==
+      -----END PUBLIC KEY-----
   - name: AUTH_INSECURE_COOKIES
     value: "true"
   # Federation trust gate (ADR-19): shares instance A's ORCE (no own orce
@@ -95,8 +102,7 @@ oid4vp:
       pid: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 # Own PostgreSQL: this instance's own DCS database plus its own Hydra's
-# database. No "fc" or "statuslist" database — B doesn't run the Federated
-# Catalogue or its own Status List Service (see below).
+# database. No "fc" database — B doesn't run the Federated Catalogue.
 postgresql:
   enabled: true
   auth:
@@ -159,7 +165,10 @@ nats:
 hydra:
   enabled: true
   config:
-    dsn: "postgres://dcs:dcs@dcs2-postgresql:5432/hydra?sslmode=disable"
+    # The "hydra" database of this release's PostgreSQL, password from its
+    # Secret, verified against the internal CA (global.internalTLS).
+    coDeployedPostgresql:
+      enabled: true
     dev: true
     selfIssuerURL: "http://dcs-b.localhost:18080"
     loginURL: "http://dcs-b.localhost:18080/digital-contracting-service/ui/"
@@ -234,38 +243,13 @@ pkcs11:
     enabled: true
     soPin: "12345678"
 
-# XFSC Status List Service: shared with instance A rather than a second
-# co-deployed instance — url/tenantID point at A's already-running service.
-# Release "dcs" (instance A) -> Service name "dcs-statuslist-service", per
-# the 'statuslistServiceURL' helper's own naming convention (mirrored
-# explicitly here since statuslistService.enabled=false on this release, so
-# the helper's auto-wired branch never fires).
-#
-# The tenant is B's own, not A's: each instance allocates revocation entries out
-# of its own database (migration 20260734), so sharing one tenant's list would
-# have both instances hand out entry 0, entry 1, ... to different contracts and
-# a termination on A would read as a revocation on B. A tenant per instance
-# keeps the index spaces apart; A's list-init hook creates it
-# (values.bdd.yml bddListInit.tenantIDs).
-statuslistService:
-  enabled: false
-  url: "http://dcs-statuslist-service:8080"
-  tenantID: c2pa2
-
-# Same loopback proxy as instance A (values.bdd.yml): status list credential
-# IDs embedded by the shared Status List Service are public-origin URLs
-# (http://localhost:18080/statuslist/..., host-agnostic per instance A's
-# ingress) that this pod must also be able to resolve back to the shared
-# Traefik from inside the cluster.
+# Same loopback proxy as instance A (values.bdd.yml): the login credentials name
+# the issuer's status list at http://localhost:18080/issuer/..., which this pod
+# must resolve back to the shared Traefik from inside the cluster.
 statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
-  # Same seeded list instance A probes: B has no status list of its own and
-  # reaches A's through the same Ingress. Without this the probe falls back to
-  # the chart default /statuslist/health, which nothing serves — the sidecar
-  # then never turns ready and holds B's rollout open until it times out.
-  readinessPath: "/statuslist/v1/tenants/c2pa2/status/1"
 
 # IPFS / IPFS Document Manager: instance B runs its OWN, like a real second
 # organization (two independent provenance stores) — sharing instance A's Kubo
@@ -355,7 +339,9 @@ dss:
 # the dispatch: dcs_url is B's in-cluster API base, token_url is B's own Hydra,
 # which is the only issuer B's backend accepts. The flow falls back to its own
 # DCS_URL / HYDRA_TOKEN_URL environment (instance A's) when a registry entry
-# carries neither, so A's dispatches are unchanged.
+# carries neither, so A's dispatches are unchanged. dcs_url is the http port:
+# the ORCE of release dcs trusts the internal CA of release dcs only, and each
+# release has its own.
 contractTargets:
   - name: "BDD Contract Target"
     url: "http://dcs-orce:1880/contract-target/deploy?dcs_url=http://dcs2-digital-contracting-service:8991/digital-contracting-service/api&token_url=http://dcs2-hydra:4444/oauth2/token"
@@ -369,3 +355,24 @@ contractTargets:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
+
+# In-cluster TLS (global.internalTLS) is on, as on instance A: B's own
+# PostgreSQL, NATS, IPFS, pdf-core and Hydra use this release's CA. The ORCE and
+# DSS B shares with instance A belong to another release with another CA, so B
+# calls them on their plain ports (signing.tsaURL, dss.url, auditExecutor.url,
+# workflowGateExecutor.url, DCS_TRUST_PDP_URL, contractTargets).
+
+# The backend, ORCE and DSS admit only the Traefik ingress, the pods of this
+# release and the other BDD release (DCS-NFR-SEC-14). Instance A's ORCE (release dcs) posts the deployment callbacks of this instance's target.
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik
+  peersFrom:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: dcs

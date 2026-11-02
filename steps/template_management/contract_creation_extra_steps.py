@@ -84,6 +84,10 @@ def _clause_catalog_document(clause_names: list[str]) -> dict:
             }
         )
         layout_children.append({"@id": block_id})
+    # The first clause binds the canonical fixture's filled field, so the
+    # template policy audit (FACIS-TPL-CLAUSE-001) finds no error.
+    canonical = TemplateService.canonical_document_data("BDD Reusable Clause Template")
+    blocks[0]["dcs:content"]["@list"].append({"@id": "urn:uuid:field-service-description"})
     return {
         "@context": {"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
         "@type": "dcs:ContractTemplate",
@@ -99,6 +103,8 @@ def _clause_catalog_document(clause_names: list[str]) -> dict:
                 }
             ],
         },
+        "dcs:contractFields": canonical["dcs:contractFields"],
+        "dcs:policies": canonical["dcs:policies"],
     }
 
 
@@ -182,6 +188,11 @@ def step_then_assembly_validates_metadata(context):
     assert contract.get("template_did") and contract.get("template_version") is not None, (
         f"Expected assembled contract to carry validated template metadata (template_did/version): {contract}"
     )
+    # Name and description are the metadata submit requires
+    # (command/submit.go requireAssemblyMetadata); the assembly takes them
+    # from the clause-catalog template.
+    assert str(contract.get("name") or "").strip(), f"Expected a contract name: {contract}"
+    assert str(contract.get("description") or "").strip(), f"Expected a contract description: {contract}"
 
 
 @then("the assembly process validates content logic")
@@ -393,12 +404,27 @@ def step_then_package_shared_metadata(context):
 
 @then("the package tracks signature states")
 def step_then_package_signature_states(context):
-    zf, _ = _open_package_manifest(context)
+    zf, manifest = _open_package_manifest(context)
     names = zf.namelist()
     sig_entries = [n for n in names if n.endswith("signatures.json")]
-    assert len(sig_entries) >= 2, (
-        f"Expected the package to track a signatures.json entry per bundled contract, got: {names}"
+    components = manifest.get("components") or []
+    assert len(components) >= 2 and len(sig_entries) == len(components), (
+        f"Expected one signatures.json per bundled contract {[c.get('did') for c in components]}, got: {sig_entries}"
     )
+    # Each member records the state of every signature on it (bundleexport
+    # signaturesToJSON); a member without a signature records an empty list.
+    for entry_name in sig_entries:
+        signatures = json.loads(zf.read(entry_name))
+        assert isinstance(signatures, list), f"{entry_name} is not a list: {signatures}"
+        for signature in signatures:
+            assert signature.get("signer_did"), f"{entry_name}: signature without signer_did: {signature}"
+            assert signature.get("status") in ("PENDING", "SIGNED", "REVOKED"), (
+                f"{entry_name}: unknown signature status: {signature}"
+            )
+            if signature["status"] == "SIGNED":
+                assert signature.get("signed_at"), f"{entry_name}: SIGNED without signed_at: {signature}"
+            if signature["status"] == "REVOKED":
+                assert signature.get("revoked_at"), f"{entry_name}: REVOKED without revoked_at: {signature}"
 
 
 # ---------------------------------------------------------------------------

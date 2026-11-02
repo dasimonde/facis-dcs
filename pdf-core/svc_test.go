@@ -363,6 +363,20 @@ func TestVerify_ValidPDF(t *testing.T) {
 	}
 }
 
+// A compiled base followed by a signature-shaped revision that was never
+// re-anchored is outside its only manifest's hard binding (ADR-26), so /verify
+// reports a mismatch rather than reading the trailer as a valid signature layer.
+func TestVerify_UnanchoredSignatureTrailerOnTheBaseIsAMismatch(t *testing.T) {
+	pdf := compilePDF(t)
+	trailer := append(append([]byte(nil), pdf...),
+		"\n4242 0 obj\n<< /Type /Sig /ByteRange [0 1 2 3] /Contents <00> >>\nendobj\nstartxref\n0\n%%EOF\n"...)
+
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(trailer), "application/pdf")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("verify: status %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestVerify_WrongContentType(t *testing.T) {
 	rec := doRequest(http.MethodPost, "/verify",
 		bytes.NewBufferString("{}"), "application/json")
@@ -538,7 +552,7 @@ func TestUpdateResponseCarriesVersionHeader(t *testing.T) {
 	_, _ = pdfPart.Write(basePDF)
 	payloadPart, _ := mw.CreateFormField("payload")
 	_, _ = payloadPart.Write([]byte(minimalPayloadAmended))
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -570,7 +584,7 @@ func TestUpdateWithVCEmbedsAttachment(t *testing.T) {
 	_, _ = payloadPart.Write([]byte(minimalPayloadAmended))
 	vcPart, _ := mw.CreateFormField("vc")
 	_, _ = vcPart.Write(vcBytes)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -602,7 +616,7 @@ func TestUpdateWithVCUnchangedPayloadProceeds(t *testing.T) {
 	_, _ = payloadPart.Write([]byte(minimalPayload)) // same payload as base
 	vcPart, _ := mw.CreateFormField("vc")
 	_, _ = vcPart.Write(vcBytes)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -1012,7 +1026,7 @@ func TestEmbedEvidenceAttachesAndRoundTrips(t *testing.T) {
 	_, _ = pdfPart.Write(basePDF)
 	evPart, _ := mw.CreateFormField("evidence")
 	_, _ = evPart.Write(evidence)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/evidence/embed", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -1068,7 +1082,7 @@ func embedEvidenceHTTP(t *testing.T, pdf, evidence []byte) []byte {
 	_, _ = pdfPart.Write(pdf)
 	evPart, _ := mw.CreateFormField("evidence")
 	_, _ = evPart.Write(evidence)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/evidence/embed", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {

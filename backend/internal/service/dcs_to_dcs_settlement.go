@@ -37,35 +37,13 @@ const settlementClockSkew = 5 * time.Minute
 // shipped — held locally, re-verifiable, and bound to the document this
 // instance itself holds. Every refusal names the check that failed.
 func (s *dcsToDcssrvc) PostSettlement(ctx context.Context, req *dcstodcs.DCSToDCSContractSettlementRequest) (res *dcstodcs.DCSToDCSContractSettlementResponse, err error) {
-	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	defer func() { s.auditReceivedExchange(ctx, "post_settlement", req.ContractIri, req.FromPeerDid, err) }()
+	// Transport authentication and the federation trust gate (ADR-19), exactly
+	// as the PDF ship applies them: a peer this instance may not federate with
+	// cannot deposit evidence here.
+	remoteDIDDocument, localPeer, err := s.admitPeer(ctx, trustgate.OpPostSettlement, req.FromPeerDid, req.ContractIri, []byte(req.SettlementJades), req.SecretValue, req.SecretHash)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_settlement rejected: peer %s did not authenticate: %w", req.FromPeerDid, err))
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
-		return nil, contractworkflowengine.MakeBadRequest(
-			errors.New("post_settlement rejected: a settlement shipped by this instance to itself is no counterparty evidence"))
-	}
-
-	// Federation trust gate (ADR-19), exactly as the PDF ship applies it: a
-	// peer this instance may not federate with cannot deposit evidence here.
-	if err := s.TrustGate.Check(ctx, req.FromPeerDid, trustgate.Inbound, req.ContractIri, ""); err != nil {
-		var gateErr *trustgate.GateError
-		if errors.As(err, &gateErr) {
-			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {
-				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
-			}
-		}
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_settlement rejected: peer %s does not pass the federation trust gate: %w", req.FromPeerDid, err))
+		return nil, err
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
@@ -333,33 +311,12 @@ func verifyShippedSettlement(jadesSignature, fromPeerDID string, remoteDIDDocume
 // because a withdrawal is the same statement in reverse and must be no easier
 // to inject than the settlement it revokes.
 func (s *dcsToDcssrvc) PostSettlementWithdrawal(ctx context.Context, req *dcstodcs.DCSToDCSSettlementWithdrawalRequest) (res *dcstodcs.DCSToDCSSettlementWithdrawalResponse, err error) {
-	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	defer func() {
+		s.auditReceivedExchange(ctx, "post_settlement_withdrawal", req.ContractIri, req.FromPeerDid, err)
+	}()
+	remoteDIDDocument, localPeer, err := s.admitPeer(ctx, trustgate.OpPostSettlementWithdrawal, req.FromPeerDid, req.ContractIri, []byte(req.WithdrawalJades), req.SecretValue, req.SecretHash)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_settlement_withdrawal rejected: peer %s did not authenticate: %w", req.FromPeerDid, err))
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
-		return nil, contractworkflowengine.MakeBadRequest(
-			errors.New("post_settlement_withdrawal rejected: this instance cannot withdraw its own settlement through the peer channel"))
-	}
-
-	if err := s.TrustGate.Check(ctx, req.FromPeerDid, trustgate.Inbound, req.ContractIri, ""); err != nil {
-		var gateErr *trustgate.GateError
-		if errors.As(err, &gateErr) {
-			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {
-				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
-			}
-		}
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_settlement_withdrawal rejected: peer %s does not pass the federation trust gate: %w", req.FromPeerDid, err))
+		return nil, err
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)

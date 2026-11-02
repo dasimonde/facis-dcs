@@ -14,20 +14,35 @@ import (
 	semantichubgen "digital-contracting-service/gen/semantic_hub"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/safehttp"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/semantichub"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
+	"goa.design/clue/log"
 )
 
 const maxSchemaFetchBytes = 8 << 20 // 8 MiB
 
+// schemaFetchClient dials public addresses only: no loopback, link-local or
+// private address, also on a redirect hop, because every dial is checked
+// (DCS-FR-TR-03).
+var schemaFetchClient = schemaClient(safehttp.Policy{DenyPrivate: true})
+
+func schemaClient(p safehttp.Policy) *http.Client {
+	client := safehttp.Client(20*time.Second, p)
+	// Canonical schemas sit behind w3id/purl redirects. The default policy
+	// follows up to 10 of them; each hop goes through the checked dialer.
+	client.CheckRedirect = nil
+	return client
+}
+
 // fetchSchemaFromURL retrieves a schema document over http(s), following
-// redirects (Gaia-X and other canonical schemas sit behind w3id/purl
-// redirects). It is register-only and RBAC-gated (Template Manager); it bounds
-// the scheme, response size, and time. The caller snapshots the bytes as an
-// immutable version.
+// redirects. It is register-only and RBAC-gated (Template Manager); it bounds
+// the scheme, the addresses, the response size, and time. The caller
+// snapshots the bytes as an immutable version.
 func fetchSchemaFromURL(ctx context.Context, rawURL string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
@@ -43,9 +58,7 @@ func fetchSchemaFromURL(ctx context.Context, rawURL string) (string, error) {
 	}
 	req.Header.Set("Accept", "text/turtle, application/ld+json, application/rdf+xml, application/json, */*")
 
-	// http.Client follows up to 10 redirects by default.
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := schemaFetchClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch %s: %w", parsed.Redacted(), err)
 	}
@@ -375,6 +388,33 @@ func (s *semanticHubsrvc) List(ctx context.Context) (res []*semantichubgen.Seman
 		})
 	}
 	return out, nil
+}
+
+// FollowHubActivations calls refresh each time any replica commits a hub
+// activation, and after the listening connection is restored, because
+// activations can be missed while it is down. The anchors are process-wide
+// state, so without this only the replica that served the activation request
+// would use the new versions.
+func FollowHubActivations(ctx context.Context, databaseURL string, refresh func(context.Context) error) error {
+	listener := pq.NewListener(databaseURL, time.Second, time.Minute, nil)
+	if err := listener.Listen(semantichub.ActivationChannel); err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("listen for semantic hub activations: %w", err)
+	}
+	go func() {
+		defer func() { _ = listener.Close() }()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-listener.Notify:
+				if err := refresh(ctx); err != nil {
+					log.Errorf(ctx, err, "re-anchor validation after a semantic hub activation")
+				}
+			}
+		}
+	}()
+	return nil
 }
 
 // RefreshValidationAnchors re-points the validation layer's process-wide

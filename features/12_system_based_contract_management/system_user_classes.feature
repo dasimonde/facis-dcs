@@ -27,6 +27,20 @@ Feature: SRS System User classes authenticate as machine clients
     When the system client "dcs-orce-manager" obtains an access token
     Then the system client holds a machine access token
 
+  # Each class acts with its own client credentials: the reviewer forwards the
+  # submitted contract to approval, then the approver approves it.
+  @UC-12-02 @UC-12-03 @DCS-FR-UC-12-2 @DCS-FR-UC-12-3
+  Scenario: A System Contract Reviewer and a System Contract Approver review and approve a contract through the API
+    Given contract "System Reviewed Contract" has reached contract state "SUBMITTED"
+    When the system client "dcs-orce-reviewer" obtains an access token
+    And the system client forwards contract "System Reviewed Contract" to approval
+    Then get http 200:Success code
+    And the contract "System Reviewed Contract" is in state "REVIEWED"
+    When the system client "dcs-orce-approver" obtains an access token
+    And the system client approves contract "System Reviewed Contract"
+    Then get http 200:Success code
+    And the contract "System Reviewed Contract" is in state "APPROVED"
+
   @DCS-IR-PACM-01 @ADR-16 @DCS-FR-CSA-03 @DCS-FR-PACM-01 @DCS-NFR-BR-05
   Scenario: The System Auditor reads the audit checkpoint head it anchors externally
     Given contract "Anchored Audit Contract" has reached contract state "APPROVED"

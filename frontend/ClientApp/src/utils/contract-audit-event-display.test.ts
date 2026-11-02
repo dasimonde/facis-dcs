@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { contractAuditEventTransition } from './contract-audit-event-display'
+import { contractAuditEventDisplayText, contractAuditEventTransition } from './contract-audit-event-display'
+
+describe('contractAuditEventDisplayText', () => {
+  it('names a termination notice the counterparty refused', () => {
+    expect(contractAuditEventDisplayText('PEER_EXCHANGE_REFUSED')).toBe(
+      'Termination notice refused by the counterparty instance',
+    )
+  })
+})
 
 describe('contractAuditEventTransition', () => {
   it('formats previous → new from event_data', () => {

@@ -62,11 +62,12 @@ func (c *claimConn) QueryContext(_ context.Context, query string, _ []driver.Nam
 		return &claimRows{
 			columns: []string{"run_id", "correlation_id", "snapshot_id", "contract_did", "contract_version",
 				"contract_state", "contract_updated_at", "gate", "status", "content_hash", "effective_shapes",
-				"profile_version", "continuation_json"},
+				"profile_version", "continuation_json", "local_evaluation", "response_json", "created_at"},
 			values: [][]driver.Value{{
 				c.state.runID, "66d1a314-c32f-4259-af22-62808c993bcc", "sha256:snapshot",
 				"did:web:example.test:contract", int64(1), "DRAFT", time.Now().UTC(),
 				"submission", "DISPATCHING", "sha256:content", []byte(`["shape"]`), int64(1), []byte(`{}`),
+				[]byte(`{}`), []byte(`{}`), time.Now().UTC(),
 			}},
 		}, nil
 	case strings.Contains(query, "pac_workflow_gate_review_decisions"),

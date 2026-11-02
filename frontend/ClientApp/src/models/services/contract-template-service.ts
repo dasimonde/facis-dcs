@@ -23,6 +23,8 @@ import type {
   ContractTemplateCopyResponse,
   ContractTemplateCreateResponse,
   ContractTemplateHistoryResponse,
+  ContractTemplatePdfVerifyResponse,
+  ContractTemplateProvenanceResponse,
   ContractTemplatePublishResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
@@ -52,7 +54,7 @@ export interface ContractTemplateService {
   audit: (request: ContractTemplateAuditRequest) => Promise<ContractTemplateAuditResponse>
   publish: (request: ContractTemplatePublishRequest) => Promise<ContractTemplatePublishResponse>
   exportPdf: (did: string) => Promise<Blob>
-  verifyPdf: (
-    did: string,
-  ) => Promise<{ match: boolean; jsonld_hash: string; base_pdf_hash: string; stored_base_pdf_hash: string }>
+  verifyPdf: (did: string) => Promise<ContractTemplatePdfVerifyResponse>
+  provenance: (did: string) => Promise<ContractTemplateProvenanceResponse>
+  exportBundle: (did: string) => Promise<Blob>
 }

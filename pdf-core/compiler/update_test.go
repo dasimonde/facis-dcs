@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"bytes"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -328,12 +329,48 @@ func TestVerifyIncrementalUpdate_SignedThenAmended(t *testing.T) {
 	if _, err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
 		t.Errorf("VerifyIncrementalUpdate on signed-then-amended PDF: %v", err)
 	}
+}
 
-	// Also verify that amending after a PAdES-re-signed amended PDF passes.
-	fakeSignature2 := []byte("\n% external-signature-appendix-2\nstartxref\n0\n%%EOF\n")
-	reSigned := append(append([]byte(nil), amended...), fakeSignature2...)
-	if _, err := VerifyIncrementalUpdate(testSigningContext(), reSigned); err != nil {
-		t.Errorf("VerifyIncrementalUpdate on re-signed amended PDF: %v", err)
+// Bytes appended after the last DCS revision are outside every replay, which
+// is a prefix check. The last manifest's hard binding covers the whole file,
+// so a revision that redefines a page after it is rejected, and so is any
+// other trailer that was not re-anchored (ADR-26).
+func TestVerifyRejectsRevisionAppendedAfterLastManifest(t *testing.T) {
+	compiled, err := CompilePDF(testSigningContext(), []byte(minimalPayloadBase), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	amended, err := UpdatePDF(testSigningContext(), compiled, []byte(minimalPayloadAmended), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), amended); err != nil {
+		t.Fatalf("the amended PDF must verify: %v", err)
+	}
+	ranges, err := pageContentStreamRanges(amended)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := "BT /F1 24 Tf 72 700 Td (FORGED TERMS) Tj ET"
+	forgedPage := appendRevision(t, amended, map[int]string{
+		ranges[0].objID: "<< /Length " + strconv.Itoa(len(forged)) + " >>\nstream\n" + forged + "\nendstream",
+	})
+	unsignedTrailer := append(append([]byte(nil), amended...), "\n% external-signature-appendix\nstartxref\n0\n%%EOF\n"...)
+
+	for name, tampered := range map[string][]byte{"redefined page": forgedPage, "unsigned trailer": unsignedTrailer} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := VerifyIncrementalUpdate(testSigningContext(), tampered); err == nil {
+				t.Fatal("bytes appended after the last manifest were accepted")
+			}
+		})
+	}
+
+	reanchored, err := ReanchorProvenance(testSigningContext(), unsignedTrailer, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyIncrementalUpdate(testSigningContext(), reanchored); err != nil {
+		t.Fatalf("a re-anchor over the appended bytes must verify: %v", err)
 	}
 }
 

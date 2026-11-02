@@ -11,12 +11,12 @@ import (
 // PoAVCT is the DCS Proof of Authority credential type (version 1).
 const PoAVCT = "urn:dcs:poa:v1"
 
-const PoACredentialQueryID = "dcs_poa_credential"
+const PoACredentialQueryID = "dcs_poa_credential" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 // PoALegacyCredentialQueryID asks for the same Power of Attorney under the
 // SD-JWT VC format identifier that predates dc+sd-jwt. A PoA may be issued by
 // any issuer this deployment trusts for the purpose, not only its own (ADR-31).
-const PoALegacyCredentialQueryID = "dcs_poa_credential_vc_sd_jwt"
+const PoALegacyCredentialQueryID = "dcs_poa_credential_vc_sd_jwt" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 // DefaultDCQLQuery requests an SD-JWT VC PoA credential for OpenID4VP
 // presentation, under either format identifier.

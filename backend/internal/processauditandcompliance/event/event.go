@@ -149,6 +149,8 @@ func (e ComplianceRiskEvent) GetDID() string {
 // anchoring so a PROCESS_AUDIT_AND_COMPLIANCE-scope audit read can prove the
 // finding was recorded, not merely accepted.
 type IncidentReportEvent struct {
+	// CaseID groups the findings of one incident report into one case.
+	CaseID     string             `json:"case_id"`
 	DID        string             `json:"did"`
 	RiskType   string             `json:"risk_type"`
 	Detail     string             `json:"detail"`
@@ -167,6 +169,44 @@ func (e IncidentReportEvent) EventType() string {
 func (e IncidentReportEvent) GetDID() string {
 	return e.DID
 }
+
+// CaseFileExportedEvent records that an investigator exported the case file
+// of an incident (DCS-FR-PACM-05) and why.
+type CaseFileExportedEvent struct {
+	CaseID        string             `json:"case_id"`
+	DID           string             `json:"did"`
+	ExportedBy    string             `json:"exported_by"`
+	Justification string             `json:"justification"`
+	ContentHash   string             `json:"content_hash"`
+	OccurredAt    time.Time          `json:"occurred_at"`
+	HolderDID     string             `json:"holder_did"`
+	UserRoles     userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e CaseFileExportedEvent) EventType() string { return "PAC_CASE_FILE_EXPORTED" }
+
+// GetDID implements the Event interface.
+func (e CaseFileExportedEvent) GetDID() string { return e.DID }
+
+// PartyReportGeneratedEvent records that a party compliance report of a
+// contract was generated (DCS-FR-PACM-07): it shows signer identities and
+// credential metadata.
+type PartyReportGeneratedEvent struct {
+	DID         string             `json:"did"`
+	GeneratedBy string             `json:"generated_by"`
+	Status      string             `json:"status"`
+	ContentHash string             `json:"content_hash"`
+	OccurredAt  time.Time          `json:"occurred_at"`
+	HolderDID   string             `json:"holder_did"`
+	UserRoles   userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e PartyReportGeneratedEvent) EventType() string { return "PAC_PARTY_REPORT_GENERATED" }
+
+// GetDID implements the Event interface.
+func (e PartyReportGeneratedEvent) GetDID() string { return e.DID }
 
 // TrustGateDenialEvent anchors one federation trust-gate rejection (ADR-19):
 // either the agreement-credential check (layer 3a: missing, unsigned, or a

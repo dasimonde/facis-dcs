@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({ lifecycle: vi.fn() }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { did: 'did:test:contract' } }) }))
 vi.mock('@/services/contract-workflow-service', () => ({ contractWorkflowService: mocks }))
 
-describe('U3 contract lifecycle history', () => {
+describe('contract lifecycle history', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()

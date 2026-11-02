@@ -1,9 +1,17 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-nats
 spec:
   replicas: 1
+  # The data volume is RWO, so an update must terminate the current pod before
+  # creating its replacement.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: nats
@@ -14,13 +22,53 @@ spec:
         app.kubernetes.io/name: nats
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: nats
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["-js"]
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+          {{- if $tls }}
+            - name: internal-tls
+              mountPath: /etc/dcs-internal-tls
+              readOnly: true
+            - name: config
+              mountPath: /etc/nats
+              readOnly: true
+          # Clients must use TLS 1.3 (DCS-NFR-SEC-14).
+          args: ["-js", "-sd", "/data", "-c", "/etc/nats/nats.conf"]
+          {{- else }}
+          args: ["-js", "-sd", "/data"]
+          {{- end }}
           ports:
             - name: client
               containerPort: {{ .Values.service.port }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        # The JetStream store: the events that a consumer group has not
+        # acknowledged yet stay through a restart of the pod.
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-nats
+      {{- if $tls }}
+        - name: internal-tls
+          secret:
+            secretName: {{ .Release.Name }}-internal-tls
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-nats
+      {{- end }}

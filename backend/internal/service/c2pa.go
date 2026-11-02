@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,8 +12,6 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
-	"digital-contracting-service/internal/pdfgeneration/provenance"
-	pdfquery "digital-contracting-service/internal/pdfgeneration/query"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -25,25 +24,16 @@ type c2paSrvc struct {
 	Artifacts *artifactstore.Store
 	CRepo     cwedb.ContractRepo
 	PDFCore   *pdfcore.Client
-	IssuerDID string
-	VCIssuer  provenance.VCIssuer
 }
 
-// NewC2PAService wires the public C2PA manifest endpoint (DCS-OR-C2PA-008,
-// DCS-OR-C2PA-008). It reuses the same PDF export dependencies as PDFGeneration so
-// it can fetch the current/cached signed PDF and extract its embedded C2PA
-// manifest store.
+// NewC2PAService wires the public C2PA manifest endpoint (DCS-OR-C2PA-008). It
+// serves the manifest store of the contract PDF this instance stores.
 func NewC2PAService(
 	db *sqlx.DB,
 	artifacts *artifactstore.Store,
 	cRepo cwedb.ContractRepo,
 	pdfCore *pdfcore.Client,
-	issuerDID string,
-	vcIssuer provenance.VCIssuer,
 ) c2paservice.Service {
-	if vcIssuer == nil {
-		panic("VCIssuer is required for DCS-OR-C2PA-004 compliance")
-	}
 	if pdfCore == nil {
 		panic("PDFCore client is required")
 	}
@@ -52,40 +42,22 @@ func NewC2PAService(
 		Artifacts: artifacts,
 		CRepo:     cRepo,
 		PDFCore:   pdfCore,
-		IssuerDID: issuerDID,
-		VCIssuer:  vcIssuer,
 	}
 }
 
-// GetManifest returns the raw C2PA JUMBF manifest store bytes for a
-// signed/exported contract (Content-Type application/c2pa), or — when
-// ?history=true — a parsed JSON enumeration of the manifest chain.
+// GetManifest returns the raw C2PA JUMBF manifest store of the stored PDF of a
+// signed contract (Content-Type application/c2pa), or — when ?history=true — a
+// parsed JSON enumeration of the manifest chain.
+//
+// The endpoint is public, so it never waits for a regeneration in flight: it
+// serves the stored PDF as it stands and answers not found when there is none.
 func (s *c2paSrvc) GetManifest(ctx context.Context, p *c2paservice.GetManifestPayload) (*c2paservice.GetManifestResult, io.ReadCloser, error) {
-	// Fetch the current/cached PDF through the same export path
-	// export_contract_pdf uses, then extract its embedded C2PA manifest store.
-	exportHandler := pdfquery.ExportContractPdfHandler{
-		DB:        s.DB,
-		CRepo:     s.CRepo,
-		Artifacts: s.Artifacts,
-		PDFCore:   s.PDFCore,
-		VCIssuer:  s.VCIssuer,
-		IssuerDID: s.IssuerDID,
-	}
-	pdfReader, err := exportHandler.Handle(ctx, pdfquery.ExportContractPdfQry{DID: p.ContractDid})
+	pdfBytes, err := s.storedPDF(ctx, p.ContractDid)
 	if err != nil {
-		if artifactstore.IsShredded(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, nil, c2paservice.MakeNotFound(err)
 		}
-		if isNotFoundErr(err) {
-			return nil, nil, c2paservice.MakeNotFound(err)
-		}
-		return nil, nil, c2paservice.MakeInternalError(fmt.Errorf("export contract PDF %s for C2PA manifest: %w", p.ContractDid, err))
-	}
-	defer func() { _ = pdfReader.Close() }()
-
-	pdfBytes, err := io.ReadAll(pdfReader)
-	if err != nil {
-		return nil, nil, c2paservice.MakeInternalError(fmt.Errorf("read exported PDF for %s: %w", p.ContractDid, err))
+		return nil, nil, c2paservice.MakeInternalError(fmt.Errorf("read the stored PDF of %s for its C2PA manifest: %w", p.ContractDid, err))
 	}
 
 	if p.History != nil && *p.History {
@@ -111,4 +83,28 @@ func (s *c2paSrvc) GetManifest(ctx context.Context, p *c2paservice.GetManifestPa
 
 	ct := c2paManifestMediaType
 	return &c2paservice.GetManifestResult{ContentType: &ct}, io.NopCloser(bytes.NewReader(manifestBytes)), nil
+}
+
+// storedPDF returns the contract PDF this instance stores for did.
+func (s *c2paSrvc) storedPDF(ctx context.Context, did string) ([]byte, error) {
+	tx, err := s.DB.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	state, err := s.CRepo.ReadPDFState(ctx, tx, did)
+	_ = tx.Rollback()
+	if err != nil {
+		return nil, err
+	}
+	if state.IPFSCID == "" {
+		return nil, fmt.Errorf("contract %s has no stored PDF: not found", did)
+	}
+	// The manifest of a contract that is not signed names its drafts and
+	// negotiation states and their reasons. It is served to anyone only once the
+	// contract is signed; before that its parties read the chain through the
+	// authenticated GET /signature/provenance/{did} (UC-IF-32).
+	if !state.Signed {
+		return nil, fmt.Errorf("contract %s is not signed: not found", did)
+	}
+	return s.Artifacts.Get(ctx, artifactstore.ContractScope(did), state.IPFSCID)
 }

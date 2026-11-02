@@ -3,33 +3,15 @@ package webhookplatform
 import (
 	"bytes"
 	"context"
-	"os"
 	"testing"
 
-	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
-
-	"digital-contracting-service/migrations"
+	"digital-contracting-service/internal/base/pgtest"
 )
 
 // Runs only against a real database: QA_DATABASE_URL must point to an empty
 // Postgres that the migrations may write to.
 func TestPostgresSubscriptionsScopeToOwner(t *testing.T) {
-	url := os.Getenv("QA_DATABASE_URL")
-	if url == "" {
-		t.Skip("QA_DATABASE_URL is not set")
-	}
-	db, err := sqlx.Connect("postgres", url)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := migrations.Run(db); err != nil {
-		t.Fatalf("migrations: %v", err)
-	}
-	if _, err := db.Exec(`DELETE FROM webhook_subscriptions`); err != nil {
-		t.Fatalf("clean: %v", err)
-	}
+	db := pgtest.Open(t)
 
 	ctx := context.Background()
 	s := PostgresSubscriptions{DB: db, Secrets: testSecretBox(t)}

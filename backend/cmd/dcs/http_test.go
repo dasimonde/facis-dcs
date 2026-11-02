@@ -3,13 +3,32 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	goahttp "goa.design/goa/v3/http"
+
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 )
+
+// DCS-FR-CWE-24: the metrics wrapper lets the server-sent event stream flush
+// each event to the client instead of holding it in the response buffer.
+func TestMetricsMiddlewareFlushesStreamedResponses(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	metricsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("data: {}\n\n"))
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush: %v", err)
+		}
+	})).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/contract/events", nil))
+	if !recorder.Flushed {
+		t.Fatal("the event stayed in the response buffer")
+	}
+}
 
 // TestErrorFormatterPreservesBundleExportFindings verifies that a
 // *pdfgeneration.BundleExportRefusedError keeps its findings array (and gets a
@@ -82,6 +101,25 @@ func TestErrorFormatterRefusalNilFindings(t *testing.T) {
 	}
 }
 
+// The Webhooks view calls the webhook platform under the API path, which the
+// ingress routes to the backend; /orce/ on the root stays for ORCE
+// (DCS-NFR-SQ-08).
+func TestWebhookPlatformIsUnderTheAPIPath(t *testing.T) {
+	t.Setenv("DCS_API_PATH", "/digital-contracting-service/api")
+	platform := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("platform " + r.URL.Path)) })
+	mux := newOuterMux(platform, http.NotFoundHandler(), http.NotFoundHandler())
+	for path, want := range map[string]string{
+		"/digital-contracting-service/api/orce/webhooks": "platform /webhooks",
+		"/orce/webhooks": "platform /webhooks",
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Body.String() != want {
+			t.Errorf("GET %s = %d %q, want %q", path, rec.Code, rec.Body.String(), want)
+		}
+	}
+}
+
 // TestMetricsOnlyOnMetricsListener: the public handler chain must not serve
 // /metrics; the metrics listener must.
 func TestMetricsOnlyOnMetricsListener(t *testing.T) {
@@ -97,4 +135,41 @@ func TestMetricsOnlyOnMetricsListener(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "# HELP") {
 		t.Errorf("metrics GET /metrics = %d, body %.80q; want 200 with Prometheus text", rec.Code, rec.Body.String())
 	}
+}
+
+// DCS-NFR-PER-01 (NFR-8): the request metrics are labelled with the route
+// pattern and a known method, so requests to unknown paths or with invented
+// methods add no new series.
+func TestMetricsLabelsStayBounded(t *testing.T) {
+	goaMux := goahttp.NewMuxer()
+	goaMux.Handle(http.MethodGet, "/contract/{did}", func(w http.ResponseWriter, _ *http.Request) {})
+	handler := metricsMiddleware(recordRoute(newOuterMux(http.NotFoundHandler(), http.NotFoundHandler(), goaMux)))
+	serve := func(method, path string) {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, path, nil))
+	}
+
+	before := seriesCount(httpRequestsTotal)
+	for i := range 100 {
+		serve(http.MethodPost, fmt.Sprintf("/scan/%d", i))
+		serve(http.MethodGet, fmt.Sprintf("/contract/did:example:%d", i))
+	}
+	serve("FOO", "/contract/did:example:1")
+	if added := seriesCount(httpRequestsTotal) - before; added > 3 {
+		t.Fatalf("201 requests added %d label sets, want at most 3", added)
+	}
+	for _, labels := range [][]string{{http.MethodGet, "/contract/{did}", "200"}, {"OTHER", "/", "405"}} {
+		if !httpRequestsTotal.DeleteLabelValues(labels...) {
+			t.Errorf("no series %v", labels)
+		}
+	}
+}
+
+func seriesCount(c prometheus.Collector) int {
+	ch := make(chan prometheus.Metric)
+	go func() { c.Collect(ch); close(ch) }()
+	n := 0
+	for range ch {
+		n++
+	}
+	return n
 }

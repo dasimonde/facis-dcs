@@ -1,6 +1,6 @@
 // Package statuspublication provides the durable PostgreSQL-backed delivery
-// queue for contract lifecycle status updates sent to the retained XFSC
-// Status List Service.
+// queue for contract lifecycle status updates written to the status list this
+// deployment serves (ADR-34).
 package statuspublication
 
 import (

@@ -1,7 +1,13 @@
+# kind v0.30.0 and its node image. Since kind v0.24 the default CNI (kindnetd
+# with kube-network-policies) enforces NetworkPolicy, so the chart's policies
+# are in force in the BDD and e2e stacks (scripts/run_bdd_helm.sh checks it).
+# Create the cluster with kind v0.30.0, the version CI installs
+# (.github/workflows/bdd-kind.yml).
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
+    image: kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a
     kubeadmConfigPatches:
       - |
         kind: InitConfiguration

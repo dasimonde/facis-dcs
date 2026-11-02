@@ -33,7 +33,7 @@ func TestBuildArchiveEntryFillsTheRetentionDate(t *testing.T) {
 	now := time.Now().UTC()
 	exp := time.Date(2027, 10, 1, 0, 0, 0, 0, time.UTC)
 	entry, err := BuildArchiveEntry(&db.Contract{DID: "did:web:contract", ContractVersion: 1, State: contractstate.Signed.String(),
-		CreatedAt: now, UpdatedAt: now, ExpDate: &exp}, "did:web:operator", ArchiveSigningEvidence{SignedAt: now})
+		CreatedAt: now, UpdatedAt: now, ExpDate: &exp}, nil, "did:web:operator", []ArchiveSigningEvidence{{SignedAt: now}}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, entry.RetentionUntil)
 	require.Equal(t, time.Date(2037, 10, 1, 0, 0, 0, 0, time.UTC), *entry.RetentionUntil)

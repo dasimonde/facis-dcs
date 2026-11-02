@@ -40,7 +40,7 @@ def step_then_template_audit_includes_action(context, name, event_type):
     while time.monotonic() < deadline:
         resp = requests.get(
             template_audit_url(context),
-            params={"did": t["did"]},
+            params={"did": t["did"], "justification": "BDD template audit"},
             headers=headers,
             timeout=context.http_timeout_seconds,
         )
@@ -69,7 +69,7 @@ def step_then_template_audit_records_review_comment(context, name, comment):
     while time.monotonic() < deadline:
         resp = requests.get(
             template_audit_url(context),
-            params={"did": t["did"]},
+            params={"did": t["did"], "justification": "BDD template audit"},
             headers=headers,
             timeout=context.http_timeout_seconds,
         )

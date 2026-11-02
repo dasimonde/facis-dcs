@@ -1,3 +1,4 @@
+import type { TemplateLevel } from '@/models/contract-template/contract-template'
 import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type { DcsBlock, DcsContractDataObject, DcsContractField, DcsLayoutNode, OdrlRule } from '@/models/dcs-jsonld'
 import type { ContractTemplateState } from '@/types/contract-template-state'
@@ -26,6 +27,12 @@ interface TemplateDraftState {
   policies: OdrlRule[]
   customMetaData: MetaData[]
   partyType: PartyType | undefined
+  /** DCS-FR-TR-10 searchable metadata. */
+  jurisdiction: string
+  industry: string
+  /** DCS-FR-TR-02, DCS-FR-TR-23 template structure. */
+  templateLevel: TemplateLevel
+  requiredTemplates: string[]
   templateType: TemplateTypeValue
   state: ContractTemplateState | undefined
   version: number | null

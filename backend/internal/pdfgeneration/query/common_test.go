@@ -8,22 +8,24 @@ import (
 )
 
 func TestQueryStatusWithPublicationBarrierWaitsForTerminalPublication(t *testing.T) {
-	calls := 0
-	status, err := queryStatusWithPublicationBarrier(context.Background(), "terminated", func() (string, error) {
-		calls++
-		if calls == 1 {
-			return "active", nil
+	for _, lifecycle := range []string{"terminated", "suspended", "expired"} {
+		calls := 0
+		status, err := queryStatusWithPublicationBarrier(context.Background(), lifecycle, func() (string, error) {
+			calls++
+			if calls == 1 {
+				return "active", nil
+			}
+			return "revoked", nil
+		})
+		if err != nil {
+			t.Fatalf("%s: query status: %v", lifecycle, err)
 		}
-		return "revoked", nil
-	})
-	if err != nil {
-		t.Fatalf("query status: %v", err)
-	}
-	if status != "revoked" {
-		t.Fatalf("status = %q, want revoked", status)
-	}
-	if calls != 2 {
-		t.Fatalf("query calls = %d, want 2", calls)
+		if status != "revoked" {
+			t.Fatalf("%s: status = %q, want revoked", lifecycle, status)
+		}
+		if calls != 2 {
+			t.Fatalf("%s: query calls = %d, want 2", lifecycle, calls)
+		}
 	}
 }
 

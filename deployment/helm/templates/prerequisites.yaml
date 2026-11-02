@@ -1,0 +1,52 @@
+{{- /*
+Render-time checks. A production-like release (a real HSM, or a Hydra outside
+dev mode) refuses to render without the values the backend needs to start
+(DCS-NFR-SQ-03): each of them is otherwise a fatal error at startup or a pod
+that never becomes ready. deployment/README.md, "Production prerequisites",
+lists them with the Secrets and their keys.
+*/}}
+{{- $hydraDev := and .Values.hydra.enabled (eq (toString (dig "config" "dev" false .Values.hydra)) "true") }}
+{{- /* replicaCount 0 (the dev profiles): the backend runs outside the cluster. */}}
+{{- $backendDeployed := or .Values.autoscaling.enabled (gt (int .Values.replicaCount) 0) }}
+{{- $production := and $backendDeployed (or (not .Values.pkcs11.provisioning.enabled) (and .Values.hydra.enabled (not $hydraDev))) }}
+{{- $pg := dig "config" "coDeployedPostgresql" "enabled" false .Values.hydra }}
+{{- if and .Values.hydra.enabled $pg (not (and .Values.postgresql.enabled (has "hydra" .Values.postgresql.additionalDatabases))) }}
+{{- fail "hydra.config.coDeployedPostgresql needs postgresql.enabled and \"hydra\" in postgresql.additionalDatabases" }}
+{{- end }}
+{{- if $production }}
+{{- $missing := list }}
+{{- if not (or .Values.signing.issuerDID .Values.signing.issuerDIDSecretRef.name) }}
+{{- $missing = append $missing "signing.issuerDID (or signing.issuerDIDSecretRef.name): the DID of this instance, ISSUER_DID" }}
+{{- end }}
+{{- if not .Values.signing.tsaURL }}
+{{- $missing = append $missing "signing.tsaURL: the RFC 3161 timestamp authority, TSA_URL" }}
+{{- end }}
+{{- if not (or .Values.messaging.natsURL .Values.messaging.secretRef.name .Values.nats.enabled) }}
+{{- $missing = append $missing "messaging.natsURL, messaging.secretRef.name or nats.enabled: the NATS server, NATS_URL" }}
+{{- end }}
+{{- if not (and .Values.oid4vp.trust.enabled .Values.oid4vp.trust.existingConfigMap) }}
+{{- $missing = append $missing "oid4vp.trust.enabled=true and oid4vp.trust.existingConfigMap: the trusted credential issuers, OID4VP_TRUST_DATA_PATH" }}
+{{- else if not (hasKey (.Values.configIntegrity.pins | default dict) "oid4vp-trust-data") }}
+{{- $missing = append $missing "configIntegrity.pins.oid4vp-trust-data: the SHA-256 of the trust document (sha256sum of the ConfigMap key), DCS_CONFIG_SHA256_PINS" }}
+{{- end }}
+{{- if and .Values.hydra.enabled (not .Values.hydra.clients) }}
+{{- $missing = append $missing "hydra.clients: the login client of the backend (HYDRA_CLIENT_ID, HYDRA_CLIENT_SECRET)" }}
+{{- end }}
+{{- if not (or .Values.identity.existingSecret (and .Values.identity.enabled .Values.pkcs11.provisioning.enabled)) }}
+{{- $missing = append $missing "identity.existingSecret (a Secret with did.json for the HSM key dcs-did), or identity.enabled=true with pkcs11.provisioning: DCS_DID" }}
+{{- end }}
+{{- if not .Values.pkcs11.provisioning.enabled }}
+{{- if not (and .Values.pkcs11.modulePath .Values.pkcs11.tokenLabel) }}
+{{- $missing = append $missing "pkcs11.modulePath and pkcs11.tokenLabel: the PKCS#11 module and token of the HSM" }}
+{{- end }}
+{{- if not .Values.signing.issuerX5ChainPath }}
+{{- $missing = append $missing "signing.issuerX5ChainPath: the mounted certificate chain of the HSM key dcs-c2pa, DCS_ISSUER_X5CHAIN_PATH" }}
+{{- end }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.ingress.enabled (not .Values.networkPolicy.ingressFrom) }}
+{{- $missing = append $missing "networkPolicy.ingressFrom: the pods of the ingress controller, so the backend, ORCE and DSS admit no other client outside the release" }}
+{{- end }}
+{{- if $missing }}
+{{- fail (printf "this release uses a real HSM or a Hydra outside dev mode, and the backend cannot start without:\n  - %s\nSee deployment/README.md, \"Production prerequisites\"." (join "\n  - " $missing)) }}
+{{- end }}
+{{- end }}

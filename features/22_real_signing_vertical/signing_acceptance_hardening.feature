@@ -14,7 +14,7 @@ Feature: Signing acceptance-path hardening
     When the signer publishes the OID4VP signing request for contract "SAH Cert Mismatch Contract"
     Then get http 200:Success code
     When the wallet signs contract "SAH Cert Mismatch Contract" as "SAHCertMismatchWrongCert" with a certificate naming "Someone" "Else"
-    Then the ceremony callback for contract "SAH Cert Mismatch Contract" rejects the signature
+    Then the ceremony callback for contract "SAH Cert Mismatch Contract" rejects the signature with "cert_pid_mismatch"
 
   @ADR-20
   Scenario: A signed document whose visible content diverges from what was prepared is rejected
@@ -22,7 +22,7 @@ Feature: Signing acceptance-path hardening
     When the signer publishes the OID4VP signing request for contract "SAH Byte Tamper Contract"
     Then get http 200:Success code
     When the wallet signs a byte-tampered copy of the to-be-signed document for contract "SAH Byte Tamper Contract" as "SAHByteTamper"
-    Then the ceremony callback for contract "SAH Byte Tamper Contract" rejects the signature
+    Then the ceremony callback for contract "SAH Byte Tamper Contract" rejects the signature with "document_mismatch"
 
   @ADR-20 @DCS-FR-SM-02
   Scenario: An invalid JAdES is rejected even when the PAdES signature is genuinely valid
@@ -30,7 +30,7 @@ Feature: Signing acceptance-path hardening
     When the signer publishes the OID4VP signing request for contract "SAH Invalid JAdES Contract"
     Then get http 200:Success code
     When a raw invalid JAdES is submitted for the signed document on contract "SAH Invalid JAdES Contract"
-    Then the ceremony callback for contract "SAH Invalid JAdES Contract" rejects the signature
+    Then the ceremony callback for contract "SAH Invalid JAdES Contract" rejects the signature with "jades_invalid"
 
   @ADR-20 @DCS-FR-SM-18 @DCS-IR-CI-09 @DCS-IR-SI-09
   Scenario: A revoked PID is rejected at the ceremony presentation
@@ -45,7 +45,7 @@ Feature: Signing acceptance-path hardening
     When the signer publishes the OID4VP signing request for contract "SAH QES Required Contract"
     Then get http 200:Success code
     When the wallet signs contract "SAH QES Required Contract" as "SAHQesRequired" with an ordinary AES signature
-    Then the ceremony callback for contract "SAH QES Required Contract" rejects the signature
+    Then the ceremony callback for contract "SAH QES Required Contract" rejects the signature with "level_below_required"
 
   @ADR-20
   Scenario: A replayed callback for an already-consumed ceremony is rejected
@@ -53,7 +53,7 @@ Feature: Signing acceptance-path hardening
     When the signer publishes the OID4VP signing request for contract "SAH Replay Contract"
     Then get http 200:Success code
     When the wallet signs contract "SAH Replay Contract" as "SAHReplay" and the same callback is replayed
-    Then the ceremony callback for contract "SAH Replay Contract" rejects the signature
+    Then the ceremony callback for contract "SAH Replay Contract" rejects the signature with "bad_request"
 
   # A real EUDI wallet's issued PID carries its issuer certificate as an x5c
   # chain, not a bare jwk trusted via DID allow-list. The chain is verified to

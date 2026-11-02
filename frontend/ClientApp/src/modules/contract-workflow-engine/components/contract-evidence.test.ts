@@ -47,7 +47,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-describe('F10 evidence lifecycle', () => {
+describe('evidence lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.auth.user.roles = ['CONTRACT_MANAGER']
@@ -139,11 +139,38 @@ it('renders contract evidence alongside the audit trail with block and layout co
   const layout: DcsLayoutNode[] = []
   const wrapper = mount(AuditView, { props: { contract, blocks, layout }, global: { plugins: [pinia] } })
   await flushPromises()
+  expect(mocks.audit).not.toHaveBeenCalled()
+  await wrapper.get('form input').setValue('Dispute review')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(mocks.audit).toHaveBeenCalledWith({ did: contract.did, justification: 'Dispute review' })
   expect(wrapper.findComponent(ContractEvidencePanel).exists()).toBe(true)
   expect(wrapper.text()).toContain('proof.bin')
   const audit = wrapper.findComponent({ name: 'ContractAuditList' })
   expect(audit.exists()).toBe(true)
   expect(audit.props('blocks')).toEqual(blocks)
   expect(audit.props('layout')).toEqual(layout)
+  wrapper.unmount()
+})
+
+// DCS-IR-CWE-02: the contract creator populates evidence while creating the contract.
+it('lets the contract creator store evidence', async () => {
+  mocks.auth.user.roles = ['CONTRACT_CREATOR']
+  mocks.listEvidence.mockResolvedValue([])
+  const wrapper = mount(ContractEvidencePanel, { props: { contract: { ...contract, state: 'DRAFT' } } })
+  await flushPromises()
+  expect(wrapper.findAll('button').some((button) => button.text() === 'Store evidence')).toBe(true)
+  mocks.auth.user.roles = ['CONTRACT_MANAGER']
+  wrapper.unmount()
+})
+
+// DCS-IR-CWE-12: outside a draft only the manager stores evidence.
+it('offers the contract creator no evidence upload once the contract left draft', async () => {
+  mocks.auth.user.roles = ['CONTRACT_CREATOR']
+  mocks.listEvidence.mockResolvedValue([])
+  const wrapper = mount(ContractEvidencePanel, { props: { contract } })
+  await flushPromises()
+  expect(wrapper.findAll('button').some((button) => button.text() === 'Store evidence')).toBe(false)
+  mocks.auth.user.roles = ['CONTRACT_MANAGER']
   wrapper.unmount()
 })

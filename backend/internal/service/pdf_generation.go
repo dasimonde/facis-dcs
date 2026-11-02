@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	pdfquery "digital-contracting-service/internal/pdfgeneration/query"
+	"digital-contracting-service/internal/signingmanagement/dss"
 	tpldb "digital-contracting-service/internal/templaterepository/db"
 
 	"github.com/jmoiron/sqlx"
@@ -39,6 +41,8 @@ type pdfGenerationSrvc struct {
 	// CredentialStatus resolves that credential's revocation entry against the
 	// signed status list it names.
 	CredentialStatus *provenance.CredentialStatusVerifier
+	// SignerRoots anchor the C2PA manifest signers at verify (DCS-OR-C2PA-007).
+	SignerRoots *x509.CertPool
 	auth.JWTAuthenticator
 }
 
@@ -55,6 +59,7 @@ func NewPDFGeneration(
 	localPeer string,
 	credentials *provenance.CredentialVerifier,
 	credentialStatus *provenance.CredentialStatusVerifier,
+	signerRoots *x509.CertPool,
 ) pdfgen.Service {
 	if vcIssuer == nil {
 		panic("VCIssuer is required for DCS-OR-C2PA-004 compliance")
@@ -85,6 +90,7 @@ func NewPDFGeneration(
 		LocalPeer:        localPeer,
 		Credentials:      credentials,
 		CredentialStatus: credentialStatus,
+		SignerRoots:      signerRoots,
 		JWTAuthenticator: jwtAuth,
 	}
 }
@@ -207,10 +213,10 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 		CRepo:            s.CRepo,
 		Artifacts:        s.Artifacts,
 		PDFCore:          s.PDFCore,
-		VCIssuer:         s.VCIssuer,
-		IssuerDID:        s.IssuerDID,
 		Credentials:      s.Credentials,
 		CredentialStatus: s.CredentialStatus,
+		Signatures:       pdfSignatureValidator(),
+		SignerRoots:      s.SignerRoots,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfQry{DID: p.Did})
 	if err != nil {
@@ -218,6 +224,41 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify contract PDF %s: %w", p.Did, err))
+	}
+	return result, nil
+}
+
+func (s *pdfGenerationSrvc) VerifyContractPdfCopy(ctx context.Context, p *pdfgen.VerifyContractPdfCopyPayload) (*pdfgen.PDFVerifyResult, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, err
+	}
+
+	handler := pdfquery.VerifyContractPdfCopyHandler{
+		Stored: &pdfquery.VerifyContractPdfHandler{
+			DB:               s.DB,
+			CRepo:            s.CRepo,
+			Artifacts:        s.Artifacts,
+			PDFCore:          s.PDFCore,
+			Credentials:      s.Credentials,
+			CredentialStatus: s.CredentialStatus,
+			Signatures:       pdfSignatureValidator(),
+			SignerRoots:      s.SignerRoots,
+		},
+		Export: &pdfquery.ExportContractPdfHandler{
+			DB:        s.DB,
+			CRepo:     s.CRepo,
+			Artifacts: s.Artifacts,
+			PDFCore:   s.PDFCore,
+			VCIssuer:  s.VCIssuer,
+			IssuerDID: s.IssuerDID,
+		},
+	}
+	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfCopyQry{DID: p.Did, PDF: p.Pdf})
+	if err != nil {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
+			return nil, pdfgen.MakeNotFound(err)
+		}
+		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify copy of contract PDF %s: %w", p.Did, err))
 	}
 	return result, nil
 }
@@ -232,6 +273,7 @@ func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.Ver
 		IssuerDID:        s.IssuerDID,
 		Credentials:      s.Credentials,
 		CredentialStatus: s.CredentialStatus,
+		SignerRoots:      s.SignerRoots,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyTemplatePdfQry{DID: p.Did})
 	if err != nil {
@@ -249,4 +291,14 @@ func isNotFoundErr(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "not found") || strings.Contains(msg, "no rows")
+}
+
+// pdfSignatureValidator returns the EU DSS client the verifier validates PAdES
+// signatures with, the one /signature/validate uses, or nil when DSS_URL is
+// not set.
+func pdfSignatureValidator() pdfquery.PDFSignatureValidator {
+	if url := dss.URL(); url != "" {
+		return dss.New(url)
+	}
+	return nil
 }

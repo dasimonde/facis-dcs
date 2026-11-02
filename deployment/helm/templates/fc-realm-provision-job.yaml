@@ -52,6 +52,9 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-fc-lifecycle
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -62,10 +65,18 @@ spec:
           imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
             runAsNonRoot: true
             runAsUser: 65532
+          env:
+            # The discovery cache of kubectl; the root filesystem is read-only.
+            - name: KUBECACHEDIR
+              value: /tmp/kube-cache
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           command:
             - kubectl
             - wait
@@ -78,6 +89,7 @@ spec:
           imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
             runAsNonRoot: true
@@ -192,4 +204,6 @@ spec:
         - name: realm-config
           configMap:
             name: fc-keycloak-realm-configmap
+        - name: tmp
+          emptyDir: {}
 {{- end }}

@@ -56,6 +56,17 @@ layer exists. Those artifacts validate, and a regression there is a defect.
 between signing and re-anchoring.** It must not be treated as routine: once the
 re-anchor runs, a signed contract validates like any other.
 
+**A lifecycle state reached after signing is appended the same way.** Suspended
+(a revoked signature), terminated and expired arise only after signing. For
+each, the regenerator appends to the signed PDF a provenance-only update
+manifest carrying the `dcs.lifecycle` assertion of that state, together with
+the lifecycle credential issued for it, as a PDF incremental update
+(`pdfgeneration/event/subscriber.go`, `appendSignedLifecycle`). The signed
+bytes stay a prefix, so every signature keeps verifying, and the new manifest's
+hard binding covers the whole file. `contracts.pdf_signed` records that the
+stored PDF carries a signature; `pdf_c2pa_state` records the lifecycle state it
+asserts.
+
 ## What DSS reports, measured
 
 Validated through the project's DSS instance, before and after re-anchoring the
@@ -72,17 +83,27 @@ project's known bar and is unaffected. With a trusted certificate the signature
 still passes; what changes is that DSS sees a revision it cannot account for.
 
 That warning is exactly what genuine post-signature tampering produces, so it
-must not simply be tolerated. Reporting a re-anchored contract as good requires
-proving the post-signature delta **is** the re-anchor: the amendment
-verification path re-derives an appended revision from the document's own
-bytes, so "good" means the only thing appended after signing is provenance this
-instance produced, verified byte for byte — not that the warning was ignored.
+must not simply be tolerated. pdf-core's `/verify` therefore proves the
+post-signature delta is provenance: it replays every DCS revision from the
+document's own bytes and requires each replay to reproduce the stored bytes,
+and it checks the `c2pa.hash.data` of the last manifest over the whole file,
+with the manifest stream as the only exclusion (`VerifyHardBinding`). A
+revision appended after the last manifest — a redefined page, an unsigned
+trailer, a signature that was not re-anchored — fails that check. The PAdES
+signatures themselves are validated by the EU DSS, which the DCS verifier calls
+for every signature (`pdf_signature_status`, source `eu-dss`).
+
+pyHanko reports the same document as intact and valid, with modification level
+`OTHER`, after the re-anchor and after an appended lifecycle manifest
+(`pdf-core/features/pades_lifecycle.feature`, "A lifecycle manifest appended
+after signing keeps the PAdES signature valid").
 
 ## Consequences
 
 A signed contract carries one more manifest than an unsigned one: the
 lifecycle manifest the signature commits to, and the re-anchor that commits to
-the signature. The chain reads in that order and says exactly what happened.
+the signature. Each lifecycle state reached after signing adds one manifest
+after those. The chain reads in that order and says exactly what happened.
 
 PDF readers annotate the document as modified after signing. Anyone presenting
 a signed contract should expect that note and be able to say what produced it.

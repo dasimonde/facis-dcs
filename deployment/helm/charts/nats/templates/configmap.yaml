@@ -1,0 +1,13 @@
+{{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-nats
+data:
+  nats.conf: |
+    tls {
+      cert_file: "/etc/dcs-internal-tls/tls.crt"
+      key_file: "/etc/dcs-internal-tls/tls.key"
+      min_version: "1.3"
+    }
+{{- end }}

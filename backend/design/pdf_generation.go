@@ -22,18 +22,21 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// so, and never borrows the vocabulary of one that passed.
 	Attribute("c2pa_manifest_found", Boolean, "True when a C2PA JUMBF manifest was found in the PDF")
 	Attribute("c2pa_signature_status", String, "C2PA COSE_Sign1 claim-signature verification status (DCS-OR-C2PA-006): 'valid' when every manifest's claim signature verified against its x5chain leaf and the assertions the signed claim commits to still hash to the recorded values, 'invalid' when one did not, 'not_available' when the PDF carries no manifest to check.")
+	Attribute("c2pa_signer_status", String, "C2PA signer anchoring (DCS-OR-C2PA-007): 'valid' when the x5chain of every manifest verified against this deployment's trust anchors and its leaf identifies an instance party to the document, 'invalid' when one did not, 'indeterminate' when no anchors or parties are known, 'not_available' when no manifest was verified.")
+	Attribute("c2pa_signer_detail", String, "Per manifest, the party its signing leaf is anchored to, or why it is not.")
 	Attribute("vc_proof_status", String, "Embedded contract-lifecycle credential proof status: 'valid' when its Data Integrity proof verified against a key the credential's issuer publishes for assertions, 'invalid' when it did not, 'indeterminate' when the issuer could not be resolved, 'not_available' when the PDF carries no such credential. Never reports a pass for a credential that was only parsed.")
 	Attribute("status_list_uri", String, "URI of the status list service queried for revocation check")
-	Attribute("lifecycle_status", String, "Contract lifecycle state from the latest C2PA assertion (DCS-OR-C2PA-006 banner: draft, active, amended, suspended, terminated, expired, replaced)")
+	Attribute("lifecycle_status", String, "The banner (DCS-OR-C2PA-006: draft, active, amended, suspended, terminated, expired, replaced): the lifecycle state the verified lifecycle credential in the PDF asserts, or the contract's own state when no credential verified")
 	Attribute("status_list_status", String, "Live revocation state queried from the XFSC status list service: active or revoked (DCS-OR-C2PA-006)")
 	Attribute("status_list_check", String, "Named live status-list check result: passed, failed, or not_available (DCS-OR-C2PA-006)")
 	Attribute("status_list_error", String, "Explicit failure reason when the live status-list check could not be completed")
 
 	// PDF signature check (DCS-OR-C2PA-006). This is an independently named
-	// check distinct from the C2PA COSE signature check: when the PDF carries
-	// no PAdES signature, the verifier honestly reports "not_available" rather
-	// than faking a passed PDF-signature verification.
-	Attribute("pdf_signature_status", String, "PAdES/PDF signature verification status (DCS-OR-C2PA-006): 'not_available' when the PDF carries no PAdES signature, otherwise 'valid'/'invalid'. Never falsely reports a passed PDF signature check.")
+	// check distinct from the C2PA COSE signature check. Every PAdES signature
+	// is validated by the EU DSS, the validation /signature/validate uses.
+	Attribute("pdf_signature_status", String, "PAdES signature verification status (DCS-OR-C2PA-006): 'valid' when the EU DSS validated every PAdES signature of the PDF as a sound advanced electronic signature (no TOTAL-FAILED and no cryptographic sub-indication, a signing certificate present; a trust-chain gap such as NO_CERTIFICATE_CHAIN_FOUND is reported in pdf_signature_detail), 'invalid' when one failed, 'indeterminate' when the DSS could not be asked or is not configured, 'not_available' when the PDF carries no PAdES signature.")
+	Attribute("pdf_signature_source", String, "Which validator produced pdf_signature_status: 'eu-dss', the EU DSS validation service configured with DSS_URL. Empty when the PDF carries no PAdES signature.")
+	Attribute("pdf_signature_detail", String, "The DSS indication of each PAdES signature in document order (indication/sub-indication and signer), or the reason the signatures could not be validated.")
 
 	// Names WHY a verification failed, so a caller can tell failure classes
 	// apart without inferring them from combinations of the booleans above.
@@ -42,7 +45,10 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// be made about the content they were supposed to carry.
 	Attribute("discrepancy", String, "Failure class when match is false: 'content_hash_mismatch' (manifest present, content differs from the embedded JSON-LD), 'artifact_not_authentic' (stored bytes failed authenticated decryption — altered or substituted at rest), or 'verification_failed' (any other check failure). Empty when match is true.")
 
-	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "vc_proof_status", "status_list_check", "pdf_signature_status")
+	// Set only by the verification of a submitted copy (DCS-OR-C2PA-008).
+	Attribute("c2pa_manifest_source", String, "Which C2PA manifest the verification of a submitted copy used: 'embedded' when the copy carries its manifest, 'remote' when the copy carries no embedded manifest and the remote manifest it references was used (DCS-OR-C2PA-008). Empty when no manifest was used.")
+
+	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "c2pa_signer_status", "vc_proof_status", "status_list_check", "pdf_signature_status")
 })
 
 // BundleExportRefusedError is returned when the FR-PACM-06 structural-integrity
@@ -167,8 +173,8 @@ var _ = Service("PDFGeneration", func() {
 
 	// export_template_bundle — GET /template/export/{did}
 	Method("export_template_bundle", func() {
-		Description("Export a contract template as a ZIP bundle of flat artifacts: template JSON-LD, rendered PDF, and bundle manifest. No frame/parent chain directory (FR-TR-24/FR-TR-09 — templates are flat artifacts, no frame-type taxonomy).")
-		Meta("dcs:requirements", "DCS-FR-TR-24", "DCS-FR-TR-09")
+		Description("Export a contract template as a ZIP bundle: the template JSON-LD, its rendered PDF and its provenance credentials (provenance/v<n>.vc.json), and the same for every template it requires, directly or through a required template, under required/<did>/, with the bundle manifest that lists each component and the template that requires it.")
+		Meta("dcs:requirements", "DCS-FR-TR-24", "DCS-FR-TR-23", "DCS-FR-TR-09")
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
 			Scope("Template Reviewer")
@@ -217,6 +223,34 @@ var _ = Service("PDFGeneration", func() {
 			Response("not_found", StatusNotFound)
 			Response("forbidden", StatusForbidden)
 			GET("/pdf/verify/contract/{did}")
+			Response(StatusOK)
+		})
+	})
+
+	// verify_contract_pdf_copy — POST /pdf/verify/contract/{did}
+	Method("verify_contract_pdf_copy", func() {
+		Description("Verify a copy of a contract PDF that the caller submits (DCS-OR-C2PA-008). A copy that carries its embedded C2PA manifest and is the stored contract PDF, or an earlier revision of it, is verified against that manifest. Any other copy is verified against the remote manifest it references in its XMP metadata: the reference must name this contract's GET /c2pa/manifest/{did}, at this instance or at the host of a party's did:web, the contract PDF that holds that manifest is verified, and the copy must show exactly the same pages (annotations, resources and signature widgets included) and carry the same machine-readable payload. c2pa_manifest_source names the manifest that was used.")
+		Meta("dcs:requirements", "DCS-OR-C2PA-008")
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Observer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "DID of the contract")
+			Attribute("pdf", Bytes, "The copy of the contract PDF to verify")
+			Required("did", "pdf")
+		})
+		Result(PDFVerifyResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
+			POST("/pdf/verify/contract/{did}")
 			Response(StatusOK)
 		})
 	})

@@ -96,9 +96,9 @@ func TestHolderSubject(t *testing.T) {
 
 // --- x5c leaves as real issuers actually carry them ---
 
-func mintRSALeaf(t *testing.T, template *x509.Certificate, signer *ecdsa.PrivateKey, signerCert *x509.Certificate) *x509.Certificate {
+func mintRSALeaf(t *testing.T, bits int, template *x509.Certificate, signer *ecdsa.PrivateKey, signerCert *x509.Certificate) *x509.Certificate {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
 		t.Fatalf("generate rsa key: %v", err)
 	}
@@ -120,7 +120,7 @@ func mintRSALeaf(t *testing.T, template *x509.Certificate, signer *ecdsa.Private
 // the key type alone rejects credentials that are otherwise fully verifiable.
 func TestVerificationKeyFromX5C_RSALeafIsAccepted(t *testing.T) {
 	caKey, caCert := mintSelfSignedCA(t, "Shared Trust Root")
-	leaf := mintRSALeaf(t, &x509.Certificate{
+	leaf := mintRSALeaf(t, 3072, &x509.Certificate{
 		Subject:               pkix.Name{CommonName: "Real PID Issuer"},
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
@@ -135,6 +135,23 @@ func TestVerificationKeyFromX5C_RSALeafIsAccepted(t *testing.T) {
 	}
 	if _, ok := key.(*rsa.PublicKey); !ok {
 		t.Fatalf("expected an *rsa.PublicKey, got %T", key)
+	}
+}
+
+// DCS-NFR-SEC-02: an RSA issuer key below 3000 bits is refused.
+func TestVerificationKeyFromX5C_RSALeafBelow3000BitsIsRefused(t *testing.T) {
+	caKey, caCert := mintSelfSignedCA(t, "Shared Trust Root")
+	leaf := mintRSALeaf(t, 2048, &x509.Certificate{
+		Subject:               pkix.Name{CommonName: "Real PID Issuer"},
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}, caKey, caCert)
+
+	roots := x509.NewCertPool()
+	roots.AddCert(caCert)
+
+	if _, err := verificationKeyFromX5C(x5cHeaderValue(leaf), roots, "Real PID Issuer"); err == nil {
+		t.Fatal("a 2048-bit rsa issuer certificate was accepted")
 	}
 }
 

@@ -142,8 +142,13 @@ func (r *negotiationTaskRepoFake) AnyTasksInState(_ context.Context, _ *sqlx.Tx,
 	return false, nil
 }
 
+func (r *taskContractRepoFake) ReadOpenRenewalDID(context.Context, *sqlx.Tx, string) (string, error) {
+	return r.openRenewal, nil
+}
+
 type taskContractRepoFake struct {
 	db.ContractRepo
+	openRenewal    string
 	process        *db.ContractProcessData
 	stored         *db.Contract
 	pdfState       db.ContractPDFState
@@ -210,7 +215,7 @@ func (r *taskContractRepoFake) CreateHistoryEntryForDID(_ context.Context, _ *sq
 	return nil
 }
 
-func (r *taskContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _ string, state string) error {
+func (r *taskContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _, _ string, state string) error {
 	r.states = append(r.states, state)
 	r.process.State = state
 	return nil

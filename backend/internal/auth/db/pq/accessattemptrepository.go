@@ -18,11 +18,11 @@ type PostgresAccessAttemptRepo struct {
 func (r *PostgresAccessAttemptRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.AccessAttempt) error {
 	statement := `
         INSERT INTO access_attempts (
-            attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification, outcome
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification, outcome, lockout_key
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     `
 	_, err := tx.ExecContext(ctx, statement,
-		data.AttemptBy, data.IPAddress, data.AttemptedAt.UTC(), data.Success, data.Service, data.Method, data.Roles, data.Scope, data.DID, data.Justification, data.Outcome)
+		data.AttemptBy, data.IPAddress, data.AttemptedAt.UTC(), data.Success, data.Service, data.Method, data.Roles, data.Scope, data.DID, data.Justification, data.Outcome, data.LockoutKey)
 	return err
 }
 
@@ -78,32 +78,13 @@ func (r *PostgresAccessAttemptRepo) CountFailedAttempts(ctx context.Context, tx 
 	return count, nil
 }
 
-func (r *PostgresAccessAttemptRepo) CountFailedAttemptsByIP(ctx context.Context, tx *sqlx.Tx, ip string, since time.Time) (int, error) {
-	query := `
-        SELECT COUNT(*)
-        FROM access_attempts
-        WHERE ip_address = $1
-          AND success = FALSE
-          AND attempted_at > $2
-    `
+func (r *PostgresAccessAttemptRepo) CountLockoutAttempts(ctx context.Context, tx *sqlx.Tx, key string, since time.Time) (int, error) {
 	var count int
-	err := tx.GetContext(ctx, &count, query, ip, since.UTC())
+	err := tx.GetContext(ctx, &count, `SELECT COUNT(*) FROM access_attempts WHERE lockout_key = $1 AND attempted_at > $2`, key, since.UTC())
 	if err != nil {
-		return 0, fmt.Errorf("failed to count failed attempts for ip %s: %w", ip, err)
+		return 0, fmt.Errorf("failed to count lockout attempts for %s: %w", key, err)
 	}
 	return count, nil
-}
-
-func (r *PostgresAccessAttemptRepo) DeleteOlderThan(ctx context.Context, tx *sqlx.Tx, before time.Time) error {
-	statement := `
-        DELETE FROM access_attempts
-        WHERE attempted_at < $1
-    `
-	_, err := tx.ExecContext(ctx, statement, before.UTC())
-	if err != nil {
-		return fmt.Errorf("failed to delete old login attempts: %w", err)
-	}
-	return nil
 }
 
 func (r *PostgresAccessAttemptRepo) ReadPage(ctx context.Context, tx *sqlx.Tx, before *db.AccessAttemptCursor, limit int) ([]db.AccessAttempt, error) {

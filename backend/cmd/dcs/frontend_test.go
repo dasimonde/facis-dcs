@@ -26,7 +26,7 @@ func TestServeFrontendSetsFramingAndCSPHeaders(t *testing.T) {
 	} {
 		path := tc.path
 		rec := httptest.NewRecorder()
-		serveFrontend(rec, httptest.NewRequest(http.MethodGet, path, nil), tc.dir, "/ui")
+		serveFrontend(rec, httptest.NewRequest(http.MethodGet, path, nil), tc.dir, "/ui", "/api")
 
 		if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
 			t.Errorf("%s: X-Frame-Options = %q, want DENY", path, got)
@@ -36,6 +36,43 @@ func TestServeFrontendSetsFramingAndCSPHeaders(t *testing.T) {
 			if !strings.Contains(csp, directive) {
 				t.Errorf("%s: Content-Security-Policy %q lacks %q", path, csp, directive)
 			}
+		}
+	}
+}
+
+// The deployment settings reach the UI without a write to the image: the
+// filesystem of the backend container is read-only (DCS-NFR-SEC-05).
+func TestServeFrontendWritesDeploymentSettingsAtServeTime(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"index.html": `<base href="__DCS_UI_BASE_PATH__" /><script src="config.js"></script>`,
+		"config.js":  "window.DCS_CONFIG = undefined\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	for _, tc := range []struct{ path, want string }{
+		{"/dcs/ui/config.js", `window.DCS_CONFIG = { API_BASE_URL: "/dcs/api" }`},
+		{"/dcs/ui/", `<base href="/dcs/ui/" />`},
+		{"/dcs/ui/index.html", `<base href="/dcs/ui/" />`},
+		{"/dcs/ui/contracts/42", `<base href="/dcs/ui/" />`},
+	} {
+		rec := httptest.NewRecorder()
+		serveFrontend(rec, httptest.NewRequest(http.MethodGet, tc.path, nil), dir, "/dcs/ui", "/dcs/api")
+		if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, tc.want) {
+			t.Errorf("%s: %d %q, want %q", tc.path, rec.Code, body, tc.want)
+		}
+	}
+	for name, body := range files {
+		if got, _ := os.ReadFile(filepath.Join(dir, name)); string(got) != body {
+			t.Errorf("%s changed on disk: %q", name, got)
 		}
 	}
 }

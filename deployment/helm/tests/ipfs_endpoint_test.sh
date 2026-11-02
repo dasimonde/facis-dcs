@@ -48,9 +48,11 @@ for enabled in true false; do
   done
 done
 
-assert_url 'http://ipfs-endpoint-ipfs:5001' --set ipfs.enabled=true
+# With in-cluster TLS (default) the backend calls the TLS proxy of the IPFS pod.
+assert_url 'https://ipfs-endpoint-ipfs:8443' --set ipfs.enabled=true
+assert_url 'http://ipfs-endpoint-ipfs:5001' --set ipfs.enabled=true --set global.internalTLS.enabled=false
 assert_url 'http://ipfs-endpoint-ipfs:5101' \
-  --set ipfs.enabled=true --set ipfs.service.apiPort=5101
+  --set ipfs.enabled=true --set ipfs.service.apiPort=5101 --set global.internalTLS.enabled=false
 assert_url '' --set ipfs.enabled=false --set replicaCount=0
 
 if render_endpoint \

@@ -486,9 +486,12 @@ def step_real_signing_evidence(context):
     metadata = row[0]
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
+    signatures = metadata.get("signatures") or []
+    assert signatures, f"No signature in the archive entry: {metadata!r}"
     required = ("signer", "credential_type", "ceremony_id", "field", "signed_at", "pdf_cid", "pdf_hash")
-    missing = [key for key in required if not metadata.get(key)]
-    assert not missing, f"Missing real signing evidence {missing}: {metadata!r}"
+    for signature in signatures:
+        missing = [key for key in required if not signature.get(key)]
+        assert not missing, f"Missing real signing evidence {missing}: {metadata!r}"
     assert metadata.get("status") == "SIGNED", metadata
 
 

@@ -75,14 +75,20 @@ def step_then_credential_actors(context):
     subject = (_single_credential_entry(context).get("credential") or {}).get("credentialSubject") or {}
     for field in ("created_by", "registered_by"):
         assert subject.get(field), f"Expected credentialSubject.{field} to be set, got: {subject}"
-    for field in ("reviewed_by", "approved_by"):
-        actors = subject.get(field)
-        assert isinstance(actors, list) and actors and all(actors), (
-            f"Expected credentialSubject.{field} to name at least one actor, got: {subject}"
+    # The reviewer and the approver are named by the holder DID (token sub)
+    # of the person who forwarded and approved the template.
+    for field, roles in (("reviewed_by", ["Template Reviewer"]), ("approved_by", ["Template Approver"])):
+        assert subject.get(field) == [_holder_did(roles)], (
+            f"Expected credentialSubject.{field} to name the {roles[0]} holder DID, got: {subject}"
         )
-    assert subject.get("registrar_holder_did", "").startswith("did:"), (
+    assert subject.get("registrar_holder_did") == _holder_did(["Template Manager"]), (
         f"Expected the registrar's holder DID, got: {subject.get('registrar_holder_did')!r}"
     )
+
+
+def _holder_did(roles):
+    token = AuthService.get_headers_for_roles(roles)["Authorization"].split(" ", 1)[1]
+    return AuthService.decode_jwt_payload(token)["sub"]
 
 
 @then("the provenance credential binds the registered template content by its hash")

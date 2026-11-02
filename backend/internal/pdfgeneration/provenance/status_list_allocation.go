@@ -130,7 +130,7 @@ func (s *postgresStatusListStore) Entry(ctx context.Context, subjectID string) (
 	if err != nil {
 		return StatusListEntry{}, false, err
 	}
-	return StatusListEntry{ListID: row.ListID, Index: uint32(row.Index)}, true, nil
+	return StatusListEntry{ListID: row.ListID, Index: uint32(row.Index)}, true, nil // #nosec G115 -- entry_index is a non-negative INTEGER (CHECK constraint) below list_size
 }
 
 func (s *postgresStatusListStore) ReserveIndex(ctx context.Context, listID int) (uint32, bool, error) {
@@ -156,7 +156,7 @@ func (s *postgresStatusListStore) ReserveIndex(ctx context.Context, listID int) 
 	if err != nil {
 		return 0, false, err
 	}
-	return uint32(index), true, nil
+	return uint32(index), true, nil // #nosec G115 -- entry_index is a non-negative INTEGER (CHECK constraint) below list_size
 }
 
 func (s *postgresStatusListStore) Claim(ctx context.Context, subjectID string, entry StatusListEntry) (StatusListEntry, bool, error) {
@@ -177,7 +177,7 @@ func (s *postgresStatusListStore) Claim(ctx context.Context, subjectID string, e
 		subjectID, entry.ListID, int64(entry.Index))
 	switch {
 	case err == nil:
-		return StatusListEntry{ListID: row.ListID, Index: uint32(row.Index)}, true, nil
+		return StatusListEntry{ListID: row.ListID, Index: uint32(row.Index)}, true, nil // #nosec G115 -- entry_index is a non-negative INTEGER (CHECK constraint) below list_size
 	case isUniqueViolation(err):
 		// Another allocation took this slot between the check and the insert.
 		return StatusListEntry{}, false, nil

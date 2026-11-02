@@ -79,6 +79,22 @@ func TestRenewerMovesAnExpiredTermForward(t *testing.T) {
 	require.Equal(t, repo.updates[0].ExpDate.Format(time.RFC3339), meta[metaExpirationDate].(map[string]any)["@value"])
 }
 
+// DCS-FR-CWE-22: an original with an open renewal is not renewed again, so
+// "Renew selected" run twice creates one renewal draft.
+func TestRenewerRefusesASecondOpenRenewal(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &renewRepoFake{taskContractRepoFake: &taskContractRepoFake{openRenewal: "did:web:facis.example:contract:2", stored: &db.Contract{
+		DID: "did:web:facis.example:contract:1", State: "ACTIVE", UpdatedAt: now.Add(-time.Hour), ContractData: renewableDocument(t),
+	}}}
+	renewer := Renewer{DB: taskTestDB(t), CRepo: repo, DIDDocument: *taskTestDIDDocument(t)}
+
+	_, err := renewer.Handle(context.Background(), RenewCmd{
+		DID: "did:web:facis.example:contract:3", OriginalDID: "did:web:facis.example:contract:1", UpdatedAt: now,
+	})
+	require.ErrorIs(t, err, ErrRenewalExists)
+	require.Nil(t, repo.created)
+}
+
 // A terminated original never reached its expiry: the renewal starts tomorrow,
 // not at the original's future expiry.
 func TestRenewerStartsATerminatedOriginalsRenewalTomorrow(t *testing.T) {

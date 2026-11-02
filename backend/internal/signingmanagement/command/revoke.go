@@ -98,6 +98,11 @@ func (h *Revoker) revoke(ctx context.Context, cmd RevokeCmd) error {
 		}
 	}(tx)
 
+	// The per-contract lock of the signing path: a revocation waits for a
+	// signature in progress and that signature then reads REVOKED.
+	if err := acquireRegenerationLock(ctx, tx, cmd.DID); err != nil {
+		return err
+	}
 	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
@@ -117,7 +122,7 @@ func (h *Revoker) revoke(ctx context.Context, cmd RevokeCmd) error {
 	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventRevoke); err != nil {
 		return err
 	}
-	if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Revoked.String()); err != nil {
+	if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Revoked.String()); err != nil {
 		return fmt.Errorf("could not update contract state to revoked: %w", err)
 	}
 

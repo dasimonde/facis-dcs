@@ -301,7 +301,7 @@ func (d *DIDDocument) PublishesKeyFor(purpose Purpose, pub *ecdsa.PublicKey) boo
 // published ECDSA P-256 verification method and validating the pairing with a
 // test signature.
 func NewDIDDocument(didFilePath string, signer crypto.Signer) (*DIDDocument, error) {
-	didJSON, err := os.ReadFile(didFilePath)
+	didJSON, err := os.ReadFile(didFilePath) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, err
 	}

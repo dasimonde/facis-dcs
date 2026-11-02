@@ -57,6 +57,10 @@ func (r *kpiContractRepoFake) ReadDataByDID(context.Context, *sqlx.Tx, string) (
 	return r.contract, nil
 }
 
+func (r *kpiContractRepoFake) ReadProcessDataByDID(context.Context, *sqlx.Tx, string) (*db.ContractProcessData, error) {
+	return &db.ContractProcessData{DID: r.contract.DID, State: r.contract.State}, nil
+}
+
 type kpiDeploymentRepoFake struct {
 	deployment *db.ContractDeployment
 	recorded   []db.ContractKPI
@@ -266,5 +270,17 @@ func TestKPIReportFromAnUnauthenticatedCallerIsRefused(t *testing.T) {
 	err := handler.Handle(context.Background(), report)
 
 	require.ErrorIs(t, err, ErrDeploymentCallbackUnauthorized)
+	require.Empty(t, deployments.recorded)
+}
+
+// A terminated contract has left every active workflow, monitoring included
+// (DCS-FR-CWE-23): a late report on it is refused, not recorded.
+func TestKPIReportOnATerminatedContractIsRefused(t *testing.T) {
+	handler, deployments, contracts := kpiHandler(t, ptr(kpiContract()))
+	contracts.contract.State = "TERMINATED"
+
+	err := handler.Handle(context.Background(), kpiReport(db.KPIVerdictViolated, availabilityID))
+
+	require.ErrorIs(t, err, ErrKPIContractTerminated)
 	require.Empty(t, deployments.recorded)
 }

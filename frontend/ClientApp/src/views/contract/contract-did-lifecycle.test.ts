@@ -24,7 +24,7 @@ const original: Contract = {
   updated_at: '',
 }
 
-it('F10 changes the actual contract DID, clears the old audit panel, and ignores late previous-contract responses', async () => {
+it('changes the actual contract DID, clears the old audit panel, and ignores late previous-contract responses', async () => {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAuthStore().user = { issuer: 'org', holder: 'manager', roles: ['CONTRACT_MANAGER'] }

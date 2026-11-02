@@ -67,7 +67,7 @@ const searchFn = async (request: Record<string, unknown>) => {
       </select>
     </div>
     <ListSearch
-      class="w-full min-w-0 sm:w-auto sm:max-w-full sm:flex-1"
+      class="w-full min-w-0 sm:w-auto sm:max-w-full sm:min-w-80 sm:flex-1"
       :items="templates"
       :filter-labels="filterLabels"
       :filters="filters"

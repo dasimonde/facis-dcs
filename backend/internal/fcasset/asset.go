@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CredentialsV2Context = "https://www.w3.org/ns/credentials/v2"
+	CredentialsV2Context = "https://www.w3.org/ns/credentials/v2" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 	DCSContextURL        = "https://w3id.org/facis/dcs/1#"
 	SchemaContextURL     = "https://schema.org/"
 	ProvContextURL       = "http://www.w3.org/ns/prov#"
@@ -27,6 +27,10 @@ type CatalogueSubject struct {
 	Version      string
 	TemplateType string
 	PartyType    string
+	// The searchable metadata an importing instance takes over (DCS-FR-TR-10, DCS-FR-TR-02).
+	Jurisdiction  string
+	Industry      string
+	TemplateLevel string
 }
 
 // BuildInput carries catalogue metadata required for an FC /assets JSON-LD payload.
@@ -55,9 +59,78 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 		return nil, fmt.Errorf("issuer is empty")
 	}
 
-	validFrom := input.ValidFrom.UTC()
+	claims := map[string]any{
+		"dcs:templateUuid":       input.Subject.ID,
+		"dcs:state":              input.Subject.State,
+		"dcs:templateType":       input.Subject.TemplateType,
+		"dcs:partyType":          input.Subject.PartyType,
+		"schema:name":            input.Subject.Name,
+		"schema:description":     input.Subject.Description,
+		"schema:version":         input.Subject.Version,
+		"dcs:templateDataString": input.TemplateDataString,
+	}
+	for key, value := range map[string]string{
+		"dcs:jurisdiction":  input.Subject.Jurisdiction,
+		"dcs:industry":      input.Subject.Industry,
+		"dcs:templateLevel": input.Subject.TemplateLevel,
+	} {
+		if value != "" {
+			claims[key] = value
+		}
+	}
+	return credential(input.Issuer, input.SubjectIRI, input.ValidFrom, "dcs:ContractTemplate", claims), nil
+}
+
+// ContractSubject is the contract metadata published to FC (DCS-IR-CWE-10). It
+// holds no contract content and no party.
+type ContractSubject struct {
+	ID         string
+	State      string
+	Name       string
+	Version    int
+	TemplateID string
+	StartDate  *time.Time
+	EndDate    *time.Time
+}
+
+// BuildContractPayload assembles a thin catalogue VC for a contract.
+func BuildContractPayload(issuer, subjectIRI string, validFrom time.Time, subject ContractSubject) (map[string]any, error) {
+	if strings.TrimSpace(issuer) == "" || strings.TrimSpace(subjectIRI) == "" || strings.TrimSpace(subject.ID) == "" {
+		return nil, fmt.Errorf("issuer, contract subject iri and contract did are required")
+	}
+	claims := map[string]any{
+		"dcs:contractUuid":        subject.ID,
+		"dcs:state":               strings.ToLower(subject.State),
+		"schema:name":             subject.Name,
+		"schema:version":          strconv.Itoa(subject.Version),
+		"dcs:derivedFromTemplate": subject.TemplateID,
+	}
+	if subject.StartDate != nil {
+		claims["schema:startDate"] = subject.StartDate.UTC().Format(time.RFC3339)
+	}
+	if subject.EndDate != nil {
+		claims["schema:endDate"] = subject.EndDate.UTC().Format(time.RFC3339)
+	}
+	return credential(issuer, subjectIRI, validFrom, "dcs:Contract", claims), nil
+}
+
+// credential wraps claims about subjectIRI in the unsecured VC envelope FC
+// ingests.
+func credential(issuer, subjectIRI string, validFrom time.Time, subjectType string, claims map[string]any) map[string]any {
+	validFrom = validFrom.UTC()
 	if validFrom.After(time.Now().UTC()) {
 		validFrom = time.Now().UTC()
+	}
+
+	// credentialSubject's own "id" becomes the RDF subject for every
+	// property below once FC ingests this as JSON-LD — it must be a
+	// well-formed absolute IRI (base.ResourceIRI), not the bare UUID: FC's
+	// JsonLdToRdf silently drops ("Non well-formed subject... has been
+	// skipped") every triple whose subject isn't one, confirmed live. The
+	// bare UUID travels separately as a plain literal property.
+	subject := map[string]any{"id": subjectIRI, "type": subjectType}
+	for key, value := range claims {
+		subject[key] = value
 	}
 
 	return map[string]any{
@@ -69,13 +142,13 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 				"prov":   ProvContextURL,
 			},
 		},
-		"id": input.SubjectIRI,
+		"id": subjectIRI,
 		// The VerifiableCredential type is load-bearing twice over, so it stays
-		// even though BuildPayload attaches no proof. In the VC 2.0 context
-		// `issuer`, `validFrom` and `credentialSubject` are defined only inside
-		// that type's scoped @context — drop the type and JSON-LD expansion
-		// discards the whole credentialSubject, so FC ingests an empty node and
-		// publish still answers 200. FC then reifies each ingested triple with
+		// even though no proof is attached. In the VC 2.0 context `issuer`,
+		// `validFrom` and `credentialSubject` are defined only inside that
+		// type's scoped @context — drop the type and JSON-LD expansion discards
+		// the whole credentialSubject, so FC ingests an empty node and publish
+		// still answers 200. FC then reifies each ingested triple with
 		// credentialSubject (see templatecatalogueintegration's sparql.go), which
 		// the read path joins on, so retrieval depends on FC having parsed this
 		// as a credential too.
@@ -84,32 +157,11 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 		// unsecured self-description and nothing downstream should treat its
 		// contents as attested. Signing it is the fix; untyping it only breaks
 		// the catalogue.
-		"type": []string{
-			"VerifiableCredential",
-			"dcs:ContractTemplate",
-		},
-		"issuer":    input.Issuer,
-		"validFrom": validFrom.Format(time.RFC3339),
-		// credentialSubject's own "id" becomes the RDF subject for every
-		// property below once FC ingests this as JSON-LD — it must be a
-		// well-formed absolute IRI (base.ResourceIRI), not the bare template
-		// UUID: FC's JsonLdToRdf silently drops ("Non well-formed subject...
-		// has been skipped") every triple whose subject isn't one, confirmed
-		// live. dcs:templateUuid carries the bare UUID separately as a plain
-		// literal property, unaffected by that requirement.
-		"credentialSubject": map[string]any{
-			"id":                     input.SubjectIRI,
-			"type":                   "dcs:ContractTemplate",
-			"dcs:templateUuid":       input.Subject.ID,
-			"dcs:state":              input.Subject.State,
-			"dcs:templateType":       input.Subject.TemplateType,
-			"dcs:partyType":          input.Subject.PartyType,
-			"schema:name":            input.Subject.Name,
-			"schema:description":     input.Subject.Description,
-			"schema:version":         input.Subject.Version,
-			"dcs:templateDataString": input.TemplateDataString,
-		},
-	}, nil
+		"type":              []string{"VerifiableCredential", subjectType},
+		"issuer":            issuer,
+		"validFrom":         validFrom.Format(time.RFC3339),
+		"credentialSubject": subject,
+	}
 }
 
 // TemplateDataString serializes persisted template_data for FC graph storage.

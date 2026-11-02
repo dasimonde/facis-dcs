@@ -365,14 +365,6 @@ func renderBMFFBox(boxType string, payload []byte) []byte {
 	return box
 }
 
-func renderUUIDContentBox(uuidHex string, payload []byte) []byte {
-	uuid := decodeUUIDHex(uuidHex)
-	boxPayload := make([]byte, 0, 16+len(payload))
-	boxPayload = append(boxPayload, uuid[:]...)
-	boxPayload = append(boxPayload, payload...)
-	return renderBMFFBox("uuid", boxPayload)
-}
-
 func renderJUMBFDescriptionBox(uuidHex string, toggles byte, label string) []byte {
 	uuid := decodeUUIDHex(uuidHex)
 	payload := make([]byte, 0, 16+1+len(label)+1)
@@ -972,6 +964,9 @@ func ExtractSigningChain(pdf []byte) ([][]byte, error) {
 type ManifestSigner struct {
 	Manifest string
 	LeafDER  []byte
+	// Chain is the x5chain the manifest carries, leaf first, so a caller can
+	// anchor the leaf to a trust anchor and an organization.
+	Chain [][]byte
 }
 
 // ManifestSigners lists, in chain order, the leaf each of a PDF's manifests was
@@ -995,7 +990,7 @@ func ManifestSigners(pdf []byte) ([]ManifestSigner, error) {
 		if err != nil {
 			return nil, fmt.Errorf("manifest %s: %w", label, err)
 		}
-		signers = append(signers, ManifestSigner{Manifest: label, LeafDER: chain[0]})
+		signers = append(signers, ManifestSigner{Manifest: label, LeafDER: chain[0], Chain: chain})
 	}
 	return signers, nil
 }
@@ -1037,12 +1032,7 @@ func extractLifecycleEffectiveAt(c2paBytes []byte, manifestIdx int) (time.Time, 
 // (which embeds it) would fail the byte-for-byte determinism check. See
 // renderXMPMetadata's doc comment for why this replaced a C2PA claim field.
 func extractRemoteManifestURLFromXMP(pdf []byte) string {
-	const metadataObjID = 13
-	start, length, found := findLastObjectStreamRange(pdf, metadataObjID)
-	if !found {
-		return ""
-	}
-	xmp := pdf[start : start+length]
+	xmp := metadataStream(pdf)
 	marker := []byte(`dcterms:provenance="`)
 	idx := bytes.Index(xmp, marker)
 	if idx < 0 {

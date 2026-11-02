@@ -27,7 +27,7 @@ def step_then_denied_authorization(context):
 @then('the request is denied because of credential expiration')
 def step_then_denied_credential_invalid(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "token is expired" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
 
 
 @then("the request is denied")
@@ -37,7 +37,17 @@ def step_then_denied(context):
 @then('the request is denied because of too many failed attempts')
 def step_then_denied_to_many_attempts(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
+    # The refusal text is the same for any refused credential; the lock row
+    # proves the lockout itself (FR-UC-01-4).
+    cursor = context.db.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM lockouts WHERE locked_until > NOW()")
+        locked = cursor.fetchone()[0]
+    finally:
+        cursor.close()
+    context.db.rollback()
+    assert locked >= 1, "No active IP lockout after the refused attempts"
 
 # ---------------------------------------------------------------------------
 # Generic HTTP response assertions

@@ -57,10 +57,14 @@ def _ensure_c2patool() -> str:
 
 
 def _verapdf(pdf_path: str) -> None:
+    # --network none: a container with a network gets a veth on the host, and
+    # Chromium aborts the open requests of the running e2e pages with
+    # ERR_NETWORK_CHANGED when that host address set changes. veraPDF reads
+    # only the mounted file.
     artifacts_dir = os.path.dirname(os.path.abspath(pdf_path)) or "."
     name = os.path.basename(pdf_path)
     completed = subprocess.run(
-        ["docker", "run", "--rm", "-v", f"{artifacts_dir}:/data", _VERAPDF_IMAGE,
+        ["docker", "run", "--rm", "--network", "none", "-v", f"{artifacts_dir}:/data", _VERAPDF_IMAGE,
          "-f", "3a", "--format", "text", f"/data/{name}"],
         check=False, capture_output=True, text=True, timeout=300,
     )
@@ -69,7 +73,7 @@ def _verapdf(pdf_path: str) -> None:
         # WHICH clause the artifact violates. Re-run for the failed-rule detail
         # so a conformance regression is actionable rather than just "FAIL 3a".
         detail = subprocess.run(
-            ["docker", "run", "--rm", "-v", f"{artifacts_dir}:/data", _VERAPDF_IMAGE,
+            ["docker", "run", "--rm", "--network", "none", "-v", f"{artifacts_dir}:/data", _VERAPDF_IMAGE,
              "-f", "3a", "--format", "xml", f"/data/{name}"],
             check=False, capture_output=True, text=True, timeout=300,
         )

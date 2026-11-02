@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 const target = {
   id: 'target-1',
@@ -40,6 +41,7 @@ function jwt(): string {
 
 async function authenticate(page: Page): Promise<void> {
   const accessToken = jwt()
+  await withholdUnsignedToken(page)
   await page.addInitScript(
     ([token]) => {
       localStorage.setItem('token_type', 'Bearer')
@@ -143,7 +145,7 @@ test.describe('admin UI accessibility hardening', () => {
 
     await page.goto('/ui/admin/system-users')
     const roleControls = page.locator('fieldset').getByRole('checkbox')
-    await expect(roleControls).toHaveCount(5)
+    await expect(roleControls).toHaveCount(6)
     for (let index = 0; index < (await roleControls.count()); index += 1) {
       await expectBinaryControl(page, roleControls.nth(index))
     }

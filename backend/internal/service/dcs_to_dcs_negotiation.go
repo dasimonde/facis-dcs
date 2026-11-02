@@ -15,6 +15,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
+	"digital-contracting-service/internal/contractworkflowengine/negotiationmerging"
 	trustgate "digital-contracting-service/internal/dcstodcs"
 
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
@@ -26,38 +27,14 @@ import (
 // whose Proposal is missing are refused so the sender retries after the
 // predecessor arrives.
 func (s *dcsToDcssrvc) PostNegotiation(ctx context.Context, req *dcstodcs.DCSToDCSNegotiationMessageRequest) (res *dcstodcs.DCSToDCSNegotiationMessageResponse, err error) {
-	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	defer func() { s.auditReceivedExchange(ctx, "post_negotiation", req.ContractIri, req.FromPeerDid, err) }()
+	body, err := trustgate.NegotiationMessageBody(req)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_negotiation rejected: %w", err))
 	}
-
-	err = remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash)
+	_, localPeer, err := s.admitPeer(ctx, trustgate.OpPostNegotiation, req.FromPeerDid, req.ContractIri, body, req.SecretValue, req.SecretHash)
 	if err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_negotiation rejected: peer %s did not authenticate: %w", req.FromPeerDid, err))
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
-		return nil, contractworkflowengine.MakeBadRequest(
-			errors.New("post_negotiation rejected: a message shipped by this instance to itself is not peer delivery"))
-	}
-
-	err = s.TrustGate.Check(ctx, req.FromPeerDid, trustgate.Inbound, req.ContractIri, "")
-	if err != nil {
-		var gateErr *trustgate.GateError
-		if errors.As(err, &gateErr) {
-			incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr)
-			if incidentErr != nil {
-				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
-			}
-		}
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_negotiation rejected: peer %s does not pass the federation trust gate: %w", req.FromPeerDid, err))
+		return nil, err
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
@@ -134,6 +111,9 @@ func (s *dcsToDcssrvc) persistShippedProposal(
 			return contractworkflowengine.MakeBadRequest(
 				fmt.Errorf("post_negotiation rejected: change_request is not JSON: %w", err))
 		}
+		if _, _, err := negotiationmerging.Decode(encoded); err != nil {
+			return contractworkflowengine.MakeBadRequest(fmt.Errorf("post_negotiation rejected: %w", err))
+		}
 		raw := datatype.JSON(encoded)
 		changeRequest = &raw
 	}
@@ -206,7 +186,7 @@ func (s *dcsToDcssrvc) persistShippedProposal(
 		if err != nil {
 			return contractworkflowengine.MakeBadRequest(err)
 		}
-		err = s.CRepo.UpdateState(ctx, tx, req.ContractIri, contractstate.Negotiation.String())
+		err = s.CRepo.UpdateState(ctx, tx, req.ContractIri, processData.State, contractstate.Negotiation.String())
 		if err != nil {
 			return contractworkflowengine.MakeInternalError(
 				fmt.Errorf("could not move received proposal into negotiation: %w", err))
@@ -240,7 +220,7 @@ func persistShippedOfferAccepted(
 		return contractworkflowengine.MakeBadRequest(err)
 	}
 
-	err = cRepo.UpdateState(ctx, tx, req.ContractIri, contractstate.Negotiation.String())
+	err = cRepo.UpdateState(ctx, tx, req.ContractIri, processData.State, contractstate.Negotiation.String())
 	if err != nil {
 		return contractworkflowengine.MakeInternalError(
 			fmt.Errorf("could not move origin copy into negotiation after offer accepted: %w", err))

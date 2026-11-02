@@ -30,7 +30,7 @@ const contract: Contract = {
 function render() {
   return shallowMount(ViewContractView)
 }
-describe('F03 contract loading feedback', () => {
+describe('contract loading feedback', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     useAuthStore().user = { issuer: 'org', holder: 'manager', roles: ['CONTRACT_MANAGER'] }

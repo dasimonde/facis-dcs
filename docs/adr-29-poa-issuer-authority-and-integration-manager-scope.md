@@ -108,3 +108,27 @@ vocabulary and role claims carrying them must remain valid.
   "enforced" distinguishable. The demo issuer must offer only roles that are
   actually enforced, or a participant receives a credential that logs in and
   grants nothing.
+
+## Note: contract owner notifications (DCS-FR-CSA-23)
+
+The DCS knows a local user only by the holder DID and the roles of the login
+credential. It has no email address or other contact data, and it keeps no
+per-user notification store. Notification management for contract owners is
+split in two:
+
+- **Delivery outside the DCS goes through the webhook platform to ORCE.** The
+  `Integration Manager` subscribes an ORCE flow (Standard Webhooks) to the
+  contract events an owner follows: `contract.renewal_due`, `contract.expired`,
+  `contract.terminated` and the state changes `contract.created`,
+  `contract.submitted`, `contract.approved`, `contract.rejected`,
+  `contract.negotiated`, `contract.offered`, `contract.withdrawn`,
+  `contract.signature_applied`, `contract.signature_revoked`,
+  `contract.activated` and `contract.renewed`. Each contract event carries
+  `owner` (`created_by` and the `responsible` parties of the contract), and
+  delivery follows the contract read policy of the subscribing organization.
+  The flow maps the owner to a channel (mail, Teams and similar) and holds the
+  contact data. Which events reach which channel is set in the flow.
+- **Inside the DCS, owners see changes live.** The dashboards update over the
+  `/contract/events` stream, which applies the contract read policy. The
+  expiration notice period of each contract sets when the renewal-due event
+  fires.

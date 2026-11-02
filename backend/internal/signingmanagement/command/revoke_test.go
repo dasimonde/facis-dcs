@@ -27,7 +27,9 @@ func (r revokeRepoFake) ReadProcessDataByDID(context.Context, *sqlx.Tx, string) 
 func (r revokeRepoFake) RevokeSignature(context.Context, *sqlx.Tx, string, string) error {
 	return r.revokeErr
 }
-func (r revokeRepoFake) UpdateState(context.Context, *sqlx.Tx, string, string) error { return nil }
+func (r revokeRepoFake) UpdateState(context.Context, *sqlx.Tx, string, string, string) error {
+	return nil
+}
 
 func revokeCmd(reason string) RevokeCmd {
 	return RevokeCmd{DID: revokeContractDID, SignerDID: revokeSignerDID, Reason: reason, RevokedBy: "participant-1"}

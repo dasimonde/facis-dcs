@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from '@/stores/auth-store'
@@ -21,8 +21,9 @@ vi.mock(import('vue-router'), async (importOriginal) => ({
   useRoute: () => ({ name: routeName.value }) as never,
 }))
 
+const service = vi.hoisted(() => ({ publishCatalogue: vi.fn() }))
 vi.mock('@/services/contract-workflow-service', () => ({
-  contractWorkflowService: {},
+  contractWorkflowService: service,
 }))
 
 function mountActions(roles: UserRole[], state: ContractState, contractData?: Contract['contract_data']) {
@@ -129,5 +130,35 @@ describe('the offer gate', () => {
   it('does not block on a declaration the document no longer references', () => {
     const button = offerButton(mountActions(['CONTRACT_CREATOR'], 'DRAFT', contractWithUnfilledField(false)))
     expect(button?.attributes('disabled')).toBeUndefined()
+  })
+})
+
+// DCS-IR-CWE-10: an approved contract reaches the catalogue only by the explicit
+// action of an approver or manager, after a confirmation that names what is
+// published.
+describe('catalogue registration', () => {
+  it.each([
+    [['CONTRACT_APPROVER'], 'APPROVED', true],
+    [['CONTRACT_MANAGER'], 'SIGNED', true],
+    [['CONTRACT_APPROVER'], 'REVIEWED', false],
+    [['CONTRACT_CREATOR'], 'APPROVED', false],
+  ] as [UserRole[], ContractState, boolean][])('%s on %s offers it: %s', (roles, state, offered) => {
+    expect(labels(mountActions(roles, state)).includes('Register in catalogue')).toBe(offered)
+  })
+
+  it('registers the contract after confirmation', async () => {
+    service.publishCatalogue.mockResolvedValue({ did: 'did:web:example.com:contract', asset_hash: 'h' })
+    HTMLDialogElement.prototype.showModal = vi.fn()
+    HTMLDialogElement.prototype.close = vi.fn()
+    const wrapper = mountActions(['CONTRACT_APPROVER'], 'APPROVED')
+    await wrapper.get('[data-testid="publish-catalogue"]').trigger('click')
+    await flushPromises()
+    expect(service.publishCatalogue).not.toHaveBeenCalled()
+    // Earlier tests leave their teleported modals in the body; this one is last.
+    const confirms = document.querySelectorAll<HTMLButtonElement>('[data-testid="confirmation-confirm"]')
+    confirms[confirms.length - 1]!.click()
+    await flushPromises()
+    expect(service.publishCatalogue).toHaveBeenCalledWith('did:web:example.com:contract')
+    wrapper.unmount()
   })
 })

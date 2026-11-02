@@ -1,0 +1,33 @@
+# Example values that complete values.prod.yml for the chart tests
+# (templates/prerequisites.yaml; deployment/README.md, "Production
+# prerequisites").
+federatedCatalogue:
+  remote:
+    acknowledgeAdminAllTrustBoundary: true
+signing:
+  issuerDID: "did:web:dcs.example.org"
+  tsaURL: "https://tsa.example.org/tsr"
+  issuerX5ChainPath: /etc/dcs/c2pa/x5chain.pem
+messaging:
+  secretRef:
+    name: dcs-prod-nats
+oid4vp:
+  trust:
+    enabled: true
+    existingConfigMap: dcs-prod-trust
+configIntegrity:
+  pins:
+    oid4vp-trust-data: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+pkcs11:
+  modulePath: /usr/lib/pkcs11/hsm.so
+  tokenLabel: dcs
+identity:
+  existingSecret: dcs-prod-did
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik

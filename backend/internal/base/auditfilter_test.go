@@ -10,7 +10,8 @@ func TestIsAuditVisibleEventType(t *testing.T) {
 	}{
 		{name: "retrieve by id is hidden", eventType: "RETRIEVE_CONTRACT_TEMPLATE_BY_ID", want: false},
 		{name: "retrieve all is hidden", eventType: "RETRIEVE_ALL_CONTRACTS", want: false},
-		{name: "retrieve archived is hidden", eventType: "RETRIEVE_ARCHIVED_CONTRACTS", want: false},
+		{name: "archive retrieval is visible", eventType: "RETRIEVE_ARCHIVED_CONTRACTS", want: true},
+		{name: "archive search is visible", eventType: "SEARCH_ARCHIVED_CONTRACTS", want: true},
 		{name: "search is hidden", eventType: "SEARCH_CONTRACT_TEMPLATE", want: false},
 		{name: "archive store is visible", eventType: "STORE_ARCHIVED_CONTRACT", want: true},
 		{name: "archive audit summary is visible", eventType: "ARCHIVE_ENTRY_AUDIT_SUMMARY", want: true},

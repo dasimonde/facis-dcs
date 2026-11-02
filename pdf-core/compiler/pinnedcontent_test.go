@@ -54,19 +54,19 @@ func appendRevisionWithRoot(t *testing.T, pdf []byte, root int, objs map[int]str
 	offsets := make(map[int]int, len(ids))
 	for _, id := range ids {
 		offsets[id] = base + buf.Len()
-		buf.WriteString(fmt.Sprintf("%d 0 obj\n%s\nendobj\n", id, objs[id]))
+		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", id, objs[id])
 	}
 	xrefStart := base + buf.Len()
 	buf.WriteString("xref\n")
 	for _, id := range ids {
-		buf.WriteString(fmt.Sprintf("%d 1\n%010d 00000 n \n", id, offsets[id]))
+		fmt.Fprintf(&buf, "%d 1\n%010d 00000 n \n", id, offsets[id])
 	}
 	idEntry := ""
 	if fileID := extractTrailerID(pdf); fileID != "" {
 		idEntry = " /ID " + fileID
 	}
-	buf.WriteString(fmt.Sprintf("trailer\n<< /Size %d /Root %d 0 R /Prev %d%s >>\nstartxref\n%d\n%%%%EOF\n",
-		maxObjID+1, root, prevStartXref, idEntry, xrefStart))
+	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root %d 0 R /Prev %d%s >>\nstartxref\n%d\n%%%%EOF\n",
+		maxObjID+1, root, prevStartXref, idEntry, xrefStart)
 
 	return append(append([]byte(nil), pdf...), buf.Bytes()...)
 }

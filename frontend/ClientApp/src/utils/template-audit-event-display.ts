@@ -8,7 +8,8 @@ const templateEventLabels: Record<string, string> = {
   APPROVE_CONTRACT_TEMPLATE: 'Template approved',
   REJECT_CONTRACT_TEMPLATE: 'Template rejected',
   VERIFY_CONTRACT_TEMPLATE: 'Template verified',
-  ARCHIVE_CONTRACT_TEMPLATE: 'Template archived',
+  ARCHIVE_CONTRACT_TEMPLATE: 'Template deprecated',
+  DELETE_CONTRACT_TEMPLATE: 'Template deleted',
   REGISTER_CONTRACT_TEMPLATE: 'Template registered',
   PUBLISH_CONTRACT_TEMPLATE: 'Template published',
   COPY_CONTRACT_TEMPLATE: 'Template copied',
@@ -16,6 +17,7 @@ const templateEventLabels: Record<string, string> = {
   SEARCH_CONTRACT_TEMPLATE: 'Templates searched',
   RETRIEVE_ALL_CONTRACT_TEMPLATES: 'Templates retrieved',
   RETRIEVE_CONTRACT_TEMPLATE_BY_ID: 'Template retrieved',
+  RETRIEVE_CONTRACT_TEMPLATE_PROVENANCE: 'Template provenance retrieved',
   TEMPLATE_POLICY_AUDIT_FINDING: 'Policy finding',
 }
 

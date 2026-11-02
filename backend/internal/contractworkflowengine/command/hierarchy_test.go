@@ -42,9 +42,8 @@ func TestCheckNoParentCycle(t *testing.T) {
 		parents: map[string]string{"B": "A"},
 		known:   map[string]bool{"A": true, "B": true},
 	}
-	u := &Updater{CRepo: repo}
 
-	if err := u.checkNoParentCycle(context.Background(), nil, "A", "B"); !errors.Is(err, ErrContractHierarchyCycle) {
+	if err := checkNoParentCycle(context.Background(), nil, repo, "A", "B"); !errors.Is(err, ErrContractHierarchyCycle) {
 		t.Fatalf("expected cycle error, got %v", err)
 	}
 
@@ -53,8 +52,7 @@ func TestCheckNoParentCycle(t *testing.T) {
 		parents: map[string]string{},
 		known:   map[string]bool{"A": true, "B": true},
 	}
-	uNoLoop := &Updater{CRepo: repoNoLoop}
-	if err := uNoLoop.checkNoParentCycle(context.Background(), nil, "B", "A"); err != nil {
+	if err := checkNoParentCycle(context.Background(), nil, repoNoLoop, "B", "A"); err != nil {
 		t.Fatalf("expected no cycle, got %v", err)
 	}
 
@@ -63,8 +61,7 @@ func TestCheckNoParentCycle(t *testing.T) {
 		parents: map[string]string{},
 		known:   map[string]bool{"child": true},
 	}
-	uRemote := &Updater{CRepo: repoRemote}
-	if err := uRemote.checkNoParentCycle(context.Background(), nil, "child", "did:remote:frame"); err != nil {
+	if err := checkNoParentCycle(context.Background(), nil, repoRemote, "child", "did:remote:frame"); err != nil {
 		t.Fatalf("expected non-local parent to be tolerated, got %v", err)
 	}
 }

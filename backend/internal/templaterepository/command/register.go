@@ -15,17 +15,23 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/templatestructure"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/eventtype"
 	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 
 	"github.com/jmoiron/sqlx"
 )
+
+// ErrInvalidTemplateState refuses a command that the template's current state does not allow.
+var ErrInvalidTemplateState = db.ErrInvalidTemplateState
 
 type RegisterCmd struct {
 	DID          string
@@ -38,8 +44,6 @@ type RegisterCmd struct {
 type Registrar struct {
 	DB       *sqlx.DB
 	CTRepo   db.ContractTemplateRepo
-	RTRepo   db.ReviewTaskRepo
-	ATRepo   db.ApprovalTaskRepo
 	FCClient *fcclient.FederatedCatalogueClient
 	// VCSigner + IssuerDID issue the per-version template provenance VC
 	// (DCS-FR-TR-09) at registration — registration is the moment a version
@@ -51,7 +55,7 @@ type Registrar struct {
 func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error) {
 
 	if cmd.DID == "" {
-		return nil, errors.New("did is empty")
+		return nil, fmt.Errorf("%w: did is empty", ErrInvalidRequest)
 	}
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -69,24 +73,23 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		return nil, fmt.Errorf("could not check if contract template already exists: %w", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("could not commit transaction: %w", err)
-	}
-
 	if existing != nil {
 
-		tx, err := h.DB.BeginTxx(ctx, nil)
-		if err != nil {
-			return nil, fmt.Errorf("could not start transaction: %w", err)
+		// Only an approved template enters the pool of contract-ready
+		// templates (DCS-IR-TR-06). A repeated register of a registered
+		// template changes nothing.
+		switch existing.State {
+		case contracttemplatestate.Approved.String():
+		case contracttemplatestate.Registered.String():
+			return &cmd.DID, nil
+		default:
+			return nil, fmt.Errorf("%w: %s cannot be registered", ErrInvalidTemplateState, existing.State)
 		}
-		defer func(tx *sqlx.Tx) {
-			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-				log.Printf("could not rollback transaction: %v", err)
-			}
-		}(tx)
+		if existing.ComplianceStatus != Compliant {
+			return nil, fmt.Errorf("%w: compliance status %s", ErrTemplateNotCompliant, existing.ComplianceStatus)
+		}
 
-		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Registered.String())
+		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, existing.State, contracttemplatestate.Registered.String())
 		if err != nil {
 			return nil, fmt.Errorf("could not update registered state: %w", err)
 		}
@@ -120,6 +123,26 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			return nil, fmt.Errorf("could not create event: %w", err)
 		}
 
+		// DCS-FR-TR-22: the users of the previous version are told of its successor.
+		predecessor, err := h.CTRepo.ReadPredecessorDID(ctx, tx, cmd.DID)
+		if err != nil {
+			return nil, err
+		}
+		if predecessor != nil {
+			err = event.Create(ctx, tx, templateevents.SuccessorRegisteredEvent{
+				DID:              *predecessor,
+				SuccessorDID:     cmd.DID,
+				SuccessorVersion: existing.Version,
+				RegisteredBy:     cmd.RegisteredBy,
+				OccurredAt:       time.Now().UTC(),
+				HolderDID:        cmd.HolderDID,
+				UserRoles:        cmd.UserRoles,
+			}, componenttype.ContractTemplateRepo)
+			if err != nil {
+				return nil, fmt.Errorf("could not create event: %w", err)
+			}
+		}
+
 		err = tx.Commit()
 		if err != nil {
 			return nil, fmt.Errorf("could not commit transaction: %w", err)
@@ -129,8 +152,13 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 
 	} else {
 
+		// The import does remote calls; it does not keep the read transaction open.
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("could not commit transaction: %w", err)
+		}
+
 		if cmd.Version < 1 {
-			return nil, errors.New("version must be greater than 0")
+			return nil, fmt.Errorf("%w: version must be greater than 0", ErrInvalidRequest)
 		}
 
 		if h.FCClient == nil {
@@ -166,10 +194,10 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		}
 
 		if fcTemplate.TemplateType == nil || strings.TrimSpace(*fcTemplate.TemplateType) == "" {
-			return nil, errors.New("template type is missing from Federated Catalogue")
+			return nil, fmt.Errorf("%w: template type is missing from Federated Catalogue", ErrInvalidRequest)
 		}
 		if fcTemplate.PartyType == nil {
-			return nil, errors.New("party type is missing from Federated Catalogue")
+			return nil, fmt.Errorf("%w: party type is missing from Federated Catalogue", ErrInvalidRequest)
 		}
 		partyType, err := partytype.New(*fcTemplate.PartyType)
 		if err != nil {
@@ -182,6 +210,12 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 
 		if err := requireDeclaredShapeLibraries(ctx, h.DB, templateData); err != nil {
 			return nil, err
+		}
+		// DCS-FR-TR-01: the imported template is stored in the canonical
+		// envelope under its own resource IRI, as a created one is.
+		templateData, err = validation.NormalizeTemplateDataForPersistence(templateData, *newDID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: the template from the Federated Catalogue is not valid: %v", ErrInvalidRequest, err)
 		}
 
 		tx, err := h.DB.BeginTxx(ctx, nil)
@@ -203,6 +237,11 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			Description:  fcTemplate.Description,
 			CreatedBy:    cmd.RegisteredBy,
 			TemplateData: templateData,
+			SearchableMetadata: db.SearchableMetadata{
+				Jurisdiction: fcTemplate.Jurisdiction,
+				Industry:     fcTemplate.Industry,
+			},
+			Structure: db.Structure{TemplateLevel: knownLevel(base.DerefString(fcTemplate.TemplateLevel))},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("could not create registered contract template: %w", err)
@@ -236,9 +275,10 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 }
 
 // issueProvenanceCredential gathers the version's actor trail (creator from
-// the template row, reviewers/approvers from their decided tasks, registrar
-// from the command), issues the signed provenance VC, and stores it linked
-// to the previous version's credential (DCS-FR-TR-09).
+// the template row, the reviewer and the approver by holder DID from the
+// decision events, registrar from the command), issues the signed
+// provenance VC, and stores it linked to the previous version's credential
+// (DCS-FR-TR-09).
 func (h *Registrar) issueProvenanceCredential(ctx context.Context, tx *sqlx.Tx, cmd RegisterCmd, existing *db.ContractTemplate) error {
 	if h.VCSigner == nil || h.IssuerDID == "" {
 		return errors.New("template provenance VC issuance is not configured (VCSigner/IssuerDID)")
@@ -257,29 +297,9 @@ func (h *Registrar) issueProvenanceCredential(ctx context.Context, tx *sqlx.Tx, 
 		}
 	}
 
-	var reviewers []string
-	if h.RTRepo != nil {
-		tasks, err := h.RTRepo.ReadAllByDID(ctx, tx, cmd.DID)
-		if err != nil {
-			return fmt.Errorf("read review tasks: %w", err)
-		}
-		for _, t := range tasks {
-			if t.State == "VERIFIED" || t.State == "APPROVED" {
-				reviewers = append(reviewers, t.Reviewer)
-			}
-		}
-	}
-	var approvers []string
-	if h.ATRepo != nil {
-		tasks, err := h.ATRepo.ReadAllByDID(ctx, tx, cmd.DID)
-		if err != nil {
-			return fmt.Errorf("read approval tasks: %w", err)
-		}
-		for _, t := range tasks {
-			if t.State == "APPROVED" {
-				approvers = append(approvers, t.Approver)
-			}
-		}
+	reviewers, approvers, err := h.deciders(ctx, tx, cmd.DID)
+	if err != nil {
+		return err
 	}
 
 	previousVCID, err := h.CTRepo.ReadLatestProvenanceVCID(ctx, tx, cmd.DID)
@@ -319,6 +339,49 @@ func (h *Registrar) issueProvenanceCredential(ctx context.Context, tx *sqlx.Tx, 
 		PreviousVCID: previousVCID,
 		Credential:   datatype.JSON(signedVC),
 	})
+}
+
+// deciders returns the holder DIDs of the persons who made the review and
+// approval decisions of this version: the last forward to approval and the
+// last approval in the template's events.
+func (h *Registrar) deciders(ctx context.Context, tx *sqlx.Tx, did string) (reviewers, approvers []string, err error) {
+	events, err := h.CTRepo.ReadEvents(ctx, tx, did, eventtype.Submit.String(), eventtype.Approve.String())
+	if err != nil {
+		return nil, nil, err
+	}
+	var reviewer, approver string
+	for _, evt := range events {
+		var data struct {
+			NewState  string `json:"new_state"`
+			HolderDID string `json:"holder_did"`
+		}
+		if err := json.Unmarshal(evt.EventData, &data); err != nil {
+			return nil, nil, fmt.Errorf("decode %s event of %s: %w", evt.EventType, did, err)
+		}
+		switch {
+		case evt.EventType == eventtype.Submit.String() && data.NewState == contracttemplatestate.Reviewed.String():
+			reviewer = data.HolderDID
+		case evt.EventType == eventtype.Approve.String():
+			approver = data.HolderDID
+		}
+	}
+	if reviewer != "" {
+		reviewers = []string{reviewer}
+	}
+	if approver != "" {
+		approvers = []string{approver}
+	}
+	return reviewers, approvers, nil
+}
+
+// knownLevel keeps a template level of this deployment; any other value
+// gives the default level.
+func knownLevel(level string) string {
+	switch templatestructure.Level(level) {
+	case templatestructure.FrameAgreement, templatestructure.Agreement, templatestructure.SubAgreement, templatestructure.Addendum:
+		return level
+	}
+	return ""
 }
 
 func templateDataFromAny(raw any) (*datatype.JSON, error) {

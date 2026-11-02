@@ -9,8 +9,12 @@ import type { ContractTemplateAuditResponse } from '@/models/responses/template-
 
 type DocumentType = 'contract' | 'template'
 
+// A drill-down (for example from a compliance risk) opens the panel on its DID.
+const props = defineProps<{ initialDid?: string }>()
+
 const documentType = ref<DocumentType>('contract')
-const documentDid = ref('')
+const documentDid = ref(props.initialDid ?? '')
+const justification = ref('')
 const loading = ref(false)
 const loadError = ref('')
 const contractAudits = ref<ContractAuditResponse>([])
@@ -18,7 +22,7 @@ const templateAudits = ref<ContractTemplateAuditResponse>([])
 const loadedDid = ref('')
 const loadedType = ref<DocumentType | null>(null)
 
-const canView = computed(() => documentDid.value.trim().length > 0)
+const canView = computed(() => documentDid.value.trim().length > 0 && justification.value.trim().length > 0)
 const hasLoaded = computed(() => loadedType.value !== null && loadedDid.value !== '')
 const isEmpty = computed(() => {
   if (!hasLoaded.value) return false
@@ -27,7 +31,7 @@ const isEmpty = computed(() => {
 
 async function viewActivityHistory() {
   const did = documentDid.value.trim()
-  if (!did || loading.value) return
+  if (!canView.value || loading.value) return
   if (loadedDid.value === did && loadedType.value === documentType.value) return
 
   loading.value = true
@@ -37,9 +41,9 @@ async function viewActivityHistory() {
 
   try {
     if (documentType.value === 'contract') {
-      contractAudits.value = await contractWorkflowService.audit({ did })
+      contractAudits.value = await contractWorkflowService.audit({ did, justification: justification.value.trim() })
     } else {
-      templateAudits.value = await contractTemplateService.audit({ did })
+      templateAudits.value = await contractTemplateService.audit({ did, justification: justification.value.trim() })
     }
     loadedDid.value = did
     loadedType.value = documentType.value
@@ -82,6 +86,17 @@ watch(documentType, () => {
         <input
           id="input-action-history-did"
           v-model="documentDid"
+          class="input-bordered input rounded-box"
+          :disabled="loading"
+          @keyup.enter="viewActivityHistory"
+        />
+      </label>
+
+      <label class="form-control w-full sm:w-64">
+        <span class="label-text mb-1">Justification</span>
+        <input
+          id="input-action-history-justification"
+          v-model="justification"
           class="input-bordered input rounded-box"
           :disabled="loading"
           @keyup.enter="viewActivityHistory"

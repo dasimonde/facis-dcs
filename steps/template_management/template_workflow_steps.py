@@ -12,6 +12,7 @@ from steps.support.api_client import (
     put_json,
     template_audit_url,
     template_approve_url,
+    template_create_url,
     template_register_url,
     template_reject_url,
     template_retrieve_by_id_url,
@@ -161,7 +162,7 @@ def step_given_template_deprecated_status(context, name):
     archive_resp = post_json(
         context,
         template_archive_url(context),
-        {"did": t["did"], "updated_at": t["updated_at"]},
+        _archive_payload(t),
         headers=manager_headers,
     )
     assert archive_resp.status_code == 200, f"Template archive failed: {archive_resp.text}"
@@ -210,11 +211,10 @@ def step_when_submit_template(context, name):
 @when('I resubmit template "{name}"')
 def step_when_resubmit_template(context, name):
     t = TemplateService.named(context, name)
-    context.requests_response = post_json(
-        context,
-        template_submit_url(context),
-        TemplateService.template_submit_payload(context, t["did"], t["updated_at"]),
-    )
+    payload = TemplateService.template_submit_payload(context, t["did"], t["updated_at"])
+    # DCS-IR-TR-05: the approver states why the template goes back to review.
+    payload["comments"] = ["Clarify the liability clause"]
+    context.requests_response = post_json(context, template_submit_url(context), payload)
     if context.requests_response.status_code == 200:
         ua = TemplateService.fetch_template(context, t["did"]).get("updated_at", "draft")
         TemplateService.store_named(context, name, t["did"], ua)
@@ -497,7 +497,7 @@ def step_when_search_templates(context, name, count):
 @when('the request is denied because of too many failed attempts')
 def step_when_denied_to_many_attempts(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
 
 @when('I search for templates with name "{name}"')
 def step_when_search_templates(context, name):
@@ -543,13 +543,18 @@ def step_when_attempt_verify_template(context, name):
     )
 
 
+def _archive_payload(t):
+    # DCS-IR-TR-07: an archival requires a justification.
+    return {"did": t["did"], "updated_at": t["updated_at"], "justification": "Replaced by a newer template"}
+
+
 @when('I deprecate template "{name}"')
 def step_when_deprecate_template(context, name):
     t = TemplateService.named(context, name)
     context.requests_response = post_json(
         context,
         template_archive_url(context),
-        {"did": t["did"], "updated_at": t["updated_at"]},
+        _archive_payload(t),
     )
 
 
@@ -564,7 +569,7 @@ def step_when_delete_template(context, name):
     context.requests_response = post_json(
         context,
         template_archive_url(context),
-        {"did": t["did"], "updated_at": t["updated_at"]},
+        _archive_payload(t),
     )
 
 
@@ -646,6 +651,17 @@ def step_then_template_status(context, expected_status):
 
 
 
+@then('template "{name}" is still in "{expected_status}" status')
+def step_then_template_still_in_status(context, name, expected_status):
+    t = TemplateService.named(context, name)
+    # A scenario that authenticated no role reads as the Template Creator.
+    headers = getattr(context, "headers", None) or AuthService.get_headers_for_roles(["Template Creator"])
+    actual = TemplateService.fetch_template(context, t["did"], headers=headers).get("state", "").upper()
+    assert actual == expected_status.upper(), (
+        f"Template state changed: expected '{expected_status.upper()}', got '{actual}'"
+    )
+
+
 @then('template "{name}" status remains "{expected_status}"')
 def step_then_template_status_remains(context, name, expected_status):
     assert context.requests_response.status_code == 200, context.requests_response.text
@@ -698,7 +714,7 @@ def step_then_deletion_recorded_audit(context):
     assert did, f"No DID in delete response: {body}"
     audit = requests.get(
         template_audit_url(context),
-        params={"did": did},
+        params={"did": did, "justification": "BDD template audit"},
         headers=getattr(context, "headers", {}),
         timeout=context.http_timeout_seconds,
     )
@@ -805,16 +821,50 @@ def step_then_template_links_latest_version(context, base_name, successor_name):
 
 @then("contract creation from the unapproved template is denied")
 def step_then_contract_creation_from_unapproved_template_denied(context):
-    # contract/create resolves templates against REGISTERED/PUBLISHED rows
-    # only; the miss surfaces via MakeInternalError today, so the assertion
-    # accepts any error status rather than pinning the 4xx class.
+    # contract/create uses only the newest REGISTERED/PUBLISHED version of a
+    # lineage; any other template is a client error (400).
     resp = context.requests_response
-    assert resp.status_code >= 400, (
-        f"Expected contract creation from a Draft template to be denied, got "
+    assert resp.status_code == 400, (
+        f"Expected contract creation from a Draft template to be denied with 400, got "
         f"{resp.status_code}: {resp.text}"
     )
-    assert "could not find contract template" in resp.text.lower(), (
+    assert "no usable contract template" in resp.text.lower(), (
         f"Expected the denial to name the unusable template, got: {resp.text}"
     )
     body = resp.json()
     assert "did" not in body, f"No contract identifier may be issued on denial: {body}"
+
+
+@given('a registered frame template "{name}"')
+def step_given_registered_frame_template(context, name):
+    from steps.pdf_generation.dcs_bundle_export_steps import step_given_template_for_bundle_export
+
+    step_given_template_for_bundle_export(context, name, {"template_level": "FRAME_AGREEMENT"})
+    _register_named_template(context, name)
+
+
+@when('I submit a frame template "{name}" that requires template "{required}"')
+def step_when_submit_frame_requiring(context, name, required):
+    # DCS-FR-TR-02, DCS-FR-TR-26: a template requires only a template of a
+    # higher level, so a frame agreement cannot require a frame agreement.
+    headers = AuthService.get_headers_for_roles(["Template Creator"])
+    create = post_json(
+        context,
+        template_create_url(context),
+        {
+            "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
+            "name": name,
+            "template_data": TemplateService.canonical_document_data(name, clause_text="Frame clause"),
+            "template_level": "FRAME_AGREEMENT",
+            "required_templates": [TemplateService.named(context, required)["did"]],
+        },
+        headers=headers,
+    )
+    assert create.status_code == 200, f"Template create failed: {create.text}"
+    did = create.json()["did"]
+    updated_at = TemplateService.fetch_template(context, did, headers=headers).get("updated_at")
+    TemplateService.store_named(context, name, did, updated_at)
+    context.requests_response = post_json(
+        context, template_submit_url(context), TemplateService.template_submit_payload(context, did, updated_at), headers=headers
+    )

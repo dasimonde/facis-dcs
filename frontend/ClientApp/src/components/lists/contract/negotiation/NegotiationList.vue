@@ -335,6 +335,13 @@ watch(
             <div class="min-w-0 space-y-1">
               <h2 class="card-title">Change proposal by: {{ negotiation.created_by }}</h2>
               <p class="text-sm text-base-content/60">Proposed {{ formatProposedAt(negotiation.created_at) }}</p>
+              <p
+                v-if="negotiation.change_request?.comment"
+                class="text-sm whitespace-pre-wrap"
+                data-testid="proposal-comment"
+              >
+                Comment: {{ negotiation.change_request.comment }}
+              </p>
             </div>
             <span v-if="isOwnProposal(negotiation)" class="badge badge-ghost badge-sm">Your proposal</span>
             <span v-else-if="canRespondTo(negotiation)" class="badge badge-sm badge-warning">

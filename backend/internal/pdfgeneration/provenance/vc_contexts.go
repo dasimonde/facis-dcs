@@ -39,7 +39,7 @@ import (
 //go:embed contexts/credentials-v2.json contexts/data-integrity-v2.json
 var vcContextFS embed.FS
 
-var embeddedVCContexts = map[string]string{
+var embeddedVCContexts = map[string]string{ // #nosec G101 -- identifier or vocabulary IRI, not a credential
 	"https://www.w3.org/ns/credentials/v2":        "contexts/credentials-v2.json",
 	"https://w3id.org/security/data-integrity/v2": "contexts/data-integrity-v2.json",
 }

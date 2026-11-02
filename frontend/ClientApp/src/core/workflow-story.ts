@@ -252,7 +252,7 @@ export function contractStory(
       return story(
         'REVOKED',
         'This contract was revoked',
-        'Revoked after signing. It is no longer in force. The revocation is recorded in the audit trail and reflected in the C2PA status of the PDF.',
+        'Revoked after signing. It is no longer in force. The revocation is recorded in the audit trail, in the status list, and in a suspended lifecycle manifest appended to the signed PDF.',
       )
     case 'TERMINATED':
       return story(

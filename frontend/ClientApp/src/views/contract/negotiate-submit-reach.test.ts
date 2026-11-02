@@ -8,9 +8,8 @@ import type { UserRole } from '@/types/user-role'
 
 /**
  * Submit closes a negotiation round. command/submit.go's NEGOTIATION branch
- * accepts Contract Creator, Contract Negotiator and Contract Reviewer — the
- * negotiator reaches the view through the Negotiation Tasks tab but had the
- * one control that ends the round permanently greyed out.
+ * accepts Contract Creator, Contract Negotiator, Contract Reviewer and Contract
+ * Manager, the roles that negotiate the round (DCS-IR-CWE-03).
  */
 
 vi.mock(import('vue-router'), async (importOriginal) => ({
@@ -68,15 +67,14 @@ const submitButton = async (roles: UserRole[]) =>
   (await mountAs(roles)).findAll('button').find((button) => button.text().includes('Submit'))
 
 describe('closing a negotiation round', () => {
-  it.each<UserRole>(['CONTRACT_CREATOR', 'CONTRACT_REVIEWER', 'CONTRACT_NEGOTIATOR'])(
+  it.each<UserRole>(['CONTRACT_CREATOR', 'CONTRACT_REVIEWER', 'CONTRACT_NEGOTIATOR', 'CONTRACT_MANAGER'])(
     'enables Submit for %s',
     async (role) => {
       expect((await submitButton([role]))?.attributes('disabled')).toBeUndefined()
     },
   )
 
-  // submit.go deliberately does not admit the manager to this transition.
-  it.each<UserRole>(['CONTRACT_MANAGER', 'CONTRACT_OBSERVER'])('leaves Submit disabled for %s', async (role) => {
+  it.each<UserRole>(['CONTRACT_OBSERVER'])('leaves Submit disabled for %s', async (role) => {
     expect((await submitButton([role]))?.attributes('disabled')).toBeDefined()
   })
 })

@@ -35,7 +35,7 @@ test('secure contract viewer shows the real contract content and guides the sign
     await expect(page.getByText(/provider invoices the agreed payment amount/i)).toBeVisible()
   })
 
-  await test.step('P02 the signer cannot edit the contract values', async () => {
+  await test.step('the signer cannot edit the contract values', async () => {
     const amount = page.getByRole('textbox', { name: 'Payment Amount', exact: true })
     await expect(amount).toBeVisible()
     await expect(amount).toBeDisabled()

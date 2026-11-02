@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
+import { ROUTES } from '@/router/router'
 import { pacNonComplianceService } from '@/services/pac-non-compliance-service'
+import { useAuthStore } from '@/stores/auth-store'
+import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
-import type { PACComplianceRisk } from '@/models/responses/pac-non-compliance-response'
+import type { PACCase, PACComplianceRisk, PACWorkflowGateRun } from '@/models/responses/pac-non-compliance-response'
+
+// The Compliance Officer monitors, reports incidents and decides workflow-gate
+// reviews. The Auditor reads and exports the case files (DCS-FR-PACM-05).
+const authStore = useAuthStore()
+const isComplianceOfficer = computed(() => authStore.user?.roles.includes('COMPLIANCE_OFFICER') ?? false)
 
 const risks = ref<PACComplianceRisk[]>([])
 const checkedAt = ref<string | null>(null)
@@ -20,11 +29,14 @@ const filteredRisks = computed(() => {
 const hasCompletedSweep = computed(() => checkedAt.value !== null)
 const hasActiveFilter = computed(() => searchTerm.value.trim() !== '')
 
+// Optional: with it, the risks name the denied actors (DCS-FR-PACM-04).
+const monitorJustification = ref('')
+
 const runMonitoringSweep = async () => {
   sweepLoading.value = true
   sweepError.value = null
   try {
-    const response = await pacNonComplianceService.monitor()
+    const response = await pacNonComplianceService.monitor(monitorJustification.value.trim() || undefined)
     checkedAt.value = response.checked_at
     risks.value = response.risks
   } catch (err) {
@@ -35,20 +47,23 @@ const runMonitoringSweep = async () => {
   }
 }
 
-const contractDid = ref('')
 // A contract in force that no longer meets its own agreed boundaries is the
 // one risk here that is about the contract UNDERPERFORMING rather than about a
 // process step being missed, so it is called out visually (DCS-FR-CWE-31).
 const isUnderperformance = (risk: PACComplianceRisk) => risk.risk_type === 'CONTRACT_UNDERPERFORMANCE'
 
+// DCS-IR-PACM-04: an incident is linked to a contract or to a template.
+const linkedTo = ref<'contract' | 'template'>('contract')
+const linkedDid = ref('')
 const riskType = ref('')
 const detail = ref('')
 const incidentSubmitting = ref(false)
 const incidentError = ref<string | null>(null)
 const incidentSuccess = ref(false)
+const caseId = ref<string | null>(null)
 
 const canSubmitIncident = computed(
-  () => contractDid.value.trim() !== '' && riskType.value.trim() !== '' && detail.value.trim() !== '',
+  () => linkedDid.value.trim() !== '' && riskType.value.trim() !== '' && detail.value.trim() !== '',
 )
 
 const submitIncidentReport = async () => {
@@ -56,11 +71,15 @@ const submitIncidentReport = async () => {
   incidentError.value = null
   incidentSuccess.value = false
   try {
-    await pacNonComplianceService.reportIncident({
-      contract_did: contractDid.value.trim(),
-      findings: [{ risk_type: riskType.value.trim(), detail: detail.value.trim() }],
-    })
+    const did = linkedDid.value.trim()
+    caseId.value =
+      (await pacNonComplianceService.reportIncident({
+        ...(linkedTo.value === 'contract' ? { contract_did: did } : { template_did: did }),
+        findings: [{ risk_type: riskType.value.trim(), detail: detail.value.trim() }],
+      })) ?? null
     incidentSuccess.value = true
+    if (caseId.value) caseLookup.value = caseId.value
+    await loadCases()
   } catch (err) {
     claimReportedHttpError(err)
     incidentError.value = err instanceof Error ? err.message : 'Incident report could not be submitted.'
@@ -68,6 +87,76 @@ const submitIncidentReport = async () => {
     incidentSubmitting.value = false
   }
 }
+
+// DCS-FR-PACM-05: the case list, the case lookup and the case file export.
+const cases = ref<PACCase[]>([])
+const casesError = ref<string | null>(null)
+const caseLookup = ref('')
+const caseJustification = ref('')
+const caseExporting = ref(false)
+
+async function loadCases() {
+  casesError.value = null
+  try {
+    cases.value = await pacNonComplianceService.cases()
+  } catch (err) {
+    claimReportedHttpError(err)
+    casesError.value = err instanceof Error ? err.message : 'Cases could not be loaded.'
+  }
+}
+
+const exportCaseFile = async (id: string) => {
+  if (!id.trim() || !caseJustification.value.trim()) return
+  caseExporting.value = true
+  casesError.value = null
+  try {
+    const file = await pacNonComplianceService.exportCaseFile(id.trim(), caseJustification.value.trim())
+    downloadBlob(file, `case-${id.trim()}.json`)
+    await loadCases()
+  } catch (err) {
+    claimReportedHttpError(err)
+    casesError.value = err instanceof Error ? err.message : 'Case file could not be exported.'
+  } finally {
+    caseExporting.value = false
+  }
+}
+
+// DCS-FR-PACM-03: REVIEW runs of the workflow gates wait for a decision.
+const gateRuns = ref<PACWorkflowGateRun[]>([])
+const gateError = ref<string | null>(null)
+const gateJustifications = ref<Record<string, string>>({})
+const decidingRun = ref<string | null>(null)
+
+async function loadGateRuns() {
+  gateError.value = null
+  try {
+    gateRuns.value = await pacNonComplianceService.workflowGateRuns()
+  } catch (err) {
+    claimReportedHttpError(err)
+    gateError.value = err instanceof Error ? err.message : 'Workflow-gate reviews could not be loaded.'
+  }
+}
+
+async function decide(run: PACWorkflowGateRun, decision: 'approve' | 'reject') {
+  const justification = gateJustifications.value[run.run_id]?.trim()
+  if (!justification) return
+  decidingRun.value = run.run_id
+  gateError.value = null
+  try {
+    await pacNonComplianceService.decideWorkflowGateReview(run.run_id, decision, justification)
+    await loadGateRuns()
+  } catch (err) {
+    claimReportedHttpError(err)
+    gateError.value = err instanceof Error ? err.message : 'The review decision could not be recorded.'
+  } finally {
+    decidingRun.value = null
+  }
+}
+
+onMounted(() => {
+  void loadCases()
+  if (isComplianceOfficer.value) void loadGateRuns()
+})
 </script>
 
 <template>
@@ -78,7 +167,7 @@ const submitIncidentReport = async () => {
   </div>
 
   <section class="space-y-6 px-4">
-    <div class="rounded-box border border-base-content/10 p-4">
+    <div v-if="isComplianceOfficer" class="rounded-box border border-base-content/10 p-4">
       <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <label class="form-control w-full md:w-96">
           <span class="label-text mb-1">Filter by contract DID</span>
@@ -86,6 +175,15 @@ const submitIncidentReport = async () => {
             id="input-filter-did"
             v-model="searchTerm"
             data-testid="monitor-search"
+            class="input-bordered input rounded-box"
+          />
+        </label>
+
+        <label class="form-control w-full md:w-96">
+          <span class="label-text mb-1">Justification to name denied actors (optional)</span>
+          <input
+            v-model="monitorJustification"
+            data-testid="monitor-justification"
             class="input-bordered input rounded-box"
           />
         </label>
@@ -143,7 +241,15 @@ const submitIncidentReport = async () => {
                 data-testid="monitor-risk-row"
                 :class="isUnderperformance(risk) ? 'bg-warning/10' : ''"
               >
-                <td data-testid="monitor-risk-did">{{ risk.did }}</td>
+                <td data-testid="monitor-risk-did">
+                  <RouterLink
+                    :to="{ name: ROUTES.AUDIT.LIST, query: { did: risk.did } }"
+                    class="link wrap-anywhere"
+                    :aria-label="`Action history of ${risk.did}`"
+                  >
+                    {{ risk.did }}
+                  </RouterLink>
+                </td>
                 <td data-testid="monitor-risk-type">
                   <span
                     v-if="isUnderperformance(risk)"
@@ -163,21 +269,85 @@ const submitIncidentReport = async () => {
       </template>
     </div>
 
-    <div class="rounded-box border border-base-content/10 p-4">
+    <div v-if="isComplianceOfficer" class="rounded-box border border-base-content/10 p-4" data-testid="gate-reviews">
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <h3 class="font-bold">Workflow-gate reviews</h3>
+        <button type="button" class="btn btn-ghost btn-sm" @click="loadGateRuns">Refresh reviews</button>
+      </div>
+      <p v-if="gateError" class="mb-2 text-sm text-error">{{ gateError }}</p>
+      <p v-if="gateRuns.length === 0" class="text-sm opacity-70">No workflow-gate run waits for a review.</p>
+      <ul v-else class="space-y-3">
+        <li
+          v-for="run in gateRuns"
+          :key="run.run_id"
+          class="space-y-2 rounded-box border border-base-content/10 p-3"
+          :data-testid="`gate-run-${run.run_id}`"
+        >
+          <div class="text-sm wrap-anywhere">
+            <span class="font-medium">{{ run.gate }}</span>
+            gate · contract {{ run.contract_did }} · version
+            {{ run.contract_version }}
+            <span v-if="run.created_at" class="opacity-70">· {{ new Date(run.created_at).toLocaleString() }}</span>
+          </div>
+          <div class="font-mono text-xs opacity-70">Run {{ run.run_id }}</div>
+          <ul v-if="run.findings?.length" class="list-disc pl-5 text-sm">
+            <li v-for="finding in run.findings" :key="finding">{{ finding }}</li>
+          </ul>
+          <div class="flex flex-wrap items-end gap-2">
+            <label class="form-control grow">
+              <span class="label-text mb-1">Decision justification</span>
+              <input
+                v-model="gateJustifications[run.run_id]"
+                class="input-bordered input input-sm"
+                :data-testid="`gate-justification-${run.run_id}`"
+              />
+            </label>
+            <button
+              type="button"
+              class="btn btn-sm btn-primary"
+              :disabled="decidingRun !== null || !gateJustifications[run.run_id]?.trim()"
+              :data-testid="`gate-approve-${run.run_id}`"
+              @click="decide(run, 'approve')"
+            >
+              Approve run
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline btn-sm btn-error"
+              :disabled="decidingRun !== null || !gateJustifications[run.run_id]?.trim()"
+              :data-testid="`gate-reject-${run.run_id}`"
+              @click="decide(run, 'reject')"
+            >
+              Reject run
+            </button>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="isComplianceOfficer" class="rounded-box border border-base-content/10 p-4">
       <h3 class="mb-3 font-bold">Submit non-compliance incident report</h3>
       <form data-testid="incident-form" class="grid gap-3 md:grid-cols-2" @submit.prevent="submitIncidentReport">
         <label class="form-control w-full">
-          <span class="label-text mb-1">Contract DID</span>
+          <span class="label-text mb-1">Linked to</span>
+          <select v-model="linkedTo" class="select-bordered select rounded-box" data-testid="incident-linked-to">
+            <option value="contract">Contract</option>
+            <option value="template">Template</option>
+          </select>
+        </label>
+
+        <label class="form-control w-full">
+          <span class="label-text mb-1">{{ linkedTo === 'contract' ? 'Contract DID' : 'Template DID' }}</span>
           <input
-            id="input-contract-did"
-            v-model="contractDid"
-            data-testid="incident-contract-did"
+            id="input-linked-did"
+            v-model="linkedDid"
+            data-testid="incident-did"
             class="input-bordered input rounded-box"
             required
           />
         </label>
 
-        <label class="form-control w-full">
+        <label class="form-control w-full md:col-span-2">
           <span class="label-text mb-1">Risk type</span>
           <input
             id="input-risk-type"
@@ -220,6 +390,70 @@ const submitIncidentReport = async () => {
         role="status"
       >
         Incident report submitted successfully.
+        <span v-if="caseId" data-testid="incident-case-id">Case {{ caseId }}</span>
+      </div>
+    </div>
+
+    <div class="rounded-box border border-base-content/10 p-4" data-testid="cases">
+      <h3 class="mb-3 font-bold">Cases</h3>
+      <form class="mb-3 flex flex-wrap items-end gap-2" @submit.prevent="exportCaseFile(caseLookup)">
+        <label class="form-control">
+          <span class="label-text mb-1">Case ID</span>
+          <input v-model="caseLookup" class="input-bordered input input-sm" data-testid="case-lookup" />
+        </label>
+        <label class="form-control grow">
+          <span class="label-text mb-1">Case file justification</span>
+          <input
+            v-model="caseJustification"
+            class="input-bordered input input-sm"
+            data-testid="case-justification"
+            required
+          />
+        </label>
+        <button
+          type="submit"
+          class="btn btn-sm"
+          :disabled="caseExporting || !caseLookup.trim() || !caseJustification.trim()"
+          data-testid="case-export"
+        >
+          Export case file
+        </button>
+      </form>
+      <p v-if="casesError" class="mb-2 text-sm text-error">{{ casesError }}</p>
+      <p v-if="cases.length === 0" class="text-sm opacity-70">No incident cases.</p>
+      <div v-else class="max-w-full overflow-x-auto rounded-box">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Case</th>
+              <th>Linked to</th>
+              <th>Reported</th>
+              <th>Findings</th>
+              <th>Last export</th>
+              <th><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in cases" :key="item.case_id" :data-testid="`case-${item.case_id}`">
+              <td class="font-mono text-xs wrap-anywhere">{{ item.case_id }}</td>
+              <td class="wrap-anywhere">{{ item.linked_to }} {{ item.did }}</td>
+              <td>{{ new Date(item.reported_at).toLocaleString() }} by {{ item.reported_by }}</td>
+              <td>{{ item.findings }}</td>
+              <td>{{ item.exported_at ? new Date(item.exported_at).toLocaleString() : 'Not exported' }}</td>
+              <td>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs"
+                  :disabled="caseExporting || !caseJustification.trim()"
+                  :data-testid="`case-export-${item.case_id}`"
+                  @click="exportCaseFile(item.case_id)"
+                >
+                  Export
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </section>

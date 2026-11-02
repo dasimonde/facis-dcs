@@ -49,10 +49,10 @@ describe('template row View destination', () => {
     expect(viewTarget(['TEMPLATE_APPROVER'], TemplateState.reviewed)).toBe(ROUTES.TEMPLATES.APPROVE)
   })
 
-  // template_repository.go verify/approve both scope Template Manager.
-  it('sends a manager to the pages the backend authorises it for', () => {
-    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.submitted)).toBe(ROUTES.TEMPLATES.REVIEW)
-    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.reviewed)).toBe(ROUTES.TEMPLATES.APPROVE)
+  // DCS-FR-TR-06: the Template Manager neither reviews nor approves.
+  it('sends a manager to the read-only view of a submitted or reviewed template', () => {
+    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.submitted)).toBe(ROUTES.TEMPLATES.VIEW)
+    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.reviewed)).toBe(ROUTES.TEMPLATES.VIEW)
   })
 
   it('sends a creator to the read-only view instead of a page it cannot act on', () => {

@@ -115,6 +115,47 @@ free parameter — it is bounded by the erasure commitment described in §4.1.
 Set it deliberately and record it: the retention window is part of the
 instance's Art. 17 answer.
 
+### 2.4 Automated database dump (chart)
+
+With `backup.enabled=true` (on in `values.prod.yml` and
+`values.acceptance.yml`) the chart runs a CronJob that dumps the `dcs`
+database from `DATABASE_URL` and, when Hydra keeps its state in PostgreSQL
+(`hydra.config.dsnSecretRef` or `hydra.config.coDeployedPostgresql`), the
+`hydra` database, each with `pg_dump --format=custom`, to the
+PersistentVolumeClaim `<fullname>-db-backup` (or `backup.persistence.existingClaim`)
+as `dcs-<timestamp>.dump` and `hydra-<timestamp>.dump`, and deletes dumps
+older than `backup.retentionDays`. The alerts `DCSBackupFailed`,
+`DCSBackupStale` and `DCSBackupNeverSucceeded` report a failed job and a
+job that has not succeeded for 26 hours.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `backup.schedule` | `0 2 * * *` | Recovery point objective: at most one day of `dcs` data is lost |
+| `backup.retentionDays` | `14` | Retention window of §4.1 |
+| `backup.persistence.storageClassName` | cluster default | Set an encrypted class (§2.1) |
+| `backup.image.tag` | `16-alpine` | `pg_dump` major version, at least the server's |
+
+The CronJob covers step 1 for the `dcs` and `hydra` databases. Copy the dumps
+off the cluster to the encrypted backup target. Steps 2 to 4 (IPFS snapshot,
+token volume, configuration) and the `statuslist` and `fc` databases stay
+with the operator's backup tooling, in the order of §2.2.
+
+The restore of a dump is tested: `TestBackupDumpRestoresIntoAnEmptyDatabase`
+(`backend/migrations/backup_restore_pg_test.go`, run in CI with the
+Postgres-backed tests) dumps a migrated database the way the CronJob does,
+restores it with the command below into an empty database, starts it like a
+backend start (migrations) and compares every table.
+
+Restore of a dump (step 3 of §3.1), into an empty database:
+
+```bash
+pg_restore --no-owner --dbname="$DATABASE_URL" dcs-<timestamp>.dump
+```
+
+Recovery time objective: it depends on the data volume of the environment.
+Measure it in a restore drill of §3 per environment and record it next to the
+RPO.
+
 ## 3. Restore
 
 ### 3.1 Order

@@ -122,13 +122,13 @@ func deterministicES256(priv *ecdsa.PrivateKey, message []byte) []byte {
 
 func signRFC6979(priv *ecdsa.PrivateKey, hash []byte) (*big.Int, *big.Int) {
 	n := priv.Curve.Params().N
-	d := priv.D
+	d := priv.D //nolint:staticcheck // the RFC 6979 test signer needs the raw scalar
 	e := hashToInt(hash, priv.Curve)
 	for k := rfc6979Nonce(n, d, hash); ; k = k.Add(k, big.NewInt(1)) {
 		if k.Sign() <= 0 || k.Cmp(n) >= 0 {
 			continue
 		}
-		rx, _ := priv.Curve.ScalarBaseMult(k.Bytes())
+		rx, _ := priv.Curve.ScalarBaseMult(k.Bytes()) //nolint:staticcheck // the RFC 6979 test signer needs the nonce point
 		r := new(big.Int).Mod(rx, n)
 		if r.Sign() == 0 {
 			continue

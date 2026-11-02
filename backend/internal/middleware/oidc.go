@@ -2,9 +2,14 @@ package middleware
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 
 	"digital-contracting-service/internal/auth/machineidentity"
@@ -50,9 +55,10 @@ type SystemClient struct {
 
 // HydraJWTValidator validates JWT tokens from OIDC providers.
 type HydraJWTValidator struct {
-	provider *oidc.Provider
-	verifier *oidc.IDTokenVerifier
-	config   HydraJWTConfig
+	provider        *oidc.Provider
+	verifier        *oidc.IDTokenVerifier
+	expiredVerifier *oidc.IDTokenVerifier
+	config          HydraJWTConfig
 }
 
 // NewHydraJWTValidator connects to the OIDC provider to get public keys.
@@ -73,19 +79,127 @@ func NewHydraJWTValidator(ctx context.Context, config HydraJWTConfig) (*HydraJWT
 		return nil, fmt.Errorf("failed to discover OIDC provider: %w", err)
 	}
 
+	skipSignature, err := algNoneAllowed()
+	if err != nil {
+		return nil, err
+	}
 	// Skip audience check — client binding is validated in ValidateToken via client_id (and aud).
 	// The token signature and issuer are still fully validated.
-	verifier := provider.Verifier(&oidc.Config{
+	oidcConfig := &oidc.Config{
 		ClientID:                   config.ClientID,
 		SkipClientIDCheck:          true,
-		InsecureSkipSignatureCheck: os.Getenv("JWT_ALG_NONE_SUPPORTED") == "true",
-	})
+		InsecureSkipSignatureCheck: skipSignature,
+	}
+	var meta struct {
+		JWKSURL string   `json:"jwks_uri"`
+		Algs    []string `json:"id_token_signing_alg_values_supported"`
+	}
+	if err := provider.Claims(&meta); err != nil {
+		return nil, fmt.Errorf("read the OIDC provider metadata: %w", err)
+	}
+	// The metadata names the JWKS under the public issuer URL. The backend
+	// fetches it where it fetched the discovery document: the public URL need
+	// not be reachable from inside the cluster.
+	jwksURL := meta.JWKSURL
+	if discoveryURL != publicIssuer && strings.HasPrefix(jwksURL, publicIssuer+"/") {
+		jwksURL = discoveryURL + strings.TrimPrefix(jwksURL, publicIssuer)
+	}
+	var keys oidc.KeySet = oidc.NewRemoteKeySet(ctx, jwksURL)
+	oidcConfig.SupportedSigningAlgs = meta.Algs
+	if len(oidcConfig.SupportedSigningAlgs) == 0 {
+		oidcConfig.SupportedSigningAlgs = []string{oidc.RS256}
+	}
+	devKey, err := devAccessTokenKey()
+	if err != nil {
+		return nil, err
+	}
+	if devKey != nil {
+		keys = devKeySet{
+			dev:      &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{devKey}},
+			provider: keys,
+		}
+		oidcConfig.SupportedSigningAlgs = append(slices.Clone(oidcConfig.SupportedSigningAlgs), oidc.ES256)
+	}
+	newVerifier := func(config *oidc.Config) *oidc.IDTokenVerifier {
+		return oidc.NewVerifier(publicIssuer, keys, config)
+	}
+	verifier := newVerifier(oidcConfig)
+	expiredConfig := *oidcConfig
+	expiredConfig.SkipExpiryCheck = true
 
 	return &HydraJWTValidator{
-		provider: provider,
-		verifier: verifier,
-		config:   config,
+		provider:        provider,
+		verifier:        verifier,
+		expiredVerifier: newVerifier(&expiredConfig),
+		config:          config,
 	}, nil
+}
+
+// devAccessTokenKey reads DCS_DEV_ACCESS_TOKEN_KEY, a PEM-encoded ES256 public
+// key. A development or test stack accepts access tokens signed with it beside
+// the provider's keys: the BDD stack signs the expired tokens of its negative
+// credential scenarios with it, so it runs with the signature check on. Only a
+// stack that declares itself one with DCS_ALLOW_DEV_TRUST=true may set it.
+func devAccessTokenKey() (crypto.PublicKey, error) {
+	raw := strings.TrimSpace(os.Getenv("DCS_DEV_ACCESS_TOKEN_KEY"))
+	if raw == "" {
+		return nil, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("DCS_ALLOW_DEV_TRUST")), "true") {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY admits access tokens signed with a development key; it is refused unless DCS_ALLOW_DEV_TRUST=true declares a development or test stack")
+	}
+	block, _ := pem.Decode([]byte(raw))
+	if block == nil {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY is not a PEM public key")
+	}
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY: %w", err)
+	}
+	if _, ok := key.(*ecdsa.PublicKey); !ok {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY is not an ECDSA public key")
+	}
+	log.Printf("WARNING: DCS_DEV_ACCESS_TOKEN_KEY: access tokens signed with a development key are accepted. Development and test stacks only.")
+	return key, nil
+}
+
+// devKeySet verifies a token with the development key, else with the
+// provider's keys.
+type devKeySet struct {
+	dev      oidc.KeySet
+	provider oidc.KeySet
+}
+
+func (k devKeySet) VerifySignature(ctx context.Context, jwt string) ([]byte, error) {
+	if payload, err := k.dev.VerifySignature(ctx, jwt); err == nil {
+		return payload, nil
+	}
+	return k.provider.VerifySignature(ctx, jwt)
+}
+
+// algNoneAllowed reads JWT_ALG_NONE_SUPPORTED, which turns off the token
+// signature check. Only a stack that declares itself a development or test
+// stack with DCS_ALLOW_DEV_TRUST=true may set it (DCS-NFR-SEC-03).
+func algNoneAllowed() (bool, error) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("JWT_ALG_NONE_SUPPORTED")), "true") {
+		return false, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("DCS_ALLOW_DEV_TRUST")), "true") {
+		return false, fmt.Errorf("JWT_ALG_NONE_SUPPORTED=true turns off the access token signature check; it is refused unless DCS_ALLOW_DEV_TRUST=true declares a development or test stack")
+	}
+	log.Printf("WARNING: JWT_ALG_NONE_SUPPORTED=true: access token signatures are NOT checked; any caller can forge any role. Development and test stacks only.")
+	return true, nil
+}
+
+// ExpiredTokenSubject returns the subject of a token whose signature and
+// issuer are valid but whose lifetime ended, or "" for any other token. It
+// identifies the caller of a refused expired token in the attempt log.
+func (v *HydraJWTValidator) ExpiredTokenSubject(ctx context.Context, token string) string {
+	idToken, err := v.expiredVerifier.Verify(ctx, token)
+	if err != nil {
+		return ""
+	}
+	return idToken.Subject
 }
 
 // TokenInfo holds the validated identity extracted from a JWT.

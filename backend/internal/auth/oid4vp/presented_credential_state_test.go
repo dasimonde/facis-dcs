@@ -30,6 +30,26 @@ func TestPresentedCredentialState_FollowsTheLiveStatusList(t *testing.T) {
 	assert.Equal(t, status.StateInvalid, state)
 }
 
+// The compliance check reads the live status of the PID a signatory presented
+// (DCS-FR-SM-21). A PID carries no roles and no delegation, and its status
+// follows the issuer's list like any other credential's.
+func TestPresentedCredentialState_ReadsThePIDStatus(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
+	issuerKey, holderKey := newECKey(t), newECKey(t)
+	pid := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, map[string]any{"roles": nil})
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePID}, []string{testPoAParty}, list)
+
+	state, err := PresentedCredentialState(context.Background(), pid.Presentation, trust, PurposePID)
+	require.NoError(t, err)
+	assert.Equal(t, status.StateValid, state)
+
+	list.Revoke(testPoAStatusIndex)
+
+	state, err = PresentedCredentialState(context.Background(), pid.Presentation, trust, PurposePID)
+	require.NoError(t, err)
+	assert.Equal(t, status.StateInvalid, state)
+}
+
 // A list that cannot be fetched gives no state. The caller reports UNKNOWN; a
 // default of "valid" would hide a revocation for as long as the outage lasts.
 func TestPresentedCredentialState_UnreachableListIsAnError(t *testing.T) {

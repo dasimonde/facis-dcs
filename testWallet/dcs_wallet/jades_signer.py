@@ -79,6 +79,10 @@ def sign_jades_payload(
         "x5c": [base64.b64encode(cert_der).decode()],
         "nonce": nonce,
         "iat": int(time.time()),
+        # JAdES B-B (ETSI TS 119 182-1 §5.1.1): the claimed signing time,
+        # marked critical.
+        "sigT": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "crit": ["sigT"],
     }
     header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _b64url(payload)

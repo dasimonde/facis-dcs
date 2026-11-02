@@ -1,3 +1,6 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+{{- $image := printf "%s:%s" .Values.image.repository .Values.image.tag }}
+{{- with .Values.image.digest }}{{ $image = printf "%s@%s" $image . }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,15 +42,39 @@ spec:
         checksum/settings: {{ include (print $.Template.BasePath "/configmap-settings.yaml") . | sha256sum }}
       {{- end }}
     spec:
-      {{- if or .Values.localTSA.enabled .Values.persistence.enabled }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
-        {{- if .Values.persistence.enabled }}
-        # A fresh persistent volume mounted at /data shadows the image's
-        # baked-in Node-RED runtime files (settings.js, ...); seed them once.
-        - name: seed-data
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        {{- if .Values.volumePermissions.enabled }}
+        - name: volume-permissions
+          image: {{ $image | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
-          command: ["/bin/sh", "-c", "[ -f /seed/settings.js ] || cp -a /data/. /seed/"]
+          command: ["chown", "-R", "{{ .Values.podSecurityContext.runAsUser }}:{{ .Values.podSecurityContext.runAsGroup }}", "/data"]
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN"]
+          volumeMounts:
+            - name: orce-data
+              mountPath: /data
+        {{- end }}
+        # The volume mounted at /data shadows the image's baked-in Node-RED
+        # runtime files (settings.js, ...); seed them once. cp -R, not -a: a
+        # non-root user cannot keep the root owner of the image files.
+        - name: seed-data
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["/bin/sh", "-c", "[ -f /seed/settings.js ] || cp -R /data/. /seed/"]
           {{- with .Values.resources }}
           # A pod's effective limit is max(sum of containers, max of init
           # containers), so mirroring the main block here costs nothing while an
@@ -58,12 +85,15 @@ spec:
           volumeMounts:
             - name: orce-data
               mountPath: /seed
-        {{- end }}
         {{- if .Values.localTSA.enabled }}
         # openssl ts -reply needs a writable, pre-existing serial file.
         - name: seed-tsa-serial
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ $image | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["/bin/sh", "-c", "[ -f /data/tsa-state/serial ] || echo 01 > /data/tsa-state/serial"]
           {{- with .Values.resources }}
           resources:
@@ -73,17 +103,26 @@ spec:
             - name: tsa-state
               mountPath: /data/tsa-state
         {{- end }}
-      {{- end }}
       containers:
         - name: orce
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ $image | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 1880
               protocol: TCP
-          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken .Values.checkpointSink.url .Values.extraEnv }}
+          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken .Values.checkpointSink.url .Values.extraEnv $tls }}
           env:
+            {{- if $tls }}
+            # Node.js trusts the internal CA for HTTPS calls to the DCS backend
+            # and Hydra (DCS-NFR-SEC-14).
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/dcs-internal-tls/ca.crt
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -145,10 +184,11 @@ spec:
             {{- end }}
           {{- end }}
           volumeMounts:
-            {{- if .Values.persistence.enabled }}
             - name: orce-data
               mountPath: /data
-            {{- end }}
+            # The local TSA flow writes its query and reply files here.
+            - name: tmp
+              mountPath: /tmp
             # Also over a persistent volume, so a volume seeded with an older
             # settings.js still runs this one.
             - name: settings
@@ -159,6 +199,9 @@ spec:
             - name: pki-root
               mountPath: /etc/orce/pki-root
               readOnly: true
+            {{- end }}
+            {{- if $tls }}
+            {{- include "digital-contracting-service.internalCAVolumeMount" . | nindent 12 }}
             {{- end }}
             {{- if .Values.flowsFile.enabled }}
             - name: flows-merged
@@ -192,15 +235,26 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- end }}
+        {{- if $tls }}
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" 1880) | nindent 8 }}
+        {{- end }}
       volumes:
+        {{- if $tls }}
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- include "digital-contracting-service.internalCAVolume" . | nindent 8 }}
+        {{- end }}
         - name: settings
           configMap:
             name: {{ .Release.Name }}-orce-settings
-        {{- if .Values.persistence.enabled }}
         - name: orce-data
+          {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-orce
-        {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
         {{- if .Values.pkiRootCA.devFixture }}
         - name: pki-root
           secret:

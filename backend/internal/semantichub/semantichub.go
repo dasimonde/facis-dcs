@@ -239,6 +239,11 @@ func (Repo) Activate(ctx context.Context, tx *sqlx.Tx, name, kind string, versio
 	return activateVersion(ctx, tx, name, kind, version)
 }
 
+// ActivationChannel is the Postgres notification channel an activation
+// signals on when its transaction commits. Every replica listens on it and
+// re-anchors validation to the new active versions.
+const ActivationChannel = "semantic_hub_activated"
+
 func activateVersion(ctx context.Context, tx *sqlx.Tx, name, kind string, version int) error {
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE semantic_schemas SET active = FALSE WHERE name = $1 AND kind = $2 AND active`, name, kind); err != nil {
@@ -247,6 +252,9 @@ func activateVersion(ctx context.Context, tx *sqlx.Tx, name, kind string, versio
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE semantic_schemas SET active = TRUE WHERE name = $1 AND kind = $2 AND version = $3`, name, kind, version); err != nil {
 		return fmt.Errorf("semantic hub: activate %s/%s v%d: %w", name, kind, version, err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_notify($1, '')`, ActivationChannel); err != nil {
+		return fmt.Errorf("semantic hub: signal activation of %s/%s v%d: %w", name, kind, version, err)
 	}
 	return nil
 }
@@ -331,6 +339,10 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Replicas that start together seed one after the other.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('dcs-hub-seed'))`); err != nil {
+		return err
+	}
 
 	genesis := []struct {
 		name, kind, mediaType string

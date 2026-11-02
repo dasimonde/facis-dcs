@@ -52,9 +52,9 @@ func (c contractRowsConn) QueryContext(_ context.Context, query string, args []d
 		return &fakeRows{
 			columns: []string{"run_id", "correlation_id", "snapshot_id", "contract_did", "contract_version",
 				"contract_state", "contract_updated_at", "gate", "status", "content_hash", "effective_shapes",
-				"profile_version", "continuation_json"},
+				"profile_version", "continuation_json", "local_evaluation", "response_json", "created_at"},
 			values: [][]driver.Value{{args[0].Value, "correlation", "snapshot", args[0].Value, int64(1), "DRAFT", time.Now().UTC(),
-				"submission", "PASSED", "sha256:content", []byte(`[]`), int64(1), []byte(`{}`)}},
+				"submission", "PASSED", "sha256:content", []byte(`[]`), int64(1), []byte(`{}`), []byte(`{}`), []byte(`{}`), time.Now().UTC()}},
 		}, nil
 	case strings.Contains(query, "pac_workflow_gate_review_decisions"),
 		strings.Contains(query, "pac_workflow_gate_continuation_attempts"):

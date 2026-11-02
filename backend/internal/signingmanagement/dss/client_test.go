@@ -140,6 +140,48 @@ func TestValidatePDFAttributesTheLastSignatureOnAMultiSignedDocument(t *testing.
 	}
 }
 
+// The verifier checks every signature of a document, not only the last one:
+// ValidatePDFSignatures returns one report per Signature entry, in document
+// order, each with its own certificate, and skips timestamp entries.
+func TestValidatePDFSignaturesReportsEverySignature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"simpleReport": {
+				"signatureOrTimestampOrEvidenceRecord": [
+					{"Signature": {"Id": "S-A", "Indication": "TOTAL-FAILED", "SubIndication": "HASH_FAILURE", "SignedBy": "A"}},
+					{"Timestamp": {"Id": "T-1", "Indication": "PASSED", "SignedBy": "Dev TSA"}},
+					{"Signature": {"Id": "S-B", "Indication": "TOTAL-PASSED", "SignedBy": "B"}}
+				]
+			},
+			"diagnosticData": {
+				"Signatures": {"Signature": [
+					{"Id": "S-A", "SigningCertificate": {"Certificate": "C-A"}},
+					{"Id": "S-B", "SigningCertificate": {"Certificate": "C-B"}}
+				]},
+				"UsedCertificates": {"Certificate": [
+					{"Id": "C-A", "CommonName": "Signatory A"},
+					{"Id": "C-B", "CommonName": "Signatory B"}
+				]}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	reports, err := New(srv.URL).ValidatePDFSignatures(context.Background(), []byte("%PDF fake"))
+	if err != nil {
+		t.Fatalf("ValidatePDFSignatures: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("got %d reports, want one per signature (2)", len(reports))
+	}
+	if reports[0].Indication != "TOTAL-FAILED" || reports[0].CommonName != "Signatory A" {
+		t.Fatalf("first report = %+v, want signature A failed", reports[0])
+	}
+	if reports[1].Indication != "TOTAL-PASSED" || reports[1].CommonName != "Signatory B" {
+		t.Fatalf("second report = %+v, want signature B passed", reports[1])
+	}
+}
+
 // TestValidatePDFResolvesIdentityForASingleSignature is the ordinary,
 // single-signer case (no incremental prior signature to disambiguate from) —
 // it must still resolve GivenName/Surname via diagnosticData, since

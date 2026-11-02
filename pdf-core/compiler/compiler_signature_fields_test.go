@@ -15,7 +15,7 @@ func TestRenderPDFUsesCborContentBoxForSignature(t *testing.T) {
 		},
 		SignatureFields: []sigFieldDef{{Name: "SignerOne", Label: "Signer One"}},
 		NamespaceMap:    map[string]string{},
-		EmbeddedPayload:   []byte(`{}`),
+		EmbeddedPayload: []byte(`{}`),
 		PayloadHash:     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		FileID:          "0123456789abcdef0123456789abcdef",
 	}
@@ -161,10 +161,10 @@ func TestRenderPDFIncludesAcroFormAndSigWidgets(t *testing.T) {
 			{Name: "SignerOne", Label: "Signer One"},
 			{Name: "SignerTwo", Label: "Signer Two"},
 		},
-		NamespaceMap:  map[string]string{},
+		NamespaceMap:    map[string]string{},
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		FileID:        "0123456789abcdef0123456789abcdef",
+		PayloadHash:     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		FileID:          "0123456789abcdef0123456789abcdef",
 	}
 
 	pdf, err := renderPDF(testSigningContext(), doc)

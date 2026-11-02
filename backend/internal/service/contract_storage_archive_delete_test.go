@@ -23,7 +23,7 @@ func (r *recordingSnapshotStore) DeleteFile(cid string) error {
 	return nil
 }
 
-func TestSnapshotCIDsForDeletionSelectsLiveEntriesOfTheDID(t *testing.T) {
+func TestSnapshotCIDsForDeletionSelectsEveryEntryOfTheDID(t *testing.T) {
 	deletedAt := time.Now().UTC()
 	entries := []db.ContractArchiveEntry{
 		{DID: "did:web:a", ContractVersion: 1, SnapshotCID: "bafy-a-v1"},
@@ -31,8 +31,8 @@ func TestSnapshotCIDsForDeletionSelectsLiveEntriesOfTheDID(t *testing.T) {
 		// Same CID twice (identical snapshot bytes are content-addressed to
 		// one object) must yield one removal.
 		{DID: "did:web:a", ContractVersion: 3, SnapshotCID: "bafy-a-v2"},
-		// Already soft-deleted: its snapshot was disposed of by the earlier
-		// delete, not this one.
+		// Already soft-deleted: a repeated delete removes what an earlier
+		// attempt left.
 		{DID: "did:web:a", ContractVersion: 0, SnapshotCID: "bafy-a-old", DeletedAt: &deletedAt},
 		// Another contract's entry stays untouched.
 		{DID: "did:web:b", ContractVersion: 1, SnapshotCID: "bafy-b-v1"},
@@ -42,7 +42,7 @@ func TestSnapshotCIDsForDeletionSelectsLiveEntriesOfTheDID(t *testing.T) {
 
 	cids := snapshotCIDsForDeletion(entries, "did:web:a")
 
-	want := []string{"bafy-a-v1", "bafy-a-v2"}
+	want := []string{"bafy-a-v1", "bafy-a-v2", "bafy-a-old"}
 	if len(cids) != len(want) {
 		t.Fatalf("expected CIDs %v, got %v", want, cids)
 	}
@@ -63,14 +63,14 @@ func TestRemoveArchivedSnapshotsRemovesEveryCID(t *testing.T) {
 	}
 }
 
-func TestRemoveArchivedSnapshotsHardFailsOnRemovalError(t *testing.T) {
+func TestRemoveArchivedSnapshotsTriesEveryCIDAndReportsTheFailures(t *testing.T) {
 	store := &recordingSnapshotStore{failOn: "bafy-2"}
 	err := removeArchivedSnapshots(store, []string{"bafy-1", "bafy-2", "bafy-3"})
 	if err == nil {
-		t.Fatal("expected the removal error to propagate")
+		t.Fatal("expected the removal error to be reported")
 	}
-	if len(store.deleted) != 1 || store.deleted[0] != "bafy-1" {
-		t.Fatalf("expected removal to stop at the failing CID, got %v", store.deleted)
+	if len(store.deleted) != 2 || store.deleted[0] != "bafy-1" || store.deleted[1] != "bafy-3" {
+		t.Fatalf("expected every other CID removed, got %v", store.deleted)
 	}
 }
 

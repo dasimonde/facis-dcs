@@ -36,8 +36,13 @@ type CreateCmd struct {
 	Name         *string
 	Description  *string
 	TemplateData *datatype.JSON
-	HolderDID    string
-	UserRoles    userrole.UserRoles
+	Jurisdiction *string
+	Industry     *string
+	// TemplateLevel defaults to AGREEMENT when empty.
+	TemplateLevel     string
+	RequiredTemplates []string
+	HolderDID         string
+	UserRoles         userrole.UserRoles
 }
 
 type Creator struct {
@@ -51,7 +56,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	}
 	normalizedTemplateData, err := validation.NormalizeTemplateDataForPersistence(cmd.TemplateData, cmd.DID)
 	if err != nil {
-		return fmt.Errorf("template data validation failed: %w", err)
+		return fmt.Errorf("%w: template data validation failed: %w", ErrInvalidRequest, err)
 	}
 	cmd.TemplateData = normalizedTemplateData
 
@@ -74,6 +79,11 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,
+		SearchableMetadata: db.SearchableMetadata{
+			Jurisdiction: cmd.Jurisdiction,
+			Industry:     cmd.Industry,
+		},
+		Structure: db.Structure{TemplateLevel: cmd.TemplateLevel, RequiredTemplates: cmd.RequiredTemplates},
 	}
 	createdAt, err := h.CTRepo.Create(ctx, tx, data)
 	if err != nil {

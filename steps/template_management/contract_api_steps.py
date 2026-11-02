@@ -113,7 +113,7 @@ _ENDPOINT_PAYLOADS = {
     "template_approve":       {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
     "template_reject":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z", "reason": "test"},
     "template_register":      {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
-    "template_archive":       {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
+    "template_archive":       {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z", "justification": "test"},
     "contract_create":        {"template_did": "did:example:template:1"},
     "contract_update":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
     "contract_submit":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},

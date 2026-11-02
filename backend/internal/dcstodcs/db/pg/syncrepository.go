@@ -54,6 +54,26 @@ func (r PostgresSyncRepository) DeleteSyncFailEntry(ctx context.Context, tx *sql
 	return err
 }
 
+func (r PostgresSyncRepository) GetPDFDeliveries(ctx context.Context, tx *sqlx.Tx, did string) ([]db.PDFDelivery, error) {
+	var deliveries []db.PDFDelivery
+	err := tx.SelectContext(ctx, &deliveries, `
+        SELECT did, peer_did, contract_state, pdf_cid FROM contract_pdf_deliveries WHERE did = $1
+    `, did)
+	return deliveries, err
+}
+
+func (r PostgresSyncRepository) UpsertPDFDelivery(ctx context.Context, tx *sqlx.Tx, d db.PDFDelivery) error {
+	_, err := tx.ExecContext(ctx, `
+        INSERT INTO contract_pdf_deliveries (did, peer_did, contract_state, pdf_cid, delivered_at)
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        ON CONFLICT (did, peer_did) DO UPDATE SET
+            contract_state = EXCLUDED.contract_state,
+            pdf_cid        = EXCLUDED.pdf_cid,
+            delivered_at   = CURRENT_TIMESTAMP
+    `, d.DID, d.PeerDID, d.ContractState, d.PDFCID)
+	return err
+}
+
 // GetPendingSyncFails returns the ships due for another attempt, oldest attempt
 // first and at most limit of them.
 //

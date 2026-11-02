@@ -112,8 +112,12 @@ const negotiationBaseline = computed(() => (contract.value ? contractWithAccepte
 
 const hasAcceptedProposals = computed(() => acceptedNegotiations(contract.value).length > 0)
 
+// Comment to the other party, sent with the proposal (DCS-IR-CWE-03).
+const proposalComment = ref('')
+
 const hasChangeRequest = computed(() => {
   return (
+    !!proposalComment.value.trim() ||
     changedName.value ||
     changedDescription.value ||
     changedContractData.value ||
@@ -264,6 +268,9 @@ function buildChangeRequest(): ContractChangeRequest {
   if (changedContractData.value) {
     changeRequest.contract_data = buildCurrentContractData()
   }
+  if (proposalComment.value.trim()) {
+    changeRequest.comment = proposalComment.value.trim()
+  }
   return changeRequest
 }
 
@@ -291,6 +298,7 @@ const negotiateContractChange = async () => {
       change_request: buildChangeRequest(),
     })
     if (response.did) {
+      proposalComment.value = ''
       // Proposing consumed the server-side draft (SRS §3.1.1 "Save draft" vs
       // "Propose change") — loadContract re-checks and finds none.
       await loadContract()
@@ -381,6 +389,7 @@ async function restoreNegotiationDraft() {
     if (changeRequest.exp_notice_period !== undefined)
       editedContract.value.exp_notice_period = changeRequest.exp_notice_period
     if (changeRequest.exp_policy !== undefined) editedContract.value.exp_policy = changeRequest.exp_policy
+    if (changeRequest.comment !== undefined) proposalComment.value = changeRequest.comment
     if (changeRequest.contract_data) {
       // Same mechanism the negotiation compare view uses to overlay a change
       // request's values onto the editor.
@@ -730,6 +739,18 @@ const exportPDF = async () => {
       </div>
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
+      <div v-if="formEditable && activeTab !== 'proposals'" class="mx-auto max-w-4xl px-6 pt-3">
+        <label class="floating-label w-full">
+          <span>Comment to the other party</span>
+          <textarea
+            v-model="proposalComment"
+            class="textarea w-full"
+            rows="2"
+            placeholder="Comment to the other party (optional)"
+            data-testid="proposal-comment-input"
+          ></textarea>
+        </label>
+      </div>
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
         <!-- Needs the loaded contract's DID; until it arrives exportPDF can only
@@ -790,7 +811,7 @@ const exportPDF = async () => {
           class="btn flex-1 btn-primary"
           data-testid="submit-negotiation"
           :disabled="
-            (!isCreator && !isReviewer && !isNegotiator) ||
+            (!isCreator && !isReviewer && !isNegotiator && !isManager) ||
             isSubmitting ||
             hasChangeRequest ||
             hasUnresolvedRound ||

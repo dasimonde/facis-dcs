@@ -118,6 +118,7 @@ func TestRegisterRejectsNonObjectCanonicalContextAsBadRequest(t *testing.T) {
 // Admission runs before any DB write, so a bad source_url body is rejected
 // without needing postgres.
 func TestRegisterRejectsInvalidSourceURLBodyAsBadRequest(t *testing.T) {
+	allowLoopbackSchemaFetch(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("definitely not turtle"))
 	}))

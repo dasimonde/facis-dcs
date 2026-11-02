@@ -25,6 +25,8 @@ type GetAuditLogByDIDQry struct {
 	AuditedBy string
 	HolderDID string
 	UserRoles userrole.UserRoles
+	// Justification is the reason the auditor gave for this access (DCS-FR-PACM-04).
+	Justification string
 }
 
 type AuditLogByDIDAuditor struct {
@@ -42,6 +44,7 @@ func buildAuditEvent(query GetAuditLogByDIDQry) (event.Event, error) {
 			OccurredAt:    time.Now().UTC(),
 			ComponentType: query.Scope,
 			UserRoles:     query.UserRoles,
+			Justification: query.Justification,
 		}, nil
 	case componenttype.ContractTemplateRepo:
 		return templateevents.AuditEvt{
@@ -51,6 +54,7 @@ func buildAuditEvent(query GetAuditLogByDIDQry) (event.Event, error) {
 			OccurredAt:    time.Now().UTC(),
 			HolderDID:     query.HolderDID,
 			UserRoles:     query.UserRoles,
+			Justification: query.Justification,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported audit scope: %s", query.Scope)

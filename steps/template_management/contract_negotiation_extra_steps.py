@@ -8,7 +8,7 @@ rejections") are reused as-is by the scenarios these steps support.
 
 import json
 
-from behave import given, then
+from behave import given, then, when
 
 from steps.support.api_client import (
     contract_negotiate_url,
@@ -51,6 +51,23 @@ def step_given_have_proposed_redline(context, clause):
 @given('contract "{name}" does not list this instance as a negotiating party')
 def step_given_contract_not_a_party(context, name):
     ContractService._create_contract_excluding_local_peer(context, name)
+
+
+@when('an organization that is not a party proposes a change to contract "{name}"')
+def step_when_non_party_proposes(context, name):
+    did, updated_at = ContractService._contract_data(context, name)
+    outsider_h = AuthService.get_headers_for_roles(["Contract Reviewer"], organization="BDD Non-Party Org")
+    context.requests_response = post_json(
+        context,
+        contract_negotiate_url(context),
+        {
+            "did": did,
+            "updated_at": updated_at,
+            "negotiated_by": AuthService.username_for_roles(["Contract Reviewer"]),
+            "change_request": "[Liability] Change from an organization that is not a party",
+        },
+        headers=outsider_h,
+    )
 
 
 # ---------------------------------------------------------------------------

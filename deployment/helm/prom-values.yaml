@@ -1,5 +1,6 @@
 grafana:
-  adminPassword: YourStrongPassword
+  # No adminPassword: the grafana chart generates a random one and keeps it in
+  # its Secret on upgrade (DCS-NFR-SEC-12).
   persistence:
     enabled: true
     storageClassName: local-path

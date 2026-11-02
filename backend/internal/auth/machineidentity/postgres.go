@@ -54,14 +54,14 @@ func (r *PostgresRepo) FindByClientID(ctx context.Context, clientID string) (*Id
 	return &identity, nil
 }
 
-func (r *PostgresRepo) Create(ctx context.Context, data Identity) (*Identity, error) {
+func (r *PostgresRepo) Create(ctx context.Context, tx *sqlx.Tx, data Identity) (*Identity, error) {
 	const statement = `
         INSERT INTO machine_identities
             (name, oauth_client_id, participant_did, roles, description, enabled, secret_issued_at, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING ` + columns
 	var created Identity
-	if err := r.DB.GetContext(ctx, &created, statement,
+	if err := tx.GetContext(ctx, &created, statement,
 		data.Name, data.OAuthClientID, data.ParticipantDID, data.RolesJSON,
 		data.Description, data.Enabled, data.SecretIssuedAt, data.CreatedBy,
 	); err != nil {
@@ -70,7 +70,7 @@ func (r *PostgresRepo) Create(ctx context.Context, data Identity) (*Identity, er
 	return &created, nil
 }
 
-func (r *PostgresRepo) Update(ctx context.Context, data Identity) (*Identity, error) {
+func (r *PostgresRepo) Update(ctx context.Context, tx *sqlx.Tx, data Identity) (*Identity, error) {
 	const statement = `
         UPDATE machine_identities
         SET name = $2, participant_did = $3, roles = $4, description = $5,
@@ -78,7 +78,7 @@ func (r *PostgresRepo) Update(ctx context.Context, data Identity) (*Identity, er
         WHERE id = $1
         RETURNING ` + columns
 	var updated Identity
-	if err := r.DB.GetContext(ctx, &updated, statement,
+	if err := tx.GetContext(ctx, &updated, statement,
 		data.ID, data.Name, data.ParticipantDID, data.RolesJSON, data.Description, data.Enabled,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -89,8 +89,8 @@ func (r *PostgresRepo) Update(ctx context.Context, data Identity) (*Identity, er
 	return &updated, nil
 }
 
-func (r *PostgresRepo) Delete(ctx context.Context, id string) error {
-	if _, err := r.DB.ExecContext(ctx, `DELETE FROM machine_identities WHERE id = $1`, id); err != nil {
+func (r *PostgresRepo) Delete(ctx context.Context, tx *sqlx.Tx, id string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM machine_identities WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("delete machine identity %s: %w", id, err)
 	}
 	return nil
@@ -103,9 +103,9 @@ func (r *PostgresRepo) DeleteByClientIDTx(ctx context.Context, tx *sqlx.Tx, clie
 	return nil
 }
 
-func (r *PostgresRepo) TouchSecretIssuedAt(ctx context.Context, id string, at time.Time) error {
+func (r *PostgresRepo) TouchSecretIssuedAt(ctx context.Context, tx *sqlx.Tx, id string, at time.Time) error {
 	const statement = `UPDATE machine_identities SET secret_issued_at = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`
-	if _, err := r.DB.ExecContext(ctx, statement, id, at); err != nil {
+	if _, err := tx.ExecContext(ctx, statement, id, at); err != nil {
 		return fmt.Errorf("record the issued secret for machine identity %s: %w", id, err)
 	}
 	return nil

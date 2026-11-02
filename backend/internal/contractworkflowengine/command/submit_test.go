@@ -155,6 +155,10 @@ func (r *submitContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db.C
 	return nil
 }
 
+func (r *submitContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string, string) error {
+	return nil
+}
+
 func (r *submitContractRepoFake) Create(context.Context, *sqlx.Tx, db.Contract) error {
 	panic("not implemented")
 }

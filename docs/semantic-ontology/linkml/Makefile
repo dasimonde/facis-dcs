@@ -5,9 +5,9 @@ SCHEMA      ?= linkml.yaml
 
 VENV_PYTHON := $(VENV_PATH)/bin/python
 VENV_PIP    := $(VENV_PATH)/bin/pip
-# Fertigmeldung des venv. Nicht activate: die Datei entsteht schon beim Anlegen
-# des venv, also bevor die Pakete drin sind. Bricht pip danach ab, gilt das
-# venv fuer make trotzdem als fertig, und die Generatoren fehlen fuer immer.
+# Marks the venv as complete. Not bin/activate: that file exists as soon as the
+# venv is created, before the packages are in. If pip then fails, make would treat
+# the venv as complete and the generators would stay missing.
 VENV_STAMP  := $(VENV_PATH)/.install-stamp
 GEN_SHACL          := $(VENV_PATH)/bin/gen-shacl
 GEN_JSONLD_CONTEXT := $(VENV_PATH)/bin/gen-jsonld-context
@@ -41,14 +41,13 @@ $(VENV_STAMP):
 $(OUTPUT_PATH):
 	mkdir -p $(OUTPUT_PATH)
 
-# Die Erzeugnisse haengen an ihrer Quelle, nicht am venv: sie liegen im
-# Repository, und wer nur baut, soll nicht die halbe LinkML-Toolchain
-# installieren muessen. Das venv wird erst im Rezept geholt, also nur dann,
-# wenn wirklich neu erzeugt wird.
+# The outputs depend on their source, not on the venv: they are committed, and a
+# plain build must not install the LinkML toolchain. The recipe fetches the venv
+# only when it regenerates.
 #
-# Geschrieben wird ueber eine Zwischendatei. Eine Umleitung direkt auf das Ziel
-# leert die versionierte Datei, bevor der Generator ueberhaupt laeuft — ein
-# Fehlschlag hinterliess so eine 0-Byte-Datei im Arbeitsverzeichnis.
+# Output goes to a temporary file first. A redirect straight to the target would
+# empty the committed file before the generator runs, and a failure would leave a
+# 0-byte file.
 $(OUTPUT_PATH)/$(SCHEMA).shacl.ttl: $(SCHEMA) | $(OUTPUT_PATH)
 	$(MAKE) $(VENV_STAMP)
 	$(VENV_PYTHON) $(GEN_SHACL) --non-closed $(SCHEMA) > $@.tmp

@@ -1,0 +1,18 @@
+{{- if include "digital-contracting-service.traefikServersTransportAnnotation" . }}
+# Traefik reaches the TLS proxies of the backend, Hydra and the Federated
+# Catalogue over TLS and verifies their certificate against the internal CA
+# (DCS-NFR-SEC-01, DCS-NFR-SEC-14). The Services name this transport in their
+# traefik.ingress.kubernetes.io/service.serverstransport annotation. Traefik
+# connects to pod IPs, so serverName gives the name it verifies; the one
+# internal certificate carries the names of all of these Services.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ printf "%s-internal-tls" .Release.Name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  serverName: {{ printf "%s.%s.svc" (include "digital-contracting-service.fullname" .) .Release.Namespace | quote }}
+  rootCAs:
+    - secret: {{ include "digital-contracting-service.internalTLSSecretName" . | quote }}
+{{- end }}

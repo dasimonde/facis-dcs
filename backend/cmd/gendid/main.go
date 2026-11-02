@@ -163,7 +163,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gendid: marshal: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil { // #nosec G306 -- did.json is a public document
 		fmt.Fprintf(os.Stderr, "gendid: write %s: %v\n", *out, err)
 		os.Exit(1)
 	}

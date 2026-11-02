@@ -113,6 +113,10 @@ watch(
           if (route.params.did !== id) return
           contract.value = loaded
           applyContractDataToDraft(contract.value?.contract_data)
+          // The audit trail records that the reviewer opened the submitted contract (DCS-IR-CWE-04).
+          if (isReviewer.value && loaded?.state === ContractState.submitted) {
+            void contractWorkflowService.review({ did: id }).catch(() => undefined)
+          }
         }
       } catch (err: unknown) {
         reportActionError(err, 'Load contract review')
@@ -261,7 +265,10 @@ const exportPDF = async () => {
         <!-- Tabs -->
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
-            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Review Contract</p>
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">
+              <span>Review Contract</span>
+              <span v-if="isReviewer" class="font-normal normal-case">· as Contract Reviewer</span>
+            </p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
               <button
                 v-for="tab in tabs"
@@ -307,6 +314,7 @@ const exportPDF = async () => {
                       :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                       :verification-result="verificationResult"
                       :set-semantic-condition-value="setSemanticConditionValue"
+                      :highlighted-block-ids="Object.keys(annotationDraft)"
                       disabled
                     />
                   </div>

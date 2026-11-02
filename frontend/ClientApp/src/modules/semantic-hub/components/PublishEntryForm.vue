@@ -118,22 +118,26 @@ async function submit() {
       </div>
     </div>
     <div role="tablist" class="tabs-boxed tabs w-fit tabs-sm">
-      <a
+      <button
+        type="button"
         role="tab"
+        :aria-selected="source === 'inline'"
         class="tab"
         :class="[source === 'inline' ? 'tab-active' : 'text-base-content/70']"
         @click="source = 'inline'"
       >
         Paste / upload
-      </a>
-      <a
+      </button>
+      <button
+        type="button"
         role="tab"
+        :aria-selected="source === 'url'"
         class="tab"
         :class="[source === 'url' ? 'tab-active' : 'text-base-content/70']"
         @click="source = 'url'"
       >
         From URL
-      </a>
+      </button>
     </div>
 
     <div v-if="source === 'inline'" class="form-control">

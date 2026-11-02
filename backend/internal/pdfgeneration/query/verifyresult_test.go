@@ -141,7 +141,7 @@ func TestRunVerifyReportsAVerifiedLifecycleCredentialAsValid(t *testing.T) {
 		return testIssuerDocument(t, &key.PublicKey), nil
 	}}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, nil, SignerAnchors{}, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestRunVerifyReportsAnUnresolvableIssuerAsIndeterminate(t *testing.T) {
 		return nil, errors.New("dial tcp: connection refused")
 	}}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, nil, SignerAnchors{}, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestRunVerifyReportsAForeignSignedCredentialAsInvalid(t *testing.T) {
 		return testIssuerDocument(t, &published.PublicKey), nil
 	}}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, verifier, statusList.Verifier, nil, SignerAnchors{}, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestRunVerifyReportsAnAbsentCredentialAsNotAvailable(t *testing.T) {
 		"vc_present":           false,
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "draft")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, nil, SignerAnchors{}, "draft")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRunVerifyReportsAFailedC2PAClaimSignatureAsInvalid(t *testing.T) {
 		"vc_present":           false,
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, nil, SignerAnchors{}, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestRunVerifyReportsAFailedC2PAClaimSignatureAsInvalid(t *testing.T) {
 func TestRunVerifyReportsNoC2PAVerdictWhenVerifyDidNotAnswer(t *testing.T) {
 	pdfCore := newStubPDFCore(t, http.StatusConflict, map[string]any{})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, nil, SignerAnchors{}, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestRunVerifyCarriesThePDFCoreDigests(t *testing.T) {
 		"stored_base_pdf_hash": "2222",
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, nil, SignerAnchors{}, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestRunVerifyReportsDivergingDigestsOnAContentMismatch(t *testing.T) {
 		"stored_base_pdf_hash": "3333",
 	})
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, "active")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, nil, SignerAnchors{}, "active")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}

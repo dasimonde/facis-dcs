@@ -221,9 +221,23 @@ spec:
         spec:
           serviceAccountName: {{ .Values.acmeRenewal.serviceAccountName | default $name }}
           restartPolicy: Never
+          # certbot writes only to /state (--config-dir, --work-dir, --logs-dir)
+          # and /tmp (DCS-NFR-SEC-05).
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: certbot
               image: {{ .Values.acmeRenewal.image | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
               command: ["/bin/sh", "/scripts/renew.sh"]
               env:
                 - name: ACME_HOST
@@ -244,6 +258,8 @@ spec:
                   mountPath: /scripts
                 - name: state
                   mountPath: /state
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 {{- toYaml .Values.acmeRenewal.resources | nindent 16 }}
           volumes:
@@ -253,4 +269,6 @@ spec:
             - name: state
               persistentVolumeClaim:
                 claimName: {{ $name }}
+            - name: tmp
+              emptyDir: {}
 {{- end }}

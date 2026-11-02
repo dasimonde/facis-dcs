@@ -18,19 +18,27 @@ Feature: Archive Contract Templates
     When I deprecate template "Old NDA"
     Then the request is denied with an authorization error
 
-  @clean_db
-  Scenario: Delete reviewed template
+  @clean_db @DCS-IR-TR-07
+  Scenario: A template in review is not deleted
     Given I am authenticated with roles: "Template Manager"
     And template "Old NDA" is in "Reviewed" status
     When I delete template "Old NDA"
+    Then the request is denied with a client error
+    And template "Old NDA" is still in "Reviewed" status
+
+  @clean_db @DCS-FR-TR-18
+  Scenario: Delete a draft template
+    Given I am authenticated with roles: "Template Manager"
+    And template "Draft NDA" is in "Draft" status
+    When I delete template "Draft NDA"
     Then the template status is "Deleted"
 
-  @clean_db
-  Scenario: Cannot delete deprecated template
+  @clean_db @DCS-FR-TR-18
+  Scenario: Delete deprecated template
     Given I am authenticated with roles: "Template Manager"
     And template "Standard NDA" is in "Deprecated" status
     When I delete template "Standard NDA"
-    Then I receive error "invalid contract template state"
+    Then the template status is "Deleted"
 
   @clean_db
   Scenario: Unauthorized role cannot delete template

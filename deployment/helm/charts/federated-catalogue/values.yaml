@@ -5,6 +5,21 @@ image:
   tag: "sha-c243a65@sha256:535024f1b92fa8e48b59e93bc7040c0a32aed0d06f73c35260eb408dc4ff3594"
   pullPolicy: IfNotPresent
 
+# fc-service and the portal: 1000 is the appuser of both images. They write to
+# /tmp, /logs and the filestore volume (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
 service:
   type: ClusterIP
   port: 8081

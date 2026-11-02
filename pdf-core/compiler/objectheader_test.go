@@ -63,15 +63,15 @@ func TestObjectHeaderLookupPrefersTheLatestDefinition(t *testing.T) {
 func decoyPDF(fileName string, objID int, real, decoy string, decoyFirst, crlfHeader bool) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("%PDF-1.7\n")
-	buf.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&buf,
 		"1 0 obj\n<< /Type /Filespec /F (%s) /UF (%s) /EF << /F %d 0 R >> >>\nendobj\n",
-		fileName, fileName, objID))
+		fileName, fileName, objID)
 
 	writeStreamObject := func(id int, eol, content string) {
 		buf.WriteString(eol)
-		buf.WriteString(fmt.Sprintf("%d 0 obj", id))
+		fmt.Fprintf(&buf, "%d 0 obj", id)
 		buf.WriteString(eol)
-		buf.WriteString(fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", len(content), content))
+		fmt.Fprintf(&buf, "<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", len(content), content)
 	}
 
 	realEOL := "\n"

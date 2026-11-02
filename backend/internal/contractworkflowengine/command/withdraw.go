@@ -84,7 +84,7 @@ func (h *Withdrawer) Handle(ctx context.Context, cmd WithdrawCmd) error {
 		return err
 	}
 
-	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Withdrawn.String())
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Withdrawn.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}

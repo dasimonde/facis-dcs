@@ -33,7 +33,9 @@ Feature: Key shredding — archive deletion destroys the contract CEKs on both i
     And instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance A applies a ceremony-backed signature to the contract
     When an anchored audit entry CID of the cross-instance contract is captured on instance A
-    And the Archive Manager of the dedicated organization deletes the archived cross-instance contract with justification "GDPR Art. 17 erasure request"
+    And the Contract Manager of the dedicated organization terminates the cross-instance contract on instance A
+    Then the contract appears on instance B in state TERMINATED within a few seconds
+    When the Archive Manager of the dedicated organization deletes the archived cross-instance contract with justification "GDPR Art. 17 erasure request"
     Then the erasure status of the cross-instance contract reports local status "shredded" on instance A
     And the erasure status on instance A names peer confirmation from instance B
     And the erasure status of the cross-instance contract reports local status "shredded" on instance B

@@ -226,7 +226,7 @@ func concatKDF(z []byte) []byte {
 }
 
 func writeLenPrefixed(buf *bytes.Buffer, data []byte) {
-	_ = binary.Write(buf, binary.BigEndian, uint32(len(data)))
+	_ = binary.Write(buf, binary.BigEndian, uint32(len(data))) // #nosec G115 -- lengths and counters of KDF and key-wrap inputs, far below the bound
 	buf.Write(data)
 }
 
@@ -279,7 +279,7 @@ func keyUnwrap(kek, wrapped []byte) ([]byte, error) {
 	var b [16]byte
 	for j := 5; j >= 0; j-- {
 		for i := n; i >= 1; i-- {
-			binary.BigEndian.PutUint64(b[:8], a^uint64(n*j+i))
+			binary.BigEndian.PutUint64(b[:8], a^uint64(n*j+i)) // #nosec G115 -- lengths and counters of KDF and key-wrap inputs, far below the bound
 			copy(b[8:], r[i-1])
 			block.Decrypt(b[:], b[:])
 			a = binary.BigEndian.Uint64(b[:8])

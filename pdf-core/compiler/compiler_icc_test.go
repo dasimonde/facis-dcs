@@ -38,11 +38,11 @@ func findICCStreamInPDF(pdf []byte) []byte {
 // length).
 func TestGeneratedPDFICCProfileIsStructurallyValid(t *testing.T) {
 	doc := documentModel{
-		Title:         "icc-test",
+		Title:           "icc-test",
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
-		NamespaceMap:  map[string]string{},
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
+		NamespaceMap:    map[string]string{},
 	}
 
 	pdf, err := renderPDF(testSigningContext(), doc)

@@ -3,6 +3,7 @@
 import os
 import time
 from datetime import datetime
+from types import SimpleNamespace
 
 import requests
 from behave import given, then, when
@@ -55,7 +56,7 @@ def step_given_authenticated_service(context):
 @given('the request is denied because of too many failed attempts')
 def step_given_denied_to_many_attempts(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
 
 @given("a system service provides an invalid API key")
 def step_given_invalid_api_key(context):
@@ -288,4 +289,22 @@ def step_when_present_revoked_wallet_credential(context, roles):
 
 @then("the login presentation is rejected for a revoked credential")
 def step_then_login_rejected_revoked(context):
-    assert_refused_for_the_revoked_bit(context, context.requests_response, "the login presentation")
+    # FR-UC-01-4: the wallet gets the prescribed message; the reason is kept
+    # in the audit trail only.
+    response = context.requests_response
+    assert response.status_code == 401, response.text
+    assert response.json().get("message") == "Credential invalid or access revoked.", response.text
+    cursor = context.db.cursor()
+    try:
+        cursor.execute(
+            """SELECT event_data::text FROM outbox_events
+               WHERE event_type = 'OID4VP_PRESENTATION_FAILED'
+               ORDER BY id DESC LIMIT 1"""
+        )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+    context.db.rollback()
+    assert row, "no failed-presentation audit event"
+    audited = SimpleNamespace(status_code=response.status_code, text=row[0])
+    assert_refused_for_the_revoked_bit(context, audited, "the login presentation")

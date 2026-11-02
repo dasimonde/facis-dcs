@@ -96,6 +96,15 @@ contract-signing key (ADR-12, ADR-20). The only signing path is the ceremony:
    and (once a ceremony is published) the JAdES's nonce claim matches. Only
    then does it finalize and transition the contract to SIGNED.
 
+Prepare and submit also apply the signing workflow the contract document
+defines (DCS-FR-SM-13): a `dcs:SignatureField` with `dcs:signingOrder` (a
+positive integer) is refused until every field with a lower position is
+signed, and every signature is refused after `dcs:signingDeadline` (an
+`xsd:dateTime`, or an `xsd:date` that includes the whole day in UTC, at the
+top level of the document). A refusal is audited as
+`APPLY_SIGNATURE_FAILED`. The compliance monitor flags a contract that is not
+signed when its signing deadline passes (`SIGNING_DEADLINE_MISSED`).
+
 `POST /signature/prepare` + `POST /signature/submit` are the same
 prepare/validate steps without the QR/publish layer, for a JWT-authenticated
 caller who already has the signatory's signed PDF in hand (e.g. a desktop

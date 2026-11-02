@@ -1,18 +1,65 @@
 image:
   repository: oryd/hydra
   tag: "v2.2.0"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# 100:101 is the ory user of the Hydra image. Hydra writes no files: its state
+# is in the database of config.dsn (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Image of the client registration container in the Hydra pod: it needs sh,
+# curl and jq. It runs as UID 65532 on a read-only root filesystem.
+jobImage:
+  repository: alpine/k8s
+  tag: "1.33.4"
+  digest: "sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68"
+  pullPolicy: IfNotPresent
+
+# More than one replica needs a persistent DSN (config.dsnSecretRef or
+# config.coDeployedPostgresql); the chart refuses replicas > 1 with dsn memory.
+replicaCount: 1
 
 service:
   type: ClusterIP
   publicPort: 4444
+  # With global.internalTLS the Service has no plain admin port: in-cluster
+  # callers use the TLS proxy (https, global.internalTLS.proxy.port).
   adminPort: 4445
+  # TLS proxy port of the public API (global.internalTLS); the parent ingress
+  # routes to it.
+  publicTLSPort: 8444
   publicNodePort: null
   adminNodePort: null
 
 config:
-  # For production, use a persistent DSN (for example PostgreSQL).
+  # Where Hydra keeps its clients, signing keys and sessions. The first that is
+  # set wins:
+  #   dsnSecretRef: a Secret key that holds the whole DSN (production).
+  #   coDeployedPostgresql.enabled: the "hydra" database of the co-deployed
+  #     PostgreSQL (<release>-postgresql), with the password from its Secret.
+  #     List "hydra" in postgresql.additionalDatabases.
+  #   dsn: a literal DSN. "memory" loses all state on a restart and is
+  #     accepted only with dev: true and one replica.
   dsn: "memory"
+  dsnSecretRef:
+    name: ""
+    key: dsn
+  coDeployedPostgresql:
+    enabled: false
+    user: dcs
+    database: hydra
   # REQUIRED: public-facing base URL browsers use to reach Hydra (e.g. https://dcs.example.com).
   # Hydra stamps this into every redirect_to URL it returns, so it must be externally reachable.
   # Route Hydra's public paths (/oauth2, /.well-known) through the parent ingress via route.paths.
@@ -23,6 +70,11 @@ config:
   logoutURL: ""
   publicTLS: false
   adminTLS: false
+  # Lifetime of an access token (Hydra ttl.access_token, e.g. "5m"). Empty
+  # keeps the Hydra default of 1h. A revoked credential ends the session at
+  # the next token refresh, so this is the longest time an access token issued
+  # before a revocation stays valid (DCS-IR-CI-09, DCS-NFR-BR-06).
+  accessTokenTTL: ""
   # Enable Hydra dev mode (required when selfIssuerURL uses http://).
   # Never set to true in production.
   dev: false
@@ -45,8 +97,14 @@ secrets:
 
 resources: {}
 
-# Sizes the client-registration hook Job, a separate pod from the server. Falls
-# back to `resources` when unset; set it on namespaces with a limits.cpu quota,
-# where an unsized hook inherits the LimitRange default and is refused once the
-# release's own containers consume the quota.
+# Sizes the client registration container of the Hydra pod. Falls back to
+# `resources` when unset; set it on namespaces with a limits.cpu quota, where an
+# unsized container inherits the LimitRange default.
 jobResources: {}
+
+# OAuth2 clients. Every Hydra pod registers them through its admin API when it
+# starts (upsert by client_id), so a restart or a new replica has them without
+# a Helm hook. The client secret comes from a Secret: client_secretSecretRef
+# ({name, key}) names an existing one; an inline client_secret goes into the
+# chart Secret <release>-hydra-clients (key: client_id).
+clients: []

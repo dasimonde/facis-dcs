@@ -352,6 +352,8 @@ export interface DcsContractData extends DcsDocumentData {
   'dcs:parties'?: unknown[]
   'dcs:signatureFields'?: unknown[]
   'sh:shapesGraph'?: unknown
+  /** The signing deadline (xsd:dateTime) the signing workflow enforces (DCS-FR-SM-13). */
+  'dcs:signingDeadline'?: unknown
 }
 
 /** The source-template node: a prov:wasDerivedFrom edge plus version assertion. */

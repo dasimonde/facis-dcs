@@ -2,7 +2,6 @@ package dcstodcs
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -242,8 +241,7 @@ func (s *DCSToDCSSynchronizer) deliverSettlement(ctx context.Context, settlement
 		return err
 	}
 
-	secretValue := rand.Text()
-	secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
+	secretValue, secretHash, err := SignPeerChallenge(&s.DIDDocument, OpPostSettlement, settlement.FromPeerDID, settlement.ToPeerDID, settlement.DID, []byte(settlement.JadesSignature))
 	if err != nil {
 		return err
 	}
@@ -268,6 +266,9 @@ func (s *DCSToDCSSynchronizer) deliverSettlement(ctx context.Context, settlement
 	}(tx)
 	if err := s.SRepo.MarkSettlementDelivered(ctx, tx, settlement.DID, settlement.FromPeerDID, settlement.ToPeerDID); err != nil {
 		return fmt.Errorf("could not mark the settlement of %s delivered: %w", settlement.DID, err)
+	}
+	if err := RecordPeerExchangeTx(ctx, tx, settlement.DID, "post_settlement", ExchangeSent, settlement.ToPeerDID); err != nil {
+		return fmt.Errorf("could not audit the settlement of %s: %w", settlement.DID, err)
 	}
 	return tx.Commit()
 }
@@ -299,8 +300,7 @@ func (s *DCSToDCSSynchronizer) deliverSettlementWithdrawal(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	secretValue := rand.Text()
-	secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
+	secretValue, secretHash, err := SignPeerChallenge(&s.DIDDocument, OpPostSettlementWithdrawal, withdrawal.FromPeerDID, withdrawal.ToPeerDID, withdrawal.DID, []byte(signature))
 	if err != nil {
 		return err
 	}
@@ -325,6 +325,9 @@ func (s *DCSToDCSSynchronizer) deliverSettlementWithdrawal(ctx context.Context, 
 	}(tx)
 	if err := s.SRepo.MarkSettlementWithdrawalDelivered(ctx, tx, withdrawal.DID, withdrawal.FromPeerDID, withdrawal.ToPeerDID); err != nil {
 		return fmt.Errorf("could not mark the settlement withdrawal of %s delivered: %w", withdrawal.DID, err)
+	}
+	if err := RecordPeerExchangeTx(ctx, tx, withdrawal.DID, "post_settlement_withdrawal", ExchangeSent, withdrawal.ToPeerDID); err != nil {
+		return fmt.Errorf("could not audit the settlement withdrawal of %s: %w", withdrawal.DID, err)
 	}
 	return tx.Commit()
 }

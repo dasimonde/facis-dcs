@@ -23,6 +23,10 @@ traefik:
       port: 18080
       exposedPort: 18080
       hostPort: 18080
+  # One line per request with the status of the backend and the size sent to
+  # the client: a failure dump then shows which hop cut a response.
+  accessLog:
+    enabled: true
 
 image:
   pullPolicy: Never
@@ -39,8 +43,15 @@ extraEnv:
   # declare that, so no deployment inherits it by omission.
   - name: DCS_ALLOW_DEV_TRUST
     value: "true"
-  - name: JWT_ALG_NONE_SUPPORTED
-    value: "true"
+  # Access token signatures are checked. The expired-credential scenarios sign
+  # their tokens with the development key steps/support/keys/
+  # access-token-dev.key.pem; this is its public half (UC-IF-20).
+  - name: DCS_DEV_ACCESS_TOKEN_KEY
+    value: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3STLc7Ky2vgK+BpZR5qRzK5Lldg8
+      MOm5sT6tCbop7Anb5Umo6nTNXdNfvkzccGlxKsckiufjhjYuZz6MFlql5g==
+      -----END PUBLIC KEY-----
   - name: AUTH_INSECURE_COOKIES
     value: "true"
   # Federation trust gate (ADR-19): the local policy endpoint every inbound
@@ -49,7 +60,7 @@ extraEnv:
   # trust-pdp-flow.json), shared with instance B (values.bdd2.yml has no own
   # orce release).
   - name: DCS_TRUST_PDP_URL
-    value: "http://dcs-orce:1880/trust-pdp"
+    value: "https://dcs-orce:8443/trust-pdp"
   # did:web is https, and the resolver makes that exception only for loopback on
   # its own. The synthetic peers the ADR-19 scenarios use are in-cluster Services
   # on plain http under names that are not loopback, so they are named here
@@ -112,7 +123,7 @@ postgresql:
     username: dcs
     password: dcs
     database: dcs
-  additionalDatabases: ["fc", "hydra", "statuslist"]
+  additionalDatabases: ["fc", "hydra"]
   persistence:
     enabled: false
 
@@ -172,7 +183,10 @@ ingress:
 hydra:
   enabled: true
   config:
-    dsn: "postgres://dcs:dcs@dcs-postgresql:5432/hydra?sslmode=disable"
+    # The "hydra" database of this release's PostgreSQL, password from its
+    # Secret, verified against the internal CA (global.internalTLS).
+    coDeployedPostgresql:
+      enabled: true
     dev: true
     selfIssuerURL: "http://localhost:18080"
     loginURL: "http://localhost:18080/digital-contracting-service/ui/"
@@ -210,6 +224,18 @@ hydra:
       token_endpoint_auth_method: client_secret_post
     - client_id: dcs-orce-manager
       client_secret: dcs-orce-manager-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
+    - client_id: dcs-orce-reviewer
+      client_secret: dcs-orce-reviewer-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
+    - client_id: dcs-orce-approver
+      client_secret: dcs-orce-approver-secret
       grant_types: ["client_credentials"]
       response_types: []
       scope: ""
@@ -293,48 +319,10 @@ pkcs11:
     enabled: true
     soPin: "12345678"
 
-# XFSC Status List Service: deployed, with nothing consuming it (ADR-34).
-statuslistService:
-  enabled: true
-  tenantID: c2pa
-  ingress:
-    enabled: true
-    className: traefik
-    stripPrefix: /statuslist
-    hosts:
-      - host: localhost
-        paths:
-          - path: /statuslist
-            pathType: Prefix
-  database:
-    enabled: true
-    host: "dcs-postgresql"
-    port: "5432"
-    name: "statuslist"
-    user: "dcs"
-    password: "dcs"
-    sslMode: "disable"
-  nats:
-    url: "nats://dcs-nats:4222"
-  bddListInit:
-    enabled: true
-    tenantIDs:
-      - c2pa
-      # Instance B shares this service but not this instance's database, and a
-      # revocation entry is allocated out of that database (migration 20260734).
-      # Two instances allocating into one list would hand the same bit to two
-      # unrelated contracts, so B gets its own tenant — see values.bdd2.yml.
-      - c2pa2
-
 statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
-  # A list this service actually serves, so Pod readiness requires the full
-  # proxy→Ingress→list route. Login credentials no longer live here — they name
-  # the ORCE issuer's own signed list — so the "credential" tenant is gone and
-  # the C2PA one this instance allocates from takes its place.
-  readinessPath: "/statuslist/v1/tenants/c2pa/status/1"
 
 # IPFS: required — IPFS_MFS_BASE_URL is fatal on startup.
 ipfs:
@@ -383,6 +371,14 @@ systemClients:
   - client_id: dcs-orce-manager
     participant_did: "did:web:dcs-a.localhost%3A18080"
     roles: ["Sys. Contract Manager"]
+  # Reviews contracts and forwards them to approval (UC-12-02).
+  - client_id: dcs-orce-reviewer
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Sys. Contract Reviewer"]
+  # Approves reviewed contracts (UC-12-03).
+  - client_id: dcs-orce-approver
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Sys. Contract Approver"]
   # SRS Table 5 defines System Contract Signer as "API-based digital signing
   # for autonomous or IoT systems". eIDAS Art. 3(9) makes a signatory a NATURAL
   # PERSON, and an advanced signature requires their sole control (Art. 26) —
@@ -398,6 +394,12 @@ systemClients:
   - client_id: dcs-orce-target
     participant_did: "did:web:dcs-a.localhost%3A18080"
     roles: ["Contract Target System"]
+
+# The BDD webhook receiver runs in the behave process and serves plain http
+# (steps/support/services/webhook_receiver_service.py). The Makefile sets the
+# address the cluster reaches it at.
+webhooks:
+  insecureHosts: "host.docker.internal:18444"
 
 orce:
   enabled: true
@@ -415,6 +417,9 @@ orce:
     enabled: true
   persistence:
     enabled: true
+  # The volume is a hostPath (ensure_orce_persistence.sh), owned by root.
+  volumePermissions:
+    enabled: true
   # The contract-target-flow's callback legs (deployment ack + measured KPI,
   # flows/contract-target-flow.json) post to this instance's backend as their
   # own registered OAuth2 client (ADR-27): the callback proves WHICH target is
@@ -424,37 +429,56 @@ orce:
       value: "true"
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
-    # legs append /contract/deployment/callback to it.
+    # legs append /contract/deployment/callback to it. The https port is the
+    # TLS proxy of the backend pod (global.internalTLS).
     - name: DCS_URL
-      value: "http://dcs-digital-contracting-service:8991/digital-contracting-service/api"
+      value: "https://dcs-digital-contracting-service:8443/digital-contracting-service/api"
     # The credential the contract-target flow authenticates its callback with.
     # It matches the contractTargets entry's oauth_client_id below, which is
     # what binds the caller to the registry row the deployment went to.
     - name: DCS_TARGET_CLIENT_ID
       value: "dcs-orce-target"
     - name: DCS_TARGET_CLIENT_SECRET
-      value: "dcs-orce-target-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-target
     # Machine identities for the system-user flows (ADR-16/ADR-17): a plain
     # OAuth2 client credentials grant against this deployment's Hydra, one
     # client per capability. No wallet, no alg:none, no shared credential.
+    # The client secrets come from the Secret of hydra.clients
+    # (<release>-hydra-clients, key client_id).
+    # Port 8444 is the TLS proxy of the Hydra public API (global.internalTLS).
     - name: HYDRA_TOKEN_URL
-      value: "http://dcs-hydra:4444/oauth2/token"
+      value: "https://dcs-hydra:8444/oauth2/token"
     - name: ORCE_NOTARY_CLIENT_ID
       value: "dcs-orce-notary"
     - name: ORCE_NOTARY_CLIENT_SECRET
-      value: "dcs-orce-notary-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-notary
     - name: ORCE_CREATOR_CLIENT_ID
       value: "dcs-orce-creator"
     - name: ORCE_CREATOR_CLIENT_SECRET
-      value: "dcs-orce-creator-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-creator
     - name: ORCE_MANAGER_CLIENT_ID
       value: "dcs-orce-manager"
     - name: ORCE_MANAGER_CLIENT_SECRET
-      value: "dcs-orce-manager-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-manager
     - name: ORCE_SIGNER_CLIENT_ID
       value: "dcs-orce-signer"
     - name: ORCE_SIGNER_CLIENT_SECRET
-      value: "dcs-orce-signer-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-signer
   ingress:
     enabled: true
     hosts:
@@ -470,16 +494,16 @@ orce:
       # ever an unused fallback.
 
 auditExecutor:
-  url: "http://dcs-orce:1880/customer-audit/run"
+  url: "https://dcs-orce:8443/customer-audit/run"
   timeout: "2s"
 
 workflowGateExecutor:
-  url: "http://dcs-orce:1880/workflow-gate/run"
+  url: "https://dcs-orce:8443/workflow-gate/run"
   timeout: "2s"
 
 signing:
   # Wired as TSA_URL env var; fatal on startup if empty.
-  tsaURL: "http://dcs-orce:1880/tsa/"
+  tsaURL: "https://dcs-orce:8443/tsa/"
   # In-cluster dev TSA (orce chart localTSA): verify tokens against the
   # provisioned dev TSA cert instead of the embedded production cert.
   tsaTrustCertSecret: "dcs-orce-tsa-material"
@@ -547,3 +571,18 @@ contractTargets:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
+
+# The backend, ORCE and DSS admit only the Traefik ingress, the pods of this
+# release and the other BDD release (DCS-NFR-SEC-14). Instance B (release dcs2) shares this release's ORCE and DSS.
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik
+  peersFrom:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: dcs2

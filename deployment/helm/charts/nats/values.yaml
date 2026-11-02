@@ -1,11 +1,35 @@
 image:
   repository: nats
   tag: "2.10-alpine"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# The image has no user of its own; nats-server runs as 1000 (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 service:
   type: ClusterIP
   port: 4222
   nodePort: null
+
+# JetStream store (ADR-39): the event stream and the position of each
+# consumer group, on a PersistentVolumeClaim <release>-nats.
+persistence:
+  size: 1Gi
+  # Empty uses the cluster default StorageClass. Set an encrypted class per
+  # environment (DCS-NFR-SEC-14): the events carry contract content.
+  storageClassName: ""
 
 resources: {}

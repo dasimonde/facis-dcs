@@ -14,6 +14,10 @@ import type { ContractTemplateSearchResponse } from '@/models/responses/template
 
 type Searchable = PartialContractTemplate | Contract
 
+// Filters only the contract search knows (DCS-IR-CWE-07, DCS-FR-CWE-13).
+const contractOnlyFilters = ['contract_data', 'party', 'template_did', 'jurisdiction'] as const
+type ContractOnlyFilter = (typeof contractOnlyFilters)[number]
+
 const props = defineProps<{
   tasks: T[]
   placeholder?: string
@@ -27,11 +31,14 @@ const emit = defineEmits<{
 const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
 
-const filterLabels: Partial<Record<keyof Searchable | 'contract_data', string>> = {
+const filterLabels: Partial<Record<keyof Searchable | ContractOnlyFilter, string>> = {
   did: 'DID',
   name: 'Name',
   description: 'Description',
   contract_data: 'Contract Data',
+  party: 'Party',
+  template_did: 'Template',
+  jurisdiction: 'Jurisdiction',
 }
 
 const emptyItem: Searchable = {
@@ -103,6 +110,9 @@ function toContractSearchRequest(request: Record<string, unknown>): ContractSear
   if (typeof request.name === 'string') next.name = request.name
   if (typeof request.description === 'string') next.description = request.description
   if (typeof request.contract_data === 'string') next.contract_data = request.contract_data
+  if (typeof request.party === 'string') next.party = request.party
+  if (typeof request.template_did === 'string') next.template_did = request.template_did
+  if (typeof request.jurisdiction === 'string') next.jurisdiction = request.jurisdiction
   if (typeof request.contract_version === 'number') next.contract_version = request.contract_version
   if (typeof request.contract_version === 'string' && request.contract_version.trim() !== '') {
     const parsed = Number.parseInt(request.contract_version, 10)
@@ -120,7 +130,7 @@ function toTemplateSearchRequest(request: Record<string, unknown>): ContractTemp
 }
 
 function isContractOnlyFilter(request: Record<string, unknown>): boolean {
-  return Object.prototype.hasOwnProperty.call(request, 'contract_data')
+  return contractOnlyFilters.some((key) => Object.prototype.hasOwnProperty.call(request, key))
 }
 
 const search = async (request: Record<string, unknown>): Promise<Searchable[]> => {

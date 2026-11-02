@@ -15,13 +15,21 @@ type PostgresContractTemplateRepo struct {
 }
 
 func (r *PostgresContractTemplateRepo) ReadContractTemplateDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplateQueryResult, error) {
+	// DCS-FR-TR-17: a version is used for new contracts only while no newer
+	// version of its lineage is registered.
 	statement := `
-        SELECT template_data, version, name, description
-        FROM contract_templates
+        SELECT template_data, version, name, description, compliance_status
+        FROM contract_templates t
         WHERE
             did = $1
             AND template_type = 'CONTRACT_TEMPLATE'
             AND (state = 'REGISTERED' OR state = 'PUBLISHED')
+            AND NOT EXISTS (
+                SELECT 1 FROM contract_templates newer
+                WHERE newer.base_template = t.base_template
+                  AND newer.version > t.version
+                  AND newer.state IN ('REGISTERED', 'PUBLISHED')
+            )
         ORDER BY version DESC
         LIMIT 1
     `
@@ -29,7 +37,7 @@ func (r *PostgresContractTemplateRepo) ReadContractTemplateDataByID(ctx context.
 	err := tx.GetContext(ctx, &result, statement, did)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return nil, fmt.Errorf("could not find contract template with DID %q", did)
+		return nil, fmt.Errorf("%w: %q", db.ErrTemplateNotUsable, did)
 	case err != nil:
 		return nil, err
 	}

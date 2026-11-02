@@ -34,6 +34,7 @@ interface AuditRow {
   title: string
   occurredAt: string
   actor?: string
+  roles?: string
   eventType: string
   component: string
   transition?: string
@@ -103,6 +104,15 @@ function toRow(audit: ContractAuditResponseItem): AuditRow {
     transition: contractAuditEventTransition(audit.event_data),
     eventDataJson: formatEventDataJson(audit.event_data),
   }
+
+  // Role attribution (DCS-FR-CWE-25): the roles the actor held for this action.
+  const data = audit.event_data as unknown as Record<string, unknown>
+  if (Array.isArray(data.user_roles) && data.user_roles.length) {
+    row.roles = data.user_roles.map(String).join(', ')
+  }
+  // Approver comments (DCS-FR-CWE-15).
+  const decisionNotes = joinComments(data.decision_notes)
+  if (decisionNotes) row.comments = decisionNotes
 
   if (eventType.isSubmitEvent(audit)) {
     const comments = joinComments(audit.event_data.comments)
@@ -175,6 +185,9 @@ function toggle(id: number) {
           <div class="text-sm font-medium text-base-content">{{ row.title }}</div>
           <div class="mt-0.5 text-xs text-base-content/70">{{ row.occurredAt }}</div>
           <div v-if="row.actor" class="mt-1 font-mono text-xs break-all text-base-content/80">By: {{ row.actor }}</div>
+          <div v-if="row.roles" class="mt-1 text-xs text-base-content/80" data-testid="audit-roles">
+            Role: {{ row.roles }}
+          </div>
           <div v-if="row.transition" class="mt-1 text-sm text-base-content/90" data-testid="audit-transition">
             Transition: {{ row.transition }}
           </div>

@@ -318,12 +318,15 @@ def step_given_contract_has_pending_redline(context, name, clause):
             "did": did,
             "updated_at": updated_at,
             "negotiated_by": AuthService.username_for_roles(["Contract Manager"]),
-            "change_request": f"Redline on {clause}: proposed replacement text",
+            # A structured change request, so an accepted proposal can be
+            # merged into a new contract version (negotiationmerging).
+            "change_request": {"description": f"Redline on {clause}: proposed replacement text"},
         },
         headers=creator_h,
     )
     assert resp.status_code == 200, f"negotiate failed while seeding redline proposal: {resp.status_code} {resp.text}"
-    ContractService._refresh_contract(context, name)
+    refreshed = ContractService._refresh_contract(context, name)
+    context.version_before_redline = refreshed.get("contract_version")
 
 
 @given('contract "{name}" is assigned to reviewers "{r1}" and "{r2}"')
@@ -647,7 +650,7 @@ def step_then_access_denial_audited(context, name):
     event_types = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"contract audit query failed: {resp.status_code} {resp.text}"
         entries = resp.json()
         assert isinstance(entries, list), f"Expected audit entries list, got: {entries}"
@@ -803,10 +806,20 @@ def step_then_contract_versioned(context):
     body = context.requests_response.json()
     did = body.get("did")
     assert did, f"No DID in update response: {body}"
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did))
-    assert retrieve.status_code == 200, retrieve.text
-    contract = retrieve.json()
-    assert contract.get("updated_at"), f"Expected 'updated_at' timestamp in contract: {contract}"
+    # Each save snapshots the replaced version into the history with the
+    # saving organization and the save time (command/update.go).
+    history = get_with_headers(context, f"{context.base_url}/contract/history/{did}")
+    assert history.status_code == 200, history.text
+    entries = history.json()
+    assert isinstance(entries, list) and entries, f"Expected a history entry after the save, got: {entries}"
+    attributed = [
+        entry for entry in entries
+        if entry.get("modified_by") == AuthService.DEFAULT_ORGANIZATION and entry.get("modified_at")
+    ]
+    assert attributed, (
+        f"Expected a history entry with modified_by={AuthService.DEFAULT_ORGANIZATION!r} and modified_at, "
+        f"got: {[(e.get('modified_by'), e.get('modified_at')) for e in entries]}"
+    )
 
 
 @then("the negotiation interface is displayed")
@@ -869,8 +882,19 @@ def step_then_original_text_preserved(context):
     assert did, f"No DID in negotiation response: {body}"
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did))
     assert retrieve.status_code == 200, retrieve.text
-    negotiations = retrieve.json().get("negotiations") or []
-    assert negotiations, "Expected negotiation history to preserve prior text context"
+    contract = retrieve.json()
+    redline = "Proposed redline for Liability"
+    # The redline is recorded as a change request; the contract document keeps
+    # its text until a party accepts the proposal.
+    proposals = [n.get("change_request") for n in (contract.get("negotiations") or [])]
+    assert any(redline in str(change) for change in proposals), (
+        f"Expected the change request {redline!r} in the negotiation log, got: {proposals}"
+    )
+    contract_data = contract.get("contract_data") or {}
+    assert "dcs:documentStructure" in str(contract_data), f"Expected the original document, got: {contract_data}"
+    assert redline not in str(contract_data), (
+        "Expected the contract document to keep its original text while the redline is open"
+    )
 
 
 @then("the redline proposal is visible to other negotiators")
@@ -878,10 +902,15 @@ def step_then_redline_visible(context):
     body = context.requests_response.json()
     did = body.get("did")
     assert did
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did))
+    # Read as the counterparty organization named in the contract parties, not
+    # with the proposer's own credential.
+    other_h = AuthService.get_headers_for_roles(["Contract Reviewer"], organization="TechVendor Inc")
+    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=other_h)
     assert retrieve.status_code == 200, retrieve.text
-    negotiations = retrieve.json().get("negotiations") or []
-    assert negotiations, "Expected negotiations list to be non-empty after redline proposal"
+    proposals = [n.get("change_request") for n in (retrieve.json().get("negotiations") or [])]
+    assert any("Proposed redline for Liability" in str(change) for change in proposals), (
+        f"Expected the counterparty to see the redline proposal, got: {proposals}"
+    )
 
 
 @then("I see all versions with timestamps")
@@ -948,8 +977,26 @@ def step_then_approval_in_negotiation_log(context):
 
 @then("a new version is created")
 def step_then_new_contract_version(context):
-    body = context.requests_response.json()
-    assert body.get("did") or body.get("id"), f"No ID in response: {body}"
+    # The creator's submit closes the round and merges the accepted proposal
+    # into the next contract version (command/submit.go).
+    name = "Service Agreement"
+    ContractService._refresh_contract(context, name)
+    did, updated_at = ContractService._contract_data(context, name)
+    submit = post_json(
+        context,
+        contract_submit_url(context),
+        ContractService._contract_submit_payload(context, did, updated_at),
+        headers=context.contract_seed_headers[name],
+    )
+    assert submit.status_code == 200, f"submit/merge failed: {submit.status_code} {submit.text}"
+    merged = ContractService._refresh_contract(context, name)
+    before = context.version_before_redline
+    assert merged.get("contract_version") == before + 1, (
+        f"Expected contract_version {before + 1} after the merge, got {merged.get('contract_version')}"
+    )
+    assert "Redline on Liability" in str(merged.get("description")), (
+        f"Expected the accepted proposal in the new version, got description {merged.get('description')!r}"
+    )
 
 
 @then("the proposal is marked as rejected")
@@ -1004,15 +1051,34 @@ def step_then_see_approvals_and_rejections(context):
 @then("I see all comments and proposals")
 def step_then_see_comments(context):
     body = context.requests_response.json()
-    assert body.get("did"), f"No contract in response: {body}"
+    negotiations = body.get("negotiations") or []
+    proposals = {n.get("change_request") for n in negotiations}
+    for change in ("Round 1: tighten SLA wording", "Round 2: extend liability cap"):
+        assert change in proposals, f"Expected proposal {change!r} in the negotiation log, got: {proposals}"
+    for entry in negotiations:
+        assert entry.get("created_by") and entry.get("created_at"), (
+            f"Expected author and time on every negotiation entry, got: {entry}"
+        )
 
 
 @then("I see the full audit trail")
 def step_then_see_audit_trail(context):
-    body = context.requests_response.json()
-    assert body.get("updated_at") or body.get("negotiations") is not None, (
-        f"No audit-trail fields in response: {body}"
-    )
+    # The proposals and both decisions are lifecycle events with actor and
+    # time (GET /contract/lifecycle). The audit trail is written by the
+    # outbox processor, so poll.
+    did = context.requests_response.json().get("did")
+    expected = {"NEGOTIATE_CONTRACT", "ACCEPT_RESPOND_CONTRACT", "REJECT_RESPOND_CONTRACT"}
+    events = []
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        resp = get_with_headers(context, f"{context.base_url}/contract/lifecycle/{did}")
+        assert resp.status_code == 200, resp.text
+        events = resp.json()
+        found = {e.get("event_type") for e in events if e.get("actor") and e.get("occurred_at")}
+        if expected <= found:
+            return
+        time.sleep(2)
+    raise AssertionError(f"Expected lifecycle events {expected} with actor and time, got: {events}")
 
 
 @then('the contract status changes to "Under Review"')
@@ -1125,7 +1191,7 @@ def step_then_contract_returned_revision(context):
     events, found = [], False
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"Audit query failed: {resp.status_code} {resp.text}"
         events = resp.json()
         assert isinstance(events, list), f"Expected audit response list, got: {events}"
@@ -1147,8 +1213,15 @@ def step_then_contract_marked_approved(context):
 
 @then("I can view previous reviewer comments")
 def step_then_can_view_previous_comments(context):
-    body = context.requests_response.json()
-    assert body.get("did"), f"No contract DID in response: {body}"
+    did, _ = ContractService._contract_data(context, "Service Agreement")
+    approver_h = AuthService.get_headers_for_roles(["Contract Approver"])
+    resp = get_with_headers(context, f"{context.base_url}/contract/review-findings/{did}", headers=approver_h)
+    assert resp.status_code == 200, resp.text
+    comments = [c for finding in resp.json() for c in (finding.get("comments") or [])]
+    expected = getattr(context, "review_comments", None) or []
+    assert expected and all(c in comments for c in expected), (
+        f"Expected the approver to read the reviewer comments {expected}, got: {resp.json()}"
+    )
 
 
 @then("the system validates against regulatory frameworks")
@@ -1166,7 +1239,15 @@ def step_then_compliance_issues_flagged(context):
 @then("I see pending approvals")
 def step_then_see_pending_approvals(context):
     body = context.requests_response.json()
-    assert body.get("did"), f"No contract DID in approval-status response: {body}"
+    did = body.get("did")
+    assert did, f"No contract DID in approval-status response: {body}"
+    resp = get_with_headers(context, f"{context.base_url}/contract/retrieve")
+    assert resp.status_code == 200, resp.text
+    open_tasks = [
+        t for t in resp.json().get("approval_tasks") or []
+        if t.get("did") == did and t.get("state") == "OPEN"
+    ]
+    assert open_tasks, f"Expected an open approval task for the contract, got: {resp.json().get('approval_tasks')}"
 
 
 @then("negotiation actions are logged with reviewer identity")

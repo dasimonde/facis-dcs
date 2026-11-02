@@ -37,13 +37,21 @@ test('the archive dashboard shows the SRS overview and drills down into a contra
 
     await expect(page.getByTestId('stat-storage-volume'), 'archived snapshots occupy storage').not.toHaveText('0 B')
 
+    // The compliant and flagged tiles count the per-entry verdict of
+    // GET /archive/compliance (DCS-FR-CSA-19). The fixture contract has no
+    // counterparty and no validity period (the UI flow sets neither), so its
+    // metadata_completeness rule can fail; its evidence and signature rules
+    // must pass.
     const compliant = Number(await page.getByTestId('stat-compliant').innerText())
     const flagged = Number(await page.getByTestId('stat-flagged').innerText())
+    expect(compliant + flagged, 'the freshly signed entry has a compliance verdict').toBeGreaterThanOrEqual(1)
+    const verdict = page.getByTestId(`archive-compliance-${contractDid}`).first()
+    await expect(verdict).toHaveText(/^\s*(Compliant|Flagged)\s*$/)
+    const failedRules = (await verdict.locator('span').getAttribute('title')) ?? ''
     expect(
-      compliant,
-      'the freshly signed entry carries complete evidence (snapshot, hash, signature metadata, TSA receipt)',
-    ).toBeGreaterThanOrEqual(1)
-    expect(flagged, 'the flagged tile renders a count').toBeGreaterThanOrEqual(0)
+      failedRules,
+      'the freshly signed entry carries complete evidence (snapshot, hash, TSA receipt) and a recorded signature',
+    ).not.toMatch(/evidence_completeness|signature_policy/)
   })
 
   await test.step('recent actions list the archive operation on this contract', async () => {
@@ -60,7 +68,7 @@ test('the archive dashboard shows the SRS overview and drills down into a contra
     // features/07_contract_storage_security/archive_management.feature.
     const expiring = page.getByTestId('archive-expiring')
     await expect(expiring).toBeVisible()
-    await expect(expiring.getByText(/Expiring within 30 days/)).toBeVisible()
+    await expect(expiring.getByText(/Expiring within \d+ days/)).toBeVisible()
   })
 
   await test.step('a recent action drills down into the contract archive trail', async () => {

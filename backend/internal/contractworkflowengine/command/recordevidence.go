@@ -43,6 +43,11 @@ type Evidence struct {
 var ErrInvalidEvidence = errors.New("invalid evidence: file, filename and description are required and must fit configured limits")
 var ErrEvidenceTerminated = errors.New("evidence cannot be recorded for a terminated contract")
 
+// ErrEvidenceCreatorDraftOnly is returned when a Contract Creator without a
+// manager role records evidence after the draft left DRAFT or REJECTED. The
+// Manager stores evidence for the rest of the lifecycle (DCS-IR-CWE-12).
+var ErrEvidenceCreatorDraftOnly = errors.New("a contract creator records evidence only while the contract is a draft")
+
 func (e Evidence) Validate() error {
 	if len(e.Content) == 0 || len(e.Content) > conf.EvidenceFileLimit() || strings.TrimSpace(e.Filename) == "" || strings.TrimSpace(e.Description) == "" || len(e.Filename) > conf.EvidenceTextLimit() || len(e.Description) > conf.EvidenceTextLimit() || len(e.MediaType) > conf.EvidenceTextLimit() {
 		return ErrInvalidEvidence
@@ -111,6 +116,10 @@ func (h *EvidenceRecorder) Handle(ctx context.Context, cmd RecordEvidenceCmd) (s
 
 	if processData.State == contractstate.Terminated.String() {
 		return "", ErrEvidenceTerminated
+	}
+	if !cmd.UserRoles.HasRoles(userrole.ContractManager, userrole.SystemContractManager) &&
+		processData.State != contractstate.Draft.String() && processData.State != contractstate.Rejected.String() {
+		return "", ErrEvidenceCreatorDraftOnly
 	}
 
 	id, err := base.GenerateID()

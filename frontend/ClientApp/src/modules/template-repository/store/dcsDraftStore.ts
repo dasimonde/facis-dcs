@@ -34,7 +34,7 @@ import {
 } from '@/models/dcs-jsonld'
 import { declaredPartyRoles } from '@/utils/participant-selection'
 import type { SemanticConditionValue } from '@/models/contract/contract-data'
-import type { ContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractTemplate, TemplateLevel } from '@/models/contract-template/contract-template'
 import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type {
   ContractTemplateCreateRequest,
@@ -66,6 +66,10 @@ export interface LoadDocumentMeta {
   description: string
   templateType?: TemplateTypeValue
   partyType?: PartyType
+  jurisdiction?: string
+  industry?: string
+  templateLevel?: TemplateLevel
+  requiredTemplates?: string[]
   state?: ContractTemplateState | null
   version?: number | null
   created_at?: string | null
@@ -122,6 +126,10 @@ export const useDcsDraftStore = defineStore(storeId, {
         description: this.description,
         template_type: this.templateType,
         party_type: this.partyType,
+        jurisdiction: this.jurisdiction || undefined,
+        industry: this.industry || undefined,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -133,6 +141,10 @@ export const useDcsDraftStore = defineStore(storeId, {
         name: this.name,
         description: this.description,
         party_type: this.partyType,
+        jurisdiction: this.jurisdiction,
+        industry: this.industry,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -145,6 +157,10 @@ export const useDcsDraftStore = defineStore(storeId, {
         name: this.name,
         description: this.description,
         party_type: this.partyType,
+        jurisdiction: this.jurisdiction,
+        industry: this.industry,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -163,6 +179,10 @@ export const useDcsDraftStore = defineStore(storeId, {
 
         this.reset({
           partyType: meta.partyType,
+          jurisdiction: meta.jurisdiction ?? '',
+          industry: meta.industry ?? '',
+          templateLevel: meta.templateLevel ?? 'AGREEMENT',
+          requiredTemplates: meta.requiredTemplates ?? [],
           did: meta.did,
           documentIri: rawDoc['@id'] ?? null,
           name: meta.name ? meta.name : (metadata['dcs:title'] ?? ''),
@@ -189,6 +209,10 @@ export const useDcsDraftStore = defineStore(storeId, {
       // Unknown / empty format — start fresh
       this.reset({
         partyType: meta.partyType,
+        jurisdiction: meta.jurisdiction ?? '',
+        industry: meta.industry ?? '',
+        templateLevel: meta.templateLevel ?? 'AGREEMENT',
+        requiredTemplates: meta.requiredTemplates ?? [],
         did: meta.did,
         name: meta.name,
         description: meta.description,
@@ -851,7 +875,8 @@ export interface ContractDocumentInput {
  * state drops them — and posting that back discards data the server put there:
  * the party nodes a signature is attributed to (with the signatory and Power of
  * Attorney already recorded on them), the signature fields naming those
- * parties, and the shapes graph the document is pinned to.
+ * parties, the shapes graph the document is pinned to, and the signing
+ * deadline.
  */
 export function buildContractDocument(input: ContractDocumentInput): DcsContractData {
   const { storedDocument, ...editorState } = input
@@ -865,6 +890,9 @@ export function buildContractDocument(input: ContractDocumentInput): DcsContract
     document['dcs:signatureFields'] = storedDocument['dcs:signatureFields']
   }
   if (storedDocument['sh:shapesGraph'] !== undefined) document['sh:shapesGraph'] = storedDocument['sh:shapesGraph']
+  if (storedDocument['dcs:signingDeadline'] !== undefined) {
+    document['dcs:signingDeadline'] = storedDocument['dcs:signingDeadline']
+  }
   return document
 }
 
@@ -1269,6 +1297,10 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   policies: [],
   customMetaData: [],
   partyType: undefined,
+  jurisdiction: '',
+  industry: '',
+  templateLevel: 'AGREEMENT',
+  requiredTemplates: [],
   templateType: TemplateType.component,
   state: undefined,
   version: null,

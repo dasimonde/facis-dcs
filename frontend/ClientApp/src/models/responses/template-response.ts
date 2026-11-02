@@ -1,4 +1,9 @@
-import type { PartialContractTemplate } from '../contract-template/contract-template'
+import type {
+  PartialContractTemplate,
+  TemplateReviewNote,
+  TemplateSearchableMetadata,
+  TemplateStructure,
+} from '../contract-template/contract-template'
 import type { ContractTemplateApprovalTask } from '../contract-template/contract-template-approval-task'
 import type { ContractTemplateEvent } from '../contract-template/contract-template-event'
 import type { ContractTemplateResponsible } from '../contract-template/contract-template-responsible'
@@ -30,7 +35,7 @@ export interface ContractTemplateUpdateManageResponse {
   did: string
 }
 
-interface ContractTemplateSearchResponseItem {
+interface ContractTemplateSearchResponseItem extends TemplateSearchableMetadata, TemplateStructure {
   did: string
   version: string
   state: ContractTemplateState
@@ -66,7 +71,7 @@ export interface ContractTemplateRetrieveResponse {
   approval_tasks: ContractTemplateApprovalTask[]
 }
 
-export interface ContractTemplateRetrieveByIdResponse {
+export interface ContractTemplateRetrieveByIdResponse extends TemplateSearchableMetadata, TemplateStructure {
   did: string
   version: number
   state: ContractTemplateState
@@ -80,6 +85,8 @@ export interface ContractTemplateRetrieveByIdResponse {
   /** The template data of the contract template */
   template_data: DcsTemplateData
   responsible?: ContractTemplateResponsible
+  /** Oldest first; returned to the template roles only */
+  review_notes?: TemplateReviewNote[]
 }
 
 export interface ContractTemplateApproveResponse {
@@ -92,7 +99,10 @@ export interface ContractTemplateRejectResponse {
 
 export interface ContractTemplateVerifyResponse {
   did: string
+  /** Findings block the review. */
   findings: string[]
+  /** Warnings do not block the review. */
+  warnings?: string[]
 }
 
 export interface ContractTemplateArchiveResponse {
@@ -117,4 +127,36 @@ export type ContractTemplateAuditResponse = ContractTemplateAuditResponseItem[]
 
 export interface ContractTemplatePublishResponse {
   did: string
+}
+
+/** DCS-FR-TR-09: the provenance credential of one registered template version (W3C VC). */
+export interface TemplateProvenanceCredential {
+  version: number
+  vc_id: string
+  previous_vc_id?: string
+  credential: {
+    issuer: string
+    validFrom?: string
+    credentialSubject: {
+      template_did: string
+      version: number
+      template_hash: string
+      created_by: string
+      reviewed_by?: string[]
+      approved_by?: string[]
+      registered_by?: string
+      registrar_holder_did?: string
+      previous_credential?: string
+    }
+    proof?: Record<string, unknown>
+  }
+}
+
+export type ContractTemplateProvenanceResponse = TemplateProvenanceCredential[]
+
+export interface ContractTemplatePdfVerifyResponse {
+  match: boolean
+  jsonld_hash: string
+  base_pdf_hash: string
+  stored_base_pdf_hash: string
 }

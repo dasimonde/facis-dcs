@@ -113,7 +113,7 @@ func (h *OfferAcceptor) Handle(ctx context.Context, cmd AcceptOfferCmd) error {
 		if err := contractstate.ValidateOutcome(currentState, contractstate.EventNegotiate, contractstate.Negotiation); err != nil {
 			return err
 		}
-		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Negotiation.String()); err != nil {
+		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Negotiation.String()); err != nil {
 			return fmt.Errorf("could not persist negotiation state: %w", err)
 		}
 	}

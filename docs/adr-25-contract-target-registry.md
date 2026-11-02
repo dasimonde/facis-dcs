@@ -54,6 +54,18 @@ deployment is opt-in and its absence is neither an error nor an alert. A
 *manager who asks for a deployment* on such a contract is refused with a message
 saying so, because they asked; the automatic trigger just does nothing.
 
+**Deviation from DCS-FR-CWE-16 (deploy on approval).** FR-CWE-16 lets an
+approved contract go "into the signing phase or deploy it to external systems,
+depending on configuration". The DCS always takes the first branch: approval
+moves the contract to `APPROVED`, which is the signing phase, and deployment
+runs only after signing completes (`SIGNED -> ACTIVE`, DCS-FR-SM-12). There is
+no configuration that deploys an approved but unsigned contract. A target system
+that executes an agreement nobody has signed would act on terms without legal
+effect, and the deployment envelope carries the signed artifact the target
+verifies. The per-contract target designation above is the configuration this
+requirement asks for; it decides where a signed contract goes, not whether
+signing is skipped.
+
 ## Consequences
 
 The deployment record references the registry entry it was dispatched to, so a

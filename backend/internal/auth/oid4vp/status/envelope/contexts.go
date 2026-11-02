@@ -23,7 +23,7 @@ const (
 	// VC Data Model v2 base @context (https://www.w3.org/ns/credentials/v2).
 	// MUST be the first @context entry: https://www.w3.org/TR/vc-data-model-2.0/#dfn-context
 	// Base context definition: https://www.w3.org/TR/vc-data-model-2.0/#base-context
-	credentialsV2ContextURL = "https://www.w3.org/ns/credentials/v2"
+	credentialsV2ContextURL = "https://www.w3.org/ns/credentials/v2" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 	// Data Integrity v2 security @context (https://w3id.org/security/data-integrity/v2).
 	// SHOULD be injected when securing a document: https://www.w3.org/TR/vc-data-integrity/#context-injection
@@ -39,7 +39,7 @@ const (
 	contextFetchTimeout = 10 * time.Second
 )
 
-var supportedContextFiles = map[string]string{
+var supportedContextFiles = map[string]string{ // #nosec G101 -- identifier or vocabulary IRI, not a credential
 	credentialsV2ContextURL:        "contexts/credentials-v2.jsonld",
 	dataIntegrityV2ContextURL:      "contexts/data-integrity-v2.json",
 	ed25519Signature2020ContextURL: "contexts/ed25519-signature-2020-v1.jsonld",

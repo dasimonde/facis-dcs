@@ -261,6 +261,48 @@ var _ = Service("Auth", func() {
 		})
 	})
 
+	Method("lockouts", func() {
+		Description("Lists the active lockouts after repeated invalid credentials: client addresses and credential holder keys, with the end of each lock.")
+		Meta("dcs:requirements", "DCS-FR-UC-01-4", "DCS-NFR-SEC-11")
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
+		Result(ArrayOf(LockoutInfo))
+		HTTP(func() {
+			GET("/admin/lockouts")
+			Response(StatusOK)
+		})
+	})
+
+	Method("unlock", func() {
+		Description("Ends an active lockout now. Invalid credentials before the unlock no longer count toward a new lockout of the key.")
+		Meta("dcs:requirements", "DCS-FR-UC-01-4", "DCS-NFR-SEC-11")
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("key", String, "The locked key, as the lockouts method lists it")
+			Required("key")
+		})
+		Error("not_found", ErrorResult, "No active lockout for this key")
+		HTTP(func() {
+			POST("/admin/lockouts/unlock")
+			Response(StatusNoContent)
+			Response("not_found", StatusNotFound)
+		})
+	})
+
+})
+
+var LockoutInfo = Type("LockoutInfo", func() {
+	Description("One active lockout after repeated invalid credentials")
+	Attribute("key", String, "The locked key: a client address, or holder:<did:jwk> for a credential holder key")
+	Attribute("locked_until", String, "End of the lock (RFC3339)")
+	Required("key", "locked_until")
 })
 
 var PresentationStatePayload = Type("PresentationStatePayload", func() {

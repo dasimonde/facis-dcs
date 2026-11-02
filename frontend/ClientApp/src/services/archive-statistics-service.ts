@@ -2,7 +2,8 @@ import http from '@/api/http'
 
 /** One recent archive-affecting audit event (DCS-FR-CSA-21). */
 export interface ArchiveRecentAction {
-  actor: string
+  /** Present only when the request gave a justification (DCS-FR-PACM-04). */
+  actor?: string
   occurred_at: string
   event_type: string
   did: string
@@ -25,10 +26,15 @@ export interface ArchiveStatistics {
   flagged_total: number
   recent_actions: ArchiveRecentAction[]
   expiring_contracts: ArchiveExpiringContract[]
+  /** The look-ahead window of expiring_contracts in days. */
+  expiring_window_days: number
 }
 
 export const archiveStatisticsService = {
-  async statistics(): Promise<ArchiveStatistics> {
-    return http.get<ArchiveStatistics>('/archive/statistics').then((res) => res.data)
+  // With a justification the recent actions name their actors (DCS-FR-PACM-04).
+  async statistics(justification?: string): Promise<ArchiveStatistics> {
+    return http
+      .get<ArchiveStatistics>('/archive/statistics', { params: justification ? { justification } : undefined })
+      .then((res) => res.data)
   },
 }

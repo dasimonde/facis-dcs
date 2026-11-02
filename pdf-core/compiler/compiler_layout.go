@@ -286,7 +286,6 @@ func layoutDocumentFull(doc documentModel) (pages []pageLayout, flatSections []s
 			SectionIdx:     -1,
 			LocalClauseIdx: -1,
 		})
-		mcid++
 		sigY -= 40
 		for _, sigField := range doc.SignatureFields {
 			fieldWidth := 360.0

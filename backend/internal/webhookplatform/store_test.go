@@ -58,3 +58,11 @@ func TestTemplateDeprecatedIsMapped(t *testing.T) {
 		t.Fatalf("DCSEventMap[%q] = %q, want %q", treventtype.Archive.String(), got, "template.deprecated")
 	}
 }
+
+// DCS-FR-TR-21, DCS-FR-TR-22: a deletion reaches subscribers as a deletion,
+// not as a deprecation.
+func TestTemplateDeletedIsMapped(t *testing.T) {
+	if got := DCSEventMap[treventtype.Delete.String()]; got != "template.deleted" {
+		t.Fatalf("DCSEventMap[%q] = %q, want %q", treventtype.Delete.String(), got, "template.deleted")
+	}
+}

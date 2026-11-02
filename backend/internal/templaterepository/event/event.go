@@ -132,6 +132,8 @@ type VerifyEvent struct {
 	DID        string             `json:"did"`
 	Version    int                `json:"version"`
 	VerifiedBy string             `json:"verified_by"`
+	Findings   []string           `json:"findings"`
+	Warnings   []string           `json:"warnings,omitempty"`
 	OccurredAt time.Time          `json:"occurred_at"`
 	HolderDID  string             `json:"holder_did"`
 	UserRoles  userrole.UserRoles `json:"user_roles"`
@@ -147,19 +149,32 @@ func (e VerifyEvent) GetDID() string {
 	return e.DID
 }
 
+// Classification is the classification and the structure of a template
+// revision (DCS-FR-TR-05, DCS-FR-TR-21).
+type Classification struct {
+	TemplateType      string   `json:"template_type"`
+	PartyType         string   `json:"party_type"`
+	Jurisdiction      *string  `json:"jurisdiction,omitempty"`
+	Industry          *string  `json:"industry,omitempty"`
+	TemplateLevel     string   `json:"template_level"`
+	RequiredTemplates []string `json:"required_templates"`
+}
+
 // UpdateEvent is emitted when template data is updated.
 type UpdateEvent struct {
-	DID             string             `json:"did"`
-	UpdatedBy       string             `json:"updated_by"`
-	OldName         *string            `json:"old_name,omitempty"`
-	NewName         *string            `json:"new_name,omitempty"`
-	OldDescription  *string            `json:"old_description,omitempty"`
-	NewDescription  *string            `json:"new_description,omitempty"`
-	OldTemplateData *datatype.JSON     `json:"old_template_data,omitempty"`
-	NewTemplateData *datatype.JSON     `json:"new_template_data,omitempty"`
-	OccurredAt      time.Time          `json:"occurred_at"`
-	HolderDID       string             `json:"holder_did"`
-	UserRoles       userrole.UserRoles `json:"user_roles"`
+	DID               string             `json:"did"`
+	UpdatedBy         string             `json:"updated_by"`
+	OldName           *string            `json:"old_name,omitempty"`
+	NewName           *string            `json:"new_name,omitempty"`
+	OldDescription    *string            `json:"old_description,omitempty"`
+	NewDescription    *string            `json:"new_description,omitempty"`
+	OldTemplateData   *datatype.JSON     `json:"old_template_data,omitempty"`
+	NewTemplateData   *datatype.JSON     `json:"new_template_data,omitempty"`
+	OldClassification Classification     `json:"old_classification"`
+	NewClassification Classification     `json:"new_classification"`
+	OccurredAt        time.Time          `json:"occurred_at"`
+	HolderDID         string             `json:"holder_did"`
+	UserRoles         userrole.UserRoles `json:"user_roles"`
 }
 
 // EventType implements the Event interface.
@@ -174,17 +189,19 @@ func (e UpdateEvent) GetDID() string {
 
 // UpdateManageEvent is emitted when template data is updated.
 type UpdateManageEvent struct {
-	DID             string             `json:"did"`
-	UpdatedBy       string             `json:"updated_by"`
-	OldName         *string            `json:"old_name,omitempty"`
-	NewName         *string            `json:"new_name,omitempty"`
-	OldDescription  *string            `json:"old_description,omitempty"`
-	NewDescription  *string            `json:"new_description,omitempty"`
-	OldTemplateData *datatype.JSON     `json:"old_template_data,omitempty"`
-	NewTemplateData *datatype.JSON     `json:"new_template_data,omitempty"`
-	OccurredAt      time.Time          `json:"occurred_at"`
-	HolderDID       string             `json:"holder_did"`
-	UserRoles       userrole.UserRoles `json:"user_roles"`
+	DID               string             `json:"did"`
+	UpdatedBy         string             `json:"updated_by"`
+	OldName           *string            `json:"old_name,omitempty"`
+	NewName           *string            `json:"new_name,omitempty"`
+	OldDescription    *string            `json:"old_description,omitempty"`
+	NewDescription    *string            `json:"new_description,omitempty"`
+	OldTemplateData   *datatype.JSON     `json:"old_template_data,omitempty"`
+	NewTemplateData   *datatype.JSON     `json:"new_template_data,omitempty"`
+	OldClassification Classification     `json:"old_classification"`
+	NewClassification Classification     `json:"new_classification"`
+	OccurredAt        time.Time          `json:"occurred_at"`
+	HolderDID         string             `json:"holder_did"`
+	UserRoles         userrole.UserRoles `json:"user_roles"`
 }
 
 // EventType implements the Event interface.
@@ -194,6 +211,29 @@ func (e UpdateManageEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e UpdateManageEvent) GetDID() string {
+	return e.DID
+}
+
+// SuccessorRegisteredEvent is emitted for a registered template version when
+// a newer version of it is registered. Subscribers of "template.updated" for
+// the older version learn of the successor.
+type SuccessorRegisteredEvent struct {
+	DID              string             `json:"did"`
+	SuccessorDID     string             `json:"successor_did"`
+	SuccessorVersion int                `json:"successor_version"`
+	RegisteredBy     string             `json:"registered_by"`
+	OccurredAt       time.Time          `json:"occurred_at"`
+	HolderDID        string             `json:"holder_did"`
+	UserRoles        userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e SuccessorRegisteredEvent) EventType() string {
+	return eventtype.Update.String()
+}
+
+// GetDID implements the Event interface.
+func (e SuccessorRegisteredEvent) GetDID() string {
 	return e.DID
 }
 
@@ -253,14 +293,36 @@ func (e RetrieveByIDEvent) GetDID() string {
 	return e.DID
 }
 
-// ArchiveEvent is emitted when template data is archived.
+// RetrieveProvenanceEvent is emitted when the provenance credentials of a template are read.
+type RetrieveProvenanceEvent struct {
+	DID         string             `json:"did"`
+	RetrievedBy string             `json:"retrieved_by"`
+	OccurredAt  time.Time          `json:"occurred_at"`
+	HolderDID   string             `json:"holder_did"`
+	UserRoles   userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e RetrieveProvenanceEvent) EventType() string {
+	return eventtype.RetrieveProvenance.String()
+}
+
+// GetDID implements the Event interface.
+func (e RetrieveProvenanceEvent) GetDID() string {
+	return e.DID
+}
+
+// ArchiveEvent is emitted when a template is deprecated.
 type ArchiveEvent struct {
-	DID        string             `json:"did"`
-	Version    int                `json:"version"`
-	ArchivedBy string             `json:"archived_by"`
-	OccurredAt time.Time          `json:"occurred_at"`
-	HolderDID  string             `json:"holder_did"`
-	UserRoles  userrole.UserRoles `json:"user_roles"`
+	DID           string             `json:"did"`
+	Version       int                `json:"version"`
+	ArchivedBy    string             `json:"archived_by"`
+	PreviousState string             `json:"previous_state"`
+	NewState      string             `json:"new_state"`
+	Justification string             `json:"justification"`
+	OccurredAt    time.Time          `json:"occurred_at"`
+	HolderDID     string             `json:"holder_did"`
+	UserRoles     userrole.UserRoles `json:"user_roles"`
 }
 
 // EventType implements the Event interface.
@@ -270,6 +332,19 @@ func (e ArchiveEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e ArchiveEvent) GetDID() string {
+	return e.DID
+}
+
+// DeleteEvent is emitted when a template is deleted.
+type DeleteEvent ArchiveEvent
+
+// EventType implements the Event interface.
+func (e DeleteEvent) EventType() string {
+	return eventtype.Delete.String()
+}
+
+// GetDID implements the Event interface.
+func (e DeleteEvent) GetDID() string {
 	return e.DID
 }
 
@@ -308,6 +383,7 @@ type AuditEvt struct {
 	ComponentType componenttype.ComponentType `json:"component_type"`
 	HolderDID     string                      `json:"holder_did"`
 	UserRoles     userrole.UserRoles          `json:"user_roles"`
+	Justification string                      `json:"justification"`
 }
 
 // EventType implements the Event interface.

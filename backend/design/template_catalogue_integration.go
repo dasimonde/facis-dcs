@@ -80,6 +80,9 @@ var TemplateCatalogueRetrieveByIDResponse = Type("TemplateCatalogueRetrieveByIDR
 	Attribute("template_type", String, "The type of the template")
 	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("schema_version", Int, "Schema version of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)")
 	Attribute("template_data", Any, "The template data of the contract template")
 	// Optional participant summary
 	Attribute("participant_id", String, "Issuer participant DID")

@@ -141,7 +141,10 @@ Resolve NATS host (explicit override or in-chart default).
 {{- end }}
 
 {{/*
-DATABASE_URL override or derived from postgres settings.
+DATABASE_URL override or derived from postgres settings. The co-deployed
+server is reached with sslmode=verify-full against the internal CA when
+global.internalTLS.enabled. Without an explicit password the URL has none and
+PGPASSWORD comes from the postgresql Secret (databaseEnv).
 */}}
 {{- define "digital-contracting-service.databaseURL" -}}
 {{- if .Values.database.url -}}
@@ -150,12 +153,204 @@ DATABASE_URL override or derived from postgres settings.
 {{- $host := include "digital-contracting-service.postgresqlHost" . -}}
 {{- $port := default 5432 .Values.database.port -}}
 {{- $user := default (default "dcs" .Values.postgresql.auth.username) .Values.database.user -}}
-{{- $password := default (default "dcs" .Values.postgresql.auth.password) .Values.database.password -}}
+{{- $password := default .Values.postgresql.auth.password .Values.database.password -}}
 {{- $dbname := default (default "dcs" .Values.postgresql.auth.database) .Values.database.name -}}
 {{- $sslmode := default "disable" .Values.database.sslmode -}}
-{{- printf "host=%s port=%v user=%s password=%s dbname=%s sslmode=%s" $host $port $user $password $dbname $sslmode -}}
+{{- if and .Values.global.internalTLS.enabled .Values.postgresql.enabled (not .Values.serviceDiscovery.postgresqlHost) -}}
+{{- $sslmode = printf "verify-full sslrootcert=%s/ca.crt" (include "digital-contracting-service.internalTLSDir" .) -}}
+{{- end -}}
+{{- printf "host=%s port=%v user=%s" $host $port $user -}}
+{{- with $password }}{{ printf " password=%s" . }}{{ end -}}
+{{- printf " dbname=%s sslmode=%s" $dbname $sslmode -}}
 {{- else -}}
 {{- "" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Env entries that give a container its database connection: DATABASE_URL and,
+when the co-deployed server has a generated password, PGPASSWORD.
+*/}}
+{{- define "digital-contracting-service.databaseEnv" -}}
+- name: DATABASE_URL
+  {{- if .Values.database.secretRef.name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.database.secretRef.name | quote }}
+      key: {{ .Values.database.secretRef.key | quote }}
+  {{- else }}
+  value: {{ include "digital-contracting-service.databaseURL" . | quote }}
+  {{- end }}
+{{- if and (not .Values.database.secretRef.name) (not .Values.database.url) .Values.postgresql.enabled (not (default .Values.postgresql.auth.password .Values.database.password)) }}
+- name: PGPASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ printf "%s-postgresql" .Release.Name | quote }}
+      key: postgres-password
+{{- end }}
+{{- end }}
+
+{{/*
+In-cluster TLS (DCS-NFR-SEC-14, DCS-NFR-SEC-01): Secret with the server
+certificate and the CA, and the directory a client mounts the CA in.
+*/}}
+{{- define "digital-contracting-service.internalTLSSecretName" -}}
+{{- printf "%s-internal-tls" .Release.Name -}}
+{{- end }}
+
+{{/*
+The internal CA as JSON {"Cert","Key"}: from the <release>-internal-ca Secret
+when it exists, else generated (ECDSA P-256, 10 years). The result is kept in
+.Values for the render, so every template of this chart gets the same CA.
+*/}}
+{{- define "digital-contracting-service.internalCA" -}}
+{{- $cfg := .Values.global.internalTLS -}}
+{{- if not (hasKey $cfg "renderedCA") -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (printf "%s-internal-ca" .Release.Name) -}}
+{{- $ca := dict -}}
+{{- if $existing.data -}}
+{{- $ca = dict "Cert" (index $existing.data "ca.crt" | b64dec) "Key" (index $existing.data "ca.key" | b64dec) -}}
+{{- else -}}
+{{- $gen := genCAWithKey (printf "%s internal CA" .Release.Name) 3650 (genPrivateKey "ecdsa") -}}
+{{- $ca = dict "Cert" $gen.Cert "Key" $gen.Key -}}
+{{- end -}}
+{{- $_ := set $cfg "renderedCA" $ca -}}
+{{- end -}}
+{{- $cfg.renderedCA | toJson -}}
+{{- end }}
+
+{{- define "digital-contracting-service.internalTLSDir" -}}
+/etc/dcs-internal-tls
+{{- end }}
+
+{{/* Volume with only the internal CA, for clients. */}}
+{{- define "digital-contracting-service.internalCAVolume" -}}
+- name: internal-ca
+  secret:
+    secretName: {{ include "digital-contracting-service.internalTLSSecretName" . | quote }}
+    items:
+      - key: ca.crt
+        path: ca.crt
+{{- end }}
+
+{{- define "digital-contracting-service.internalCAVolumeMount" -}}
+- name: internal-ca
+  mountPath: {{ include "digital-contracting-service.internalTLSDir" . | quote }}
+  readOnly: true
+{{- end }}
+
+{{/*
+TLS proxy container for a component that serves plain HTTP only (IPFS RPC,
+pdf-core, DSS, ORCE). It terminates TLS 1.3 on global.internalTLS.proxy.port
+and forwards to the component on 127.0.0.1:<upstreamPort>. It runs as the nginx
+user of the image (UID 101) on a read-only root filesystem and writes only to
+/tmp. The pod must have the volumes of internalTLSVolume. Subcharts include
+this template only when global.internalTLS.enabled, so they render on their
+own as well. Optional "extra": more listeners, each a dict with "name" (port
+name), "port" and "upstreamPort".
+Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" 5001)
+*/}}
+{{- define "digital-contracting-service.internalTLSProxy" -}}
+{{- $p := .root.Values.global.internalTLS.proxy -}}
+{{- $servers := prepend (.extra | default list) (dict "name" "https" "port" $p.port "upstreamPort" .upstreamPort) -}}
+- name: tls-proxy
+  image: "{{ $p.image.repository }}:{{ $p.image.tag }}{{ with $p.image.digest }}@{{ . }}{{ end }}"
+  imagePullPolicy: {{ $p.image.pullPolicy }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  command: ["/bin/sh", "-c"]
+  args:
+    - |
+      cat > /tmp/nginx.conf <<'EOF'
+      pid /tmp/nginx.pid;
+      events {}
+      http {
+        client_body_temp_path /tmp/client_body;
+        proxy_temp_path /tmp/proxy;
+        fastcgi_temp_path /tmp/fastcgi;
+        uwsgi_temp_path /tmp/uwsgi;
+        scgi_temp_path /tmp/scgi;
+        access_log off;
+        {{- range $servers }}
+        server {
+          listen {{ .port }} ssl;
+          ssl_certificate /etc/dcs-internal-tls/tls.crt;
+          ssl_certificate_key /etc/dcs-internal-tls/tls.key;
+          ssl_protocols TLSv1.3;
+          client_max_body_size 0;
+          proxy_request_buffering off;
+          proxy_buffering off;
+          proxy_read_timeout 600s;
+          proxy_send_timeout 600s;
+          location / {
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            # The backend keys the lockout on the client address (FR-UC-01-4): pass the peer address on.
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_pass http://127.0.0.1:{{ .upstreamPort }};
+          }
+        }
+        {{- end }}
+      }
+      EOF
+      exec nginx -c /tmp/nginx.conf -g 'daemon off;'
+  ports:
+    {{- range $servers }}
+    - name: {{ .name }}
+      containerPort: {{ .port }}
+      protocol: TCP
+    {{- end }}
+  readinessProbe:
+    tcpSocket:
+      port: https
+    periodSeconds: 5
+  {{- with $p.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumeMounts:
+    - name: internal-tls
+      mountPath: /etc/dcs-internal-tls
+      readOnly: true
+    - name: tls-proxy-tmp
+      mountPath: /tmp
+{{- end }}
+
+{{/* Volumes of the TLS proxy: the server certificate and key, and its /tmp. */}}
+{{- define "digital-contracting-service.internalTLSVolume" -}}
+- name: internal-tls
+  secret:
+    secretName: {{ printf "%s-internal-tls" .Release.Name | quote }}
+- name: tls-proxy-tmp
+  emptyDir: {}
+{{- end }}
+
+{{/* Service port of the TLS proxy. */}}
+{{- define "digital-contracting-service.internalTLSServicePort" -}}
+- name: https
+  port: {{ .Values.global.internalTLS.proxy.port }}
+  targetPort: https
+  protocol: TCP
+{{- end }}
+
+{{/*
+URL the backend calls a component on: https on the TLS proxy port when
+global.internalTLS.enabled, else plain http on the component port.
+Call: include "digital-contracting-service.componentURL" (dict "root" . "host" "x" "port" 8080)
+*/}}
+{{- define "digital-contracting-service.componentURL" -}}
+{{- if .root.Values.global.internalTLS.enabled -}}
+{{- printf "https://%s:%v" .host .root.Values.global.internalTLS.proxy.port -}}
+{{- else -}}
+{{- printf "http://%s:%v" .host .port -}}
 {{- end -}}
 {{- end }}
 
@@ -168,7 +363,11 @@ NATS_URL override or derived from nats settings.
 {{- else if include "digital-contracting-service.natsHost" . -}}
 {{- $host := include "digital-contracting-service.natsHost" . -}}
 {{- $port := default 4222 .Values.messaging.natsPort -}}
-{{- printf "nats://%s:%v" $host $port -}}
+{{- $scheme := "nats" -}}
+{{- if and .Values.global.internalTLS.enabled .Values.nats.enabled (not .Values.serviceDiscovery.natsHost) -}}
+{{- $scheme = "tls" -}}
+{{- end -}}
+{{- printf "%s://%s:%v" $scheme $host $port -}}
 {{- else -}}
 {{- "" -}}
 {{- end -}}
@@ -188,12 +387,15 @@ Hydra OAuth2/OIDC issuer (URLs issuer / discovery). Requires hydra.enabled.
 {{- end }}
 
 {{/*
-In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls.
+In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls:
+the TLS proxy of the public API when global.internalTLS.enabled.
 */}}
 {{- define "digital-contracting-service.hydraInternalIssuerURL" -}}
 {{- if .Values.hydra.enabled -}}
 {{- if .Values.hydra.config.internalIssuerURL -}}
 {{- .Values.hydra.config.internalIssuerURL -}}
+{{- else if .Values.global.internalTLS.enabled -}}
+{{- printf "https://%s-hydra:%d" .Release.Name (.Values.hydra.service.publicTLSPort | int) -}}
 {{- else -}}
 {{- printf "http://%s-hydra:%d" .Release.Name (.Values.hydra.service.publicPort | int) -}}
 {{- end -}}
@@ -201,11 +403,12 @@ In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls.
 {{- end }}
 
 {{/*
-Hydra admin API base URL (login/consent accept).
+Hydra admin API base URL (login/consent accept): the TLS proxy of the Hydra
+pod when global.internalTLS.enabled.
 */}}
 {{- define "digital-contracting-service.hydraAdminURL" -}}
 {{- if .Values.hydra.enabled -}}
-{{- printf "http://%s-hydra:%d" .Release.Name (.Values.hydra.service.adminPort | int) -}}
+{{- include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-hydra" .Release.Name) "port" (.Values.hydra.service.adminPort | int)) -}}
 {{- end -}}
 {{- end }}
 
@@ -249,9 +452,8 @@ IPFS Kubo RPC URL: explicit URL before the enabled sub-chart endpoint.
 {{- if .Values.ipfs.mfsBaseURL -}}
 {{- .Values.ipfs.mfsBaseURL -}}
 {{- else if .Values.ipfs.enabled -}}
-{{- $host := printf "%s-ipfs" .Release.Name -}}
 {{- $port := default 5001 .Values.ipfs.service.apiPort -}}
-{{- printf "http://%s:%v" $host $port -}}
+{{- include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-ipfs" .Release.Name) "port" $port) -}}
 {{- else -}}
 {{- "" -}}
 {{- end -}}
@@ -282,13 +484,24 @@ Normalize the vendored fc-service route path (leading slash, no trailing slash).
 {{- end }}
 
 {{/*
-PDF-Core internal service URL — auto-wired when pdfCore.enabled=true.
+PDF-Core internal service URL — auto-wired when pdfCore.enabled=true. It is
+also the base of the ontology and context IRIs, so it stays the plain service
+URL; the backend calls pdfCoreCallURL.
 */}}
 {{- define "digital-contracting-service.pdfCoreURL" -}}
 {{- if .Values.pdfCore.url -}}
 {{- .Values.pdfCore.url -}}
 {{- else if .Values.pdfCore.enabled -}}
 {{- printf "http://%s-pdf-core:%v" (include "digital-contracting-service.fullname" .) .Values.pdfCore.service.port -}}
+{{- end -}}
+{{- end }}
+
+{{/* URL the backend calls pdf-core on. */}}
+{{- define "digital-contracting-service.pdfCoreCallURL" -}}
+{{- if .Values.pdfCore.url -}}
+{{- .Values.pdfCore.url -}}
+{{- else if .Values.pdfCore.enabled -}}
+{{- include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-pdf-core" (include "digital-contracting-service.fullname" .)) "port" .Values.pdfCore.service.port) -}}
 {{- end -}}
 {{- end }}
 
@@ -386,5 +599,89 @@ Default: auto-derived as <pdfCoreURL>/ontology/dcs-pdf-core.
 {{- .Values.pdfCore.contextIRI -}}
 {{- else -}}
 {{- printf "%s/ontology/dcs-pdf-core" (include "digital-contracting-service.pdfCoreURL" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Ingress controller that reaches the backend, the Hydra public API and the
+Federated Catalogue on their TLS proxies and verifies them against the internal
+CA (DCS-NFR-SEC-01, DCS-NFR-SEC-14): "nginx" for ingress.className nginx,
+"traefik" for ingress.className traefik or empty when the ServersTransport CRD
+exists. Empty: the ingress uses the plain ports.
+*/}}
+{{- define "digital-contracting-service.ingressBackendTLS" -}}
+{{- if .Values.global.internalTLS.enabled -}}
+{{- $class := .Values.ingress.className -}}
+{{- if eq $class "nginx" -}}
+nginx
+{{- else if and (or (eq $class "traefik") (not $class)) (include "digital-contracting-service.traefikServersTransportAnnotation" .) -}}
+traefik
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Service annotation that names the Traefik ServersTransport of the release
+(templates/ingress-backend-tls.yaml): Traefik then verifies the TLS proxy of
+the Service against the internal CA. Set when global.internalTLS.enabled and
+the ServersTransport CRD exists. Subcharts include it with their own context.
+*/}}
+{{- define "digital-contracting-service.traefikServersTransportAnnotation" -}}
+{{- if and (dig "internalTLS" "enabled" false (.Values.global | default dict)) (.Capabilities.APIVersions.Has "traefik.io/v1alpha1/ServersTransport") -}}
+traefik.ingress.kubernetes.io/service.serverstransport: {{ printf "%s-%s-internal-tls@kubernetescrd" .Release.Namespace .Release.Name | quote }}
+{{- end -}}
+{{- end }}
+
+{{/*
+"true" when the chart enforces the minimum TLS version itself: the ingress
+terminates TLS and Traefik serves it (DCS-IR-CI-01, DCS-NFR-SEC-01).
+*/}}
+{{- define "digital-contracting-service.tlsOptionEnforced" -}}
+{{- if and .Values.ingress.enabled .Values.ingress.tlsOptions.enabled .Values.ingress.tls (or .Values.traefik.enabled (.Capabilities.APIVersions.Has "traefik.io/v1alpha1/TLSOption")) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+DCS_CONFIG_SHA256_PINS (DCS-NFR-SEC-04): configIntegrity.pins. The pin of the
+operator trust ConfigMap is an explicit value, required in production
+(templates/prerequisites.yaml): a pin taken from the live ConfigMap at render
+time would take over an edit of it, and helm template or ArgoCD would render
+none.
+*/}}
+{{- define "digital-contracting-service.configPins" -}}
+{{- $parts := list -}}
+{{- range $name, $hash := (.Values.configIntegrity.pins | default dict) -}}
+{{- $parts = append $parts (printf "%s=%s" $name $hash) -}}
+{{- end -}}
+{{- join "," $parts -}}
+{{- end }}
+
+{{/* Name of the /metrics Service; the alert rules select it by this name. */}}
+{{- define "digital-contracting-service.metricsServiceName" -}}
+{{- printf "%s-metrics" (include "digital-contracting-service.fullname" . | trunc 55 | trimSuffix "-") -}}
+{{- end }}
+
+{{/*
+Labels of the ServiceMonitor and the PrometheusRule (DCS-NFR-SEC-11): the
+selectors of the Prometheus that loads them. alerts.labels when set; else
+release: <this release> for the co-deployed kube-prometheus-stack
+(monitoring.enabled), whose selectors match its own release; else
+release: prometheus, the release name of a separately installed stack.
+*/}}
+{{- define "digital-contracting-service.monitoringLabels" -}}
+{{- if .Values.alerts.labels -}}
+{{- toYaml .Values.alerts.labels -}}
+{{- else if .Values.monitoring.enabled -}}
+release: {{ .Release.Name }}
+{{- else -}}
+release: prometheus
+{{- end -}}
+{{- end }}
+
+{{/* "true" when the Prometheus Operator CRDs exist or monitoring.enabled. */}}
+{{- define "digital-contracting-service.prometheusOperator" -}}
+{{- if or .Values.monitoring.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") -}}
+true
 {{- end -}}
 {{- end }}

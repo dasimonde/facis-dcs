@@ -186,6 +186,9 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
       { timeout: 90_000 },
     )
     await page.getByRole('button', { name: 'Load Audit Report', exact: true }).click()
+    const confirmation = page.getByRole('dialog', { name: 'Confirmation' })
+    await confirmation.getByPlaceholder('Audit justification').fill('Signature compliance review')
+    await confirmation.getByRole('button', { name: 'Submit' }).click()
     const resp = await audited
     // The audit trail lives only in IPFS and intermittently loses a just-written
     // entry ("DataIdentifier not found") — tolerate that one infra flake, stay

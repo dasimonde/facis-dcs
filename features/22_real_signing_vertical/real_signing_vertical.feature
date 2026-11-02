@@ -24,21 +24,16 @@
 #      CMS/ASN.1 parse - each documents its own precision limit at its point
 #      of use in the steps module.
 #
-# The Signature Manager UI (QR/poll/result modal, AES badge) has no coverage
-# in this pack - this repo-root BDD harness has no browser-automation
-# convention at all (see features/16_other/frontend.feature, a bare
-# reachability check). The service-level contract the UI would call is
-# already exercised by the ceremony scenarios below; the UI-specific
-# rendering claims are recorded as an explicit coverage gap via the final
-# @skip scenario, not fabricated.
+# The Signature Manager UI (wallet request, result, AES level) is covered by
+# the Playwright specs frontend/ClientApp/e2e/wallet-signing.spec.ts and
+# signature-compliance-viewer.spec.ts.
 
 @DCS-FR-SM-16 @DCS-IR-SI-10 @DCS-FR-UC-04-1
 Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony, PID binding
 
   # ---------------------------------------------------------------------
-  # PAdES signature production - pdf-core POST /sign, exercised indirectly
-  # via POST /signature/apply after a completed ceremony (see steps module
-  # docstring point 1).
+  # PAdES signature production - exercised through the prepare/submit wallet
+  # ceremony (ADR-12, ADR-20); see the steps module docstring point 1.
   # ---------------------------------------------------------------------
 
   @DCS-OR-C2PA-002 @DCS-OR-C2PA-010
@@ -58,16 +53,18 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     Given contract "RSV Timestamp Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerThree"
     Then the signed PDF for contract "RSV Timestamp Contract" embeds an RFC3161 timestamp token
 
-  @DCS-OR-C2PA-002 @DCS-OR-C2PA-010
+  @DCS-OR-C2PA-002 @DCS-OR-C2PA-003 @DCS-OR-C2PA-004 @DCS-OR-C2PA-010
   Scenario: The order /update -> /sign -> /update leaves the PAdES signature and C2PA chain valid
     Given contract "RSV Order Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerFour"
     When the signature for contract "RSV Order Contract" is revoked as a post-sign C2PA update
     Then get http 200:Success code
     When I re-export the signed PDF for contract "RSV Order Contract"
     Then the signed PDF for contract "RSV Order Contract" still has a structurally valid PAdES signature
+    And the C2PA manifest history of contract "RSV Order Contract" ends with lifecycle status "suspended"
     When contract "RSV Order Contract" is exported and verified as PDF
     Then get http 200:Success code
     And the verification result shows match is true
+    And the PDF signature check for contract "RSV Order Contract" is reported valid by the EU DSS
 
   # ---------------------------------------------------------------------
   # Contract signer + apply flow
@@ -174,15 +171,17 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     Given contract "RSV Summary VC Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerFourteen"
     Then a ContractSigningSummaryCredential for contract "RSV Summary VC Contract" is embedded inside the PAdES ByteRange
 
-  # @skip — deferred BY DECISION. The wallet-driven remote-signing ceremony
-  # produces the PAdES signature over the PDF; a detached JAdES over the
-  # machine-readable JSON-LD is not yet emitted by the wallet/DSS path. The
-  # vertical takes precedence; wallet-JAdES is follow-up research. Un-skip once
-  # the ceremony emits the JAdES artifact.
-  @DCS-FR-SM-02 @DCS-FR-SM-11 @skip
+  # The wallet signs the published request's second document (the canonical
+  # JSON-LD payload) as a JAdES next to the PAdES over the PDF
+  # (testWallet/dcs_wallet/oid4vp_signing.py).
+  @DCS-FR-SM-02 @DCS-FR-SM-11
   Scenario: The ceremony also produces a JAdES signature over the machine-readable JSON-LD
-    Given contract "RSV JAdES Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerJades"
-    Then the signature view for contract "RSV JAdES Contract" carries a JAdES signature that verifies over the contract JSON-LD
+    Given contract "RSV JAdES Contract" is APPROVED and has completed a signing ceremony for signatory "SignerJades"
+    When the signer publishes the OID4VP signing request for contract "RSV JAdES Contract"
+    Then get http 200:Success code
+    When the wallet signs contract "RSV JAdES Contract" by consuming the OID4VP signing request as "SignerJades"
+    Then the wallet callback reports the contract "RSV JAdES Contract" as SIGNED
+    And the signature view for contract "RSV JAdES Contract" carries a JAdES signature that verifies over the contract JSON-LD
 
   # Uses the IPFS CID-swap seam (steps/support/tamper_seam.py). See
   # steps/real_signing_vertical/dcs_real_signing_vertical_tamper_steps.py's
@@ -217,22 +216,3 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     And the verification result shows match is true
     And the contract_signatures row for contract "RSV E2E Contract" is a real signature, not the STUB placeholder
     And the contract_signatures row for contract "RSV E2E Contract" is linked to a signature_ceremonies row
-
-  # ---------------------------------------------------------------------
-  # Signature Manager UI: documented coverage gap (see the header comment
-  # above). No fabricated pass/fail - the traceability is kept present via
-  # @skip.
-  # ---------------------------------------------------------------------
-
-  @skip
-  Scenario: Signature Manager UI ceremony flow and AES badge - not provable from this HTTP-only BDD harness
-    # This repo-root BDD harness has no browser-automation convention (see
-    # features/16_other/frontend.feature - a bare reachability check). The
-    # service-level contract the UI would call (start ceremony, poll status,
-    # apply, AES credential_type) is already exercised end-to-end by the
-    # ceremony and e2e scenarios above. The UI-specific claims (the
-    # QR/poll/result modal and the AES badge render,
-    # frontend/ClientApp/src/services/signature-management-service.ts) need
-    # a browser-level test this harness does not have; recorded here as an
-    # explicit coverage gap, not a fabricated result.
-    Given I am authenticated with roles: "Contract Manager"

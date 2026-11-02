@@ -1109,6 +1109,9 @@ func compactConstraintLeaves(constraint map[string]any) []map[string]any {
 		}
 		leaves := []map[string]any{}
 		children, _ := asArray(raw)
+		if list, ok := jsonLDList(raw); ok {
+			children = list
+		}
 		if children == nil {
 			if child, ok := raw.(map[string]any); ok {
 				children = []any{child}

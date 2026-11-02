@@ -15,7 +15,7 @@ var PACAuditRequest = Type("PACAuditRequest", func() {
 	Attribute("scope", String, "Scope that should be audited")
 	Attribute("did", String, "Optional resource DID filter")
 	Attribute("resource_id", String, "Optional resource DID filter alias used by audit-executor clients")
-	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
+	Attribute("justification", String, "Required audit justification", func() { Pattern(`\S`) })
 
 	Required("scope", "justification")
 })
@@ -31,7 +31,7 @@ var PACResourceAuditTrailEntry = Type("PACResourceAuditTrailEntry", func() {
 	Attribute("created_at", String, "The creation date of the event")
 	Attribute("res_log_pred_cid", String, "Resource audit trail predecessor on the IPFS chain")
 	Attribute("kind", String, "Entry kind: TIMELINE or CHECK")
-	Attribute("result", String, "Check result: PASSED or FAILED")
+	Attribute("result", String, "Check result: PASSED, FAILED, or ERASED when the check needs content erased with the contract key")
 	Attribute("rule_id", String, "Stable integrity rule identifier")
 	Attribute("reason", String, "Human-readable check reason")
 
@@ -164,6 +164,8 @@ var PACWorkflowGateRun = Type("PACWorkflowGateRun", func() {
 	Attribute("effective_shapes", ArrayOf(String))
 	Attribute("profile_version", Int)
 	Attribute("review", PACWorkflowGateReview)
+	Attribute("findings", ArrayOf(String), "The findings that put the run in REVIEW or BLOCKED: the local evaluation and the policy executor")
+	Attribute("created_at", String, "When the run started (RFC3339)")
 	Required("run_id", "correlation_id", "snapshot_id", "contract_did", "contract_version", "gate", "status", "content_hash", "effective_shapes", "profile_version")
 })
 
@@ -174,6 +176,18 @@ var PACWorkflowGateReviewDecision = Type("PACWorkflowGateReviewDecision", func()
 	Attribute("decided_by", String)
 	Attribute("decided_at", String)
 	Required("run_id", "decision", "justification", "decided_by", "decided_at")
+})
+
+var PACCase = Type("PACCase", func() {
+	Description("One incident case (DCS-IR-PACM-04, DCS-FR-PACM-05)")
+	Attribute("case_id", String)
+	Attribute("did", String, "The linked contract or template DID")
+	Attribute("linked_to", String, "What the DID names", func() { Enum("contract", "template") })
+	Attribute("reported_by", String)
+	Attribute("reported_at", String, "RFC3339")
+	Attribute("findings", Int, "Number of reported findings")
+	Attribute("exported_at", String, "When the case file was last exported (RFC3339); absent before the first export")
+	Required("case_id", "did", "linked_to", "reported_by", "reported_at", "findings")
 })
 
 var PACAccessAttempt = Type("PACAccessAttempt", func() {
@@ -206,7 +220,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		Security(JWTAuth, func() { Scope(string(userrole.Auditor)) })
 		Payload(func() {
 			Token("token", String)
-			Attribute("justification", String, func() { MinLength(1) })
+			Attribute("justification", String, func() { Pattern(`\S`) })
 			Attribute("limit", Int, func() { Default(25); Minimum(1); Maximum(100) })
 			Attribute("cursor", String, func() { MaxLength(256) })
 			Required("justification")
@@ -260,17 +274,18 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 
 	Method("audit_report", func() {
 		Description("Export the latest persisted audit run, including its frozen lifecycle timeline, as JSON, CSV, or PDF. No checks are executed again. Reports containing erased resource content are unavailable.")
-		Meta("dcs:requirements", "DCS-IR-PACM-02")
+		Meta("dcs:requirements", "DCS-IR-PACM-02", "DCS-FR-PACM-05")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Archive Manager")
+			Scope("Compliance Officer")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
 			Attribute("scope", String, "Scope that should be reported")
 			Attribute("format", String, "Report format: json, csv, or pdf")
 			Attribute("did", String, "Optional resource DID filter")
-			Attribute("justification", String, "Required report justification", func() { MinLength(1) })
+			Attribute("justification", String, "Required report justification", func() { Pattern(`\S`) })
 			Required("justification")
 		})
 		Error("forbidden", ErrorResult, "Forbidden")
@@ -295,27 +310,31 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	})
 
 	Method("monitor", func() {
-		Description("Continuous compliance monitoring sweep: flags contracts pending approval that still have OPEN approval tasks (a missing required approval) and records the sweep in the audit trail. Technical/contractual conformance only — autonomous legal-conformity assessment (DCS-FR-PACM-03) is descoped per the client decision of 2026-07-26 (ADR-24).")
+		Description("Continuous compliance monitoring sweep: flags contracts pending approval that still have OPEN approval tasks (a missing required approval) and records the sweep in the audit trail. The regulatory rule pack (DCS-FR-PACM-03) runs at the deployment workflow gate (ADR-37).")
 		Meta("dcs:requirements", "DCS-IR-PACM-03")
 		Security(JWTAuth, func() {
 			Scope("Compliance Officer")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
+			Attribute("justification", String, "Why the caller reads the identities of denied actors (DCS-FR-PACM-04); without it an unauthorized-access risk names no actor", func() { Pattern(`\S`) })
 		})
 		Result(PACMonitorResponse)
 
+		Error("forbidden", ErrorResult, "Forbidden")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			GET("/pac/monitor")
+			Param("justification")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
 
 	Method("incident_report", func() {
-		Description("submit non-compliance findings as case records.")
+		Description("submit non-compliance findings as one case; the response carries the case_id of the case file (DCS-FR-PACM-05).")
 		Meta("dcs:requirements", "DCS-IR-PACM-04")
 		Security(JWTAuth, func() {
 			Scope("Compliance Officer")
@@ -328,15 +347,93 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult, "The caller may not read the linked contract")
+		Error("not_found", ErrorResult, "No contract or template has the linked DID")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/pac/report")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 		Result(Any)
+	})
+
+	Method("case_file", func() {
+		Description("export the case file of an incident for regulatory review: the reported findings, and the compliance risks, workflow gate runs and event timeline of the linked contract. The export and its justification are recorded in the audit trail.")
+		Meta("dcs:requirements", "DCS-FR-PACM-05")
+		Security(JWTAuth, func() {
+			Scope("Compliance Officer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("case_id", String, "Case ID returned by POST /pac/report")
+			Attribute("justification", String, "Required export justification", func() { Pattern(`\S`) })
+			Required("case_id", "justification")
+		})
+		Result(Bytes)
+		Error("forbidden", ErrorResult, "The caller may not read the linked contract")
+		Error("not_found", ErrorResult, "No incident report has this case ID")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			GET("/pac/case/{case_id}")
+			Param("justification")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("cases", func() {
+		Description("list the incident cases, newest first: the cases linked to a template and to a contract the caller may read (DCS-IR-PACM-04, DCS-FR-PACM-05)")
+		Meta("dcs:requirements", "DCS-IR-PACM-04", "DCS-FR-PACM-05")
+		Security(JWTAuth, func() {
+			Scope("Compliance Officer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
+		Result(ArrayOf(PACCase))
+		Error("forbidden", ErrorResult, "Forbidden")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			GET("/pac/cases")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("party_report", func() {
+		Description("export the compliance report of a contract segmented by party. Each party carries its compliance status, a timestamp, its non-conformances and the credential metadata of its signature (level, certificate, PoA). The segmentation by clause is GET /signature/clause-report.")
+		Meta("dcs:requirements", "DCS-FR-PACM-07")
+		Security(JWTAuth, func() {
+			Scope("Compliance Officer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "Contract DID")
+			Required("did")
+		})
+		Result(Bytes)
+		Error("forbidden", ErrorResult, "The caller may not read the contract")
+		Error("not_found", ErrorResult, "Contract not found")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			GET("/pac/party-report")
+			Param("did")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
 	})
 
 	Method("checkpoint_head", func() {
@@ -453,18 +550,44 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Token("token", String, "JWT token")
 			Attribute("run_id", String)
 			Attribute("decision", String, func() { Enum("approve", "reject") })
-			Attribute("justification", String, func() { MinLength(1) })
+			Attribute("justification", String, func() { Pattern(`\S`) })
 			Required("run_id", "decision", "justification")
 		})
 		Result(PACWorkflowGateReviewDecision)
 		Error("bad_request", ErrorResult)
+		Error("forbidden", ErrorResult)
 		Error("not_found", ErrorResult)
 		Error("internal_error", ErrorResult)
 		HTTP(func() {
 			POST("/pac/workflow-gates/review")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("forbidden", StatusForbidden)
 			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("workflow_gate_runs", func() {
+		Description("list the workflow-gate runs of the contracts the caller may read, newest first; by default the REVIEW runs that wait for a decision (DCS-FR-PACM-03)")
+		Meta("dcs:requirements", "DCS-FR-PACM-03", "DCS-FR-PACM-06")
+		Security(JWTAuth, func() { Scope("Compliance Officer") })
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("status", String, "Only runs with this status; REVIEW when omitted", func() {
+				Enum("DISPATCHING", "SUCCESS", "REVIEW", "BLOCKED")
+			})
+			Attribute("pending", Boolean, "Only REVIEW runs without a decision; true when omitted")
+		})
+		Result(ArrayOf(PACWorkflowGateRun))
+		Error("forbidden", ErrorResult)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			GET("/pac/workflow-gates")
+			Param("status")
+			Param("pending")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})

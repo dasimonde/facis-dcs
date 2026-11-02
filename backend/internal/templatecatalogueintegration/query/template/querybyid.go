@@ -35,10 +35,18 @@ type GetByIDHandler struct {
 }
 
 const retrieveTemplateByIDStatementTemplate = `
-SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type ?template_data_string WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type ?template_data_string ?jurisdiction ?industry ?template_level WHERE {
 %s%s%s}
 LIMIT 1
 `
+
+// optionalMetadataTriples bind the searchable metadata a publishing instance
+// may leave out.
+func optionalMetadataTriples() string {
+	return "  OPTIONAL {\n  " + fieldTriple(dcsJurisdictionIRI, "jurisdiction") + "  }\n" +
+		"  OPTIONAL {\n  " + fieldTriple(dcsIndustryIRI, "industry") + "  }\n" +
+		"  OPTIONAL {\n  " + fieldTriple(dcsTemplateLevelIRI, "template_level") + "  }\n"
+}
 
 func (h *GetByIDHandler) Handle(ctx context.Context, qry GetByIDQry) (*templatecatalogueintegration.TemplateCatalogueRetrieveByIDResponse, error) {
 	if h.FCClient == nil {
@@ -51,7 +59,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, qry GetByIDQry) (*templatec
 		return nil, fmt.Errorf("version must be greater than 0")
 	}
 
-	extraTriples := fieldTriple(dcsTemplateDataStringIRI, "template_data_string")
+	extraTriples := fieldTriple(dcsTemplateDataStringIRI, "template_data_string") + optionalMetadataTriples()
 	didFilter := fmt.Sprintf("  FILTER(?template_uuid = \"%s\")\n", sparqlEscapeString(qry.DID))
 	statement := fmt.Sprintf(retrieveTemplateByIDStatementTemplate, coreFieldTriples(), extraTriples, didFilter)
 
@@ -134,7 +142,18 @@ func mapCatalogueDetail(n map[string]interface{}) *templatecatalogueintegration.
 		Description:  ptr.Ref(ptr.StringFromMap(n, "description")),
 		TemplateType: ptr.Ref(ptr.StringFromMap(n, "template_type")),
 		PartyType:    ptr.Ref(ptr.StringFromMap(n, "party_type")),
+
+		Jurisdiction:  optionalString(n, "jurisdiction"),
+		Industry:      optionalString(n, "industry"),
+		TemplateLevel: optionalString(n, "template_level"),
 	}
+}
+
+func optionalString(n map[string]interface{}, key string) *string {
+	if value := ptr.StringFromMap(n, key); value != "" {
+		return &value
+	}
+	return nil
 }
 
 func templateDataFromString(raw string) (map[string]interface{}, error) {

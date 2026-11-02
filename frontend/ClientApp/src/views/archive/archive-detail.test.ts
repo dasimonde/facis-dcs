@@ -27,7 +27,7 @@ function snapshot(): Contract {
 function render() {
   return mount(ArchiveDetailView, { global: { stubs: { TemplatePreview: true } } })
 }
-describe('P05 exact immutable snapshot lifecycle', () => {
+describe('exact immutable snapshot lifecycle', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     detail.mockReset()

@@ -2,7 +2,6 @@ package dcstodcs
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -116,14 +115,14 @@ func (s *DCSToDCSSynchronizer) deliverNegotiationMessage(ctx context.Context, ms
 		return err
 	}
 
-	secretValue := rand.Text()
-	secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
+	body, err := NegotiationMessageBody(req)
 	if err != nil {
 		return err
 	}
-
-	req.SecretValue = secretValue
-	req.SecretHash = secretHash
+	req.SecretValue, req.SecretHash, err = SignPeerChallenge(&s.DIDDocument, OpPostNegotiation, req.FromPeerDid, msg.ToPeerDID, req.ContractIri, body)
+	if err != nil {
+		return err
+	}
 
 	err = s.NegotiationSender.SendNegotiation(ctx, msg.ToPeerDID, req)
 	if err != nil {
@@ -144,6 +143,10 @@ func (s *DCSToDCSSynchronizer) deliverNegotiationMessage(ctx context.Context, ms
 	err = s.NORepo.MarkDelivered(ctx, tx, msg.ID)
 	if err != nil {
 		return fmt.Errorf("could not mark negotiation message %s delivered: %w", msg.ID, err)
+	}
+	err = RecordPeerExchangeTx(ctx, tx, msg.DID, "post_negotiation", ExchangeSent, msg.ToPeerDID)
+	if err != nil {
+		return fmt.Errorf("could not audit negotiation message %s: %w", msg.ID, err)
 	}
 
 	return tx.Commit()

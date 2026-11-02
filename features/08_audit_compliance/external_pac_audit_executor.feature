@@ -131,7 +131,8 @@ Feature: Configurable external PAC audit executor
     And the "<format>" report represents the same persisted executor run
     And the "<format>" report contains the chronological persisted lifecycle timeline
     And the ORCE audit executor has still observed exactly one request
-    When the Archive Manager deletes the archived contract "Persisted Report Contract" with justification "P06 report erasure regression"
+    When the Contract Manager terminates contract "Persisted Report Contract" before the archive deletion
+    And the Archive Manager deletes the archived contract "Persisted Report Contract" with justification "P06 report erasure regression"
     Then get http 200:Success code
     When the Auditor exports format "<format>" from the persisted "archive" run for contract "Persisted Report Contract"
     Then the persisted report is unavailable after resource key shredding

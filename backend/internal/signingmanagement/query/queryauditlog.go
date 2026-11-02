@@ -24,6 +24,8 @@ type GetAuditLogQry struct {
 	AuditedBy string
 	HolderDID string
 	UserRoles userrole.UserRoles
+	// Justification is the reason the auditor gave for this access (DCS-FR-PACM-04).
+	Justification string
 }
 
 type Auditor struct {
@@ -55,6 +57,7 @@ func (h *Auditor) Handle(ctx context.Context, query GetAuditLogQry) ([]datatype.
 		OccurredAt:    time.Now().UTC(),
 		HolderDID:     query.HolderDID,
 		UserRoles:     query.UserRoles,
+		Justification: query.Justification,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.SignatureManagement)
 	if err != nil {

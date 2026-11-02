@@ -21,8 +21,9 @@ jobs:
     # gained a full counterparty drive to APPROVED each, and 60 killed it
     # mid-run with the diagnostic dump skipped — a suite that cannot finish
     # reports nothing at all. Raised to leave headroom; the growth itself is
-    # worth reducing rather than absorbing indefinitely.
-    timeout-minutes: 90
+    # worth reducing rather than absorbing indefinitely. The load test after
+    # the suite adds about 15 minutes (its capacity steps about 5 of them).
+    timeout-minutes: 100
     concurrency:
       group: bdd-kind-${{ github.ref }}
       cancel-in-progress: true
@@ -89,11 +90,17 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v3
 
       - name: Install kind
-        uses: helm/kind-action@v1.10.0
+        uses: helm/kind-action@v1.13.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run kind-backed BDD suite
+        id: bdd
         run: |
           set -euo pipefail
           make -C tests/bdd run_bdd_kind_ci \
@@ -103,6 +110,14 @@ jobs:
             DOCKER_BUILD="docker buildx build --load" \
             DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image-v2 --cache-to type=gha,mode=max,scope=dcs-image-v2" \
             PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image-v2 --cache-to type=gha,mode=max,scope=pdf-core-image-v2"
+
+      # NFR-PER-01/02: k6 against the same stack, with one and then two DCS
+      # replicas, then the capacity of each (tests/load/run_load.py). Also runs
+      # when scenarios failed, as long as the stack was deployed. Limits and
+      # load level: tests/load/dcs_load.js.
+      - name: Load test (k6)
+        if: ${{ !cancelled() && steps.bdd.outcome != 'skipped' }}
+        run: make -C tests/bdd run_load_kind_once KIND_CLUSTER_NAME=dcs-bdd
 
       - name: Save DSS image to cache
         if: always() && steps.dss-cache.outputs.cache-hit != 'true'
@@ -120,6 +135,13 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
+          # The whole Traefik log with its access log, as a report file: the
+          # dump above keeps only its tail.
+          mkdir -p tests/bdd/.reports
+          kubectl logs -n kube-system deployment/traefik --tail=-1 > tests/bdd/.reports/traefik.log 2>&1 || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=2000 --prefix || true
           # The backend is not the only container in that pod. A sidecar that
@@ -150,10 +172,11 @@ jobs:
           docker exec dcs-bdd-control-plane df -h / /var || true
           for release in dcs dcs2; do
             echo "--- ${release}-ipfs node state ---"
+            # The Kubo RPC API requires its bearer token (charts/ipfs, api.auth).
             kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
-              sh -c 'ipfs pin ls --type=recursive 2>/dev/null | wc -l' || true
+              sh -c 'ipfs --api-auth "bearer:$IPFS_API_TOKEN" pin ls --type=recursive 2>/dev/null | wc -l' || true
             kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
-              ipfs repo stat || true
+              sh -c 'ipfs --api-auth "bearer:$IPFS_API_TOKEN" repo stat' || true
           done
 
       - name: Generate coverage XML and summary
@@ -254,9 +277,14 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v3
 
       - name: Install kind
-        uses: helm/kind-action@v1.10.0
+        uses: helm/kind-action@v1.13.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run isolated audit BDD gate
         run: |
@@ -281,6 +309,9 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=2000 --prefix || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
@@ -400,9 +431,14 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v3
 
       - name: Install kind
-        uses: helm/kind-action@v1.10.0
+        uses: helm/kind-action@v1.13.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run Playwright E2E on its own kind stack
         run: |
@@ -449,6 +485,9 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
           # Per-deployment so both instances (dcs + dcs2) are captured whole and a
           # large tail keeps the export/regeneration diagnostics that fire near the
           # end of a run inside the window.

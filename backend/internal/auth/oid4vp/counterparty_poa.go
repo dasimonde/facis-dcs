@@ -42,6 +42,10 @@ type CounterpartyPoAExpectation struct {
 // `peer`, entitled to speak for that organization, says the holder may act for
 // it, and the credential is not revoked. It does not establish who the human
 // is — the PID does that, on the instance where the ceremony ran.
+//
+// A delegated Power of Attorney is accepted when its delegation chain verifies
+// to an issuer trusted for `peer`, link by link (verifyPoAChain), and no link
+// is revoked (DCS-FR-SM-04).
 func VerifyCounterpartyPoA(presentation string, trust *TrustConfig, expected CounterpartyPoAExpectation) (*CounterpartyPoA, error) {
 	if trust == nil {
 		return nil, fmt.Errorf("trust config is not configured")
@@ -61,14 +65,14 @@ func VerifyCounterpartyPoA(presentation string, trust *TrustConfig, expected Cou
 		return nil, err
 	}
 
-	document, err := verifyCredentialDocument(parsed.IssuerJWT, parsed.Disclosures, trust, PurposePeer)
+	chain, err := verifyPoAChain(parsed.IssuerJWT, parsed.Disclosures, trust, PurposePeer)
 	if err != nil {
 		return nil, err
 	}
-
-	if err := checkStatusList(document.RawClaims); err != nil {
+	if err := checkChainStatus(chain); err != nil {
 		return nil, err
 	}
+	document := chain[0].document
 
 	if document.Organization != organization {
 		return nil, fmt.Errorf("power of attorney authorizes %q, not the signing party %q", document.Organization, organization)

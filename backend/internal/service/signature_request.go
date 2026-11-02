@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"goa.design/clue/log"
+	goa "goa.design/goa/v3/pkg"
 
 	signaturemanagement "digital-contracting-service/gen/signature_management"
 	"digital-contracting-service/internal/auth/oid4vp"
@@ -23,11 +24,14 @@ import (
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
+	smevent "digital-contracting-service/internal/signingmanagement/event"
 )
 
 // signingRequestTTL is how long a published OID4VP signing request stays valid
@@ -68,6 +72,9 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	}
 	if ceremony == nil {
 		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s not found", req.CeremonyID))
+	}
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, ceremony.ContractDID); err != nil {
+		return nil, err
 	}
 	if ceremony.Status != db.CeremonyVerified || ceremony.SignerDID == nil || strings.TrimSpace(*ceremony.SignerDID) == "" {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s has no verified PID presentation to publish a signing request for", req.CeremonyID))
@@ -313,7 +320,36 @@ func (s *signatureManagementsrvc) SignatureRequestDocument(ctx context.Context, 
 	if err := assertPreparedDocumentDigestConsistent(ceremony); err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
+	retrieval := smevent.RetrieveForSigningEvent{
+		DID: ceremony.ContractDID, CeremonyID: ceremony.ID, FieldName: ceremony.FieldName,
+		DocumentSHA256: *ceremony.PreparedPDFSHA256, Channel: smevent.ChannelWalletDocument, OccurredAt: time.Now().UTC(),
+	}
+	if ceremony.SignerDID != nil {
+		retrieval.SignerDID = *ceremony.SignerDID
+	}
+	// The endpoint is unauthenticated, so one retrieval per ceremony and
+	// document is audited, not every request.
+	if err := s.auditDocumentRetrieval(ctx, retrieval); err != nil {
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("audit the retrieval of the document to be signed: %w", err))
+	}
 	return io.NopCloser(bytes.NewReader(ceremony.PreparedPDF)), nil
+}
+
+// auditDocumentRetrieval audits the first retrieval of a ceremony's document.
+func (s *signatureManagementsrvc) auditDocumentRetrieval(ctx context.Context, retrieval smevent.RetrieveForSigningEvent) error {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	first, err := s.CeremonyRepo.MarkDocumentRetrieved(ctx, tx, retrieval.CeremonyID, retrieval.DocumentSHA256)
+	if err != nil || !first {
+		return err
+	}
+	if err := event.Create(ctx, tx, retrieval, componenttype.SignatureManagement); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SignatureRequestPayload serves the pinned canonical JSON-LD contract payload
@@ -340,22 +376,39 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	// Every refusal is kept on the ceremony for the signer's status poll and
+	// audited (DCS-FR-SM-19), a presentation as well as a signed document.
+	step := smevent.StepWalletCallback
+	defer func() {
+		if err != nil {
+			s.recordWalletRefusal(ctx, p.CeremonyID, step, err)
+		}
+	}()
+
 	form, err := parseDirectPostForm(body)
 	if err != nil {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("parse direct_post body: %w", err))
-	}
-	if walletErr := strings.TrimSpace(form.Get("error")); walletErr != "" {
-		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("wallet reported an error: %s", walletErr))
 	}
 	if state := strings.TrimSpace(form.Get("state")); state != "" && state != p.CeremonyID {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("callback state %q does not match ceremony %s", state, p.CeremonyID))
 	}
 
 	if vpToken := strings.TrimSpace(form.Get("vp_token")); vpToken != "" {
+		step = smevent.StepPresentation
 		return s.ceremonyPresentationDirectPost(ctx, p.CeremonyID, vpToken)
 	}
 
-	ceremony, err := s.loadPublishedCeremony(ctx, p.CeremonyID)
+	return s.signedDocumentCallback(ctx, p.CeremonyID, form)
+}
+
+// signedDocumentCallback accepts the signed document a wallet posts for a
+// published signing request. SignatureRequestCallback records its refusals.
+func (s *signatureManagementsrvc) signedDocumentCallback(ctx context.Context, ceremonyID string, form url.Values) (res *signaturemanagement.SMSignatureRequestCallbackResponse, err error) {
+	if walletErr := strings.TrimSpace(form.Get("error")); walletErr != "" {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("wallet reported an error: %s", command.SanitizeRefusal(walletErr)))
+	}
+
+	ceremony, err := s.loadPublishedCeremony(ctx, ceremonyID)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +418,7 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	// ONE transaction, so two concurrent callbacks can never both finalize
 	// even though both may pass this early, non-atomic read.
 	if ceremony.ConsumedAt != nil {
-		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", p.CeremonyID))
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", ceremonyID))
 	}
 
 	signedDocs := formList(form, "documentWithSignature")
@@ -416,7 +469,7 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
-	if err := applier.SubmitSignature(ctx, command.SubmitSignatureCmd{
+	if err := applier.SubmitWalletSignature(ctx, command.SubmitSignatureCmd{
 		ApplyCmd: command.ApplyCmd{
 			DID:            ceremony.ContractDID,
 			SignerDID:      *ceremony.SignerDID,
@@ -462,6 +515,37 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		Did:        &did,
 		Status:     processData.State,
 	}, nil
+}
+
+// recordWalletRefusal keeps a refused wallet response on its ceremony and
+// audits it against the contract of the ceremony. A response for an unknown
+// ceremony names no contract and is only logged.
+func (s *signatureManagementsrvc) recordWalletRefusal(ctx context.Context, ceremonyID, step string, refusal error) {
+	ctx = context.WithoutCancel(ctx)
+	ceremony, err := s.getCeremony(ctx, ceremonyID)
+	if err != nil || ceremony == nil {
+		log.Printf(ctx, "could not record the refused wallet response for ceremony %s: %v (refusal: %v)", ceremonyID, err, refusal)
+		return
+	}
+	cmd := command.ApplyCmd{DID: ceremony.ContractDID, FieldName: ceremony.FieldName, CeremonyID: ceremony.ID}
+	if ceremony.SignerDID != nil {
+		cmd.SignerDID = *ceremony.SignerDID
+	}
+	if ceremony.CredentialType != nil {
+		cmd.CredentialType = *ceremony.CredentialType
+	}
+	if ceremony.PublishedBy != nil {
+		cmd.AppliedBy = *ceremony.PublishedBy
+	}
+	if ceremony.PublishedHolderDID != nil {
+		cmd.HolderDID = *ceremony.PublishedHolderDID
+	}
+	code := "internal_error"
+	var named goa.GoaErrorNamer
+	if errors.As(refusal, &named) {
+		code = named.GoaErrorName()
+	}
+	command.RecordWalletRefusal(ctx, s.DB, s.CeremonyRepo, cmd, step, code, refusal)
 }
 
 func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Context, ceremonyID, vpToken string) (*signaturemanagement.SMSignatureRequestCallbackResponse, error) {
@@ -539,6 +623,7 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		PidClaims:       pidClaims,
 		PoAOrganization: strings.TrimSpace(verifiedPoA.ParticipantDID),
 		PoARoles:        verifiedPoA.Roles,
+		PoASubjectDID:   verifiedPoA.SubjectDID,
 		PoAVpToken:      poaPresentation,
 	})
 

@@ -243,6 +243,10 @@ type Run struct {
 	Continuation                                                                            map[string]any
 	Review                                                                                  *ReviewDecision
 	ContinuationStatus                                                                      string
+	// Findings are the local and executor findings that hold the run in
+	// REVIEW or BLOCKED.
+	Findings  []string
+	CreatedAt time.Time
 }
 
 type Coordinator struct {
@@ -281,6 +285,12 @@ func (c *Coordinator) ExecuteSnapshot(ctx context.Context, input Input) (string,
 	localFindings, err := validation.AuditContractContent(ctx, snapshot.Content, nil, validation.ContractContentAuditMetadata{
 		ContractDID: snapshot.ContractDID, ContractVersion: fmt.Sprint(snapshot.ContractVersion), AuditedBy: input.Requester,
 	})
+	if err == nil && input.Gate == regulatoryGate {
+		var facts regulatoryFacts
+		if facts, err = loadRegulatoryFacts(ctx, c.DB, snapshot.ContractDID, snapshot.Content); err == nil {
+			localFindings = append(localFindings, regulatoryFindings(snapshot.Content, facts)...)
+		}
+	}
 	if err != nil {
 		runID, persistErr := c.persistClosedRun(ctx, input, snapshot, snapshotID, "BLOCKED", LocalEvaluation{Result: "BLOCKED"}, err)
 		if persistErr != nil {
@@ -638,16 +648,18 @@ func (c *Coordinator) Read(ctx context.Context, runID, snapshotID, gate string) 
 	query := `
         SELECT run_id::text,correlation_id::text,snapshot_id,contract_did,contract_version,
                contract_state,contract_updated_at,gate,status,content_hash,effective_shapes,
-               profile_version,continuation_json
+               profile_version,continuation_json,local_evaluation,COALESCE(response_json,'{}'::jsonb),created_at
         FROM pac_workflow_gate_runs
         WHERE (($1 <> '' AND run_id=$1::uuid) OR ($1='' AND snapshot_id=$2 AND gate=$3))`
+	var local, response []byte
 	err := c.DB.QueryRowxContext(ctx, query, runID, snapshotID, gate).Scan(
 		&run.RunID, &run.CorrelationID, &run.SnapshotID, &run.ContractDID, &run.ContractVersion,
 		&run.ContractState, &run.ContractUpdatedAt, &run.Gate, &run.Status, &run.ContentHash,
-		&shapes, &run.ProfileVersion, &continuation)
+		&shapes, &run.ProfileVersion, &continuation, &local, &response, &run.CreatedAt)
 	if err != nil {
 		return run, err
 	}
+	run.Findings = runFindings(local, response)
 	if err := json.Unmarshal(shapes, &run.EffectiveShapes); err != nil {
 		return run, fmt.Errorf("decode persisted effective shapes: %w", err)
 	}
@@ -673,6 +685,56 @@ func (c *Coordinator) Read(ctx context.Context, runID, snapshotID, gate string) 
 		return run, err
 	}
 	return run, nil
+}
+
+// List returns the runs with the given status, newest first. pending keeps
+// only the REVIEW runs that have no decision yet.
+func (c *Coordinator) List(ctx context.Context, status string, pending bool) ([]Run, error) {
+	var ids []string
+	if err := c.DB.SelectContext(ctx, &ids, `
+        SELECT r.run_id::text FROM pac_workflow_gate_runs r
+        WHERE r.status = $1 AND (NOT $2 OR NOT EXISTS (
+            SELECT 1 FROM pac_workflow_gate_review_decisions d WHERE d.run_id = r.run_id))
+        ORDER BY r.created_at DESC`, status, pending); err != nil {
+		return nil, err
+	}
+	// Limit: one Read per run; a single joined query when the list grows large.
+	runs := make([]Run, 0, len(ids))
+	for _, id := range ids {
+		run, err := c.Read(ctx, id, "", "")
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, nil
+}
+
+// runFindings lists the findings a reviewer decides on: the local findings
+// the gate enforces with a warning or error severity, and the executor
+// findings that did not pass. A record that does not decode adds no finding:
+// the run status stays the verdict.
+func runFindings(local, response []byte) []string {
+	var evaluation LocalEvaluation
+	_ = json.Unmarshal(local, &evaluation)
+	var executed Response
+	_ = json.Unmarshal(response, &executed)
+	findings := []string{}
+	for _, finding := range evaluation.Findings {
+		if !gateEnforces(finding) {
+			continue
+		}
+		switch severityOf(finding) {
+		case validation.SeverityError, "critical", "blocking", "violation", validation.SeverityWarning, "warn", "review":
+			findings = append(findings, strings.TrimSpace(finding.RuleID+": "+finding.Message))
+		}
+	}
+	for _, finding := range executed.Findings {
+		if finding.Result == "REVIEW" || finding.Result == "FAILED" {
+			findings = append(findings, finding.RuleID+": "+finding.Reason)
+		}
+	}
+	return findings
 }
 
 func (c *Coordinator) DecideReview(ctx context.Context, runID, decision, justification, decidedBy string) (ReviewDecision, error) {

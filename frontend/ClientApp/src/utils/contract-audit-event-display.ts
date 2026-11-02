@@ -30,6 +30,7 @@ const contractEventLabels: Record<string, string> = {
   STORE_ARCHIVED_CONTRACT: 'Contract stored in archive',
   ARCHIVE_ENTRY_AUDIT_SUMMARY: 'Archive entry audit summary',
   ARCHIVE_INTEGRITY_AUDIT_CHECK: 'Archive integrity audit check',
+  PEER_EXCHANGE_REFUSED: 'Termination notice refused by the counterparty instance',
 }
 
 const submitTransitionLabels: Record<string, string> = {

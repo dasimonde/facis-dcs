@@ -55,7 +55,7 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 		Context: []interface{}{
 			"https://www.w3.org/ns/credentials/v2",
 			dataIntegrityContext,
-			map[string]interface{}{
+			map[string]interface{}{ // #nosec G101 -- identifier or vocabulary IRI, not a credential
 				"dcs":                              "https://w3id.org/facis/dcs/ontology/v1#",
 				"ContractSigningSummaryCredential": "dcs:ContractSigningSummaryCredential",
 				"contract_id":                      "dcs:contractId",

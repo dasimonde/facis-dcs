@@ -8,6 +8,7 @@ package deployevent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/command"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 )
@@ -38,26 +40,45 @@ type ContractDeployer interface {
 	Handle(ctx context.Context, cmd command.DeployCmd) (*command.DeployResult, error)
 }
 
-// Start registers the event handler with the NATS sub-client and begins
-// consuming events. It returns immediately; the subscription runs in the
-// background until the sub-client is closed.
-func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
-	return subClient.Subscribe(func(evt cloudevent.Event) {
-		if evt.Type() != smeventtype.Applied.String() {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
+// Start registers the event handler with the durable sub-client and consumes
+// events until the sub-client is closed.
+func (s *Subscriber) Start(subClient *event.DurableSubClient) error {
+	return subClient.Subscribe(s.consume)
+}
+
+// consume handles one event. It returns an error, and the event is delivered
+// again, only for a failure that a later attempt can overcome.
+func (s *Subscriber) consume(evt cloudevent.Event) error {
+	if evt.Type() != smeventtype.Applied.String() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	err := s.handle(ctx, evt)
+	var blocked *workflowgate.BlockedError
+	switch {
+	case err == nil,
 		// A contract that designates no target system is not an error: not every
 		// party deploys what it signs — a negotiating peer may simply hold the
 		// agreement. Deployment is opt-in, so this is an ordinary outcome
 		// (ADR-25) and must not be reported as a failure.
+		errors.Is(err, command.ErrNoTargetDesignated),
 		// A partially signed contract fires this event after each signature but
 		// the last; that is the expected path, not a failure.
-		if err := s.handle(ctx, evt); err != nil && !errors.Is(err, command.ErrNoTargetDesignated) && !errors.Is(err, command.ErrSigningIncomplete) {
-			log.Printf("contractworkflowengine/deployevent: could not auto-deploy: %v", err)
-		}
-	})
+		errors.Is(err, command.ErrSigningIncomplete),
+		// A redelivered event whose deployment is dispatched already.
+		errors.Is(err, command.ErrAlreadyDispatched):
+		return nil
+	case errors.As(err, &blocked),
+		errors.Is(err, contractstate.ErrInvalidTransition),
+		errors.Is(err, command.ErrTargetNotRegistered),
+		errors.Is(err, command.ErrTargetDisabled):
+		// The gate run and the registry decide; a redelivery reads the same.
+		log.Printf("contractworkflowengine/deployevent: could not auto-deploy: %v", err)
+		return nil
+	default:
+		return fmt.Errorf("contractworkflowengine/deployevent: could not auto-deploy: %w", err)
+	}
 }
 
 func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
@@ -94,6 +115,7 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 		DID:         envelope.DID,
 		RequestedBy: "system:auto-deploy",
 		LocalPeer:   s.LocalPeer,
+		EventID:     evt.ID(),
 	})
 	return err
 }

@@ -22,10 +22,18 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.pdfCore.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: pdf-core
-          image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}{{ with .Values.pdfCore.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.pdfCore.image.pullPolicy }}
+          {{- with .Values.pdfCore.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.pdfCore.service.port }}
@@ -56,4 +64,9 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
+        {{- if .Values.global.internalTLS.enabled }}
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" .Values.pdfCore.service.port) | nindent 8 }}
+      volumes:
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- end }}
 {{- end }}

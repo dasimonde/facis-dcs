@@ -12,6 +12,7 @@ the bundle scenarios below, rather than duplicating them.
 import hashlib
 import io
 import json
+import re
 import zipfile
 
 from behave import given, then, when
@@ -41,7 +42,7 @@ def step_given_contract_no_exported_pdf(context, name):
 
 
 @given('an approved template "{name}" is available for bundle export')
-def step_given_template_for_bundle_export(context, name):
+def step_given_template_for_bundle_export(context, name, extra=None):
     # Canonical dcs:documentStructure envelope via the shared fixture source
     # (TemplateService.canonical_document_data) — NormalizeTemplateData
     # rejects the flat {"title", "clauses"} shape.
@@ -58,6 +59,7 @@ def step_given_template_for_bundle_export(context, name):
             "name": name,
             "description": "BDD template for bundle export",
             "template_data": TemplateService.canonical_document_data(name, clause_text="Base clause"),
+            **(extra or {}),
         },
         headers=creator_headers,
     )
@@ -78,6 +80,19 @@ def step_given_template_for_bundle_export(context, name):
     assert approve_resp.status_code == 200, f"Template approve failed: {approve_resp.text}"
     updated_at = TemplateService.fetch_template(context, did, headers=approver_headers).get("updated_at")
     TemplateService.store_named(context, name, did, updated_at)
+
+
+@given('a registered frame template "{frame}" and an approved template "{name}" that requires it are available for bundle export')
+def step_given_template_with_frame_for_bundle_export(context, name, frame):
+    # DCS-FR-TR-23: a template requires a template of a higher level.
+    from steps.template_management.template_workflow_steps import _register_named_template
+
+    step_given_template_for_bundle_export(context, frame, {"template_level": "FRAME_AGREEMENT"})
+    _register_named_template(context, frame)
+    frame_did = TemplateService.named(context, frame)["did"]
+    step_given_template_for_bundle_export(
+        context, name, {"template_level": "AGREEMENT", "required_templates": [frame_did]}
+    )
 
 
 @given(
@@ -162,6 +177,21 @@ def step_then_template_bundle_contains_entries(context, name, entries):
     assert not missing, (
         f"Template bundle ZIP for '{name}' is missing entries {missing}; actual entries: {names}"
     )
+
+
+@then('the template bundle ZIP for "{name}" contains the required template "{frame}" with its provenance credential')
+def step_then_template_bundle_contains_required(context, name, frame):
+    zf = _open_bundle_zip(context)
+    names = zf.namelist()
+    frame_did = TemplateService.named(context, frame)["did"]
+    folder = "required/" + re.sub(r"[^A-Za-z0-9._-]+", "_", frame_did).strip("_") + "/"
+    for entry in ("template.jsonld", "template.pdf", "provenance/v1.vc.json"):
+        assert folder + entry in names, (
+            f"Template bundle ZIP for '{name}' lacks {folder + entry}; actual entries: {names}"
+        )
+    manifest = json.loads(zf.read("bundle-manifest.json"))
+    required = [c for c in manifest.get("components", []) if c.get("role") == "required"]
+    assert [c.get("did") for c in required] == [frame_did], f"Unexpected required components: {manifest}"
 
 
 @then('the template bundle ZIP for "{name}" contains no frame/parent chain directory')

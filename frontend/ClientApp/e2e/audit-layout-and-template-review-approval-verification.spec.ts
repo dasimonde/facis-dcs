@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 const templateDid = 'did:web:example.test:templates:review-layout'
 const odrlProfileFixture = `
@@ -29,6 +30,7 @@ async function authenticate(page: Page, role: string): Promise<void> {
   await page.route('**/auth/refresh', (route) => json(route, { token_type: 'Bearer', access_token: accessToken }))
   await page.route('**/semantic/schema/list', (route) => json(route, []))
   await page.route('**/semantic/ontology/dcs-odrl-profile', (route) => json(route, { content: odrlProfileFixture }))
+  await withholdUnsignedToken(page)
   await page.addInitScript(
     ([accessToken]) => {
       localStorage.setItem('token_type', 'Bearer')

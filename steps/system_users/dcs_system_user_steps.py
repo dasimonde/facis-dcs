@@ -23,6 +23,8 @@ SYSTEM_CLIENT_SECRETS = {
     "dcs-orce-notary": "dcs-orce-notary-secret",
     "dcs-orce-creator": "dcs-orce-creator-secret",
     "dcs-orce-manager": "dcs-orce-manager-secret",
+    "dcs-orce-reviewer": "dcs-orce-reviewer-secret",
+    "dcs-orce-approver": "dcs-orce-approver-secret",
     "dcs-orce-signer": "dcs-orce-signer-secret",
 }
 
@@ -117,6 +119,38 @@ def step_system_client_posts_with_body(context, path):
     _request(context, "POST", path, body=json.loads(context.text))
 
 
+def _system_client_contract_command(context, name: str, path: str, payload: dict):
+    """POST a contract workflow command as the system client, with the
+    updated_at the system client reads itself. A background writer (the PDF
+    regenerator) can advance updated_at between the read and the command; the
+    backend answers that with 409, so read again and send again."""
+    from steps.support.services.contract_service import ContractService  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    for _ in range(4):
+        _request(context, "GET", f"/contract/retrieve/{did}")
+        assert context.requests_response.status_code == 200, (
+            f"the system client could not read contract '{name}': "
+            f"{context.requests_response.status_code} {context.requests_response.text[:400]}"
+        )
+        updated_at = context.requests_response.json().get("updated_at")
+        _request(context, "POST", path, body=dict(payload, did=did, updated_at=updated_at))
+        if context.requests_response.status_code != 409:
+            break
+        time.sleep(1)
+    ContractService._refresh_contract(context, name)
+
+
+@when('the system client forwards contract "{name}" to approval')
+def step_system_client_forwards_to_approval(context, name):
+    _system_client_contract_command(context, name, "/contract/submit", {"forward_to": "approval"})
+
+
+@when('the system client approves contract "{name}"')
+def step_system_client_approves(context, name):
+    _system_client_contract_command(context, name, "/contract/approve", {})
+
+
 @then("the system client request is refused as forbidden")
 def step_system_client_forbidden(context):
     status = context.requests_response.status_code
@@ -161,8 +195,8 @@ def step_given_ratelimit_credential(context):
     # A DEDICATED organization is what yields a distinct token: OID4VP login
     # derives identity from the presented VP (roles + organization), so only
     # those two discriminate. The hammer must burn ONLY this credential's
-    # one-minute budget (middleware.RateLimitAuthenticated keys per
-    # Authorization header) — the suite-shared role tokens keep theirs.
+    # one-minute budget (the authenticator keys it per validated holder and
+    # organization) — the suite-shared role tokens keep theirs.
     from steps.support.services.auth_service import AuthService  # noqa: PLC0415
 
     context.ratelimit_headers = AuthService.get_headers_for_roles(
@@ -179,8 +213,8 @@ def step_when_hammer_past_rate_limit(context):
     # cross it. The margin over the suite's own busiest per-token minute
     # (~600, measured in run 30194569615) is deliberate: shared cached role
     # tokens must never brush the ceiling. The probed endpoint 404s cheaply —
-    # the limiter counts every authenticated request before routing, so the
-    # response code is irrelevant to the budget.
+    # the limiter counts every request whose token the endpoint authenticates,
+    # before the handler runs, so the response code is irrelevant to the budget.
     total = 3300
     url = f"{context.base_url}/contract/retrieve/did:web:ratelimit-probe-nonexistent"
 

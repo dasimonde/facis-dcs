@@ -13,12 +13,15 @@ const emit = defineEmits<{
   searchResult: [value: Contract[] | null]
 }>()
 
-const filterLabels: Partial<Record<keyof Contract, string>> = {
+const filterLabels: Partial<Record<keyof Contract | 'party' | 'jurisdiction', string>> = {
   did: 'DID',
   name: 'Name',
   description: 'Description',
   contract_version: 'Version',
   contract_data: 'Contract Data',
+  party: 'Party',
+  template_did: 'Template',
+  jurisdiction: 'Jurisdiction',
 }
 
 const deadlineUntil = ref('')
@@ -47,9 +50,19 @@ const responseMapper = (response: ContractSearchResponse): Contract[] =>
 
 const empty: Contract = { did: '', created_at: '', state: 'DRAFT', updated_at: '', created_by: '', contract_version: 1 }
 
+let lastRequest: Record<string, unknown> | null = null
+
 async function search(request: Record<string, unknown>): Promise<Contract[]> {
+  lastRequest = request
   return responseMapper(await contractWorkflowService.search(request))
 }
+
+// Runs the last search again, so a reload keeps the user's search.
+async function rerun(): Promise<Contract[] | null> {
+  return lastRequest ? search(lastRequest) : null
+}
+
+defineExpose({ rerun })
 </script>
 
 <template>

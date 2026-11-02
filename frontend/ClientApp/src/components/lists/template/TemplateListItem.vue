@@ -25,14 +25,14 @@ const canEdit = computed(() => {
 })
 
 const canReview = computed(() => {
-  return props.template.state === TemplateState.submitted && (isReviewer.value || isManager.value)
+  return props.template.state === TemplateState.submitted && isReviewer.value
 })
 
 const resolveViewRouteName = computed(() => {
   if (canReview.value) {
     return ROUTES.TEMPLATES.REVIEW
   }
-  if (props.template.state === TemplateState.reviewed && (isApprover.value || isManager.value)) {
+  if (props.template.state === TemplateState.reviewed && isApprover.value) {
     return ROUTES.TEMPLATES.APPROVE
   }
   return ROUTES.TEMPLATES.VIEW
@@ -58,7 +58,14 @@ function getTemplateLink(template: PartialContractTemplate): string {
           >
             A newer template version is available
           </a>
-          <div></div>
+          <div v-else></div>
+          <div
+            v-if="template.template_type === 'CONTRACT_TEMPLATE' && template.template_level"
+            class="badge badge-outline badge-md sm:justify-self-end"
+            data-testid="template-level-badge"
+          >
+            {{ toProperCase(template.template_level) }}
+          </div>
         </div>
 
         <h2 class="card-title items-start justify-between">

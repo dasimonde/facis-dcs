@@ -28,6 +28,7 @@ func (f *fakeTargetSeedRepo) create(_ context.Context, target db.ContractTarget)
 // anywhere until somebody opened the admin UI. Seeding from deployment
 // configuration is what makes an instance usable straight after install.
 func TestSeedTargetsRegistersConfiguredEntries(t *testing.T) {
+	t.Setenv("DCS_DIDWEB_INSECURE_HOSTS", "dcs-orce:1880")
 	repo := &fakeTargetSeedRepo{}
 	seeded, err := seedTargets(context.Background(), repo.list, repo.create, []SeedTarget{
 		{Name: "ORCE", URL: "http://dcs-orce:1880/contract-target/deploy"},
@@ -61,6 +62,7 @@ func TestSeedTargetsLeavesAnExistingEntryAlone(t *testing.T) {
 // Seeding runs on every start, so it must be idempotent by name rather than
 // accumulating duplicates a manager would then have to choose between.
 func TestSeedTargetsIsIdempotent(t *testing.T) {
+	t.Setenv("DCS_DIDWEB_INSECURE_HOSTS", "dcs-orce:1880")
 	repo := &fakeTargetSeedRepo{}
 	entries := []SeedTarget{{Name: "ORCE", URL: "http://dcs-orce:1880/contract-target/deploy"}}
 
@@ -77,6 +79,15 @@ func TestSeedTargetsRejectsAnEntryWithoutNameOrURL(t *testing.T) {
 	repo := &fakeTargetSeedRepo{}
 	_, err := seedTargets(context.Background(), repo.list, repo.create, []SeedTarget{{Name: "ORCE"}})
 	require.Error(t, err, "a target with no URL would fail every dispatch at run time instead of at install")
+}
+
+// UC-IF-8: a configured target receives signed contracts, so a plain-http one
+// on a host the deployment did not name is refused at install.
+func TestSeedTargetsRejectsAPlainHTTPTarget(t *testing.T) {
+	repo := &fakeTargetSeedRepo{}
+	_, err := seedTargets(context.Background(), repo.list, repo.create, []SeedTarget{{Name: "ERP", URL: "http://erp.example/deploy"}})
+	require.ErrorIs(t, err, ErrInvalidTargetURL)
+	require.Empty(t, repo.created)
 }
 
 func TestParseSeedTargetsReadsTheConfiguredList(t *testing.T) {

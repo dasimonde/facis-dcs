@@ -4,6 +4,7 @@
 package event
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -26,6 +27,7 @@ import (
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 	tplevttype "digital-contracting-service/internal/templaterepository/datatype/eventtype"
 	tpldb "digital-contracting-service/internal/templaterepository/db"
 )
@@ -47,6 +49,9 @@ var contractLifecycleEventTypes = map[string]bool{
 	cweeventtype.ContractExpired.String():         true,
 	cweeventtype.Negotiation.String():             true,
 	cweeventtype.IncreaseContractVersion.String(): true,
+	// A revoked signature suspends a signed contract, whose signed PDF then
+	// gets the suspended lifecycle manifest appended.
+	smeventtype.Revoke.String(): true,
 }
 
 // templateLifecycleEventTypes is the set of template repository event types
@@ -110,19 +115,20 @@ const (
 	maxRegenerationRetryBackoff = time.Hour
 )
 
-// Start registers the event handler with the NATS sub-client and begins
-// consuming events, alongside the retry pass that reconciles entities whose
-// regeneration never completed. It returns immediately; both run in the
-// background until the sub-client is closed.
-func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
+// Start starts the retry pass that reconciles entities whose regeneration
+// never completed, and consumes events until the sub-client is closed. A
+// failed regeneration is delivered again (event.DurableSubClient); every
+// handler short-circuits when the PDF is current, so a redelivery is safe.
+func (s *Subscriber) Start(subClient *event.DurableSubClient) error {
 	go s.retryPendingRegenerations(conf.PDFRegenerationRetryTimeOut())
 
-	return subClient.Subscribe(func(evt cloudevent.Event) {
+	return subClient.Subscribe(func(evt cloudevent.Event) error {
 		ctx, cancel := s.regenerationContext()
 		defer cancel()
 		if err := s.handle(ctx, evt); err != nil {
-			log.Printf("pdfgeneration: failed to handle event %s/%s: %v", evt.Source(), evt.Type(), err)
+			return fmt.Errorf("pdfgeneration: failed to handle event %s/%s: %w", evt.Source(), evt.Type(), err)
 		}
+		return nil
 	})
 }
 
@@ -135,9 +141,9 @@ func (s *Subscriber) regenerationContext() (context.Context, context.CancelFunc)
 
 // retryPendingRegenerations re-runs regeneration for entities whose stored PDF
 // is not a render of the document as it now stands. A lifecycle event is
-// delivered at most once and a failed regeneration is logged rather than
-// redelivered, so a transient pdf-core or artifact-store failure would
-// otherwise leave the entity stuck for good — not exportable, and, for a
+// delivered a bounded number of times, so a pdf-core or artifact-store failure
+// that outlasts them would otherwise leave the entity stuck for good — not
+// exportable, and, for a
 // cross-instance contract, not shippable, so the counterparty never receives it
 // however often the sync-fail scheduler retries the ship. That holds whether
 // the lost regeneration was the entity's FIRST (leaving no stored PDF at all)
@@ -256,10 +262,10 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 // frozenArtifactVerdict decides what a background regeneration may do to a
 // contract whose PDF is frozen — a PAdES-signed artifact (DCS-FR-SM-16), or a
 // peer's signed bytes received verbatim. The signing command already produced
-// and stored the final bytes, and any post-signing C2PA lifecycle update runs
-// through the explicit signing/revoke endpoints, never this regenerator:
-// re-rendering here would replace the signed PDF with an unsigned one and
-// destroy the signature's /ByteRange. Returns true when there is nothing to do.
+// and stored the final bytes: re-rendering here would replace the signed PDF
+// with an unsigned one and destroy the signature's /ByteRange. Returns true
+// when the PDF must not be rendered; the only thing appendC2PA then does is
+// append a post-signing lifecycle manifest (appendSignedLifecycle).
 //
 // What freezes an artifact is a SIGNATURE, not a state past "draft". The stored
 // artifact's own C2PA state says so directly — it was written by the signing
@@ -358,7 +364,10 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 		return err
 	}
 	if frozen {
-		return nil
+		if !provenance.SignedLifecycleAppendPending(pdfState.Signed, pdfState.C2PAState, c2paState) {
+			return nil
+		}
+		return s.appendSignedLifecycle(ctx, tx, cweEvt, string(contract.State), c2paState, pdfState)
 	}
 
 	contentChanged := pdfState.PayloadHash != currentPayloadHash
@@ -395,7 +404,7 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 	fileHash := hex.EncodeToString(h[:])
 
 	_, vcBytes, err := s.VCIssuer.IssueContractLifecycleVC(
-		ctx, cweEvt.DID, fileHash, c2paState, cweEvt.Reason, s.IssuerDID, cweEvt.OccurredAt,
+		ctx, cweEvt.DID, fileHash, c2paState, provenance.LifecycleReason(cweEvt.Reason, c2paState), s.IssuerDID, cweEvt.OccurredAt,
 	)
 	if err != nil {
 		return fmt.Errorf("issue lifecycle VC (DCS-OR-C2PA-004): %w", err)
@@ -432,6 +441,65 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 	return nil
 }
 
+// appendSignedLifecycle appends the lifecycle manifest and credential of a
+// state a signed contract reaches after signing (suspended, terminated,
+// expired) to its signed PDF. pdf-core writes it as a provenance-only
+// incremental update over the signed bytes, the same way the re-anchor is
+// written after signing (ADR-26), so every signature keeps verifying and the
+// manifest's hard binding covers the whole file. The payload passed is the one
+// the signed PDF embeds, which the update carries unchanged.
+func (s *Subscriber) appendSignedLifecycle(ctx context.Context, tx *sqlx.Tx, evt minimalCWEEvent,
+	contractState, c2paState string, pdfState *cwedb.ContractPDFState) error {
+	signedPDF, err := s.Artifacts.Get(ctx, artifactstore.ContractScope(evt.DID), pdfState.IPFSCID)
+	if err != nil || len(signedPDF) == 0 {
+		return fmt.Errorf("fetch signed PDF %s for contract %s: %w", pdfState.IPFSCID, evt.DID, err)
+	}
+	payload, err := s.PDFCore.ExtractPayload(ctx, signedPDF)
+	if err != nil {
+		return fmt.Errorf("read the payload the signed PDF of %s embeds: %w", evt.DID, err)
+	}
+	sum := sha256.Sum256(signedPDF)
+	_, vcBytes, err := s.VCIssuer.IssueContractLifecycleVC(
+		ctx, evt.DID, hex.EncodeToString(sum[:]), c2paState, provenance.LifecycleReason(evt.Reason, c2paState), s.IssuerDID, evt.OccurredAt,
+	)
+	if err != nil {
+		return fmt.Errorf("issue lifecycle VC (DCS-OR-C2PA-004): %w", err)
+	}
+	updatedPDF, rendererVersion, err := s.PDFCore.Update(ctx, signedPDF, payload, vcBytes, provenance.RemoteManifestURL(evt.DID))
+	if err != nil {
+		return fmt.Errorf("pdf-core lifecycle update over the signed PDF of %s: %w", evt.DID, err)
+	}
+	if !bytes.HasPrefix(updatedPDF, signedPDF) {
+		return fmt.Errorf("pdf-core rewrote the signed PDF of %s instead of appending to it", evt.DID)
+	}
+	storedCID, err := s.Artifacts.Put(ctx, artifactstore.ContractScope(evt.DID), updatedPDF)
+	if err != nil {
+		return fmt.Errorf("store the signed PDF of %s with its %s lifecycle manifest: %w", evt.DID, c2paState, err)
+	}
+	if err := s.CRepo.UpdatePDFState(ctx, tx, evt.DID, cwedb.ContractPDFState{
+		IPFSCID:         storedCID,
+		RendererVersion: rendererVersion,
+		C2PAState:       c2paState,
+		PayloadHash:     pdfState.PayloadHash,
+		Signed:          true,
+	}); err != nil {
+		return fmt.Errorf("update pdf state for %s: %w", evt.DID, err)
+	}
+	if err := event.Create(ctx, tx, cweevent.PdfRegeneratedEvent{
+		DID:        evt.DID,
+		IPFSCID:    storedCID,
+		State:      contractState,
+		OccurredAt: time.Now().UTC(),
+	}, componenttype.ContractWorkflowEngine); err != nil {
+		return fmt.Errorf("emit PDF-regenerated event for %s: %w", evt.DID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit the %s lifecycle manifest of %s: %w", c2paState, evt.DID, err)
+	}
+	log.Printf("pdfgeneration: appended the %s lifecycle manifest to the signed PDF of %s → IPFS CID %s", c2paState, evt.DID, storedCID)
+	return nil
+}
+
 // appendTemplateC2PA appends a C2PA lifecycle assertion to a contract template's
 // stored PDF in response to a template state-change event (DCS-OR-C2PA-003).
 func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEvent) error {
@@ -444,6 +512,13 @@ func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEv
 			log.Printf("could not rollback transaction: %v", err)
 		}
 	}(tx)
+
+	// Serialize regeneration per template, as appendC2PA does per contract: the
+	// event handler on one replica and the retry sweep on another must not both
+	// render from the same stored state and fork the C2PA chain.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", tplEvt.DID); err != nil {
+		return fmt.Errorf("acquire per-template PDF regeneration lock for %s: %w", tplEvt.DID, err)
+	}
 
 	tpl, err := s.TRepo.ReadDataByID(ctx, tx, tplEvt.DID)
 	if err != nil {
@@ -491,7 +566,7 @@ func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEv
 		}
 	}
 
-	pdfBytes, err = s.appendOneTemplateManifest(ctx, tx, tplEvt.DID, tpl.State, jsonldBytes, pdfBytes, tplEvt.OccurredAt)
+	pdfBytes, err = s.appendOneTemplateManifest(ctx, tx, tplEvt.DID, tpl.State, tplEvt.Reason, jsonldBytes, pdfBytes, tplEvt.OccurredAt)
 	if err != nil {
 		return fmt.Errorf("append C2PA manifest for template %s: %w", tplEvt.DID, err)
 	}
@@ -510,7 +585,7 @@ func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEv
 // It returns the updated PDF bytes.
 func (s *Subscriber) appendOneTemplateManifest(
 	ctx context.Context, tx *sqlx.Tx,
-	did, state string, jsonldBytes, pdfBytes []byte, effectiveAt time.Time,
+	did, state, reason string, jsonldBytes, pdfBytes []byte, effectiveAt time.Time,
 ) ([]byte, error) {
 	c2paState, err := provenance.MapCWEStateToC2PA(state)
 	if err != nil {
@@ -523,7 +598,7 @@ func (s *Subscriber) appendOneTemplateManifest(
 	currentPayloadHash := hex.EncodeToString(payloadHashSum[:])
 
 	_, vcBytes, err := s.VCIssuer.IssueContractLifecycleVC(
-		ctx, did, fileHash, c2paState, "", s.IssuerDID, effectiveAt,
+		ctx, did, fileHash, c2paState, reason, s.IssuerDID, effectiveAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("issue lifecycle VC: %w", err)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -115,15 +116,18 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 	// a draft.
 	if processData.State == contractstate.Draft.String() || processData.State == contractstate.Offered.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractCreator) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator) {
 			return errors.New("invalid user permission")
 		}
 
 		// This avoids that state changes on different DCS are possible
 		if cmd.CauserDID == localPeer && cmd.SubmittedBy != processData.CreatedBy {
-			return errors.New("invalid participant")
+			return ErrNotCreator
 		}
 
+		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
+		}
 		contractData, err := h.contractDataForSemanticValidation(ctx, tx, cmd)
 		if err != nil {
 			return err
@@ -152,15 +156,18 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Rejected.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractCreator) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator) {
 			return errors.New("invalid user permission")
 		}
 
 		// This avoids that state changes on different DCS are possible
 		if cmd.CauserDID == localPeer && cmd.SubmittedBy != processData.CreatedBy {
-			return errors.New("invalid participant")
+			return ErrNotCreator
 		}
 
+		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
+		}
 		contractData, err := h.contractDataForSemanticValidation(ctx, tx, cmd)
 		if err != nil {
 			return err
@@ -191,7 +198,9 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Negotiation.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.ContractNegotiator, userrole.ContractReviewer) {
+		// The counterparty drives its inbound contract as Contract Manager, so
+		// the Manager closes the round it negotiates (DCS-IR-CWE-03).
+		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator, userrole.ContractNegotiator, userrole.ContractReviewer, userrole.SystemContractReviewer, userrole.ContractManager) {
 			return errors.New("invalid user permission")
 		}
 
@@ -350,7 +359,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Submitted.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractReviewer) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractReviewer, userrole.SystemContractReviewer) {
 			return errors.New("invalid user permission")
 		}
 
@@ -407,7 +416,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Reviewed.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractApprover) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractApprover, userrole.SystemContractApprover) {
 			return errors.New("invalid user permission")
 		}
 
@@ -443,7 +452,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		if err := contractstate.ValidateOutcome(currentState, contractstate.EventSubmit, nextState); err != nil {
 			return err
 		}
-		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, nextState.String())
+		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, nextState.String())
 		if err != nil {
 			return fmt.Errorf("could not update contract state: %w", err)
 		}
@@ -491,6 +500,15 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 		if err != nil {
 			return nil, fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
 		}
+		// The submitted document is a save like an update: the same parent
+		// checks, and a history entry of the replaced version with the actor
+		// (DCS-FR-CWE-08, DCS-FR-CWE-02).
+		if err := checkContractParent(ctx, tx, h.CRepo, cmd.DID, normalizedContractData); err != nil {
+			return nil, err
+		}
+		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID, cmd.SubmittedBy); err != nil {
+			return nil, fmt.Errorf("could not create history entry: %w", err)
+		}
 		updateData := db.ContractUpdateData{
 			DID:          cmd.DID,
 			ContractData: normalizedContractData,
@@ -506,6 +524,39 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 		return nil, fmt.Errorf("could not read contract data: %w", err)
 	}
 	return contractData.ContractData, nil
+}
+
+// ErrMissingRequiredMetadata is returned when an assembled contract is
+// submitted without the metadata every contract carries, or with a validity
+// period that does not hold.
+var ErrMissingRequiredMetadata = errors.New("contract metadata is incomplete")
+
+// requireAssemblyMetadata checks the required metadata of an assembled
+// contract before it leaves draft (DCS-FR-CWE-03): a name, a description (the
+// two fields the contract form requires), a validity period that ends after it
+// starts, and a notice period that is not negative.
+func requireAssemblyMetadata(ctx context.Context, tx *sqlx.Tx, repo db.ContractRepo, did string) error {
+	contract, err := repo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read contract metadata: %w", err)
+	}
+	var problems []string
+	for field, value := range map[string]*string{"name": contract.Name, "description": contract.Description} {
+		if value == nil || strings.TrimSpace(*value) == "" {
+			problems = append(problems, field+" is missing")
+		}
+	}
+	if contract.StartDate != nil && contract.ExpDate != nil && !contract.ExpDate.After(*contract.StartDate) {
+		problems = append(problems, "expiration date is not after the start date")
+	}
+	if contract.ExpNoticePeriod != nil && *contract.ExpNoticePeriod < 0 {
+		problems = append(problems, "notice period is negative")
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("%w: %s", ErrMissingRequiredMetadata, strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 func canSubmitUpdatedContractData(state string) bool {

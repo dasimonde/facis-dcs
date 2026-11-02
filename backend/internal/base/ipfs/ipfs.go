@@ -35,6 +35,27 @@ func NewClient(mfsBaseURL string) *APIClient {
 	}
 }
 
+// WithBearerToken makes every Kubo RPC call send the token as a bearer token.
+// Kubo checks it when its API.Authorizations names it (DCS-NFR-SF-02). An
+// empty token sends no Authorization header.
+func (c *APIClient) WithBearerToken(token string) *APIClient {
+	if token != "" {
+		c.client.Transport = bearerTransport{token: token, next: http.DefaultTransport}
+	}
+	return c
+}
+
+type bearerTransport struct {
+	token string
+	next  http.RoundTripper
+}
+
+func (t bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	return t.next.RoundTrip(r)
+}
+
 type IPFSResult struct {
 	Identifier struct {
 		Format string `json:"Format"`

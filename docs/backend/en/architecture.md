@@ -323,8 +323,7 @@ sequenceDiagram
     participant Slave as Peer B (not origin)
     participant Master as Peer A (origin)
 
-    Slave->>Slave: rand.Text() → secretValue
-    Slave->>Slave: DIDDocument.Sign(secretValue) → secretHash
+    Slave->>Slave: SignPeerChallenge(op, contract, from, to, body) → secretValue, secretHash
     Slave->>Master: Action/PostSync request<br/>(secretValue, secretHash, FromPeerDID)
     Master->>Master: FetchDIDDocumentFromHostname(FromPeerDID)<br/>via /.well-known/did.json
     Master->>Master: VerifyEIDASCertificate(against EU trust pool)

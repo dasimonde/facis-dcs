@@ -59,3 +59,16 @@ func TestErasureStatusMapsPendingAndConfirmedPeers(t *testing.T) {
 		t.Fatalf("unexpected confirmed state: %+v", confirmedPeer)
 	}
 }
+
+// An erase that the peer refused for good shows as refused, with the peer's
+// answer, so the Archive Manager sees that the peer's copy stays.
+func TestErasureStatusShowsARefusedPeer(t *testing.T) {
+	requested := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	answer := "erase rejected: this instance holds no copy of the contract shared with the requesting peer"
+	res := erasureStatusResponse(statusTestIRI, nil, []dcstodcsdb.EraseRequest{
+		{DID: statusTestIRI, PeerDID: "did:web:refused.example", RequestedAt: requested, LastTriedAt: &requested, RefusedAt: &requested, LastError: &answer},
+	})
+	if len(res.Peers) != 1 || res.Peers[0].Status != "refused" || res.Peers[0].LastError == nil || *res.Peers[0].LastError != answer {
+		t.Fatalf("unexpected refused state: %+v", res.Peers)
+	}
+}

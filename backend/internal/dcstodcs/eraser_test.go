@@ -16,7 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/base/pgtest"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
@@ -111,11 +114,20 @@ func (f *fakeEraseRepo) Upsert(_ context.Context, did, peer string) error {
 	return nil
 }
 
-func (f *fakeEraseRepo) RecordAttempt(_ context.Context, did, peer string) error {
+func (f *fakeEraseRepo) RecordAttempt(_ context.Context, did, peer, lastError string) error {
 	row := f.rows[f.key(did, peer)]
 	now := time.Now().UTC()
 	row.RetryCount++
 	row.LastTriedAt = &now
+	row.LastError = &lastError
+	return nil
+}
+
+func (f *fakeEraseRepo) Refuse(_ context.Context, did, peer, lastError string) error {
+	row := f.rows[f.key(did, peer)]
+	now := time.Now().UTC()
+	row.RefusedAt = &now
+	row.LastError = &lastError
 	return nil
 }
 
@@ -131,7 +143,7 @@ func (f *fakeEraseRepo) Confirm(_ context.Context, did, peer string) error {
 func (f *fakeEraseRepo) GetPending(context.Context) ([]db2.EraseRequest, error) {
 	var pending []db2.EraseRequest
 	for _, row := range f.rows {
-		if row.ConfirmedAt == nil {
+		if row.ConfirmedAt == nil && row.RefusedAt == nil {
 			pending = append(pending, *row)
 		}
 	}
@@ -149,12 +161,16 @@ func (f *fakeEraseRepo) ListByDID(_ context.Context, did string) ([]db2.EraseReq
 }
 
 type fakePeerSender struct {
-	fail  bool
-	calls []*dcstodcs.DCSToDCSContractEraseRequest
+	fail   bool
+	refuse bool
+	calls  []*dcstodcs.DCSToDCSContractEraseRequest
 }
 
 func (f *fakePeerSender) SendErase(_ context.Context, _ string, req *dcstodcs.DCSToDCSContractEraseRequest) error {
 	f.calls = append(f.calls, req)
+	if f.refuse {
+		return dcstodcs.MakeNotFound(errors.New("erase rejected: no contract shared with the peer"))
+	}
 	if f.fail {
 		return errors.New("peer unreachable")
 	}
@@ -180,6 +196,7 @@ const eraserTestIRI = "did:web:local.example:contract:1"
 func TestEraseContractShredsLocallyAndConfirmsPeer(t *testing.T) {
 	sender := &fakePeerSender{}
 	eraser, shredder, repo := newTestEraser(t, []string{"did:web:local.example", "did:web:peer.example"}, sender)
+	eraser.DB = pgtest.Open(t)
 
 	if err := eraser.EraseContract(context.Background(), eraserTestIRI, "archive-manager@local", "Art. 17 request"); err != nil {
 		t.Fatalf("EraseContract: %v", err)
@@ -195,15 +212,37 @@ func TestEraseContractShredsLocallyAndConfirmsPeer(t *testing.T) {
 	if req.FromPeerDid != "did:web:local.example" || req.ContractIri != eraserTestIRI {
 		t.Fatalf("unexpected erase request: %+v", req)
 	}
-	// The challenge is signed with the key this instance publishes for
-	// authenticating itself — exactly what the receiving peer checks.
-	if err := eraser.DIDDocument.VerifyPeerChallenge(nil, []byte(req.SecretValue), req.SecretHash); err != nil {
+	// The challenge is the one the receiving peer checks: an erase of this
+	// contract, from this instance, to that peer.
+	if err := VerifyPeerRequest(context.Background(), memoryNonces{}, &eraser.DIDDocument, nil, "did:web:peer.example", PeerRequest{
+		Op: OpErase, FromDID: "did:web:local.example", ContractIRI: eraserTestIRI, SecretValue: req.SecretValue, SecretHash: req.SecretHash,
+	}, time.Now()); err != nil {
 		t.Fatalf("erase request challenge does not verify: %v", err)
 	}
 	row := repo.rows[repo.key(eraserTestIRI, "did:web:peer.example")]
 	if row == nil || row.ConfirmedAt == nil {
 		t.Fatalf("peer erase not confirmed: %+v", row)
 	}
+	var sent int
+	require.NoError(t, eraser.DB.Get(&sent, `SELECT count(*) FROM outbox_events WHERE event_type = 'PEER_EXCHANGE' AND did = $1`, eraserTestIRI))
+	require.Equal(t, 1, sent, "a delivered erase is audited (DCS-NFR-BR-08)")
+}
+
+// A peer that holds no copy shared with this instance refuses the erase for
+// good: the row is refused and the retry scheduler does not send it again.
+func TestPeerEraseStopsOnPermanentRefusal(t *testing.T) {
+	sender := &fakePeerSender{refuse: true}
+	eraser, _, repo := newTestEraser(t, []string{"did:web:local.example", "did:web:peer.example"}, sender)
+
+	require.NoError(t, eraser.EraseContract(context.Background(), eraserTestIRI, "actor", "reason"))
+	eraser.RetryPending(context.Background())
+	eraser.RetryPending(context.Background())
+
+	require.Len(t, sender.calls, 1, "a refused erase was sent again")
+	row := repo.rows[repo.key(eraserTestIRI, "did:web:peer.example")]
+	require.NotNil(t, row.RefusedAt)
+	require.Nil(t, row.ConfirmedAt)
+	require.Contains(t, *row.LastError, "no contract shared")
 }
 
 func TestEraseContractLocalOnlyContractShredsWithoutPeerTraffic(t *testing.T) {
@@ -237,6 +276,7 @@ func TestEraseContractDoesNotShredWhenPartiesUnreadable(t *testing.T) {
 func TestEraseContractPeerDownLeavesPendingRowAndRetryDelivers(t *testing.T) {
 	sender := &fakePeerSender{fail: true}
 	eraser, _, repo := newTestEraser(t, []string{"did:web:local.example", "did:web:peer.example"}, sender)
+	eraser.DB = pgtest.Open(t)
 
 	if err := eraser.EraseContract(context.Background(), eraserTestIRI, "actor", "reason"); err != nil {
 		t.Fatalf("EraseContract with peer down must not fail: %v", err)

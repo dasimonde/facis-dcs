@@ -16,6 +16,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
+	trustgate "digital-contracting-service/internal/dcstodcs"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 )
 
@@ -23,23 +24,28 @@ import (
 // Read, search, audit and evidence events are absent on purpose: the lifecycle read
 // is open to every contract party and must not disclose who looked at the contract.
 var lifecycleActorField = map[string]string{
-	cweeventtype.Create.String():          "created_by",
-	cweeventtype.Offer.String():           "offered_by",
-	cweeventtype.Withdraw.String():        "withdrawn_by",
-	cweeventtype.Submit.String():          "submitted_by",
-	cweeventtype.Negotiation.String():     "negotiated_by",
-	cweeventtype.AcceptOffer.String():     "accepted_by",
-	cweeventtype.AcceptRespond.String():   "accepted_by",
-	cweeventtype.RejectRespond.String():   "rejected_by",
-	cweeventtype.WithdrawRespond.String(): "withdrawn_by",
-	cweeventtype.Approve.String():         "approved_by",
-	cweeventtype.Reject.String():          "rejected_by",
-	cweeventtype.Terminate.String():       "terminated_by",
-	cweeventtype.Renew.String():           "renewed_by",
-	cweeventtype.ContractExpired.String(): "",
-	cweeventtype.StoreArchived.String():   "stored_by",
-	smeventtype.Applied.String():          "applied_by",
-	smeventtype.Revoke.String():           "revoked_by",
+	cweeventtype.Create.String():           "created_by",
+	cweeventtype.Offer.String():            "offered_by",
+	cweeventtype.Withdraw.String():         "withdrawn_by",
+	cweeventtype.Submit.String():           "submitted_by",
+	cweeventtype.Negotiation.String():      "negotiated_by",
+	cweeventtype.AcceptOffer.String():      "accepted_by",
+	cweeventtype.AcceptRespond.String():    "accepted_by",
+	cweeventtype.RejectRespond.String():    "rejected_by",
+	cweeventtype.WithdrawRespond.String():  "withdrawn_by",
+	cweeventtype.Approve.String():          "approved_by",
+	cweeventtype.Reject.String():           "rejected_by",
+	cweeventtype.Terminate.String():        "terminated_by",
+	cweeventtype.Renew.String():            "renewed_by",
+	cweeventtype.ContractExpired.String():  "",
+	cweeventtype.Activate.String():         "activated_by",
+	cweeventtype.StoreArchived.String():    "stored_by",
+	cweeventtype.PublishCatalogue.String(): "published_by",
+	smeventtype.Applied.String():           "applied_by",
+	smeventtype.Revoke.String():            "revoked_by",
+	// A counterparty instance refused a termination notice for good, so its
+	// copy is not terminated (DCS-NFR-BR-06).
+	trustgate.PeerExchangeRefusedEvent{}.EventType(): "peer_did",
 }
 
 var lifecycleComponents = []componenttype.ComponentType{

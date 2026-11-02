@@ -1,0 +1,54 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+{{- $ssl := ternary " ssl" "" $tls }}
+# Gateway in front of Loki (DCS-NFR-SEC-09). Loki has no authentication of its
+# own and listens on loopback only. The gateway accepts pushes on port 3101 (the
+# collector) and queries on port 3100 (Grafana); every other Loki API, the
+# delete API included, is refused. The NetworkPolicy of loki.yaml admits the
+# collector to 3101 and logging.queryFrom to 3100.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-loki-gateway
+data:
+  nginx.conf: |
+    pid /tmp/nginx.pid;
+    events {}
+    http {
+      client_body_temp_path /tmp/client_body;
+      proxy_temp_path /tmp/proxy;
+      fastcgi_temp_path /tmp/fastcgi;
+      uwsgi_temp_path /tmp/uwsgi;
+      scgi_temp_path /tmp/scgi;
+      access_log off;
+      {{- if $tls }}
+      ssl_certificate /etc/dcs-internal-tls/tls.crt;
+      ssl_certificate_key /etc/dcs-internal-tls/tls.key;
+      ssl_protocols TLSv1.3;
+      {{- end }}
+      server {
+        listen 3101{{ $ssl }};
+        client_max_body_size 0;
+        location = /loki/api/v1/push {
+          limit_except POST { deny all; }
+          proxy_pass http://127.0.0.1:3110;
+        }
+        location / { return 403; }
+      }
+      server {
+        listen 3100{{ $ssl }};
+        location = /ready {
+          proxy_pass http://127.0.0.1:3110;
+        }
+        location ~ ^/loki/api/v1/(query|query_range|labels|label/[^/]+/values|series|index/stats|index/volume|index/volume_range|detected_fields|detected_labels|patterns|format_query|status/buildinfo)$ {
+          limit_except GET POST { deny all; }
+          proxy_pass http://127.0.0.1:3110;
+        }
+        location = /loki/api/v1/tail {
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection "upgrade";
+          proxy_pass http://127.0.0.1:3110;
+        }
+        location / { return 403; }
+      }
+    }

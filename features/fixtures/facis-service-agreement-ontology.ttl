@@ -1,0 +1,32 @@
+@prefix dcs:  <https://w3id.org/facis/dcs/ontology/v1#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix svca: <https://w3id.org/facis/service-agreement/v1#> .
+
+# The domain fields of the realistic service agreement that the seeded SLA
+# ontology does not define. Published at runtime as a hub kind="ontology"
+# entry (name="facis-service-agreement") by
+# steps/template_management/realistic_contract_field_artifact_flow_steps.py,
+# so the template policy audit at approval knows every field the template
+# binds (FACIS-TPL-DOMAIN-001).
+
+<https://w3id.org/facis/service-agreement/v1> a owl:Ontology ;
+  rdfs:label "FACIS Service Agreement Domain Fields"@en ;
+  rdfs:seeAlso <https://w3id.org/facis/dcs/ontology/v1> .
+
+svca:field-contract-termMonths a dcs:DomainField, owl:DatatypeProperty ;
+  rdfs:label "Contract Term in Months"@en ;
+  rdfs:range xsd:integer .
+
+svca:field-payment-termDays a dcs:DomainField, owl:DatatypeProperty ;
+  rdfs:label "Payment Term in Days"@en ;
+  rdfs:range xsd:integer .
+
+svca:field-service-reactionTimeHours a dcs:DomainField, owl:DatatypeProperty ;
+  rdfs:label "Reaction Time in Hours"@en ;
+  rdfs:range xsd:integer .
+
+svca:field-contract-venue a dcs:DomainField, owl:DatatypeProperty ;
+  rdfs:label "Place of Jurisdiction"@en ;
+  rdfs:range xsd:string .

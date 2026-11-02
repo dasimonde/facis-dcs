@@ -3,7 +3,31 @@ replicaCount: 1
 image:
   repository: ecofacis/xfsc-orce
   tag: "2.0.13"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# Node-RED runs as the node-red user of the image (1000), not as root
+# (DCS-NFR-SEC-05). It writes to /data (the volume below) and /tmp (emptyDir).
+# The hook jobs use the same image and user.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# A hostPath volume (the kind BDD stack) ignores fsGroup and stays owned by
+# root. enabled adds an init container that runs as root with only CAP_CHOWN
+# and gives /data to podSecurityContext.runAsUser.
+volumePermissions:
+  enabled: false
 
 service:
   type: ClusterIP

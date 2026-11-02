@@ -25,6 +25,16 @@ Feature: Lifecycle notifications through the webhook platform
     Then get http 200:Success code
     And the "template.updated" notification for template "Notify Update Template" is delivered to the BDD webhook receiver with a valid signature
 
+  @DCS-FR-TR-22 @DCS-FR-TR-16
+  Scenario: A subscriber is notified when a template it uses gets a registered successor
+    # Registering version 2 emits UPDATE_CONTRACT_TEMPLATE for version 1 with
+    # successor_did (templaterepository/command/register.go).
+    Given I am authenticated with roles: "Template Manager"
+    And template "Notify Successor Template" is in "Registered" status
+    And a webhook subscription for "template.updated" events pointing at the BDD webhook receiver
+    When I register an updated version of template "Notify Successor Template" named "Notify Successor Template v2"
+    Then the "template.updated" notification for template "Notify Successor Template" is delivered to the BDD webhook receiver with a valid signature
+
   @DCS-FR-TR-22
   Scenario: A subscriber is notified when a template it uses is deprecated
     # Archiving a REGISTERED template flips it to DEPRECATED and emits

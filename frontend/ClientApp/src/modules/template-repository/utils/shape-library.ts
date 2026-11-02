@@ -6,6 +6,7 @@ import {
   OntologyGraph,
   readRdfList,
 } from '@template-repository/utils/ontology-domain-fields'
+import { getConfig } from '@/config'
 import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
 
 /**
@@ -190,7 +191,7 @@ function fingerprintOf(entries: SchemaListEntry[]): string {
  *  libraries. Failures are hard errors — a missing hub is a deployment
  *  fault, not an empty palette. */
 export async function loadShapeLibraries(): Promise<ShapeClass[]> {
-  const entries = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const entries = await fetchHubJson<SchemaListEntry[]>(`${getConfig().API_BASE_URL}/semantic/schema/list`)
   const fingerprint = fingerprintOf(entries)
   if (cache?.fingerprint === fingerprint) return cache.classes
   const stored = readStoredCache(fingerprint)
@@ -203,7 +204,9 @@ export async function loadShapeLibraries(): Promise<ShapeClass[]> {
   )
   const classes: ShapeClass[] = []
   for (const library of libraries) {
-    const body = await fetchHubJson<{ content: string }>(`/api/semantic/shapes/${encodeURIComponent(library.name)}`)
+    const body = await fetchHubJson<{ content: string }>(
+      `${getConfig().API_BASE_URL}/semantic/shapes/${encodeURIComponent(library.name)}`,
+    )
     const graph = new OntologyGraph(new Parser().parse(body.content))
     classes.push(...parseLibrary(graph, library.name))
   }

@@ -16,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
@@ -99,12 +100,13 @@ func (r *PostgresContractRepo) ReadLastHistoryEntryByDID(ctx context.Context, tx
 
 func (r *PostgresContractRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractHistory, error) {
 	query := `
-        SELECT did, origin, state, name, description,
+        SELECT id, did, origin, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data, start_date,
                exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
                modified_by, modified_at
         FROM contract_history
         WHERE did = $1
+        ORDER BY modified_at NULLS FIRST, contract_version, updated_at, id
     `
 	var ct []db.ContractHistory
 	err := tx.SelectContext(ctx, &ct, query, did)
@@ -165,7 +167,34 @@ func (r *PostgresContractRepo) ReadChildrenDIDs(ctx context.Context, tx *sqlx.Tx
 	return children, nil
 }
 
-func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]db.ContractMetadata, error) {
+// listSortColumns maps ListOptions.SortBy to its SQL expression. Only these
+// expressions reach the ORDER BY clause.
+var listSortColumns = map[string]string{
+	"":           "cem.created_at",
+	"created_at": "cem.created_at",
+	"updated_at": "cem.updated_at",
+	"state":      "cem.state::text",
+	"name":       "COALESCE(cem.name, ce.contract_data->'dcs:metadata'->>'dcs:title')",
+}
+
+func (r *PostgresContractRepo) ReadOpenRenewalDID(ctx context.Context, tx *sqlx.Tx, originalDID string) (string, error) {
+	var dids []string
+	err := tx.SelectContext(ctx, &dids, `
+		SELECT did FROM contracts_effective
+		WHERE regexp_replace(contract_data->'dcs:renewsContract'->>'@id', '^.*/', '') = $1
+		  AND state::text NOT IN ('WITHDRAWN', 'REVOKED', 'TERMINATED', 'EXPIRED')
+		ORDER BY did LIMIT 1`, originalDID)
+	if err != nil || len(dids) == 0 {
+		return "", err
+	}
+	return dids[0], nil
+}
+
+func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination, options db.ListOptions) ([]db.ContractMetadata, error) {
+	sortColumn, ok := listSortColumns[options.SortBy]
+	if !ok {
+		return nil, fmt.Errorf("unknown sort key %q", options.SortBy)
+	}
 	query := `
 		SELECT
 			cem.did, cem.origin, cem.state, cem.name, cem.description, cem.created_by, cem.created_at, cem.updated_at,
@@ -176,6 +205,7 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
 			latest.did AS latest_template_did,
 			COALESCE(tpl.state = 'DEPRECATED', FALSE) AS template_is_deprecated,
 			regexp_replace(ce.contract_data->'dcs:parentContract'->>'@id', '^.*/', '') AS parent_contract_did,
+			regexp_replace(ce.contract_data->'dcs:renewsContract'->>'@id', '^.*/', '') AS renews_contract_did,
 			COALESCE(cem.name, ce.contract_data->'dcs:metadata'->>'dcs:title') AS name,
 			c.target_id,
 			tgt.name AS target_name
@@ -196,9 +226,22 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
 	`
 	var params []any
 	query += " WHERE " + contractreadpolicy.SQL(ctx, "cem.did", &params)
+	if len(options.States) > 0 {
+		params = append(params, pq.Array(options.States))
+		query += fmt.Sprintf(" AND cem.state::text = ANY($%d)", len(params))
+	}
+	if options.ParentDID != "" {
+		params = append(params, options.ParentDID)
+		query += fmt.Sprintf(" AND regexp_replace(ce.contract_data->'dcs:parentContract'->>'@id', '^.*/', '') = $%d", len(params))
+	}
+	direction := "DESC"
+	if options.Ascending {
+		direction = "ASC"
+	}
+	query += fmt.Sprintf(" ORDER BY %s %s, cem.did", sortColumn, direction)
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
-		query += fmt.Sprintf(" ORDER BY cem.created_at DESC, cem.did LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
 		params = append(params, pagination.Limit, offset)
 	}
 
@@ -358,6 +401,67 @@ func (r *PostgresContractRepo) StoreArchiveEntry(ctx context.Context, tx *sqlx.T
 	return err
 }
 
+func (r *PostgresContractRepo) AppendArchivePeerSignatures(ctx context.Context, tx *sqlx.Tx, did string, peerSignatures []byte) (bool, error) {
+	statement := `
+        WITH entry AS (
+            SELECT id, COALESCE(signature_metadata -> 'peer_signatures', '[]'::jsonb) AS held
+            FROM contract_archive_entries
+            WHERE did = $1 AND archive_status IN ('STORED', 'RETAINED')
+            ORDER BY contract_version DESC
+            LIMIT 1
+        ), fresh AS (
+            SELECT received.element, min(received.position) AS position
+            FROM entry, jsonb_array_elements($2::jsonb) WITH ORDINALITY AS received(element, position)
+            WHERE NOT entry.held @> jsonb_build_array(received.element)
+            GROUP BY received.element
+        )
+        UPDATE contract_archive_entries a
+        SET signature_metadata = jsonb_set(a.signature_metadata, '{peer_signatures}',
+            entry.held || (SELECT jsonb_agg(fresh.element ORDER BY fresh.position) FROM fresh))
+        FROM entry
+        WHERE a.id = entry.id AND EXISTS (SELECT 1 FROM fresh)
+    `
+	res, err := tx.ExecContext(ctx, statement, did, peerSignatures)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+func (r *PostgresContractRepo) ReadLatestArchiveEntry(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractArchiveEntry, error) {
+	var entry db.ContractArchiveEntry
+	err := tx.GetContext(ctx, &entry, `
+        SELECT did, contract_version, archive_status, content_hash, signature_metadata
+        FROM contract_archive_entries
+        WHERE did = $1 AND archive_status IN ('STORED', 'RETAINED')
+        ORDER BY contract_version DESC
+        LIMIT 1`, did)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func (r *PostgresContractRepo) StoreExecutionProof(ctx context.Context, tx *sqlx.Tx, proof db.ExecutionProof) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+        INSERT INTO contract_execution_proofs (did, content_hash, proof, notary_receipt, tsa_receipt)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (did, content_hash) DO NOTHING`,
+		proof.DID, proof.ContentHash, proof.Proof, proof.NotaryReceipt, proof.TSAReceipt)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 func (r *PostgresContractRepo) ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]db.ContractArchiveEntry, error) {
 	query := `
         SELECT did, contract_version, archive_status, stored_by, stored_at, contract_snapshot,
@@ -430,11 +534,31 @@ func (r *PostgresContractRepo) ReadSignedSignatureFieldNames(ctx context.Context
 	return fields, nil
 }
 
+func (r *PostgresContractRepo) ReadSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]db.SignedSignature, error) {
+	var signatures []db.SignedSignature
+	err := tx.SelectContext(ctx, &signatures, `
+        SELECT signer_did, credential_type, COALESCE(field_name, '') AS field_name, signed_at,
+               COALESCE(pdf_hash, '') AS pdf_hash, COALESCE(jades_signature, '') AS jades_signature
+        FROM contract_signatures
+        WHERE contract_did = $1 AND status = 'SIGNED'
+        ORDER BY created_at
+    `, did)
+	if err != nil {
+		return nil, err
+	}
+	return signatures, nil
+}
+
+// archivedContractColumns and archivedContractSource read an archived
+// contract with its termination record (DCS-FR-CSA-16). USING keeps the
+// unqualified did of the search conditions unambiguous.
+const archivedContractColumns = `did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date,
+	exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags,
+	reason AS termination_reason, effective_at AS terminated_at, initiating_role AS termination_role`
+const archivedContractSource = `contracts_archive_metadata LEFT JOIN contract_terminations USING (did)`
+
 func (r *PostgresContractRepo) ReadArchivedContracts(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
-	query := `
-	    SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags
-    FROM contracts_archive_metadata
-	`
+	query := `SELECT ` + archivedContractColumns + ` FROM ` + archivedContractSource
 	var params []any
 	query += " WHERE " + contractreadpolicy.SQL(ctx, "contracts_archive_metadata.did", &params)
 	var cts []db.ContractMetadata
@@ -447,10 +571,7 @@ func (r *PostgresContractRepo) ReadArchivedContracts(ctx context.Context, tx *sq
 }
 
 func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context, tx *sqlx.Tx, values db.SearchValues) ([]db.ContractMetadata, error) {
-	query := `
-	        SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags
-        FROM contracts_archive_metadata
-    `
+	query := `SELECT ` + archivedContractColumns + ` FROM ` + archivedContractSource
 	conditions, params, err := createSearchConditions(values)
 	if err != nil {
 		return nil, err
@@ -469,13 +590,27 @@ func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context
 	return cts, nil
 }
 
-func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contracts SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
+func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	return UpdateContractState(ctx, tx, did, from, to)
+}
+
+// UpdateContractState is the write of a contract's lifecycle state: it moves
+// did from state from to state to, and fails with
+// contractstate.ErrInvalidTransition when another transaction changed the
+// state after the caller read it.
+func UpdateContractState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE contracts SET state = $3 WHERE did = $1 AND state = $2`, did, from, to)
+	if err != nil {
+		return fmt.Errorf("update state of contract %s: %w", did, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update state of contract %s: %w", did, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: contract %s is no longer %s", contractstate.ErrInvalidTransition, did, from)
+	}
+	return nil
 }
 
 func (r *PostgresContractRepo) ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {
@@ -496,8 +631,8 @@ func (r *PostgresContractRepo) ExpireContract(ctx context.Context, tx *sqlx.Tx, 
 func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractPDFState, error) {
 	var state db.ContractPDFState
 	err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(pdf_ipfs_cid,''), COALESCE(pdf_renderer_version,''), COALESCE(pdf_c2pa_state,''), COALESCE(pdf_payload_hash,'') FROM contracts WHERE did=$1`, did,
-	).Scan(&state.IPFSCID, &state.RendererVersion, &state.C2PAState, &state.PayloadHash)
+		`SELECT COALESCE(pdf_ipfs_cid,''), COALESCE(pdf_renderer_version,''), COALESCE(pdf_c2pa_state,''), COALESCE(pdf_payload_hash,''), pdf_signed FROM contracts WHERE did=$1`, did,
+	).Scan(&state.IPFSCID, &state.RendererVersion, &state.C2PAState, &state.PayloadHash, &state.Signed)
 	if err != nil {
 		return nil, err
 	}
@@ -527,9 +662,14 @@ func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, 
 	// COALESCE on the exclude list: an empty Go slice binds as SQL NULL, and
 	// "did <> ALL (NULL)" is NULL — which would filter out every row and stall
 	// the sweep.
+	//
+	// The last arm selects a signed PDF that does not yet assert the lifecycle
+	// state its contract reached after signing (provenance.
+	// SignedLifecycleAppendPending), so a lost suspend, terminate or expiry
+	// event still gets its lifecycle manifest appended.
 	err := tx.SelectContext(ctx, &dids,
 		`SELECT c.did FROM contracts c
-		 WHERE (
+		 WHERE ((
 		         (c.pdf_ipfs_cid IS NULL OR c.pdf_ipfs_cid = '')
 		      OR (
 		             COALESCE(c.pdf_c2pa_state, '') IN ('', 'draft')
@@ -541,6 +681,15 @@ func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, 
 		   AND NOT EXISTS (
 		       SELECT 1 FROM contract_signatures s
 		        WHERE s.contract_did = c.did AND s.status = 'SIGNED')
+		    OR (
+		           c.pdf_signed
+		       AND COALESCE(c.pdf_ipfs_cid, '') <> ''
+		       AND COALESCE(c.pdf_c2pa_state, '') <> CASE c.state
+		               WHEN 'REVOKED' THEN 'suspended'
+		               WHEN 'TERMINATED' THEN 'terminated'
+		               WHEN 'EXPIRED' THEN 'expired'
+		               ELSE COALESCE(c.pdf_c2pa_state, '') END
+		       ))
 		   AND c.did <> ALL (COALESCE($2::text[], '{}'))
 		 ORDER BY c.created_at, c.did
 		 LIMIT $1`, limit, pq.Array(excludeDIDs),
@@ -553,8 +702,8 @@ func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, 
 
 func (r *PostgresContractRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data db.ContractPDFState) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE contracts SET pdf_ipfs_cid=$1, pdf_renderer_version=$2, pdf_c2pa_state=$3, pdf_payload_hash=$4 WHERE did=$5`,
-		data.IPFSCID, data.RendererVersion, data.C2PAState, data.PayloadHash, did,
+		`UPDATE contracts SET pdf_ipfs_cid=$1, pdf_renderer_version=$2, pdf_c2pa_state=$3, pdf_payload_hash=$4, pdf_signed = pdf_signed OR $6 WHERE did=$5`,
+		data.IPFSCID, data.RendererVersion, data.C2PAState, data.PayloadHash, did, data.Signed,
 	)
 	return err
 }
@@ -592,20 +741,23 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		params = append(params, values.ContractVersion)
 		paramIndex++
 	}
-	if len(values.State) > 0 {
-		conditions += ` state = $` + strconv.Itoa(paramIndex) + ` AND`
-		state := strings.ToUpper(values.State)
-		params = append(params, state)
+	if len(values.States) > 0 {
+		conditions += ` state::text = ANY($` + strconv.Itoa(paramIndex) + `) AND`
+		states := make([]string, len(values.States))
+		for i, state := range values.States {
+			states[i] = strings.ToUpper(state)
+		}
+		params = append(params, pq.Array(states))
 		paramIndex++
 	}
 	if len(values.Name) > 0 {
-		conditions += ` name ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Name+"%")
+		conditions += ` name ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Name))
 		paramIndex++
 	}
 	if len(values.Description) > 0 {
-		conditions += ` description ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Description+"%")
+		conditions += ` description ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Description))
 		paramIndex++
 	}
 	if len(values.ContractData) > 0 {
@@ -643,6 +795,19 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		// subquery so it composes with any outer metadata/archive table.
 		conditions += ` did IN (SELECT did FROM contracts_effective WHERE regexp_replace(contract_data->'dcs:parentContract'->>'@id', '^.*/', '') = $` + strconv.Itoa(paramIndex) + `) AND`
 		params = append(params, values.ParentDID)
+		paramIndex++
+	}
+	if len(values.TemplateDID) > 0 {
+		conditions += ` template_did = $` + strconv.Itoa(paramIndex) + ` AND`
+		params = append(params, values.TemplateDID)
+		paramIndex++
+	}
+	if len(values.Jurisdiction) > 0 {
+		conditions += ` did IN (SELECT c.did FROM contracts_effective c,
+			jsonb_array_elements(CASE WHEN jsonb_typeof(c.contract_data->'dcs:contractFields') = 'array' THEN c.contract_data->'dcs:contractFields' ELSE '[]'::jsonb END) f
+			WHERE f->'dcs:shape'->>'@id' LIKE '%#field-contract-jurisdiction'
+			AND COALESCE(f->'dcs:value'->>'@value', f->>'dcs:value') ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\') AND`
+		params = append(params, containsPattern(values.Jurisdiction))
 	}
 	l := len(" AND")
 	if len(conditions) > l {
@@ -650,6 +815,14 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 	}
 
 	return &conditions, params, nil
+}
+
+// likeEscaper escapes the LIKE wildcards, so a search value matches as text.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// containsPattern is the ILIKE pattern for "contains value" (ESCAPE '\').
+func containsPattern(value string) string {
+	return "%" + likeEscaper.Replace(value) + "%"
 }
 
 func createQuery(data db.ContractUpdateData) (*string, []interface{}, error) {

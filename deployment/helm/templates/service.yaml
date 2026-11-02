@@ -4,6 +4,10 @@ metadata:
   name: {{ include "digital-contracting-service.fullname" . }}
   labels:
     {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  {{- with include "digital-contracting-service.traefikServersTransportAnnotation" . }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -11,6 +15,9 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.global.internalTLS.enabled }}
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    {{- end }}
   selector:
     {{- include "digital-contracting-service.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: backend

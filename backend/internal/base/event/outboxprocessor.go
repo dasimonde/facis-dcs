@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
@@ -52,68 +53,109 @@ func (j OutboxProcessor) Start(ctx context.Context) error {
 // sequential, network-bound anchoring of earlier events in the same
 // backlog — that decoupling is why `published` is a separate flag from
 // `processed`.
+//
+// Events go out in outbox order (DCS-NFR-SF-01): one replica at a time
+// publishes, and a batch stops at the first event that cannot be published,
+// so no later event overtakes it.
 func (j OutboxProcessor) startPublishingJob(ctx context.Context, interval time.Duration) {
 	schedulerLogic := func() error {
-		tx, err := j.DB.BeginTxx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("could not start transaction: %w", err)
-		}
-		defer func(tx *sqlx.Tx) {
-			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-				log.Printf("could not rollback transaction: %v", err)
-			}
-		}(tx)
-
-		rows, err := tx.QueryxContext(ctx, `
-			SELECT id, component, event_type, event_data, did, created_at
-			FROM outbox_events
-			WHERE published = FALSE
-			ORDER BY created_at ASC
-			LIMIT 200
-			FOR UPDATE SKIP LOCKED
-		`)
-		if err != nil {
-			return fmt.Errorf("could not query unpublished outbox events: %w", err)
-		}
-
-		var events []datatype.OutboxEvent
-		for rows.Next() {
-			var event datatype.OutboxEvent
-			if err := rows.StructScan(&event); err != nil {
-				if closeErr := rows.Close(); closeErr != nil {
-					return closeErr
-				}
-				return fmt.Errorf("could not scan event: %w", err)
-			}
-			events = append(events, event)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-
-		for _, event := range events {
-			if err := j.CEPPubClient.Publish(event.Component, event.EventType, event.EventData); err != nil {
-				log.Printf("could not publish event %d: %v", event.ID, err)
-				continue
-			}
-			if err := db.MarkOutboxEventPublished(ctx, tx, event.ID); err != nil {
-				return fmt.Errorf("could not mark event %d published: %w", event.ID, err)
-			}
-		}
-
-		return tx.Commit()
+		_, err := db.RunExclusive(ctx, j.DB, "outbox-publishing", func() error { return j.publishPending(ctx) })
+		return err
 	}
 
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
+		if err := trackRun("outbox-publishing", schedulerLogic); err != nil {
 			log.Printf("could not publish outbox entries: %v", err)
 		}
 	}
 }
 
+func (j OutboxProcessor) publishPending(ctx context.Context) error {
+	tx, err := j.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func(tx *sqlx.Tx) {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("could not rollback transaction: %v", err)
+		}
+	}(tx)
+
+	rows, err := tx.QueryxContext(ctx, `
+		SELECT id, component, event_type, event_data, did, created_at
+		FROM outbox_events
+		WHERE published = FALSE
+		ORDER BY created_at ASC, id ASC
+		LIMIT 200
+		FOR UPDATE SKIP LOCKED
+	`)
+	if err != nil {
+		return fmt.Errorf("could not query unpublished outbox events: %w", err)
+	}
+
+	var events []datatype.OutboxEvent
+	for rows.Next() {
+		var event datatype.OutboxEvent
+		if err := rows.StructScan(&event); err != nil {
+			if closeErr := rows.Close(); closeErr != nil {
+				return closeErr
+			}
+			return fmt.Errorf("could not scan event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	err = publishInOrder(events, j.CEPPubClient.Publish, func(id int64) error {
+		return db.MarkOutboxEventPublished(ctx, tx, id)
+	})
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// publishInOrder publishes events in their order and marks each one published.
+// It stops at the first event that cannot be published: the next run starts
+// with it again, and no later event goes out ahead of it.
+func publishInOrder(events []datatype.OutboxEvent, publish func(id, component, eventType string, data json.RawMessage) error, markPublished func(id int64) error) error {
+	for _, event := range events {
+		if err := publish(cloudEventID(event), event.Component, event.EventType, event.EventData); err != nil {
+			log.Printf("could not publish event %d, stopping the batch: %v", event.ID, err)
+			return nil
+		}
+		if err := markPublished(event.ID); err != nil {
+			return fmt.Errorf("could not mark event %d published: %w", event.ID, err)
+		}
+	}
+	return nil
+}
+
+// cloudEventID is the CloudEvent id of an outbox event. It is the same on
+// every publish of the event, so the stream stores a republished event once
+// and a consumer recognizes a redelivered one.
+func cloudEventID(event datatype.OutboxEvent) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, fmt.Appendf(nil, "dcs-outbox-event:%d:%d", event.ID, event.CreatedAt.UnixNano())).String()
+}
+
 func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.Duration) {
-	schedulerLogic := func() error {
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		if err := trackRun("outbox-anchoring", func() error { return j.anchorPending(ctx) }); err != nil {
+			log.Printf("could not process outbox entries: %v", err)
+		}
+	}
+}
+
+// anchorPending anchors the next batch of unprocessed outbox events. One
+// replica at a time does this: the batch, the per-resource chain heads and the
+// checkpoint chain are read and then extended, and two replicas doing that at
+// once anchor the same events twice and fork the chains.
+func (j OutboxProcessor) anchorPending(ctx context.Context) error {
+	_, err := db.RunExclusive(ctx, j.DB, "outbox-anchoring", func() error {
 		tx, err := j.DB.BeginTxx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("could not start transaction: %w", err)
@@ -182,14 +224,8 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 			return nil
 		}
 		return j.anchorBatch(ctx, anchorable)
-	}
-
-	ticker := time.NewTicker(interval)
-	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
-			log.Printf("could not process outbox entries: %v", err)
-		}
-	}
+	})
+	return err
 }
 
 // anchorBatch anchors one batch of audit-visible events and commits to it with
@@ -615,7 +651,10 @@ func (j OutboxProcessor) startTimestampingJob(ctx context.Context, interval time
 
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
+		if err := trackRun("checkpoint-timestamping", func() error {
+			_, err := db.RunExclusive(ctx, j.DB, "audit-checkpoint-timestamping", schedulerLogic)
+			return err
+		}); err != nil {
 			log.Printf("could not timestamp pending checkpoints: %v", err)
 		}
 	}

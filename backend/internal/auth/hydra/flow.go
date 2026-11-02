@@ -72,7 +72,7 @@ func (c *Client) AcceptConsent(ctx context.Context, challenge string) (string, e
 	if err != nil {
 		return "", err
 	}
-	claims := tokenSessionClaims(rolesToGrant, iss)
+	claims := tokenSessionClaims(rolesToGrant, iss, consentReq.Context[CredentialStatusClaim])
 	consentBody := consentAcceptReq{
 		GrantScope:               consentReq.RequestedScope,
 		GrantAccessTokenAudience: consentReq.RequestedAccessTokenAudience,
@@ -145,12 +145,18 @@ func rolesFromConsentContext(ctx map[string]any) ([]string, error) {
 	return out, nil
 }
 
+// CredentialStatusClaim is the session claim that holds the status reference
+// of the PoA credential the session was opened with. Refresh checks it again.
+const CredentialStatusClaim = "credential_status" // #nosec G101 -- claim name, not a credential
+
 // AcceptLoginAndConsent accepts login and consent via the Hydra admin API.
-// organization and roles come from verified PoA claims.
-func (c *Client) AcceptLoginAndConsent(ctx context.Context, challenge, subject, organization string, roles []string) (string, error) {
+// organization, roles and the credential status reference come from verified
+// PoA claims.
+func (c *Client) AcceptLoginAndConsent(ctx context.Context, challenge, subject, organization string, roles []string, credentialStatus json.RawMessage) (string, error) {
 	loginCtx := map[string]any{
-		"roles":  roles,
-		"source": "openid4vp",
+		"roles":               roles,
+		"source":              "openid4vp",
+		CredentialStatusClaim: credentialStatus,
 	}
 	if iss := strings.TrimSpace(organization); iss != "" {
 		loginCtx["iss"] = iss
@@ -235,9 +241,12 @@ func (c *Client) doJSON(ctx context.Context, method, path string, q url.Values, 
 }
 
 // tokenSessionClaims maps verified PoA claims into Hydra session token claims.
-func tokenSessionClaims(roles []string, iss string) map[string]any {
+func tokenSessionClaims(roles []string, iss string, credentialStatus any) map[string]any {
 	claims := map[string]any{
 		"roles": roles,
+	}
+	if credentialStatus != nil {
+		claims[CredentialStatusClaim] = credentialStatus
 	}
 	if iss := strings.TrimSpace(iss); iss != "" {
 		claims["iss"] = iss

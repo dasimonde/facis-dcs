@@ -62,9 +62,31 @@ Concretely:
   unwrap, re-wrap to its own key — and ignores the copy on every later
   shipment, so a lost adoption heals on the next ship. Both instances then
   hold the same CEK, each copy openable only by its own HSM.
-- **Shredding marks, it does not delete.** Erasure sets `shredded_at`,
-  `shredded_by` and `shred_reason` on every wrapped-CEK row for the scope;
-  the row itself is retained as the destruction record. Key creation and
+- **Shredding destroys the key and keeps the record.** Erasure sets
+  `wrapped_cek` to NULL and sets `shredded_at`, `shredded_by` and
+  `shred_reason` on every wrapped-CEK row for the scope; the row itself is
+  retained as the destruction record, and a database constraint refuses a
+  shredded row that still holds a wrapped key. In the same transaction the
+  plaintext copies of the contract content that Postgres holds are erased:
+  `contracts.contract_data`, `contract_history.contract_data`, negotiation
+  change requests and drafts, the archive entry's `contract_snapshot` (the
+  only change the archive trigger permits, and only once the scope is
+  shredded; `content_hash` stays as evidence) and the payload pinned for
+  signing. The same transaction erases the other copies of the content and
+  of the signers' personal data: the prepared PDF, PID claims and
+  presentations of the signing ceremonies; the payload of every JAdES
+  signature over the contract (`contract_signatures`,
+  `contract_sync_signatures`), which becomes a detached JWS
+  (RFC 7515 Appendix F) whose protected header and signature value stay as
+  evidence; and the outbox copy of every event body that the audit trail
+  encrypts under the contract's key, replaced by the erased marker. The audit
+  chain hashes the stored IPFS entry, not the outbox row, so this change
+  breaks no chain or checkpoint proof; the erasure records and the bodies of
+  other scopes keep their outbox copy, as they keep their audit body.
+  `contracts.contract_data` keeps one thing: the `dcs:legalName` of each
+  `dcs:parties` node. These organization names are what the contract read
+  policy authorizes on, so the named parties keep read access to the erased
+  contract's metadata, erasure status and audit trail. Key creation and
   shredding are serialized per scope, and a shredded scope is final: neither
   a local write nor a peer-shipped wrapped copy ever creates a new CEK for
   it. A peer erase call

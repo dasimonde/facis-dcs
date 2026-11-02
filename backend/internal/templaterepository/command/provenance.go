@@ -73,7 +73,7 @@ func IssueTemplateProvenanceVC(ctx context.Context, signer provenance.VCSigner, 
 		Context: []interface{}{
 			"https://www.w3.org/ns/credentials/v2",
 			"https://w3id.org/security/data-integrity/v2",
-			map[string]interface{}{
+			map[string]interface{}{ // #nosec G101 -- identifier or vocabulary IRI, not a credential
 				"dcs":                          "https://w3id.org/facis/dcs/ontology/v1#",
 				"TemplateProvenanceCredential": "dcs:TemplateProvenanceCredential",
 				"template_did":                 "dcs:templateDid",

@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -21,6 +22,29 @@ type SyncFail struct {
 	// `SELECT *` has a destination for every column; the retry scheduler
 	// itself does not need to inspect it.
 	GateIncidentRecorded bool `db:"gate_incident_recorded"`
+}
+
+// PDFDelivery is the contract PDF revision — contract state and stored PDF
+// CID — that one counterparty peer last accepted, or refused because its copy
+// is closed.
+type PDFDelivery struct {
+	DID           string `db:"did"`
+	PeerDID       string `db:"peer_did"`
+	ContractState string `db:"contract_state"`
+	PDFCID        string `db:"pdf_cid"`
+}
+
+// PeersHoldingCopy returns the parties that hold a copy of the contract: the
+// origin this instance received it from, and every peer a revision was
+// delivered to. A termination notice or an erase request goes only to them.
+func PeersHoldingCopy(parties []string, origin string, deliveries []PDFDelivery) []string {
+	var holders []string
+	for _, party := range parties {
+		if party == origin || slices.ContainsFunc(deliveries, func(d PDFDelivery) bool { return d.PeerDID == party }) {
+			holders = append(holders, party)
+		}
+	}
+	return holders
 }
 
 // SyncSignature is the origin peer's JAdES signature over a synced
@@ -88,6 +112,11 @@ type SyncRepository interface {
 	// uses this to record a trust-gate denial incident exactly once.
 	CreateOrUpdateSyncFailEntry(ctx context.Context, tx *sqlx.Tx, did string, isGateFailure bool) (shouldRecordIncident bool, err error)
 	DeleteSyncFailEntry(ctx context.Context, tx *sqlx.Tx, peerDID string) error
+
+	// GetPDFDeliveries returns, per peer, the PDF revision of the contract
+	// that peer last answered; UpsertPDFDelivery records a new one.
+	GetPDFDeliveries(ctx context.Context, tx *sqlx.Tx, did string) ([]PDFDelivery, error)
+	UpsertPDFDelivery(ctx context.Context, tx *sqlx.Tx, delivery PDFDelivery) error
 
 	// UpsertSyncSignature stores the latest verified JAdES signature received
 	// for a synced contract; GetSyncSignature returns nil when none exists.

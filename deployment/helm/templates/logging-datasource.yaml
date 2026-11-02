@@ -1,0 +1,29 @@
+{{- if .Values.logging.enabled }}
+# Loki as a Grafana data source (DCS-NFR-SEC-09). The Grafana of the monitoring
+# stack loads ConfigMaps with this label from its namespace. Logs are read only
+# through Grafana, which requires a login.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}-loki-datasource
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+    grafana_datasource: "1"
+data:
+  loki-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        access: proxy
+        {{- if .Values.global.internalTLS.enabled }}
+        url: https://{{ .Release.Name }}-loki.{{ .Release.Namespace }}.svc:3100
+        jsonData:
+          tlsAuthWithCACert: true
+        secureJsonData:
+          tlsCACert: |
+            {{- (include "digital-contracting-service.internalCA" . | fromJson).Cert | nindent 12 }}
+        {{- else }}
+        url: http://{{ .Release.Name }}-loki.{{ .Release.Namespace }}.svc:3100
+        {{- end }}
+{{- end }}

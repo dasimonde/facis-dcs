@@ -82,7 +82,7 @@ func TestEveryTransactionThatRecordsASignatureTakesTheRegenerationLock(t *testin
 // between the last read and the first write: after DSS has answered, before the
 // ceremony is consumed. This pins both edges.
 func TestSubmitSignatureTakesTheRegenerationLockBetweenValidationAndTheWrites(t *testing.T) {
-	body := functionBody(t, "apply.go", "SubmitSignature")
+	body := functionBody(t, "apply.go", "submitSignature")
 
 	lock := lastCallPos(body, "acquireRegenerationLock")
 	validate := lastCallPos(body, "ValidatePDF")

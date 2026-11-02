@@ -134,11 +134,13 @@ type Repo interface {
 	// FindByClientID resolves the caller behind an access token's client_id
 	// claim. It is on the hot path of every machine-authenticated request.
 	FindByClientID(ctx context.Context, clientID string) (*Identity, error)
-	Create(ctx context.Context, data Identity) (*Identity, error)
-	Update(ctx context.Context, data Identity) (*Identity, error)
-	Delete(ctx context.Context, id string) error
+	// Create, Update, Delete and TouchSecretIssuedAt write in the caller's
+	// transaction, so the change commits with its audit event (FR-UC-09-2).
+	Create(ctx context.Context, tx *sqlx.Tx, data Identity) (*Identity, error)
+	Update(ctx context.Context, tx *sqlx.Tx, data Identity) (*Identity, error)
+	Delete(ctx context.Context, tx *sqlx.Tx, id string) error
 	// TouchSecretIssuedAt records that a new secret was handed out.
-	TouchSecretIssuedAt(ctx context.Context, id string, at time.Time) error
+	TouchSecretIssuedAt(ctx context.Context, tx *sqlx.Tx, id string, at time.Time) error
 	// Upsert seeds a declaratively configured identity, so a deployment can
 	// bootstrap the callers it needs before anyone logs in to create them.
 	Upsert(ctx context.Context, data Identity) error

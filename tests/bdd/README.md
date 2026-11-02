@@ -118,7 +118,7 @@ wrong instance's token.
 | `BDD_DCS_BASE_URL_B` | Instance B's API base. |
 | `BDD_PUBLIC_ORIGIN` | Instance A's origin, without the API path. |
 | `ISSUER_BASE_URL` | The ORCE issuer serving the status list your credentials name (ADR-34). Must be the URL the **backend** fetches: the verifier requires the status token's `sub` to equal the credential's URI. |
-| `DATABASE_URL` | `host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable`, through the port-forward above. |
+| `DATABASE_URL` | `host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=verify-ca sslrootcert=<ca.crt>`, through the port-forward above. The database accepts TLS only; `ca.crt` is the `ca.crt` key of the `<release>-internal-tls` Secret. |
 | `BDD_DCS_METRICS_ORIGIN` | `http://localhost:19464`, through the metrics port-forward above. The backend serves `/metrics` only on its metrics port. |
 | `BDD_DSS_URL` | `http://localhost:18099`. This is the EU DSS webapp acting as the external signature creation application. |
 | `BDD_HSMSIGN_EXEC` | `kubectl -n $NS exec $BACKEND_POD -c digital-contracting-service --` |

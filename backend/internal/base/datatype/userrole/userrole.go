@@ -48,6 +48,11 @@ const (
 	// external notary needs: it may read the audit trail's tamper-evidence
 	// surface and nothing else. See ADR-16.
 	SystemAuditor UserRole = "Sys. Auditor"
+	// SystemIntegrationManager is the machine counterpart of the Integration
+	// Manager for one task: it manages the webhook subscriptions of its
+	// organization (/orce/webhooks), so an integration such as ORCE subscribes
+	// to DCS events with its own credential (DCS-NFR-SQ-08, ADR-29).
+	SystemIntegrationManager UserRole = "Sys. Integration Manager"
 )
 
 func NewUserRole(s string) (UserRole, error) {
@@ -67,7 +72,7 @@ func (r UserRole) IsValid() bool {
 		ArchiveManager, Auditor, SystemAdministrator, ComplianceOfficer, IntegrationManager,
 		SystemContractCreator, SystemContractReviewer, SystemContractApprover,
 		SystemContractManager, SystemContractSigner, ContractTargetSystem,
-		SystemAuditor:
+		SystemAuditor, SystemIntegrationManager:
 		return true
 	}
 	return false
@@ -83,7 +88,7 @@ func (r UserRole) IsSystemRole() bool {
 	switch r {
 	case SystemContractCreator, SystemContractReviewer, SystemContractApprover,
 		SystemContractManager, SystemContractSigner, ContractTargetSystem,
-		SystemAuditor:
+		SystemAuditor, SystemIntegrationManager:
 		return true
 	}
 	return false

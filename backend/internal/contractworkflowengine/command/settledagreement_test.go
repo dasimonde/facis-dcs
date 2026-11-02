@@ -208,23 +208,28 @@ func TestWithdrawingWithoutAnOwnSettlementQueuesNothing(t *testing.T) {
 // contract_data off the signed PDF that copy must never re-render, wedging it out
 // of the federation for good. That copy never settled locally, so only the
 // artifact can answer.
+//
+// A signed artifact stays signed when a lifecycle manifest is appended after
+// signing, so the gate holds whatever lifecycle state the artifact asserts.
 func TestRenegotiationIsRefusedOnceTheArtifactCarriesThePeersSignature(t *testing.T) {
-	repo := &settledContractRepoFake{
-		pdfState: db.ContractPDFState{IPFSCID: "cid", C2PAState: "active"},
-		document: agreedDocument,
+	for _, asserted := range []string{"active", "suspended", "terminated", "expired"} {
+		repo := &settledContractRepoFake{
+			pdfState: db.ContractPDFState{IPFSCID: "cid", C2PAState: asserted, Signed: true},
+			document: agreedDocument,
+		}
+
+		err := requireUnsettledAgreement(context.Background(), nil, repo, emptyStore(), thisInstance, settledContractDID)
+
+		require.ErrorIs(t, err, ErrAgreementSettled, "signed artifact asserting %s", asserted)
+		require.NotErrorIs(t, err, ErrOwnAgreementSettled)
 	}
-
-	err := requireUnsettledAgreement(context.Background(), nil, repo, emptyStore(), thisInstance, settledContractDID)
-
-	require.ErrorIs(t, err, ErrAgreementSettled)
-	require.NotErrorIs(t, err, ErrOwnAgreementSettled)
 }
 
 // A signed artifact answers first: telling a party to reopen the round is the
 // wrong instruction once a signature exists, whatever the settlement rows say.
 func TestASignedArtifactIsReportedAsSignedNotAsAnOwnAgreement(t *testing.T) {
 	repo := &settledContractRepoFake{
-		pdfState: db.ContractPDFState{IPFSCID: "cid", C2PAState: "active"},
+		pdfState: db.ContractPDFState{IPFSCID: "cid", C2PAState: "active", Signed: true},
 		document: agreedDocument,
 	}
 	store := emptyStore()
@@ -267,13 +272,15 @@ func TestSettlementIsReadFromTheArtifactNotTheLocalWorkflowState(t *testing.T) {
 		contractstate.Reviewed.String(),
 		contractstate.Approved.String(),
 	} {
-		draft, err := provenance.ArtifactC2PAState(state, []byte("%PDF-1.7\n1 0 obj\n<< >>\nendobj\n"))
+		unsigned := []byte("%PDF-1.7\n1 0 obj\n<< >>\nendobj\n")
+		draft, err := provenance.ArtifactC2PAState(state, unsigned)
 		require.NoError(t, err)
-		require.False(t, provenance.ArtifactCarriesSignature(draft), "state %s over an unsigned artifact", state)
+		require.False(t, provenance.IsFrozenC2PAState(draft) || provenance.CarriesPAdESSignature(unsigned), "state %s over an unsigned artifact", state)
 
-		signed, err := provenance.ArtifactC2PAState(state, []byte("<< /Type /Sig /ByteRange [0 1 2 3] >>"))
+		signedPDF := []byte("<< /Type /Sig /ByteRange [0 1 2 3] >>")
+		signed, err := provenance.ArtifactC2PAState(state, signedPDF)
 		require.NoError(t, err)
-		require.True(t, provenance.ArtifactCarriesSignature(signed), "state %s over a PAdES-signed artifact", state)
+		require.True(t, provenance.IsFrozenC2PAState(signed) && provenance.CarriesPAdESSignature(signedPDF), "state %s over a PAdES-signed artifact", state)
 	}
 }
 

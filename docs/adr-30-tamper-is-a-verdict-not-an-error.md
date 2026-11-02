@@ -79,3 +79,14 @@ Callers no longer infer the class from combinations of booleans, and
 - Test seams that plant bytes directly in IPFS now exercise the authenticity
   path rather than the hash-comparison path. Both remain covered: the hash
   comparison still runs for artifacts that decrypt successfully.
+
+## Erased is a verdict of its own
+
+An archive entry whose contract key was shredded (ADR-28) has an empty
+snapshot, and its snapshot artifact and store-event body cannot be read. The
+archive integrity audit reports each check that needs that content with the
+result `ERASED`, not `FAILED`: the database permits the empty snapshot only
+after the key is shredded, so the missing content is the recorded erasure, not
+a tampered artifact. The checks that need no content, such as the notary
+chain, still run. This also holds on a counterparty instance, where a peer's
+erase request erases the content without a local archive deletion.

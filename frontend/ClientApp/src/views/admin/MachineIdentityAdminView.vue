@@ -22,6 +22,7 @@ const ASSIGNABLE_ROLES = [
   'Sys. Contract Approver',
   'Sys. Contract Manager',
   'Sys. Auditor',
+  'Sys. Integration Manager',
 ]
 
 const identities = ref<MachineIdentity[]>([])

@@ -1,8 +1,13 @@
-# ArgoCD Application manifest (DCS-OE-03, previously absent). Example for
+# ArgoCD Application manifest (DCS-OE-03). Example for
 # the acceptance environment — duplicate and swap valueFiles/destination for
 # production (values.prod.yml).
 #
 # Apply with: kubectl apply -n argocd -f deployment/argocd/application.yaml
+#
+# The chart refuses to render without the values the backend needs to start
+# (templates/prerequisites.yaml). valuesObject below fills them with example
+# values; replace them with those of your environment (deployment/README.md,
+# "Production prerequisites", lists every value and Secret).
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -15,21 +20,54 @@ spec:
   project: default
 
   source:
-    repoURL: git@github.com:arnemileswinter/facis-dcs.git
+    # The upstream repository. Point repoURL at the repository you deploy
+    # from (your fork or mirror) and pin targetRevision to a release tag.
+    repoURL: https://github.com/eclipse-xfsc/facis-dcs.git
     targetRevision: main
     path: deployment/helm
     helm:
       valueFiles:
         - values.yaml
         - values.acceptance.yml
+      parameters:
+        # ADR-18: the Federated Catalogue service account has ADMIN_ALL; a
+        # remote catalogue is safe only inside one trusted administrative
+        # boundary, which this release acknowledges.
+        - name: federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary
+          value: "true"
+      valuesObject:
+        signing:
+          issuerDID: "did:web:acceptance.dcs.example.org"
+          tsaURL: "https://tsa.example.org/tsr"
+        messaging:
+          secretRef:
+            name: dcs-acceptance-nats
+            key: NATS_URL
+        oid4vp:
+          trust:
+            enabled: true
+            existingConfigMap: dcs-acceptance-trust
+        configIntegrity:
+          pins:
+            # sha256sum of the trust.json key of dcs-acceptance-trust.
+            oid4vp-trust-data: "0000000000000000000000000000000000000000000000000000000000000000"
+        networkPolicy:
+          # The pods of the ingress controller of the cluster.
+          ingressFrom:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kube-system
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: traefik
 
   destination:
     server: https://kubernetes.default.svc
     namespace: dcs-acceptance
 
   syncPolicy:
-    # Automated sync is deliberately NOT enabled by default — this is a PoC
-    # chart with HSM/PKCS#11 and archive-immutability semantics; an
+    # Automated sync is deliberately NOT enabled by default — this chart has
+    # HSM/PKCS#11 and archive-immutability semantics; an
     # unattended auto-heal could mask a deliberate operational action
     # (e.g. a manual key-rotation drill, ADR-1/A5) as configuration drift.
     # Enable automated.prune/selfHeal once the operator has validated that

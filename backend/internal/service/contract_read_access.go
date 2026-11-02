@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -23,25 +24,82 @@ func contractReadContext(ctx context.Context, document identity.DIDDocument) (co
 	return contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), Roles: middleware.GetUserRoles(ctx), LocalPeer: peer}), nil
 }
 
-// authorizeContractRead checks current trusted metadata before any derived read or read-side event.
-func authorizeContractRead(ctx context.Context, database *sqlx.DB, localPeer, did string) error {
-	var row struct {
-		Origin    string         `db:"origin"`
-		CreatedBy string         `db:"created_by"`
-		Data      *datatype.JSON `db:"contract_data"`
-	}
+type contractAccessRow struct {
+	Origin    string         `db:"origin"`
+	CreatedBy string         `db:"created_by"`
+	Data      *datatype.JSON `db:"contract_data"`
+}
+
+func readContractAccessRow(ctx context.Context, database *sqlx.DB, did string) (*contractAccessRow, error) {
+	var row contractAccessRow
 	err := database.GetContext(ctx, &row, `SELECT COALESCE(origin, '') AS origin, created_by, contract_data FROM contracts_effective WHERE did = $1`, did)
 	if errors.Is(err, sql.ErrNoRows) {
-		return contractworkflowengine.MakeNotFound(err)
+		return nil, contractworkflowengine.MakeNotFound(err)
 	}
 	if err != nil {
-		return contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	return &row, nil
+}
+
+// authorizeContractRead checks current trusted metadata before any derived read or read-side event.
+func authorizeContractRead(ctx context.Context, database *sqlx.DB, localPeer, did string) error {
+	row, err := readContractAccessRow(ctx, database, did)
+	if err != nil {
+		return err
 	}
 	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), Roles: middleware.GetUserRoles(ctx), LocalPeer: localPeer}
 	if !scope.MayRead(row.Origin, row.CreatedBy, row.Data) {
 		return contractworkflowengine.MakeForbidden(contractreadpolicy.ErrDenied)
 	}
 	return nil
+}
+
+// authorizeContractWrite admits a write by the creating organization, by an
+// organization named in dcs:parties, or by a system client that acts for this
+// instance (participant = the instance DID). A Sys.* role gives no write
+// access to the contracts of other organizations (ADR-27).
+func authorizeContractWrite(ctx context.Context, database *sqlx.DB, document identity.DIDDocument, did string) error {
+	peer, err := document.GetID()
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	row, err := readContractAccessRow(ctx, database, did)
+	if err != nil {
+		return err
+	}
+	organization := middleware.GetParticipantID(ctx)
+	if organization != "" && organization == peer {
+		return nil
+	}
+	scope := contractreadpolicy.Scope{Organization: organization, LocalPeer: peer}
+	if !scope.MayRead(row.Origin, row.CreatedBy, row.Data) {
+		return contractworkflowengine.MakeForbidden(contractreadpolicy.ErrDenied)
+	}
+	return nil
+}
+
+// authorizeContractOwner admits only the creating organization, or a system
+// client that acts for this instance on a contract this instance originated.
+// A party that did not create the contract is refused.
+func authorizeContractOwner(ctx context.Context, database *sqlx.DB, document identity.DIDDocument, did string) error {
+	peer, err := document.GetID()
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	row, err := readContractAccessRow(ctx, database, did)
+	if err != nil {
+		return err
+	}
+	organization := middleware.GetParticipantID(ctx)
+	switch {
+	case organization == "":
+	case organization == row.CreatedBy:
+		return nil
+	case organization == peer && (row.Origin == "" || row.Origin == peer):
+		return nil
+	}
+	return contractworkflowengine.MakeForbidden(contractreadpolicy.ErrDenied)
 }
 
 // ContractEventAudience admits a webhook subscriber organization to a contract
@@ -61,6 +119,19 @@ func ContractEventAudience(database *sqlx.DB, localPeer string) func(ctx context
 			return false
 		}
 		return contractreadpolicy.Scope{Organization: organization, LocalPeer: localPeer}.MayRead(row.Origin, row.CreatedBy, row.Data)
+	}
+}
+
+// ContractEventOwner returns the owner of a contract for its webhook events
+// (DCS-FR-CSA-23): the creating organization and the responsible parties. It
+// returns nil when the contract is unknown.
+func ContractEventOwner(database *sqlx.DB) func(ctx context.Context, did string) json.RawMessage {
+	return func(ctx context.Context, did string) json.RawMessage {
+		var owner []byte
+		if err := database.GetContext(ctx, &owner, `SELECT json_build_object('created_by', created_by, 'responsible', responsible) FROM contracts_effective WHERE did = $1`, did); err != nil {
+			return nil
+		}
+		return owner
 	}
 }
 

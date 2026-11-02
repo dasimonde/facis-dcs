@@ -1,3 +1,4 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -9,6 +10,9 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if $tls }}
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    {{- end }}
   selector:
     app.kubernetes.io/name: dss
     app.kubernetes.io/instance: {{ .Release.Name }}

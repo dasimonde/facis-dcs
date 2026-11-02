@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -29,10 +32,14 @@ type GetArchivedContractsHandler struct {
 
 type GetArchivedContractsQry struct {
 	RetrievedBy string
+	HolderDID   string
+	UserRoles   userrole.UserRoles
 }
 
 type SearchArchivedContractsQry struct {
 	RetrievedBy     string
+	HolderDID       string
+	UserRoles       userrole.UserRoles
 	DID             string
 	ContractVersion int
 	State           *contractstate.ContractState
@@ -43,6 +50,7 @@ type SearchArchivedContractsQry struct {
 	Party           string
 	ValidFrom       *time.Time
 	ValidUntil      *time.Time
+	Jurisdiction    string
 }
 
 func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchivedContractsQry) (*GetArchivedContractsResult, error) {
@@ -66,8 +74,11 @@ func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchi
 	}
 
 	evt := events.RetrieveArchivedEvent{
-		RetrievedBy: query.RetrievedBy,
-		OccurredAt:  time.Now().UTC(),
+		RetrievedBy:  query.RetrievedBy,
+		HolderDID:    query.HolderDID,
+		UserRoles:    query.UserRoles,
+		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
+		OccurredAt:   time.Now().UTC(),
 	}
 
 	err = event.Create(ctx, tx, evt, componenttype.ContractStorageArchive)
@@ -100,15 +111,15 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		}
 	}(tx)
 
-	var state string
+	var states []string
 	if query.State != nil {
-		state = query.State.String()
+		states = []string{query.State.String()}
 	}
 
 	searchValues := db.SearchValues{
 		DID:             query.DID,
 		ContractVersion: query.ContractVersion,
-		State:           state,
+		States:          states,
 		Name:            query.Name,
 		Description:     query.Description,
 		ContractData:    query.ContractData,
@@ -116,6 +127,7 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		Party:           query.Party,
 		ValidFrom:       query.ValidFrom,
 		ValidUntil:      query.ValidUntil,
+		Jurisdiction:    query.Jurisdiction,
 	}
 
 	archivedContractsMetadata, err := h.CRepo.ReadArchivedContractsByFilter(ctx, tx, searchValues)
@@ -123,9 +135,13 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		return nil, fmt.Errorf("could not search archived contracts: %w", err)
 	}
 
-	evt := events.SearchEvent{
-		RetrievedBy: query.RetrievedBy,
-		OccurredAt:  time.Now().UTC(),
+	evt := events.SearchArchivedEvent{
+		RetrievedBy:  query.RetrievedBy,
+		HolderDID:    query.HolderDID,
+		UserRoles:    query.UserRoles,
+		Criteria:     searchCriteria(searchValues),
+		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
+		OccurredAt:   time.Now().UTC(),
 	}
 
 	err = event.Create(ctx, tx, evt, componenttype.ContractStorageArchive)
@@ -141,4 +157,42 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 	return &GetArchivedContractsResult{
 		Contracts: archivedContractsMetadata,
 	}, nil
+}
+
+// archivedContractDIDs lists the contract IDs a retrieval returned, so the
+// audit entry names every contract the caller received (DCS-FR-CSA-18).
+func archivedContractDIDs(rows []db.ContractMetadata) []string {
+	dids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		dids = append(dids, row.DID)
+	}
+	return dids
+}
+
+// searchCriteria keeps the filters the caller set; empty filters are left out.
+func searchCriteria(v db.SearchValues) map[string]string {
+	criteria := map[string]string{}
+	set := func(key, value string) {
+		if value != "" {
+			criteria[key] = value
+		}
+	}
+	set("did", v.DID)
+	if v.ContractVersion != 0 {
+		set("contract_version", strconv.Itoa(v.ContractVersion))
+	}
+	set("state", strings.Join(v.States, ","))
+	set("name", v.Name)
+	set("description", v.Description)
+	set("contract_data", v.ContractData)
+	set("tag", v.Tag)
+	set("party", v.Party)
+	if v.ValidFrom != nil {
+		set("valid_from", v.ValidFrom.UTC().Format(time.RFC3339))
+	}
+	if v.ValidUntil != nil {
+		set("valid_until", v.ValidUntil.UTC().Format(time.RFC3339))
+	}
+	set("jurisdiction", v.Jurisdiction)
+	return criteria
 }

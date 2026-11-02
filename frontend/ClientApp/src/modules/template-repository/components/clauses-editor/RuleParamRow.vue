@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { semanticParameterLabel } from '@template-repository/utils/semantic-parameter-label'
 import type { SemanticConditionParameter } from '@template-repository/models/contract-template'
 
@@ -7,6 +7,8 @@ const props = defineProps<{
   param: SemanticConditionParameter
   isUsed?: boolean
   isRequiredAndUnused?: boolean
+  /** DCS-FR-TR-04: the prose placeholder of this field was clicked. */
+  isHighlighted?: boolean
 }>()
 
 defineEmits<{
@@ -23,6 +25,14 @@ const rowClass = computed(() => ({
 
 const label = computed(() => semanticParameterLabel(props.param))
 
+const row = ref<HTMLLIElement | null>(null)
+watch(
+  () => props.isHighlighted,
+  (highlighted) => {
+    if (highlighted) row.value?.scrollIntoView?.({ block: 'nearest' })
+  },
+)
+
 const constraintLabel = computed(() => {
   const constraint = props.param.valueConstraint
   if (!constraint) return ''
@@ -38,8 +48,10 @@ const constraintLabel = computed(() => {
 <template>
   <li
     v-if="param.isRequired"
+    ref="row"
     class="-mx-1 flex items-center gap-1.5 rounded px-1 py-0.5"
-    :class="rowClass"
+    :class="[rowClass, { 'bg-primary/15 ring-1 ring-primary': isHighlighted }]"
+    :data-highlighted="isHighlighted || undefined"
     @click="$emit('click')"
   >
     <span
