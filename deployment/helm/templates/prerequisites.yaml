@@ -50,6 +50,6 @@ lists them with the Secrets and their keys.
 {{- $missing = append $missing "dss.tsp.url: a qualified RFC 3161 timestamp authority for DSS, which timestamps the PAdES-B-LTA archive of a QES contract (ADR-40)" }}
 {{- end }}
 {{- if $missing }}
-{{- fail (printf "this release uses a real HSM or a Hydra outside dev mode, and the backend cannot start without:\n  - %s\nSee deployment/README.md, \"Production prerequisites\"." (join "\n  - " $missing)) }}
+{{- fail (printf "this release uses a real HSM or a Hydra outside dev mode, and it needs:\n  - %s\nSee deployment/README.md, \"Production prerequisites\"." (join "\n  - " $missing)) }}
 {{- end }}
 {{- end }}
