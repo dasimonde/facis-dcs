@@ -48,9 +48,9 @@ func lifecycleStatusFromVC(vcBytes []byte) string {
 	return vc.CredentialSubject.Status
 }
 
-var pdfTrailerSizeRE = regexp.MustCompile(`/Size (\d+)`)
+var pdfTrailerSizeRE = regexp.MustCompile(`/Size\s+(\d+)`)
 var pdfTrailerIDRE = regexp.MustCompile(`/ID\s*(\[[^\]]*\])`)
-var pdfTrailerRootRE = regexp.MustCompile(`/Root (\d+) 0 R`)
+var pdfTrailerRootRE = regexp.MustCompile(`/Root\s+(\d+)\s+0\s+R`)
 var pdfKidsRE = regexp.MustCompile(`/Kids \[([^\]]+)\]`)
 var pdfObjRefRE = regexp.MustCompile(`(\d+) 0 R`)
 
@@ -60,11 +60,11 @@ var pdfObjRefRE = regexp.MustCompile(`(\d+) 0 R`)
 // pointing at that signed catalog so the signature field's /V link stays the
 // current one the reader resolves.
 func currentRootObjID(pdf []byte) (int, bool) {
-	idx := bytes.LastIndex(pdf, []byte("trailer\n"))
-	if idx < 0 {
+	trailer, ok := lastTrailerDict(pdf)
+	if !ok {
 		return 0, false
 	}
-	m := pdfTrailerRootRE.FindSubmatch(pdf[idx:])
+	m := pdfTrailerRootRE.FindSubmatch(trailer)
 	if len(m) < 2 {
 		return 0, false
 	}
@@ -74,6 +74,37 @@ func currentRootObjID(pdf []byte) (int, bool) {
 	}
 	return id, true
 }
+
+// lastTrailerDict returns the trailer of the cross-reference section that the
+// last startxref names: the bytes after the "trailer" keyword of a classic
+// section, or the stream dictionary of a cross-reference stream (PDF 1.5),
+// which PDFBox writes over a document that uses one. When startxref names
+// neither, it returns the bytes after the last "trailer" keyword.
+func lastTrailerDict(pdf []byte) ([]byte, bool) {
+	end := bytes.LastIndex(pdf, []byte("startxref"))
+	if offset, err := previousStartXref(pdf); err == nil && offset >= 0 && offset < end {
+		section := pdf[offset:end]
+		if bytes.HasPrefix(section, []byte("xref")) {
+			if idx := bytes.Index(section, []byte("trailer")); idx >= 0 {
+				return section[idx:], true
+			}
+		} else if pdfObjHeaderRE.Match(section) {
+			if idx := bytes.Index(section, []byte("stream")); idx >= 0 && pdfXRefTypeRE.Match(section[:idx]) {
+				return section[:idx], true
+			}
+		}
+	}
+	idx := bytes.LastIndex(pdf, []byte("trailer"))
+	if idx < 0 {
+		return nil, false
+	}
+	return pdf[idx:], true
+}
+
+var (
+	pdfObjHeaderRE = regexp.MustCompile(`^\d+\s+\d+\s+obj\b`)
+	pdfXRefTypeRE  = regexp.MustCompile(`/Type\s*/XRef\b`)
+)
 
 // IsPAdESSigned reports whether pdf carries a PAdES signature: a signature
 // value dictionary (/Type /Sig) with a /ByteRange. Exported for the service
@@ -94,11 +125,11 @@ func isPAdESSigned(pdf []byte) bool {
 // extractTrailerID returns the raw /ID array string (e.g. "[<abc…> <def…>]")
 // from the last trailer in the PDF, or an empty string if not found.
 func extractTrailerID(pdf []byte) string {
-	idx := bytes.LastIndex(pdf, []byte("trailer\n"))
-	if idx < 0 {
+	trailer, ok := lastTrailerDict(pdf)
+	if !ok {
 		return ""
 	}
-	m := pdfTrailerIDRE.FindSubmatch(pdf[idx:])
+	m := pdfTrailerIDRE.FindSubmatch(trailer)
 	if len(m) < 2 {
 		return ""
 	}
@@ -107,11 +138,11 @@ func extractTrailerID(pdf []byte) string {
 
 // findTrailerMaxObjID returns the maximum object ID in use (/Size - 1 from the last trailer).
 func findTrailerMaxObjID(pdf []byte) (int, error) {
-	idx := bytes.LastIndex(pdf, []byte("trailer\n"))
-	if idx < 0 {
+	trailer, ok := lastTrailerDict(pdf)
+	if !ok {
 		return 0, fmt.Errorf("trailer not found in PDF")
 	}
-	m := pdfTrailerSizeRE.FindSubmatch(pdf[idx:])
+	m := pdfTrailerSizeRE.FindSubmatch(trailer)
 	if len(m) < 2 {
 		return 0, fmt.Errorf("/Size not found in PDF trailer")
 	}
@@ -426,8 +457,8 @@ func nameTreeEntryRE(fileName string) *regexp.Regexp {
 }
 
 var (
-	catalogAFRE = regexp.MustCompile(`/AF \[([^\]]*)\]`)
-	catalogEFRE = regexp.MustCompile(`(/EmbeddedFiles << /Names \[)([^\]]*)(\])`)
+	catalogAFRE = regexp.MustCompile(`/AF\s*\[([^\]]*)\]`)
+	catalogEFRE = regexp.MustCompile(`(/EmbeddedFiles\s*<<\s*/Names\s*\[)([^\]]*)(\])`)
 )
 
 // buildUpdateAppendixBytes constructs the raw bytes of the PDF incremental
