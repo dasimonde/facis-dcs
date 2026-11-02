@@ -24,13 +24,9 @@
 #      CMS/ASN.1 parse - each documents its own precision limit at its point
 #      of use in the steps module.
 #
-# The Signature Manager UI (QR/poll/result modal, AES badge) has no coverage
-# in this pack - this repo-root BDD harness has no browser-automation
-# convention at all (see features/16_other/frontend.feature, a bare
-# reachability check). The service-level contract the UI would call is
-# already exercised by the ceremony scenarios below; the UI-specific
-# rendering claims are recorded as an explicit coverage gap via the final
-# @skip scenario, not fabricated.
+# The Signature Manager UI (wallet request, result, AES level) is covered by
+# the Playwright specs frontend/ClientApp/e2e/wallet-signing.spec.ts and
+# signature-compliance-viewer.spec.ts.
 
 @DCS-FR-SM-16 @DCS-IR-SI-10 @DCS-FR-UC-04-1
 Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony, PID binding
@@ -220,22 +216,3 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     And the verification result shows match is true
     And the contract_signatures row for contract "RSV E2E Contract" is a real signature, not the STUB placeholder
     And the contract_signatures row for contract "RSV E2E Contract" is linked to a signature_ceremonies row
-
-  # ---------------------------------------------------------------------
-  # Signature Manager UI: documented coverage gap (see the header comment
-  # above). No fabricated pass/fail - the traceability is kept present via
-  # @skip.
-  # ---------------------------------------------------------------------
-
-  @skip
-  Scenario: Signature Manager UI ceremony flow and AES badge - not provable from this HTTP-only BDD harness
-    # This repo-root BDD harness has no browser-automation convention (see
-    # features/16_other/frontend.feature - a bare reachability check). The
-    # service-level contract the UI would call (start ceremony, poll status,
-    # apply, AES credential_type) is already exercised end-to-end by the
-    # ceremony and e2e scenarios above. The UI-specific claims (the
-    # QR/poll/result modal and the AES badge render,
-    # frontend/ClientApp/src/services/signature-management-service.ts) need
-    # a browser-level test this harness does not have; recorded here as an
-    # explicit coverage gap, not a fabricated result.
-    Given I am authenticated with roles: "Contract Manager"

@@ -26,17 +26,6 @@
 @UC-14 @DCS-FR-SM-03 @DCS-FR-SM-04
 Feature: Power-of-Attorney credential verification at signing
 
-  # @skip: a delegated PoA at the local signing ceremony. This instance
-  # verifies its own signers against its login issuer (ADR-35); presentation
-  # + status check of the PoA itself happen at login and are covered
-  # suite-wide.
-  @skip @UC-14-01 @DCS-FR-SM-03
-  Scenario: Signer presents a PoA credential proving delegated signing authority
-    Given I hold a PoA credential compliant with eIDAS framework for organization "BDD Org"
-    When I present the PoA credential during the signing ceremony
-    Then the PoA credential chain is verified to a trusted root
-    And the signature is bound to the delegated authority
-
   # The PoA presented at the ceremony has its status-list bit revoked on the
   # issuer first; the refusal must name that bit. A revoked link of a
   # counterparty's chain is refused in
