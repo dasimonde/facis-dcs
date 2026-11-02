@@ -90,11 +90,14 @@ sign: `Sys. Contract Signer` holds no signing scope (ADR-17).
 
 One instance can host several organizations (ADR-31). The `participant_did` of
 a System User names the organization it acts for, and every action is
-attributed to it. The scope differs for reads and writes:
+attributed to it. Reads and writes follow the same organization scope:
 
-- **Reads.** A `Sys.*` role reads the contracts of every organization on the
-  instance (the privileged roles of the contract read policy). Automation that
-  lists or monitors contracts needs this.
+- **Reads.** A role gives no read access across organizations. A `Sys.*`
+  client, an Auditor and a System Administrator read the contracts that their
+  organization created or that name it in `dcs:parties`. A System User whose
+  `participant_did` is the instance DID acts for the operator of the instance
+  and reads every contract the instance holds; automation that lists or
+  monitors all contracts uses this identity (`contractreadpolicy.Scope.ActsForInstance`).
 - **Writes.** A `Sys.*` role has no privilege. A contract write (update,
   submit, negotiate, respond, offer, withdraw, approve, reject, terminate,
   renew, deploy, target designation, evidence) is admitted only when the

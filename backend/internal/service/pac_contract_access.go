@@ -12,11 +12,11 @@ import (
 )
 
 func (s *processAuditAndCompliancesrvc) contractAuditContext(ctx context.Context) (context.Context, error) {
-	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), Roles: middleware.GetUserRoles(ctx)}
+	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx)}
 	if s.ATrailReader.Artifacts != nil {
 		scope.LocalPeer = s.ATrailReader.Artifacts.InstanceScope().ID
 	}
-	if !scope.Privileged() && scope.LocalPeer == "" {
+	if scope.LocalPeer == "" {
 		return ctx, pac.MakeForbidden(contractreadpolicy.ErrDenied)
 	}
 	return contractreadpolicy.WithScope(ctx, scope), nil

@@ -179,14 +179,13 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 // organization (middleware.GetParticipantID, the OID4VP-disclosed
 // organization claim — the same value persisted as CreatedBy on create) must
 // be the contract's creating organization or one of the organizations listed
-// in the contract document's top-level "dcs:parties" array. Privileged
-// org-independent roles (Sys.* automation, Sys. Administrator, Auditor)
-// bypass the check.
+// in the contract document's top-level "dcs:parties" array. A system client
+// that acts for the instance reads across organizations.
 func callerMayReadContract(query GetByIDQry, data *db.Contract) bool {
 	if query.Internal {
 		return true
 	}
-	return CallerMayReadContract(query.RetrievedBy, query.UserRoles, query.LocalPeer, data)
+	return CallerMayReadContract(query.RetrievedBy, query.LocalPeer, data)
 }
 
 // CallerMayReadContract is the party read-scoping rule shared by direct
@@ -196,8 +195,8 @@ func callerMayReadContract(query GetByIDQry, data *db.Contract) bool {
 // the dcs:legalName of one of the contract's dcs:parties. Several organizations
 // share one instance and must not read each other's contracts. A copy received
 // from a peer has the peer's DID as creator, so only the organizations its
-// sender named in dcs:parties may read it. Privileged org-independent roles
-// bypass the check.
-func CallerMayReadContract(retrievedBy string, userRoles userrole.UserRoles, localPeer string, data *db.Contract) bool {
-	return (contractreadpolicy.Scope{Organization: retrievedBy, Roles: userRoles, LocalPeer: localPeer}).MayRead(data.Origin, data.CreatedBy, data.ContractData)
+// sender named in dcs:parties may read it. Only a system client that acts for
+// the instance reads across organizations; a role does not.
+func CallerMayReadContract(retrievedBy, localPeer string, data *db.Contract) bool {
+	return (contractreadpolicy.Scope{Organization: retrievedBy, LocalPeer: localPeer}).MayRead(data.Origin, data.CreatedBy, data.ContractData)
 }

@@ -197,11 +197,15 @@ func (s *contractStorageArchivesrvc) Sections(ctx context.Context, p *contractst
 		return nil, contractstoragearchive.MakeNotFound(fmt.Errorf("no archived section %q for DID %q", sectionID, p.Did))
 	}
 
-	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), Roles: middleware.GetUserRoles(ctx)}
+	peer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), LocalPeer: peer}
 	res = make([]*contractstoragearchive.ArchiveSectionItem, 0, len(rows))
 	var returned []string
 	for _, row := range rows {
-		if !scope.Privileged() && !slices.Contains(row.Parties, scope.Organization) {
+		if !scope.ActsForInstance() && !slices.Contains(row.Parties, scope.Organization) {
 			if sectionID != "" {
 				return nil, contractstoragearchive.MakeForbidden(fmt.Errorf("section %q is not assigned to %q", sectionID, scope.Organization))
 			}

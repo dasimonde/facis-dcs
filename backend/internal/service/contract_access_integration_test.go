@@ -119,12 +119,16 @@ func TestContractReadScopePostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, signingRows, 1)
 	require.Equal(t, "remote-party", signingRows[0].DID)
-	for _, role := range []userrole.UserRole{userrole.Auditor, userrole.SystemAdministrator, userrole.SystemContractManager} {
-		privileged := contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Roles: userrole.UserRoles{role}, LocalPeer: peer})
-		rows, err = repo.ReadAllMetaData(privileged, tx, datatype.Pagination{}, cwedb.ListOptions{})
-		require.NoError(t, err)
-		require.Len(t, rows, len(fixtures))
-	}
+	// QA F03: an Auditor, System Administrator or Sys.* client of an unrelated
+	// organization reads nothing; a system client acting for the instance reads all.
+	unrelated := contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: "Org Unrelated", LocalPeer: peer})
+	rows, err = repo.ReadAllMetaData(unrelated, tx, datatype.Pagination{}, cwedb.ListOptions{})
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	instance := contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: peer, LocalPeer: peer})
+	rows, err = repo.ReadAllMetaData(instance, tx, datatype.Pagination{}, cwedb.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, rows, len(fixtures))
 	rows, err = repo.ReadAllMetaData(ctx, tx, datatype.Pagination{}, cwedb.ListOptions{})
 	require.NoError(t, err)
 	require.Empty(t, rows)

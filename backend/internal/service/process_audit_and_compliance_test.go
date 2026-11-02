@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	goa "goa.design/goa/v3/pkg"
 
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/middleware"
@@ -35,10 +39,15 @@ func TestAuditReportUsesPersistedRunWithoutExecutorAndHashesExactBytes(t *testin
 		`  "findings":[{"rule_id":"RULE-1","result":"FAILED","reason":"failed","severity":"error","evidence_refs":["contracts/0"]}]` + "\n" +
 		"}\n")
 	executor := &countingAuditExecutor{}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var recordedHash, recordedFormat, recordedJustification string
 	var recordedSummary auditReportSummary
 	service := &processAuditAndCompliancesrvc{
 		AuditExecutor: executor,
+		ATrailReader:  base.AuditTrailReader{Artifacts: artifactstore.New(&reportObjects{blobs: map[string][]byte{}}, &reportKeys{}, reportAgreement{key}, "did:example:instance", "did:example:instance#agreement", &key.PublicKey)},
 		auditRunReader: func(_ context.Context, scope, did string) (persistedAuditRun, error) {
 			if scope != "contracts" || did != "did:example:contract" {
 				t.Fatalf("unexpected persisted-run lookup: scope=%q did=%q", scope, did)
@@ -55,7 +64,7 @@ func TestAuditReportUsesPersistedRunWithoutExecutorAndHashesExactBytes(t *testin
 		},
 	}
 	scope, format, did := "contracts", "json", "did:example:contract"
-	content, err := service.AuditReport(middleware.InjectAuthContext(context.Background(), []string{"Auditor"}, "holder", "auditor"), &processauditandcompliance.AuditReportPayload{
+	content, err := service.AuditReport(middleware.InjectAuthContext(context.Background(), []string{"Auditor"}, "holder", "did:example:instance"), &processauditandcompliance.AuditReportPayload{
 		Scope: &scope, Format: &format, Did: &did, Justification: "report unit test",
 	})
 	if err != nil {
