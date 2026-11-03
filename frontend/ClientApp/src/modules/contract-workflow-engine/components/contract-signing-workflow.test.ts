@@ -53,6 +53,28 @@ describe('signing workflow authoring', () => {
     expect(contract.contract_data?.['dcs:signingDeadline']).toBeUndefined()
   })
 
+  it('allows today as the signing deadline and rejects past dates', async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    const yesterdayDate = new Date()
+    yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1)
+    const yesterday = yesterdayDate.toISOString().slice(0, 10)
+    const contract = reactive({
+      did: 'did:web:a:contract:1',
+      contract_version: 1,
+      state: 'DRAFT',
+      contract_data: { '@type': 'dcs:Contract' },
+    }) as unknown as Contract
+    const wrapper = mount(ContractDetailsEditor, { props: { contract } })
+    const deadline = wrapper.get<HTMLInputElement>('[data-testid="contract-signing-deadline"]')
+
+    expect(deadline.attributes('min')).toBe(today)
+    await deadline.setValue(today)
+    expect(contract.contract_data?.['dcs:signingDeadline']).toEqual({ '@value': today, '@type': 'xsd:date' })
+
+    await deadline.setValue(yesterday)
+    expect(contract.contract_data?.['dcs:signingDeadline']).toEqual({ '@value': today, '@type': 'xsd:date' })
+  })
+
   it('shows the stored order and deadline read-only', () => {
     const contract = {
       did: 'did:web:a:contract:1',
