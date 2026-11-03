@@ -3,6 +3,10 @@ import { computed, ref, useTemplateRef, watch } from 'vue'
 import ContractDetailsDiffView from '@contract-workflow-engine/components/ContractDetailsDiffView.vue'
 import DiffView from '@contract-workflow-engine/components/DiffView.vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
+import {
+  type ContractDetailsSnapshot,
+  withSigningDetailsFromContractData,
+} from '@contract-workflow-engine/models/contract-details-snapshot'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { acceptedNegotiations, activeNegotiations, proposalComparisonBaseline } from '@/utils/contract-negotiations'
@@ -11,7 +15,6 @@ import type { ContractData } from '@/models/contract/contract-data'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 import type { ContractNegotiationDecision } from '@/models/contract/contract-negotiation-decision'
 import type { ContractHistoryItem } from '@/models/responses/contract-response'
-import type { ContractDetailsSnapshot } from '@contract-workflow-engine/models/contract-details-snapshot'
 
 const props = defineProps<{
   contract: Contract
@@ -98,18 +101,28 @@ function immutableSnapshot<T>(value: T): T {
 function detailsFrom(
   contract: Pick<
     Contract,
-    'name' | 'description' | 'contract_version' | 'start_date' | 'exp_date' | 'exp_policy' | 'exp_notice_period'
+    | 'name'
+    | 'description'
+    | 'contract_version'
+    | 'start_date'
+    | 'exp_date'
+    | 'exp_policy'
+    | 'exp_notice_period'
+    | 'contract_data'
   >,
 ): ContractDetailsSnapshot {
-  return {
-    name: contract.name,
-    description: contract.description,
-    contract_version: contract.contract_version,
-    start_date: contract.start_date,
-    exp_date: contract.exp_date,
-    exp_policy: contract.exp_policy,
-    exp_notice_period: contract.exp_notice_period,
-  }
+  return withSigningDetailsFromContractData(
+    {
+      name: contract.name,
+      description: contract.description,
+      contract_version: contract.contract_version,
+      start_date: contract.start_date,
+      exp_date: contract.exp_date,
+      exp_policy: contract.exp_policy,
+      exp_notice_period: contract.exp_notice_period,
+    },
+    contract.contract_data,
+  )!
 }
 
 const loadSupersededVersions = async (did: string) => {
@@ -361,7 +374,7 @@ watch(
               :key="decision.negotiator"
               class="list-row px-0 py-2"
             >
-              <div class="list-col-grow flex w-full justify-between gap-2">
+              <div class="flex w-full justify-between gap-2 list-col-grow">
                 <div class="min-w-0 break-all">
                   {{ decision.negotiator }}
                   <span v-if="isOwnDecision(decision)" class="ml-1 badge badge-ghost badge-xs">you</span>
@@ -422,7 +435,7 @@ watch(
           <div class="card-actions justify-end">
             <button
               v-if="canWithdraw(negotiation)"
-              class="btn btn-sm btn-primary"
+              class="btn btn-primary btn-sm"
               :disabled="isSubmitting"
               @click="withdrawNegotiation(negotiation)"
             >
@@ -431,7 +444,7 @@ watch(
             </button>
             <button
               v-if="canRespondTo(negotiation) && isExpanded(negotiation.id)"
-              class="btn btn-sm btn-primary"
+              class="btn btn-primary btn-sm"
               data-testid="accept-negotiation"
               :disabled="isSubmitting || acceptBlockedBySync"
               :title="acceptBlockedBySync ? acceptBlockedReason : undefined"
@@ -449,14 +462,14 @@ watch(
             </p>
             <button
               v-if="canRespondTo(negotiation) && isExpanded(negotiation.id)"
-              class="btn btn-sm btn-primary"
+              class="btn btn-primary btn-sm"
               :disabled="isSubmitting"
               @click="rejectNegotiation(negotiation)"
             >
               <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
               Reject
             </button>
-            <button class="btn btn-sm btn-primary" @click="handleShowBtn(negotiation)">
+            <button class="btn btn-primary btn-sm" @click="handleShowBtn(negotiation)">
               {{ isExpanded(negotiation.id) ? 'Hide' : 'Show' }}
             </button>
           </div>

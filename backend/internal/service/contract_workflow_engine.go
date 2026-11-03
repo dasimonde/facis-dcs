@@ -806,7 +806,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 				ContractVersion: item.ContractVersion,
 				ChangeRequest:   item.ChangeRequest,
 				CreatedBy:       item.CreatedBy,
-				CreatedAt:       item.CreatedAt.String(),
+				CreatedAt:       item.CreatedAt.Format(time.RFC3339),
 				Superseded:      superseded,
 			}
 			negotiations[item.ID] = negotiation

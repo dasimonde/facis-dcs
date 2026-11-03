@@ -109,4 +109,36 @@ describe('ContractHistoryDiffView', () => {
     expect(text).toContain('Newer name')
     expect(text).toContain('Older name')
   })
+
+  it('compares signing deadline and order from each side contract_data', async () => {
+    history.items = [
+      {
+        ...defaultHistory()[0],
+        name: 'Current',
+        contract_data: {
+          'dcs:signatureFields': [{ 'dcs:signatoryName': 'did:web:a', 'dcs:signingOrder': 1 }],
+          'dcs:signingDeadline': { '@value': '2026-12-15', '@type': 'xsd:date' },
+        },
+      },
+      {
+        ...defaultHistory()[1],
+        name: 'Previous',
+        contract_data: {
+          'dcs:signatureFields': [{ 'dcs:signatoryName': 'did:web:a', 'dcs:signingOrder': 2 }],
+          'dcs:signingDeadline': { '@value': '2026-11-01', '@type': 'xsd:date' },
+        },
+      },
+    ]
+    const wrapper = mount(ContractHistoryDiffView, {
+      props: { contractDid: 'did:web:example.com:contract', contractState: ContractState.submitted },
+    })
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('Signing deadline')
+    expect(text).toContain('Signing order')
+    expect(text).toContain('2026-12-15')
+    expect(text).toContain('2026-11-01')
+    expect(text).toContain('1 did:web:a')
+    expect(text).toContain('2 did:web:a')
+  })
 })

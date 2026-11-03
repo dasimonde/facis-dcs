@@ -36,6 +36,8 @@ const rows: { key: DetailKey; label: string }[] = [
   { key: 'exp_date', label: 'Expiration date' },
   { key: 'exp_notice_period', label: 'Notice period' },
   { key: 'exp_policy', label: 'Expiry policy' },
+  { key: 'signing_deadline', label: 'Signing deadline' },
+  { key: 'signing_order', label: 'Signing order' },
 ]
 
 function displayValue(snapshot: ContractDetailsSnapshot | null | undefined, key: DetailKey): string {

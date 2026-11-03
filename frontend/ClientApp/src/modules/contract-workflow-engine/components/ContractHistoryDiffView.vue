@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import DiffView from '@contract-workflow-engine/components/DiffView.vue'
+import {
+  type ContractDetailsSnapshot,
+  withSigningDetailsFromContractData,
+} from '@contract-workflow-engine/models/contract-details-snapshot'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { ContractState, type ContractState as ContractStateType } from '@/types/contract-state'
 import type { ContractData } from '@/models/contract/contract-data'
 import type { ContractHistoryItem } from '@/models/responses/contract-response'
-import type { ContractDetailsSnapshot } from '@contract-workflow-engine/models/contract-details-snapshot'
 
 const DRAFT_ID = 'draft'
 const FORMAL_ID = 'formal'
@@ -152,10 +155,15 @@ function snapshotFromHistory(item: ContractHistoryItem): ContractDetailsSnapshot
 }
 
 function resolveDetails(id: string): ContractDetailsSnapshot | null {
-  if (id === DRAFT_ID) return props.currentDetails ?? null
-  if (id === FORMAL_ID) return props.formalDetails ?? null
-  const row = sortedHistory.value.find((item) => historyOptionId(item) === id)
-  return row ? snapshotFromHistory(row) : null
+  let base: ContractDetailsSnapshot | null = null
+  if (id === DRAFT_ID) base = props.currentDetails ?? null
+  else if (id === FORMAL_ID) base = props.formalDetails ?? null
+  else {
+    const row = sortedHistory.value.find((item) => historyOptionId(item) === id)
+    base = row ? snapshotFromHistory(row) : null
+  }
+  // Signing deadline/order live only in contract_data.
+  return withSigningDetailsFromContractData(base, resolveData(id))
 }
 
 const leftHistoryItem = computed(() => sortedHistory.value.find((item) => historyOptionId(item) === leftPick.value))
@@ -300,7 +308,7 @@ watch([leftPick, rightPick], () => ensureDistinctPicks())
       <div v-if="restorable && leftHistoryItem" class="mt-4 border-t border-base-300 pt-4">
         <button
           type="button"
-          class="btn btn-sm btn-secondary"
+          class="btn btn-secondary btn-sm"
           data-testid="restore-history-version"
           @click="emit('restore', leftHistoryItem)"
         >
