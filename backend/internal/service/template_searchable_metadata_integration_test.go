@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,53 +15,48 @@ import (
 	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/db"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 	"digital-contracting-service/internal/templaterepository/query/contracttemplate"
 )
 
-// DCS-FR-TR-10: templates are searchable by jurisdiction, industry and the
-// regulatory compliance status the policy audit sets at approval.
-func TestTemplateSearchableMetadataPostgres(t *testing.T) {
+func TestTemplateSearchUsesSemanticValuesPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	require.NoError(t, semantichub.Seed(ctx, database))
-	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
-	ctRepo := &pg.PostgresContractTemplateRepo{}
-
-	create := func(did, jurisdiction, industry string) {
-		t.Helper()
-		data := datatype.JSON(compliantTemplateData)
-		require.NoError(t, (&command.Creator{DB: database, CTRepo: ctRepo}).Handle(ctx, command.CreateCmd{
-			DID: did, CreatedBy: "org", TemplateType: contracttemplatetype.ContractTemplate, PartyType: "SINGLE_PARTY",
-			TemplateData: &data, Jurisdiction: &jurisdiction, Industry: &industry,
-			UserRoles: userrole.UserRoles{userrole.TemplateCreator},
-		}))
-	}
-	create("tpl-de-energy", "DEU", "Energy")
-	create("tpl-fr-cloud", "FRA", "Cloud hosting")
-
-	_, err := database.Exec(`UPDATE contract_templates SET state = 'REVIEWED' WHERE did = 'tpl-de-energy'`)
-	require.NoError(t, err)
-	_, err = database.Exec(`INSERT INTO contract_templates_approval_task (did,state,approver,created_by) VALUES ('tpl-de-energy','OPEN','org','org')`)
-	require.NoError(t, err)
-	require.NoError(t, (&command.Approver{DB: database, CTRepo: ctRepo, ATRepo: &pg.PostgresApprovalTaskRepo{}}).Handle(ctx, command.ApproveCmd{
-		DID: "tpl-de-energy", UpdatedAt: time.Now().Add(time.Hour), ApprovedBy: "org", UserRoles: userrole.UserRoles{userrole.TemplateApprover},
-	}))
-
-	search := func(qry contracttemplate.GetAllMetadataByFilterQry) []string {
-		t.Helper()
-		result, err := (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: ctRepo}).Handle(ctx, qry)
+	defer validation.SwapShapeSource(semantichub.HubShapeSource{DB: database})()
+	repo := &pg.PostgresContractTemplateRepo{}
+	for did, jurisdiction := range map[string]string{"tpl-de": "Germany", "tpl-fr": "France"} {
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal([]byte(compliantTemplateData), &doc))
+		fields, _ := doc["dcs:contractFields"].([]any)
+		doc["dcs:contractFields"] = append(fields, map[string]any{"@id": "urn:uuid:00000000-0000-4000-8000-000000000001", "@type": "dcs:ContractField", "dcs:label": "Jurisdiction", "dcs:datatype": "xsd:string", "dcs:required": false, "dcs:shape": map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"}, "dcs:value": jurisdiction})
+		raw, err := json.Marshal(doc)
 		require.NoError(t, err)
-		dids := []string{}
-		for _, item := range result {
-			dids = append(dids, item.DID)
-		}
-		return dids
+		data := datatype.JSON(raw)
+		require.NoError(t, (&command.Creator{DB: database, CTRepo: repo}).Handle(ctx, command.CreateCmd{DID: did, CreatedBy: "org", TemplateType: contracttemplatetype.ContractTemplate, PartyType: "SINGLE_PARTY", TemplateData: &data, UserRoles: userrole.UserRoles{userrole.TemplateCreator}}))
 	}
-	require.Equal(t, []string{"tpl-de-energy"}, search(contracttemplate.GetAllMetadataByFilterQry{Jurisdiction: "deu"}))
-	require.Equal(t, []string{"tpl-fr-cloud"}, search(contracttemplate.GetAllMetadataByFilterQry{Industry: "cloud"}))
-	require.Equal(t, []string{"tpl-de-energy"}, search(contracttemplate.GetAllMetadataByFilterQry{ComplianceStatus: "COMPLIANT"}))
-	require.Equal(t, []string{"tpl-fr-cloud"}, search(contracttemplate.GetAllMetadataByFilterQry{ComplianceStatus: "UNASSESSED"}))
+	rows, err := (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"germ"}]`})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "tpl-de", rows[0].DID)
+	tx, err := database.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	_, err = repo.CopyFromDID(ctx, tx, "tpl-de", "tpl-copy")
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	rows, err = (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"germ"}]`})
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	changed := datatype.JSON(`{"dcs:contractFields":[{"dcs:shape":{"@id":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},"dcs:value":"Spain"}]}`)
+	tx, err = database.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Update(ctx, tx, db.ContractTemplateUpdateData{DID: "tpl-copy", TemplateData: &changed}))
+	require.NoError(t, tx.Commit())
+	rows, err = (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"germ"}]`})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "tpl-de", rows[0].DID)
 }
 
 // DCS-IR-TR-05, DCS-IR-TR-06: an error finding of the template policy audit

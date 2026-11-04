@@ -32,8 +32,6 @@ type UpdateManageCmd struct {
 	Name         *string
 	Description  *string
 	TemplateData *datatype.JSON
-	Jurisdiction *string
-	Industry     *string
 	// TemplateLevel and RequiredTemplates are left unchanged when nil.
 	TemplateLevel     *string
 	RequiredTemplates []string
@@ -114,8 +112,6 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,
-		Jurisdiction: cmd.Jurisdiction,
-		Industry:     cmd.Industry,
 
 		TemplateLevel:     cmd.TemplateLevel,
 		RequiredTemplates: cmd.RequiredTemplates,

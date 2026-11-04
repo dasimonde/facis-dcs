@@ -45,7 +45,7 @@ function getTemplateLink(template: PartialContractTemplate): string {
 
 <template>
   <li class="list-row w-full min-w-0">
-    <div class="card w-full min-w-0 border-base-content/10 bg-base-100 list-col-grow card-border hover:bg-base-300">
+    <div class="list-col-grow card w-full min-w-0 border-base-content/10 bg-base-100 card-border hover:bg-base-300">
       <div class="card-body min-w-0">
         <div class="-mt-9 mr-1 -ml-1 grid w-full grid-cols-1 items-center gap-2 sm:grid-cols-3">
           <div class="badge badge-md badge-accent sm:justify-self-start">
@@ -90,7 +90,7 @@ function getTemplateLink(template: PartialContractTemplate): string {
           <div class="card-actions shrink-0 justify-end">
             <RouterLink
               :to="{ name: resolveViewRouteName, params: { did: template.did } }"
-              class="btn btn-primary btn-sm"
+              class="btn btn-sm btn-primary"
             >
               View
             </RouterLink>
@@ -103,7 +103,7 @@ function getTemplateLink(template: PartialContractTemplate): string {
                     }
                   : '#'
               "
-              class="btn gap-2 btn-primary btn-sm"
+              class="btn gap-2 btn-sm btn-primary"
               :class="{ 'btn-disabled': !canEdit }"
             >
               Edit

@@ -105,7 +105,7 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 // read policy. Metadata, hashes and signature values stay as evidence.
 func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) error {
 	statements := []string{
-		`UPDATE contracts SET contract_data = ` + partyNamesOnly + ` WHERE did = $1 AND contract_data IS DISTINCT FROM ` + partyNamesOnly,
+		`UPDATE contracts SET contract_data = ` + partyNamesOnly + `, search_projection = '{}'::jsonb WHERE did = $1 AND (contract_data IS DISTINCT FROM ` + partyNamesOnly + ` OR search_projection <> '{}'::jsonb)`,
 		`UPDATE contracts SET name = NULL, description = NULL WHERE did = $1 AND num_nonnulls(name, description) > 0`,
 		`UPDATE contract_history SET contract_data = '{}'::jsonb WHERE did = $1 AND contract_data IS DISTINCT FROM '{}'::jsonb`,
 		`UPDATE contract_history SET name = NULL, description = NULL WHERE did = $1 AND num_nonnulls(name, description) > 0`,
@@ -117,7 +117,7 @@ func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) 
 		`UPDATE contract_terminations SET reason = '` + ErasedReason + `' WHERE did = $1 AND reason <> '` + ErasedReason + `'`,
 		`UPDATE contract_peer_terminations SET reason = '` + ErasedReason + `' WHERE did = $1 AND reason <> '` + ErasedReason + `'`,
 		`DELETE FROM contract_negotiation_drafts WHERE contract_did = $1`,
-		`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb WHERE did = $1 AND contract_snapshot <> '{}'::jsonb`,
+		`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb, search_projection = '{}'::jsonb WHERE did = $1 AND (contract_snapshot <> '{}'::jsonb OR search_projection <> '{}'::jsonb)`,
 		`UPDATE signature_ceremonies SET pinned_payload = NULL, prepared_pdf = NULL, pid_claims = NULL, vp_token = NULL, poa_vp_token = NULL
 		 WHERE contract_did = $1 AND num_nonnulls(pinned_payload, prepared_pdf, pid_claims, vp_token, poa_vp_token) > 0`,
 		`UPDATE contract_sync_signatures SET jades_signature = ` + detachedJWS + ` WHERE did = $1 AND split_part(jades_signature, '.', 2) <> ''`,

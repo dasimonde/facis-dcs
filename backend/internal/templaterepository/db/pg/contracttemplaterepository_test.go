@@ -13,7 +13,7 @@ func TestCreateQueryInvalidatesCachedPdf(t *testing.T) {
 	query, params, err := createQuery(db.ContractTemplateUpdateData{
 		DID:  "did:example:template-1",
 		Name: ptrString("Updated template"),
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, query)
@@ -30,7 +30,7 @@ func TestCreateQueryStateChangePreservesCachedPdf(t *testing.T) {
 	query, params, err := createQuery(db.ContractTemplateUpdateData{
 		DID:   "did:example:template-1",
 		State: "SUBMITTED",
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, query)

@@ -106,20 +106,12 @@ describe('archive layout and filters', () => {
       expect(additional.isVisible()).toBe(false)
       await toggle.trigger('click')
       const inputs = additional.findAll('input')
-      for (const [index, value] of [
-        'did:test:archive',
-        'party',
-        'tag',
-        '2',
-        '2026-10-01',
-        '2026-10-31',
-        'Germany',
-      ].entries()) {
+      for (const [index, value] of ['did:test:archive', 'party', 'tag', '2', '2026-10-01', '2026-10-31'].entries()) {
         await inputs[index]!.setValue(value)
       }
       await wrapper.get('input[placeholder="Search by contract name"]').setValue('Archived')
       await wrapper.get('select').setValue('SIGNED')
-      expect(toggle.text()).toContain('7')
+      expect(toggle.text()).toContain('6')
       await toggle.trigger('click')
       expect(additional.isVisible()).toBe(false)
       await wrapper.get('form').trigger('submit')
@@ -133,7 +125,6 @@ describe('archive layout and filters', () => {
         contract_version: 2,
         valid_from: '2026-10-01T00:00:00.000Z',
         valid_until: '2026-10-31T00:00:00.000Z',
-        jurisdiction: 'Germany',
       })
       await toggle.trigger('click')
       expect((inputs[0]!.element as HTMLInputElement).value).toBe('did:test:archive')

@@ -13,7 +13,9 @@ import (
 
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/fcasset"
+	"digital-contracting-service/internal/semantichub"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
@@ -21,10 +23,12 @@ import (
 
 // DCS-FR-TR-01, DCS-FR-TR-10, DCS-FR-TR-02: a template imported from the
 // Federated Catalogue is stored in the canonical envelope under its own
-// resource IRI and keeps the jurisdiction, industry and template level the
+// resource IRI and keeps the template level the
 // publishing instance put into the catalogue.
 func TestTemplateCatalogueImportNormalizesAndKeepsMetadataPostgres(t *testing.T) {
 	database := pgtest.Open(t)
+	require.NoError(t, semantichub.Seed(context.Background(), database))
+	defer validation.SwapShapeSource(semantichub.HubShapeSource{DB: database})()
 	var statement string
 	fc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -39,7 +43,7 @@ func TestTemplateCatalogueImportNormalizesAndKeepsMetadataPostgres(t *testing.T)
 		statement = query.Statement
 		row := map[string]any{
 			"did": "remote", "version": 1, "template_type": "CONTRACT_TEMPLATE", "party_type": "SINGLE_PARTY", "name": "imported",
-			"jurisdiction": "DEU", "industry": "Energy", "template_level": "FRAME_AGREEMENT",
+			"template_level":       "FRAME_AGREEMENT",
 			"template_data_string": strings.Replace(compliantTemplateData, `"@type": "dcs:ContractTemplate",`, `"@id": "https://remote.example/template/remote", "@type": "dcs:ContractTemplate",`, 1),
 		}
 		_ = json.NewEncoder(w).Encode(fcclient.QueryResults{TotalCount: 1, Items: []map[string]any{row}})
@@ -54,27 +58,21 @@ func TestTemplateCatalogueImportNormalizesAndKeepsMetadataPostgres(t *testing.T)
 	require.Contains(t, statement, "OPTIONAL")
 
 	var stored struct {
-		ID           string `db:"id"`
-		Jurisdiction string `db:"jurisdiction"`
-		Industry     string `db:"industry"`
-		Level        string `db:"template_level"`
+		ID    string `db:"id"`
+		Level string `db:"template_level"`
 	}
-	require.NoError(t, database.Get(&stored, `SELECT template_data->>'@id' AS id, jurisdiction, industry, template_level FROM contract_templates WHERE did = $1`, *did))
+	require.NoError(t, database.Get(&stored, `SELECT template_data->>'@id' AS id, template_level FROM contract_templates WHERE did = $1`, *did))
 	require.Equal(t, base.ResourceIRI("template", *did), stored.ID)
-	require.Equal(t, "DEU", stored.Jurisdiction)
-	require.Equal(t, "Energy", stored.Industry)
 	require.Equal(t, "FRAME_AGREEMENT", stored.Level)
 }
 
-// The catalogue asset carries the searchable metadata the importing instance takes over.
+// The catalogue asset carries the template level the importing instance takes over.
 func TestCatalogueAssetCarriesSearchableMetadata(t *testing.T) {
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
 		Issuer: "did:web:dcs.example", SubjectIRI: "https://dcs.example/template/1", ValidFrom: time.Now(),
-		Subject: fcasset.CatalogueSubject{ID: "1", PartyType: "SINGLE_PARTY", Jurisdiction: "DEU", Industry: "Energy", TemplateLevel: "ADDENDUM"},
+		Subject: fcasset.CatalogueSubject{ID: "1", PartyType: "SINGLE_PARTY", TemplateLevel: "ADDENDUM"},
 	})
 	require.NoError(t, err)
 	subject := payload["credentialSubject"].(map[string]any)
-	require.Equal(t, "DEU", subject["dcs:jurisdiction"])
-	require.Equal(t, "Energy", subject["dcs:industry"])
 	require.Equal(t, "ADDENDUM", subject["dcs:templateLevel"])
 }

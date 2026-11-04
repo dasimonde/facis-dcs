@@ -15,6 +15,7 @@ import (
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/validation"
 
 	"github.com/jmoiron/sqlx"
 
@@ -109,11 +110,15 @@ func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did
 // runs inside the signing transaction, before the content hash and the
 // PAdES signature are computed over the same bytes.
 func (r *PostgresContractRepo) UpdateContractData(ctx context.Context, tx *sqlx.Tx, did string, contractData datatype.JSON) error {
+	projection, err := validation.SearchProjectionJSON(ctx, contractData)
+	if err != nil {
+		return err
+	}
 	statement := `
-        UPDATE contracts SET contract_data = $2
+        UPDATE contracts SET contract_data = $2, search_projection = $3
         WHERE did = $1
     `
-	_, err := tx.ExecContext(ctx, statement, did, contractData)
+	_, err = tx.ExecContext(ctx, statement, did, contractData, string(projection))
 	return err
 }
 

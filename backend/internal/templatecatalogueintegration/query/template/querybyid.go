@@ -35,17 +35,14 @@ type GetByIDHandler struct {
 }
 
 const retrieveTemplateByIDStatementTemplate = `
-SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type ?template_data_string ?jurisdiction ?industry ?template_level WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type ?template_data_string ?template_level WHERE {
 %s%s%s}
 LIMIT 1
 `
 
-// optionalMetadataTriples bind the searchable metadata a publishing instance
-// may leave out.
+// optionalMetadataTriples binds metadata a publishing instance may leave out.
 func optionalMetadataTriples() string {
-	return "  OPTIONAL {\n  " + fieldTriple(dcsJurisdictionIRI, "jurisdiction") + "  }\n" +
-		"  OPTIONAL {\n  " + fieldTriple(dcsIndustryIRI, "industry") + "  }\n" +
-		"  OPTIONAL {\n  " + fieldTriple(dcsTemplateLevelIRI, "template_level") + "  }\n"
+	return "  OPTIONAL {\n  " + fieldTriple(dcsTemplateLevelIRI, "template_level") + "  }\n"
 }
 
 func (h *GetByIDHandler) Handle(ctx context.Context, qry GetByIDQry) (*templatecatalogueintegration.TemplateCatalogueRetrieveByIDResponse, error) {
@@ -143,8 +140,6 @@ func mapCatalogueDetail(n map[string]interface{}) *templatecatalogueintegration.
 		TemplateType: ptr.Ref(ptr.StringFromMap(n, "template_type")),
 		PartyType:    ptr.Ref(ptr.StringFromMap(n, "party_type")),
 
-		Jurisdiction:  optionalString(n, "jurisdiction"),
-		Industry:      optionalString(n, "industry"),
 		TemplateLevel: optionalString(n, "template_level"),
 	}
 }

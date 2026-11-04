@@ -108,6 +108,16 @@ func SetShapeSource(s ShapeSource) {
 	}
 }
 
+// SwapShapeSource installs a source and returns a function restoring the prior source.
+func SwapShapeSource(s ShapeSource) func() {
+	previous := activeShapeSource
+	SetShapeSource(s)
+	return func() {
+		activeShapeSource = previous
+		ResetDomainOntologyCache()
+	}
+}
+
 func requireShapeSource() (ShapeSource, error) {
 	if activeShapeSource == nil {
 		return nil, errors.New("semantic hub shape source is not configured (SetShapeSource was never called)")

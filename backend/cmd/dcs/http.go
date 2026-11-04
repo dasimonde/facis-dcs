@@ -121,6 +121,11 @@ func requestDecoderWithForm(r *http.Request) goahttp.Decoder {
 		if (err == nil && mediaType == "application/x-www-form-urlencoded") || r.ContentLength == 0 {
 			return &formRequestDecoder{r: r}
 		}
+		if mediaType == "application/json" || contentType == "" {
+			decoder := json.NewDecoder(r.Body)
+			decoder.UseNumber()
+			return decoder
+		}
 	}
 
 	return goahttp.RequestDecoder(r)

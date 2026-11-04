@@ -73,8 +73,7 @@ function emitIntegerValue(event: Event) {
     emit('update:value', '')
     return
   }
-  const parsed = Number(next)
-  emit('update:value', Number.isInteger(parsed) ? parsed : '')
+  emit('update:value', next)
 }
 
 function emitDecimalValue(event: Event) {
@@ -85,8 +84,7 @@ function emitDecimalValue(event: Event) {
     emit('update:value', '')
     return
   }
-  const parsed = Number(next)
-  emit('update:value', Number.isNaN(parsed) ? '' : parsed)
+  emit('update:value', /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(next) ? next : '')
 }
 
 function emitDateValue(event: Event) {

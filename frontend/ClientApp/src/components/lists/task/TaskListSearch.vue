@@ -1,10 +1,11 @@
 <script setup lang="ts" generic="T extends { did: string; type: 'template' | 'contract' }">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import ListSearch from '../ListSearch.vue'
+import SemanticSearchFilters from '../SemanticSearchFilters.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 import type { ContractSearchRequest } from '@/models/requests/contract-request'
@@ -15,7 +16,7 @@ import type { ContractTemplateSearchResponse } from '@/models/responses/template
 type Searchable = PartialContractTemplate | Contract
 
 // Filters only the contract search knows (DCS-IR-CWE-07, DCS-FR-CWE-13).
-const contractOnlyFilters = ['contract_data', 'party', 'template_did', 'jurisdiction'] as const
+const contractOnlyFilters = ['contract_data', 'party', 'template_did'] as const
 type ContractOnlyFilter = (typeof contractOnlyFilters)[number]
 
 const props = defineProps<{
@@ -38,8 +39,9 @@ const filterLabels: Partial<Record<keyof Searchable | ContractOnlyFilter, string
   contract_data: 'Contract Data',
   party: 'Party',
   template_did: 'Template',
-  jurisdiction: 'Jurisdiction',
 }
+
+const semanticFilters = ref('')
 
 const emptyItem: Searchable = {
   did: '',
@@ -112,7 +114,7 @@ function toContractSearchRequest(request: Record<string, unknown>): ContractSear
   if (typeof request.contract_data === 'string') next.contract_data = request.contract_data
   if (typeof request.party === 'string') next.party = request.party
   if (typeof request.template_did === 'string') next.template_did = request.template_did
-  if (typeof request.jurisdiction === 'string') next.jurisdiction = request.jurisdiction
+  if (typeof request.semantic_filters === 'string') next.semantic_filters = request.semantic_filters
   if (typeof request.contract_version === 'number') next.contract_version = request.contract_version
   if (typeof request.contract_version === 'string' && request.contract_version.trim() !== '') {
     const parsed = Number.parseInt(request.contract_version, 10)
@@ -126,6 +128,7 @@ function toTemplateSearchRequest(request: Record<string, unknown>): ContractTemp
   if (typeof request.did === 'string') next.did = request.did
   if (typeof request.name === 'string') next.name = request.name
   if (typeof request.description === 'string') next.description = request.description
+  if (typeof request.semantic_filters === 'string') next.semantic_filters = request.semantic_filters
   return next
 }
 
@@ -163,11 +166,13 @@ const handleSearchResult = (searchResults: Searchable[] | null) => {
 </script>
 
 <template>
+  <SemanticSearchFilters v-model="semanticFilters" />
   <ListSearch
     :items="searchableItems"
     :filter-labels="filterLabels"
     :search-fn="search"
     :empty-item="emptyItem"
+    :filters="{ semantic_filters: semanticFilters || undefined }"
     :placeholder="placeholder || 'Search templates/contracts'"
     @search-result="handleSearchResult"
   />

@@ -63,6 +63,27 @@ var SemanticSchemaRegisterResponse = Type("SemanticSchemaRegisterResponse", func
 	Required("name", "version", "kind", "active")
 })
 
+var SearchFilterSource = Type("SearchFilterSource", func() {
+	Attribute("name", String)
+	Attribute("kind", String)
+	Attribute("version", Int)
+	Required("name", "kind", "version")
+})
+
+var SearchFilter = Type("SearchFilter", func() {
+	Attribute("id", String)
+	Attribute("label", String)
+	Attribute("field_iri", String)
+	Attribute("source", SearchFilterSource)
+	Required("id", "label", "field_iri", "source")
+})
+
+var SearchFilterConfig = Type("SearchFilterConfig", func() {
+	Attribute("revision", Int64)
+	Attribute("filters", ArrayOf(SearchFilter))
+	Required("revision", "filters")
+})
+
 // Semantic Hub Service (/semantic/...) — DCS-FR-TR-03, UC-02-08: versioned
 // storage for the JSON-LD contexts, SHACL shapes, and validation profiles
 // every DCS document is produced against. Reads are public (like
@@ -70,6 +91,38 @@ var SemanticSchemaRegisterResponse = Type("SemanticSchemaRegisterResponse", func
 // that external verifiers must be able to resolve without a DCS login.
 var _ = Service("SemanticHub", func() {
 	Description("Semantic Hub APIs (/semantic/...): versioned JSON-LD context, SHACL shape, and validation-profile storage (DCS-FR-TR-03, UC-02-08)")
+
+	Method("get_search_filters", func() {
+		NoSecurity()
+		Result(SearchFilterConfig)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			GET("/semantic/search-filters")
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("put_search_filters", func() {
+		Security(JWTAuth, func() { Scope("Template Manager") })
+		Payload(func() {
+			Token("token", String)
+			Attribute("revision", Int64)
+			Attribute("filters", ArrayOf(SearchFilter))
+			Required("revision", "filters")
+		})
+		Result(SearchFilterConfig)
+		Error("bad_request", ErrorResult)
+		Error("conflict", ErrorResult)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			PUT("/semantic/search-filters")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("conflict", StatusConflict)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
 
 	Method("register", func() {
 		Description("Register a new version of a schema (context/shapes/profile). Versions are immutable and monotonic per name+kind; when activate is set the new version becomes the one all newly produced documents anchor to.")

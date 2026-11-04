@@ -198,6 +198,22 @@ dcst:field-company-location-postalCode a dcs:DomainField ;
   rdfs:domain dcs:CompanyParty ;
   rdfs:range xsd:string .
 
+dcst:field-contract-jurisdiction a dcs:DomainField ;
+  rdfs:label "Jurisdiction"@en ;
+  rdfs:range xsd:string .
+
+dcst:field-contract-type a dcs:DomainField ;
+  rdfs:label "Contract type"@en ;
+  rdfs:range xsd:string .
+
+dcst:field-contract-industry a dcs:DomainField ;
+  rdfs:label "Industry"@en ;
+  rdfs:range xsd:string .
+
+dcst:field-contract-regulatoryComplianceStatus a dcs:DomainField ;
+  rdfs:label "Regulatory compliance status"@en ;
+  rdfs:range xsd:string .
+
 dcst:field-contract-governingLaw a dcs:DomainField ;
   rdfs:label "Governing Law"@en ;
   rdfs:domain dcs:LegalTerms ;

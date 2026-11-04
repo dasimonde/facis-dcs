@@ -177,8 +177,6 @@ func CatalogueSubject(processData *db.ContractTemplateProcessData, template *db.
 		template.TemplateType,
 		template.PartyType,
 	)
-	subject.Jurisdiction = base.DerefString(template.Jurisdiction)
-	subject.Industry = base.DerefString(template.Industry)
 	subject.TemplateLevel = template.TemplateLevel
 	return subject
 }

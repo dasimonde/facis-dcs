@@ -1,6 +1,7 @@
 package validation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -578,7 +579,9 @@ func decodeDocumentData(raw *datatype.JSON) (documentData, error) {
 		return documentData{}, nil
 	}
 	var data map[string]any
-	if err := json.Unmarshal(*raw, &data); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(*raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&data); err != nil {
 		return nil, fmt.Errorf("document data is not valid JSON: %w", err)
 	}
 	if data == nil {
@@ -1395,6 +1398,9 @@ func numericValue(value any) (float64, bool) {
 		return float64(typed), true
 	case float64:
 		return typed, true
+	case json.Number:
+		value, err := typed.Float64()
+		return value, err == nil
 	case float32:
 		return float64(typed), true
 	default:

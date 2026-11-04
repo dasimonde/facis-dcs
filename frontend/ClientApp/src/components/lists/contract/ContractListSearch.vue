@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import ListSearch from '../ListSearch.vue'
+import SemanticSearchFilters from '../SemanticSearchFilters.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractSearchResponse } from '@/models/responses/contract-response'
 
@@ -13,7 +14,7 @@ const emit = defineEmits<{
   searchResult: [value: Contract[] | null]
 }>()
 
-const filterLabels: Partial<Record<keyof Contract | 'party' | 'jurisdiction', string>> = {
+const filterLabels: Partial<Record<keyof Contract | 'party', string>> = {
   did: 'DID',
   name: 'Name',
   description: 'Description',
@@ -21,14 +22,16 @@ const filterLabels: Partial<Record<keyof Contract | 'party' | 'jurisdiction', st
   contract_data: 'Contract Data',
   party: 'Party',
   template_did: 'Template',
-  jurisdiction: 'Jurisdiction',
 }
 
 const deadlineUntil = ref('')
+const semanticFilters = ref('')
 
 const extraRequest = computed(() => {
-  if (!deadlineUntil.value) return {}
-  return { valid_until: `${deadlineUntil.value}T23:59:59Z` }
+  return {
+    ...(deadlineUntil.value ? { valid_until: `${deadlineUntil.value}T23:59:59Z` } : {}),
+    ...(semanticFilters.value ? { semantic_filters: semanticFilters.value } : {}),
+  }
 })
 
 const responseMapper = (response: ContractSearchResponse): Contract[] =>
@@ -66,6 +69,7 @@ defineExpose({ rerun })
 </script>
 
 <template>
+  <SemanticSearchFilters v-model="semanticFilters" />
   <ListSearch
     :items="contracts"
     :filter-labels="filterLabels"

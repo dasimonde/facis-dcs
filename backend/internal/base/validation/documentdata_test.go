@@ -126,6 +126,22 @@ func canonicalTemplateData(t *testing.T) *datatype.JSON {
 	return &data
 }
 
+func TestTemplatePersistencePreservesLargeNumericField(t *testing.T) {
+	raw := canonicalTemplateData(t)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(*raw, &doc))
+	field := doc["dcs:contractFields"].([]any)[0].(map[string]any)
+	field["dcs:value"] = json.Number("18446744073709551615")
+	data, err := datatype.NewJSON(doc)
+	require.NoError(t, err)
+	persisted, err := NormalizeTemplateDataForPersistence(&data, "example")
+	require.NoError(t, err)
+	require.Contains(t, string(*persisted), "18446744073709551615")
+	projection, err := SearchProjectionJSON(t.Context(), *persisted)
+	require.NoError(t, err)
+	require.Contains(t, string(projection), "18446744073709551615")
+}
+
 // firstPolicyDuty returns the first odrl:duty rule node from the canonical
 // dcs:policies odrl:Set structure produced by canonicalTemplateData.
 func firstPolicyDuty(data map[string]any) map[string]any {

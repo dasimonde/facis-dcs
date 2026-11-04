@@ -36,6 +36,9 @@ var genesisClauseCatalog []byte
 //go:embed assets/facis-sla-ontology.ttl
 var genesisSLAOntology []byte
 
+//go:embed assets/search-filters.json
+var genesisSearchFilters []byte
+
 //go:embed assets/dcs-odrl-profile.ttl
 var genesisODRLProfile []byte
 
@@ -374,6 +377,24 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 		if _, err := (Repo{}).Register(ctx, tx, g.name, g.kind, g.mediaType, string(g.content), "system:genesis", 0, true); err != nil {
 			return err
 		}
+	}
+	ontology, err := (Repo{}).Get(ctx, tx, SLAOntologyName, "ontology", 0)
+	if err != nil {
+		return err
+	}
+	var filters []SearchFilter
+	if err := json.Unmarshal(genesisSearchFilters, &filters); err != nil {
+		return err
+	}
+	for i := range filters {
+		filters[i].Source = SearchFilterSource{Name: ontology.Name, Kind: ontology.Kind, Version: ontology.Version}
+	}
+	raw, err := json.Marshal(filters)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO semantic_search_filter_config (singleton, revision, filters) VALUES (TRUE, 1, $1) ON CONFLICT (singleton) DO NOTHING`, string(raw)); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

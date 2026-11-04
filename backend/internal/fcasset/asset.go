@@ -28,8 +28,6 @@ type CatalogueSubject struct {
 	TemplateType string
 	PartyType    string
 	// The searchable metadata an importing instance takes over (DCS-FR-TR-10, DCS-FR-TR-02).
-	Jurisdiction  string
-	Industry      string
 	TemplateLevel string
 }
 
@@ -70,8 +68,6 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 		"dcs:templateDataString": input.TemplateDataString,
 	}
 	for key, value := range map[string]string{
-		"dcs:jurisdiction":  input.Subject.Jurisdiction,
-		"dcs:industry":      input.Subject.Industry,
 		"dcs:templateLevel": input.Subject.TemplateLevel,
 	} {
 		if value != "" {

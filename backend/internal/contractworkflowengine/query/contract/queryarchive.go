@@ -3,6 +3,7 @@ package contract
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -19,6 +20,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	events "digital-contracting-service/internal/contractworkflowengine/event"
+	"digital-contracting-service/internal/semantichub"
 )
 
 type GetArchivedContractsResult struct {
@@ -37,6 +39,7 @@ type GetArchivedContractsQry struct {
 }
 
 type SearchArchivedContractsQry struct {
+	SemanticFilters string
 	RetrievedBy     string
 	HolderDID       string
 	UserRoles       userrole.UserRoles
@@ -50,7 +53,6 @@ type SearchArchivedContractsQry struct {
 	Party           string
 	ValidFrom       *time.Time
 	ValidUntil      *time.Time
-	Jurisdiction    string
 }
 
 func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchivedContractsQry) (*GetArchivedContractsResult, error) {
@@ -116,7 +118,12 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		states = []string{query.State.String()}
 	}
 
+	semanticFilters, err := semantichub.ResolveSearchFilters(ctx, tx, query.SemanticFilters)
+	if err != nil {
+		return nil, err
+	}
 	searchValues := db.SearchValues{
+		SemanticFilters: semanticFilters,
 		DID:             query.DID,
 		ContractVersion: query.ContractVersion,
 		States:          states,
@@ -127,7 +134,6 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		Party:           query.Party,
 		ValidFrom:       query.ValidFrom,
 		ValidUntil:      query.ValidUntil,
-		Jurisdiction:    query.Jurisdiction,
 	}
 
 	archivedContractsMetadata, err := h.CRepo.ReadArchivedContractsByFilter(ctx, tx, searchValues)
@@ -193,6 +199,9 @@ func searchCriteria(v db.SearchValues) map[string]string {
 	if v.ValidUntil != nil {
 		set("valid_until", v.ValidUntil.UTC().Format(time.RFC3339))
 	}
-	set("jurisdiction", v.Jurisdiction)
+	if len(v.SemanticFilters) > 0 {
+		encoded, _ := json.Marshal(v.SemanticFilters)
+		set("semantic_filters", string(encoded))
+	}
 	return criteria
 }

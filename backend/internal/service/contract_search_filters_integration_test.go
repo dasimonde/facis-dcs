@@ -11,6 +11,7 @@ import (
 	"digital-contracting-service/internal/base/pgtest"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
+	"digital-contracting-service/internal/semantichub"
 )
 
 // DCS-IR-CWE-07 and DCS-FR-CWE-13: contract search filters by party, template
@@ -23,6 +24,8 @@ func TestContractSearchFiltersByPartyTemplateAndJurisdictionPostgres(t *testing.
 		 '{"dcs:contractFields":[{"@id":"de#j","dcs:shape":{"@id":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},"dcs:value":"Germany"}]}'),
 		('fr','','Org A','DRAFT','tpl-2',1,'{"creator":"did:web:a","counterparty":"did:web:c"}',
 		 '{"dcs:contractFields":[{"@id":"fr#j","dcs:shape":{"@id":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},"dcs:value":{"@value":"France"}}]}')`)
+	require.NoError(t, err)
+	_, err = database.Exec(`UPDATE contracts SET search_projection = jsonb_build_object('https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction', jsonb_build_array(COALESCE(contract_data->'dcs:contractFields'->0->'dcs:value'->>'@value', contract_data->'dcs:contractFields'->0->>'dcs:value')))`)
 	require.NoError(t, err)
 	ctx := contractreadpolicy.WithSystemScope(context.Background())
 	search := func(values cwedb.SearchValues) []string {
@@ -40,8 +43,8 @@ func TestContractSearchFiltersByPartyTemplateAndJurisdictionPostgres(t *testing.
 
 	require.Equal(t, []string{"fr"}, search(cwedb.SearchValues{Party: "did:web:c"}))
 	require.Equal(t, []string{"de"}, search(cwedb.SearchValues{TemplateDID: "tpl-1"}))
-	require.Equal(t, []string{"de"}, search(cwedb.SearchValues{Jurisdiction: "germ"}))
-	require.Equal(t, []string{"fr"}, search(cwedb.SearchValues{Jurisdiction: "France", Party: "did:web:a"}))
+	require.Equal(t, []string{"de"}, search(cwedb.SearchValues{SemanticFilters: []semantichub.ResolvedSearchFilter{{FieldIRI: "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction", Value: "germ", Text: true}}}))
+	require.Equal(t, []string{"fr"}, search(cwedb.SearchValues{SemanticFilters: []semantichub.ResolvedSearchFilter{{FieldIRI: "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction", Value: "France", Text: true}}, Party: "did:web:a"}))
 }
 
 // DCS-FR-CWE-13: a wildcard in the jurisdiction or name filter matches as text.
@@ -53,6 +56,8 @@ func TestContractSearchMatchesWildcardsAsTextPostgres(t *testing.T) {
 		 '{"dcs:contractFields":[{"@id":"de#j","dcs:shape":{"@id":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},"dcs:value":"Germany"}]}'),
 		('pct','','Org A','DRAFT','tpl-1',1,'Supply 100%',
 		 '{"dcs:contractFields":[{"@id":"pct#j","dcs:shape":{"@id":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},"dcs:value":"EU_DE"}]}')`)
+	require.NoError(t, err)
+	_, err = database.Exec(`UPDATE contracts SET search_projection = jsonb_build_object('https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction', jsonb_build_array(COALESCE(contract_data->'dcs:contractFields'->0->'dcs:value'->>'@value', contract_data->'dcs:contractFields'->0->>'dcs:value')))`)
 	require.NoError(t, err)
 	ctx := contractreadpolicy.WithSystemScope(context.Background())
 	tx, err := database.BeginTxx(ctx, nil)
@@ -68,8 +73,8 @@ func TestContractSearchMatchesWildcardsAsTextPostgres(t *testing.T) {
 		return dids
 	}
 
-	require.Equal(t, []string{"pct"}, search(cwedb.SearchValues{Jurisdiction: "_"}))
-	require.Empty(t, search(cwedb.SearchValues{Jurisdiction: "%x"}))
+	require.Equal(t, []string{"pct"}, search(cwedb.SearchValues{SemanticFilters: []semantichub.ResolvedSearchFilter{{FieldIRI: "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction", Value: "_", Text: true}}}))
+	require.Empty(t, search(cwedb.SearchValues{SemanticFilters: []semantichub.ResolvedSearchFilter{{FieldIRI: "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction", Value: "%x", Text: true}}}))
 	require.Equal(t, []string{"pct"}, search(cwedb.SearchValues{Name: "%"}))
 }
 

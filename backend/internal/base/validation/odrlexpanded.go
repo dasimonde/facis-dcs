@@ -31,6 +31,21 @@ func dcsNamespace() string {
 // document declares only a subset of the hub prefixes (conflicting
 // redefinitions are already rejected at creation).
 func expandForAudit(ctx context.Context, document map[string]any, source ShapeSource) (map[string]any, error) {
+	expanded, err := expandDocument(ctx, document, source)
+	if err != nil {
+		return nil, err
+	}
+	if len(expanded) == 0 {
+		return map[string]any{}, nil
+	}
+	root, ok := expanded[0].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("JSON-LD expansion: unexpected root node %T", expanded[0])
+	}
+	return root, nil
+}
+
+func expandDocument(ctx context.Context, document map[string]any, source ShapeSource) ([]any, error) {
 	var contextContent string
 	var err error
 	if pinned := pinnedHubContextVersion(document); pinned > 0 {
@@ -70,14 +85,7 @@ func expandForAudit(ctx context.Context, document map[string]any, source ShapeSo
 	if err != nil {
 		return nil, fmt.Errorf("JSON-LD expansion: %w", err)
 	}
-	if len(expanded) == 0 {
-		return map[string]any{}, nil
-	}
-	root, ok := expanded[0].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("JSON-LD expansion: unexpected root node %T", expanded[0])
-	}
-	return root, nil
+	return expanded, nil
 }
 
 // expandedValues returns a property's value nodes on an expanded node.

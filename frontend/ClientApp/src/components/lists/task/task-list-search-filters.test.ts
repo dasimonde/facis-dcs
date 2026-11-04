@@ -8,12 +8,10 @@ import TaskListSearch from './TaskListSearch.vue'
 const search = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 vi.mock('@/services/contract-workflow-service', () => ({ contractWorkflowService: { search } }))
 
-// DCS-IR-CWE-07 and DCS-FR-CWE-13: the review search locates contracts by party,
-// template and jurisdiction.
+// DCS-IR-CWE-07 and DCS-FR-CWE-13: review search retains its system filters.
 it.each([
   ['Party', 'party', 'did:web:b.example'],
   ['Template', 'template_did', 'did:web:template:1'],
-  ['Jurisdiction', 'jurisdiction', 'Germany'],
 ])('searches contracts by %s', async (label, key, value) => {
   const pinia = createPinia()
   setActivePinia(pinia)

@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -12,6 +13,8 @@ import (
 	"digital-contracting-service/internal/base/contractreadpolicy"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/validation"
+	"digital-contracting-service/internal/semantichub"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
@@ -24,20 +27,28 @@ type PostgresContractRepo struct {
 }
 
 func (r *PostgresContractRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.Contract) error {
+	projection, err := contractProjection(ctx, data.ContractData)
+	if err != nil {
+		return err
+	}
 
 	statement := `
         INSERT INTO contracts (
             did, origin, created_at, created_by, state, name,
-            description, contract_data, template_did, template_version, responsible
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            description, contract_data, template_did, template_version, responsible, search_projection
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     `
-	_, err := tx.ExecContext(ctx, statement,
+	_, err = tx.ExecContext(ctx, statement,
 		data.DID, data.Origin, data.CreatedAt, data.CreatedBy, data.State, data.Name,
-		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible)
+		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible, string(projection))
 	return err
 }
 
 func (r *PostgresContractRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, data db.Contract) error {
+	projection, err := contractProjection(ctx, data.ContractData)
+	if err != nil {
+		return err
+	}
 
 	if data.CreatedAt.IsZero() {
 		data.CreatedAt = time.Now()
@@ -47,14 +58,21 @@ func (r *PostgresContractRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, da
         INSERT INTO contracts (
             did, origin, created_at, created_by, updated_at, state, name,
             description, contract_data, template_did, template_version, responsible,
-            start_date, exp_date, exp_policy, exp_notice_period
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            start_date, exp_date, exp_policy, exp_notice_period, search_projection
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
     `
-	_, err := tx.ExecContext(ctx, statement,
+	_, err = tx.ExecContext(ctx, statement,
 		data.DID, data.Origin, data.CreatedAt, data.CreatedBy, data.UpdatedAt, data.State, data.Name,
 		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible,
-		data.StartDate, data.ExpDate, data.ExpPolicy, data.ExpNoticePeriod)
+		data.StartDate, data.ExpDate, data.ExpPolicy, data.ExpNoticePeriod, string(projection))
 	return err
+}
+
+func contractProjection(ctx context.Context, data *datatype.JSON) ([]byte, error) {
+	if data == nil {
+		return validation.SearchProjectionJSON(ctx, nil)
+	}
+	return validation.SearchProjectionJSON(ctx, *data)
 }
 
 func (r *PostgresContractRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string, modifiedBy string) error {
@@ -268,6 +286,10 @@ func (r *PostgresContractRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *
 	if len(params) > 0 {
 		query += " AND " + *conditions
 	}
+	if semantic, args := semantichub.SearchFilterSQL(values.SemanticFilters, "sf.search_projection", len(params)+1); semantic != "" {
+		query += " AND EXISTS (SELECT 1 FROM contracts sf WHERE sf.did = contracts_effective_metadata.did AND " + semantic + ")"
+		params = append(params, args...)
+	}
 	query += " AND " + contractreadpolicy.SQL(ctx, "contracts_effective_metadata.did", &params)
 
 	if pagination.Limit > 0 {
@@ -377,14 +399,24 @@ func (r *PostgresContractRepo) ClaimRenewalNotice(ctx context.Context, tx *sqlx.
 }
 
 func (r *PostgresContractRepo) StoreArchiveEntry(ctx context.Context, tx *sqlx.Tx, data db.ContractArchiveEntry) error {
+	var snapshot struct {
+		ContractData json.RawMessage `json:"contract_data"`
+	}
+	if err := json.Unmarshal(data.ContractSnapshot, &snapshot); err != nil {
+		return err
+	}
+	projection, err := validation.SearchProjectionJSON(ctx, snapshot.ContractData)
+	if err != nil {
+		return err
+	}
 	statement := `
         INSERT INTO contract_archive_entries (
             did, contract_version, stored_by, stored_at, contract_snapshot, content_hash, snapshot_cid, signature_metadata,
-            credential_hashes, tsa_receipt, evidence, retention_until
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '{}'::jsonb), COALESCE($9::jsonb, '{}'::jsonb), COALESCE($10::jsonb, '{}'::jsonb), COALESCE($11::jsonb, '{}'::jsonb), $12)
+            credential_hashes, tsa_receipt, evidence, retention_until, search_projection
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '{}'::jsonb), COALESCE($9::jsonb, '{}'::jsonb), COALESCE($10::jsonb, '{}'::jsonb), COALESCE($11::jsonb, '{}'::jsonb), $12, $13)
         ON CONFLICT (did, contract_version) DO NOTHING
     `
-	_, err := tx.ExecContext(ctx, statement,
+	_, err = tx.ExecContext(ctx, statement,
 		data.DID,
 		data.ContractVersion,
 		data.StoredBy,
@@ -397,6 +429,7 @@ func (r *PostgresContractRepo) StoreArchiveEntry(ctx context.Context, tx *sqlx.T
 		data.TSAReceipt,
 		data.Evidence,
 		data.RetentionUntil,
+		string(projection),
 	)
 	return err
 }
@@ -580,6 +613,10 @@ func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context
 	if len(params) > 0 {
 		query += " AND " + *conditions
 	}
+	if semantic, args := semantichub.SearchFilterSQL(values.SemanticFilters, "sf.search_projection", len(params)+1); semantic != "" {
+		query += " AND EXISTS (SELECT 1 FROM contract_archive_entries sf WHERE sf.did = contracts_archive_metadata.did AND sf.contract_version = contracts_archive_metadata.contract_version AND sf.archive_status <> 'DELETED' AND " + semantic + ")"
+		params = append(params, args...)
+	}
 	query += " AND " + contractreadpolicy.SQL(ctx, "contracts_archive_metadata.did", &params)
 
 	var cts []db.ContractMetadata
@@ -709,7 +746,15 @@ func (r *PostgresContractRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, 
 }
 
 func (r *PostgresContractRepo) Update(ctx context.Context, tx *sqlx.Tx, data db.ContractUpdateData) error {
-	query, params, err := createQuery(data)
+	var projection []byte
+	var err error
+	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
+		projection, err = contractProjection(ctx, data.ContractData)
+		if err != nil {
+			return err
+		}
+	}
+	query, params, err := createQuery(data, projection)
 	if err != nil {
 		return err
 	}
@@ -718,7 +763,15 @@ func (r *PostgresContractRepo) Update(ctx context.Context, tx *sqlx.Tx, data db.
 }
 
 func (r *PostgresContractRepo) RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data db.Contract) error {
-	query, params, err := createRemoteQuery(data)
+	var projection []byte
+	var err error
+	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
+		projection, err = contractProjection(ctx, data.ContractData)
+		if err != nil {
+			return err
+		}
+	}
+	query, params, err := createRemoteQuery(data, projection)
 	if err != nil {
 		return err
 	}
@@ -802,13 +855,7 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		params = append(params, values.TemplateDID)
 		paramIndex++
 	}
-	if len(values.Jurisdiction) > 0 {
-		conditions += ` did IN (SELECT c.did FROM contracts_effective c,
-			jsonb_array_elements(CASE WHEN jsonb_typeof(c.contract_data->'dcs:contractFields') = 'array' THEN c.contract_data->'dcs:contractFields' ELSE '[]'::jsonb END) f
-			WHERE f->'dcs:shape'->>'@id' LIKE '%#field-contract-jurisdiction'
-			AND COALESCE(f->'dcs:value'->>'@value', f->>'dcs:value') ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\') AND`
-		params = append(params, containsPattern(values.Jurisdiction))
-	}
+
 	l := len(" AND")
 	if len(conditions) > l {
 		conditions = conditions[:len(conditions)-l]
@@ -825,7 +872,7 @@ func containsPattern(value string) string {
 	return "%" + likeEscaper.Replace(value) + "%"
 }
 
-func createQuery(data db.ContractUpdateData) (*string, []interface{}, error) {
+func createQuery(data db.ContractUpdateData, projection []byte) (*string, []interface{}, error) {
 	queryBase := `UPDATE contracts SET `
 	var columns []string
 	var params []interface{}
@@ -849,6 +896,7 @@ func createQuery(data db.ContractUpdateData) (*string, []interface{}, error) {
 	}
 	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
 		addParam("contract_data", data.ContractData)
+		addParam("search_projection", string(projection))
 	}
 	if data.StartDate != nil {
 		addParam("start_date", data.StartDate)
@@ -878,7 +926,7 @@ func createQuery(data db.ContractUpdateData) (*string, []interface{}, error) {
 	return &fullQuery, params, nil
 }
 
-func createRemoteQuery(data db.Contract) (*string, []interface{}, error) {
+func createRemoteQuery(data db.Contract, projection []byte) (*string, []interface{}, error) {
 	queryBase := `UPDATE contracts SET `
 	var columns []string
 	var params []interface{}
@@ -902,6 +950,7 @@ func createRemoteQuery(data db.Contract) (*string, []interface{}, error) {
 	}
 	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
 		addParam("contract_data", data.ContractData)
+		addParam("search_projection", string(projection))
 	}
 	if data.StartDate != nil {
 		addParam("start_date", data.StartDate)

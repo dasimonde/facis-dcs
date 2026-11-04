@@ -91,15 +91,9 @@ export const contractTemplateService: ContractTemplateService = {
   },
 
   async search(request: ContractTemplateSearchRequest): Promise<ContractTemplateSearchResponse> {
-    return http
-      .get<ContractTemplateSearchResponse>('/template/search', { params: request })
-      .then((res) => {
-        return res.data
-      })
-      .catch((err: unknown) => {
-        console.error('Search Error:', err)
-        return []
-      })
+    return http.get<ContractTemplateSearchResponse>('/template/search', { params: request }).then((res) => {
+      return res.data
+    })
   },
 
   async retrieve(request?: ContractTemplateRetrieveRequest) {

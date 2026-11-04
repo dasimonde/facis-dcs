@@ -80,13 +80,14 @@ export function compareXsdDurations(left: DurationMagnitude, right: DurationMagn
   return null
 }
 
-function numericValue(value: unknown): number | null {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (trimmed === '') return null
-  const parsed = Number(normalizeNumberInput(trimmed))
-  return Number.isFinite(parsed) ? parsed : null
+function numericValue(value: unknown): { coefficient: bigint; exponent: number } | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const input = normalizeNumberInput(String(value).trim()).replace(/^([+-]?)\./, '$10.')
+  const match = /^([+-]?)(\d+)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(input)
+  if (!match) return null
+  const exponent = Number(match[4] ?? 0) - (match[3]?.length ?? 0)
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 1000 || input.length > 1024) return null
+  return { coefficient: BigInt(`${match[1] === '-' ? '-' : ''}${match[2]}${match[3] ?? ''}`), exponent }
 }
 
 function durationValue(value: unknown): DurationMagnitude | null {
@@ -117,7 +118,12 @@ export function compareXsdValues(left: unknown, right: unknown): number | null {
 
   const leftNumber = numericValue(left)
   const rightNumber = numericValue(right)
-  if (leftNumber !== null && rightNumber !== null) return sign(leftNumber, rightNumber)
+  if (leftNumber !== null && rightNumber !== null) {
+    const exponent = Math.min(leftNumber.exponent, rightNumber.exponent)
+    const leftValue = leftNumber.coefficient * 10n ** BigInt(leftNumber.exponent - exponent)
+    const rightValue = rightNumber.coefficient * 10n ** BigInt(rightNumber.exponent - exponent)
+    return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0
+  }
   if (leftNumber !== null || rightNumber !== null) return null
 
   const leftInstant = instantValue(left)

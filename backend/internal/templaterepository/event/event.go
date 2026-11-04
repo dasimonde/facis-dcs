@@ -154,8 +154,6 @@ func (e VerifyEvent) GetDID() string {
 type Classification struct {
 	TemplateType      string   `json:"template_type"`
 	PartyType         string   `json:"party_type"`
-	Jurisdiction      *string  `json:"jurisdiction,omitempty"`
-	Industry          *string  `json:"industry,omitempty"`
 	TemplateLevel     string   `json:"template_level"`
 	RequiredTemplates []string `json:"required_templates"`
 }

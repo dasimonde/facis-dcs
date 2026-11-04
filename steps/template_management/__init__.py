@@ -5,6 +5,7 @@ from . import contract_api_steps  # noqa: F401
 from . import contract_workflow_steps  # noqa: F401
 from . import contract_state_machine_steps  # noqa: F401
 from . import template_api_steps  # noqa: F401
+from . import semantic_template_search_steps  # noqa: F401
 from . import template_workflow_steps  # noqa: F401
 from . import schema_api_steps  # noqa: F401
 from . import dcs_contract_hierarchy_steps  # noqa: F401

@@ -3,6 +3,7 @@ import { ChevronDownIcon, MagnifyingGlassIcon } from '@heroicons/vue/24/outline'
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import SemanticSearchFilters from '@/components/lists/SemanticSearchFilters.vue'
 import { type ContractChange, useContractChanges } from '@/composables/useContractChanges'
 import { ROUTES } from '@/router/router'
 import {
@@ -651,10 +652,7 @@ function shortDid(did: string): string {
               Valid until
               <input v-model="search.valid_until" type="date" class="input w-full" />
             </label>
-            <label class="fieldset min-w-0">
-              Jurisdiction
-              <input v-model="search.jurisdiction" class="input w-full" />
-            </label>
+            <SemanticSearchFilters v-model="search.semantic_filters" />
           </div>
         </form>
         <div v-if="entriesOutdated" role="status" class="alert alert-info" data-testid="archive-entries-outdated">

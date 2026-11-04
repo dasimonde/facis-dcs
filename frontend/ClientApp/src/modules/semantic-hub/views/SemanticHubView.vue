@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { refreshOntologyDomainFields } from '@template-repository/utils/ontology-domain-fields'
 import PublishEntryForm from '@semantic-hub/components/PublishEntryForm.vue'
 import RegisterVersionForm from '@semantic-hub/components/RegisterVersionForm.vue'
+import SearchFilterConfig from '@semantic-hub/components/SearchFilterConfig.vue'
 import {
   getSchemaVersions,
   listSchemas,
@@ -116,6 +117,8 @@ onMounted(loadEntries)
         already produced remain pinned to the version used when they were created.
       </p>
     </header>
+
+    <SearchFilterConfig :entries="entries" />
 
     <div class="grid gap-4 lg:grid-cols-[minmax(260px,1fr)_2fr]">
       <!-- Entry list -->

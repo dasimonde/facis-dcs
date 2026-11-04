@@ -14,7 +14,7 @@ const IRI = 'did:web:example:template:sla'
 const RESPONSE = `${IRI}#field-response-minutes`
 const ESCALATION = `${IRI}#field-escalation-minutes`
 
-function field(id: string, label: string, value?: number): DcsContractField {
+function field(id: string, label: string, value?: number | string): DcsContractField {
   return {
     '@id': id,
     '@type': 'dcs:ContractField',
@@ -47,7 +47,7 @@ function document(constraint: OdrlConstraint, fields: DcsContractField[]): DcsDo
   } as unknown as DcsDocumentData
 }
 
-function filled(id: string, label: string, value: number): SemanticConditionValue {
+function filled(id: string, label: string, value: number | string): SemanticConditionValue {
   return { blockId: '', conditionId: id, parameterName: label, parameterValue: value }
 }
 
@@ -87,6 +87,22 @@ describe('a boundary that references a contract field', () => {
     )
     expect(result.isValid, '15 minutes exceeds the 10 minutes now being negotiated').toBe(false)
     expect(result.errors[0]?.message).toContain('Expected <= 10')
+  })
+
+  it('compares large typed integer boundaries without rounding', () => {
+    const conditions = getSemanticConditionsFromTemplateData(
+      document(boundedByField, [field(RESPONSE, 'Response time'), field(ESCALATION, 'Escalation threshold')]),
+    )
+    const result = verifySemanticValue(
+      conditions,
+      [
+        filled(RESPONSE, 'Response time', '18446744073709551615'),
+        filled(ESCALATION, 'Escalation threshold', '18446744073709551614'),
+      ],
+      [],
+    )
+    expect(result.isValid).toBe(false)
+    expect(result.errors[0]?.message).toContain('Expected <= 18446744073709551614')
   })
 
   it('holds nothing against a value while its boundary is still unfilled', () => {
