@@ -124,6 +124,9 @@ func (g *CounterpartyPoAGate) Check(peerDID, localDID, contractIRI string, signe
 		if subject.Signatory == "" {
 			return deny(fmt.Errorf("counterparty Power of Attorney: the signing summary embedded for %q names no signatory", organization))
 		}
+		if subject.PoASubjectDID == "" {
+			return deny(fmt.Errorf("counterparty Power of Attorney: the signing summary embedded for %q names no Power of Attorney holder", organization))
+		}
 		if identity.SameDIDWeb(organization, strings.TrimSpace(localDID)) {
 			continue
 		}
@@ -131,8 +134,8 @@ func (g *CounterpartyPoAGate) Check(peerDID, localDID, contractIRI string, signe
 			continue
 		}
 		if _, err := g.verify()(attachment.PoAPresentation, g.Trust, oid4vp.CounterpartyPoAExpectation{
-			Organization: organization,
-			SignatoryDID: subject.Signatory,
+			Organization:  organization,
+			PoASubjectDID: subject.PoASubjectDID,
 		}); err != nil {
 			return deny(fmt.Errorf("counterparty Power of Attorney for party %q: %w", organization, err))
 		}

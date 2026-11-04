@@ -123,10 +123,9 @@ func TestAConsumedOrStaleCeremonyDoesNotSignAgain(t *testing.T) {
 	require.NotNil(t, consumed.ConsumedAt)
 }
 
-// DCS-FR-SM-03, DCS-FR-UC-14-1: the Power of Attorney presented at the
-// ceremony is issued to the person the PID identifies and grants the Contract
-// Signer role.
-func TestPresentationRequiresAPoAOfTheSignatoryWithTheSignerRole(t *testing.T) {
+// DCS-FR-SM-03, DCS-FR-UC-14-1: PID and PoA credentials may use distinct,
+// credential-specific holder identifiers; the PoA must still grant the signer role.
+func TestPresentationRecordsDistinctPIDAndPoASubjects(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version) VALUES ($1,'',$2,'APPROVED','tpl',1)`, bindingContractDID, bindingOrg)
@@ -146,11 +145,16 @@ func TestPresentationRequiresAPoAOfTheSignatoryWithTheSignerRole(t *testing.T) {
 	id := start()
 	_, err = present.CompletePresentation(ctx, cmd(id, bindingSigner, "Contract Reviewer"))
 	require.ErrorIs(t, err, ErrPoAUnauthorized, "a PoA without the Contract Signer role verified the ceremony")
-	_, err = present.CompletePresentation(ctx, cmd(id, "did:jwk:someone-else", "Contract Signer"))
-	require.ErrorIs(t, err, ErrPoAUnauthorized, "a PoA of another person verified the ceremony")
-	verified, err := present.CompletePresentation(ctx, cmd(id, bindingSigner, "Contract Reviewer", "Contract Signer"))
+
+	poaSubject := "did:jwk:credential-specific-poa-holder"
+	verified, err := present.CompletePresentation(ctx, cmd(id, poaSubject, "Contract Signer"))
 	require.NoError(t, err)
 	require.Equal(t, db.CeremonyVerified, verified.Status)
+	var pidSubject, storedPoASubject string
+	require.NoError(t, database.QueryRow(`SELECT signer_did, poa_subject_did FROM signature_ceremonies WHERE id = $1`, id).
+		Scan(&pidSubject, &storedPoASubject))
+	require.Equal(t, bindingSigner, pidSubject)
+	require.Equal(t, poaSubject, storedPoASubject)
 }
 
 // DCS-FR-SM-19, DCS-FR-SM-23: a refused wallet response is kept on the

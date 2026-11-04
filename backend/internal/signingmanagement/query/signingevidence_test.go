@@ -101,6 +101,7 @@ func signingSummary(t *testing.T, key *ecdsa.PrivateKey, signerDID, reportHash s
 		provenance.SigningSummary{
 			ContractID:           "did:example:contract-1",
 			SignerDID:            signerDID,
+			PoASubjectDID:        "did:example:poa-holder-1",
 			CeremonyID:           "ceremony-1",
 			FieldName:            "party-1",
 			ContentHash:          "aa",
@@ -284,11 +285,12 @@ func signingSummaryForField(t *testing.T, key *ecdsa.PrivateKey, field string) j
 		provenance.NewHSMVCSigner(key, "dcs-vc"), evidenceIssuerDID,
 		provenance.CredentialStatusRef{StatusListCredential: "https://dcs.example.org/status-list/1", Index: 3},
 		provenance.SigningSummary{
-			ContractID: "did:example:contract-1",
-			SignerDID:  "did:example:signer-1",
-			CeremonyID: "ceremony-1",
-			FieldName:  field,
-			KBSDHash:   "cc",
+			ContractID:    "did:example:contract-1",
+			SignerDID:     "did:example:signer-1",
+			PoASubjectDID: "did:example:poa-holder-1",
+			CeremonyID:    "ceremony-1",
+			FieldName:     field,
+			KBSDHash:      "cc",
 		})
 	if err != nil {
 		t.Fatalf("issue signing summary: %v", err)

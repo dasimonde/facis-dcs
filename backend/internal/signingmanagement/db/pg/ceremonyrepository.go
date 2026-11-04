@@ -20,7 +20,7 @@ const ceremonyColumns = `id, contract_did, field_name, requested_by, requested_h
 		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
 		       prepared_pdf, prepared_pdf_sha256, request_nonce, request_expires_at, credential_type,
 		       published_by, published_holder_did, published_roles, consumed_at,
-		       poa_organization, poa_roles, poa_vp_token,
+		       poa_organization, poa_subject_did, poa_roles, poa_vp_token,
 		       pinned_payload, pinned_payload_sha256, pinned_content_hash, pinned_renderer_version,
 		       pinned_signed_count, pinned_contract_version, required_credential_type,
 		       signer_cert_subject, signer_cert_serial,
@@ -145,10 +145,10 @@ func (r *PostgresCeremonyRepo) MarkCeremonyVerified(ctx context.Context, tx *sql
 	res, err := tx.ExecContext(ctx, `
 		UPDATE signature_ceremonies
 		   SET status = $2, signer_did = $3, vp_token = $4, pid_claims = $5, kb_sd_hash = $6, verified_at = $7,
-		       poa_organization = $9, poa_roles = $10, poa_vp_token = $11
+		       poa_organization = $9, poa_subject_did = $10, poa_roles = $11, poa_vp_token = $12
 		 WHERE id = $1 AND status = $8`,
 		v.CeremonyID, db.CeremonyVerified, v.SignerDID, v.VpToken, v.PidClaims, v.KbSdHash, now, db.CeremonyPending,
-		v.PoAOrganization, v.PoARoles, v.PoAVpToken,
+		v.PoAOrganization, v.PoASubjectDID, v.PoARoles, v.PoAVpToken,
 	)
 	if err != nil {
 		return fmt.Errorf("mark ceremony %s verified: %w", v.CeremonyID, err)

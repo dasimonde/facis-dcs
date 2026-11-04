@@ -26,9 +26,10 @@ type SigningEvidenceAttachment struct {
 // signature it stands behind: the field it was made for, the signatory that
 // made it, and the contract it belongs to.
 type SigningEvidenceSubject struct {
-	Signatory  string
-	FieldName  string
-	ContractID string
+	Signatory     string
+	PoASubjectDID string
+	FieldName     string
+	ContractID    string
 }
 
 // ReadSigningEvidence decodes one extracted attachment and the subject of the
@@ -56,9 +57,10 @@ func ReadSigningEvidenceSubject(summary json.RawMessage) (SigningEvidenceSubject
 	var vc struct {
 		Type              []string `json:"type"`
 		CredentialSubject struct {
-			ID         string `json:"id"`
-			FieldName  string `json:"field_name"`
-			ContractID string `json:"contract_id"`
+			ID            string `json:"id"`
+			PoASubjectDID string `json:"poa_subject_did"`
+			FieldName     string `json:"field_name"`
+			ContractID    string `json:"contract_id"`
 		} `json:"credentialSubject"`
 	}
 	if err := json.Unmarshal(summary, &vc); err != nil {
@@ -75,8 +77,9 @@ func ReadSigningEvidenceSubject(summary json.RawMessage) (SigningEvidenceSubject
 		return SigningEvidenceSubject{}, fmt.Errorf("the embedded evidence is not a signing summary")
 	}
 	return SigningEvidenceSubject{
-		Signatory:  strings.TrimSpace(vc.CredentialSubject.ID),
-		FieldName:  strings.TrimSpace(vc.CredentialSubject.FieldName),
-		ContractID: strings.TrimSpace(vc.CredentialSubject.ContractID),
+		Signatory:     strings.TrimSpace(vc.CredentialSubject.ID),
+		PoASubjectDID: strings.TrimSpace(vc.CredentialSubject.PoASubjectDID),
+		FieldName:     strings.TrimSpace(vc.CredentialSubject.FieldName),
+		ContractID:    strings.TrimSpace(vc.CredentialSubject.ContractID),
 	}, nil
 }
