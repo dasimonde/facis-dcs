@@ -106,18 +106,23 @@ const remove = async (sub: WebhookSubscription) => {
       {{ error }}
     </div>
 
-    <div v-if="created" data-testid="webhook-secret" class="alert flex-col items-start alert-warning" role="status">
-      <span data-testid="webhook-secret-once">
+    <div
+      v-if="created"
+      data-testid="webhook-secret"
+      class="alert w-full grid-flow-row grid-cols-1 items-stretch justify-items-stretch text-start alert-warning"
+      role="status"
+    >
+      <span data-testid="webhook-secret-once" class="w-full">
         Signing secret of the new subscription to “{{ created.event }}”. It is shown once and cannot be retrieved. If it
         is lost, delete the subscription and create a new one.
       </span>
-      <div class="flex w-full min-w-0 flex-col gap-2 sm:flex-row">
+      <div class="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
         <input
           :value="created.secret"
           data-testid="webhook-secret-value"
           readonly
           aria-label="Signing secret"
-          class="input-bordered input w-full min-w-0 font-mono text-sm"
+          class="input-bordered input min-w-0 flex-1 basis-0 font-mono text-sm"
         />
         <button type="button" class="btn shrink-0" data-testid="webhook-secret-copy" @click="copySecret">
           {{ copied ? 'Copied' : 'Copy' }}
@@ -200,7 +205,7 @@ const remove = async (sub: WebhookSubscription) => {
               <td class="text-xs">{{ new Date(sub.created_at).toLocaleString() }}</td>
               <td>
                 <button
-                  class="btn btn-outline btn-xs btn-error"
+                  class="btn btn-outline btn-error btn-xs"
                   data-testid="webhook-delete"
                   :disabled="pendingRemovals.has(sub.id)"
                   @click="remove(sub)"
