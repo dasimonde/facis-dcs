@@ -210,10 +210,13 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 		return nil, err
 	}
 
+	createdAt := time.Now().UTC()
 	data := db.Contract{
 		DID:             cmd.DID,
 		Origin:          localPeer,
 		CreatedBy:       cmd.RenewedBy,
+		CreatedAt:       createdAt,
+		UpdatedAt:       createdAt,
 		State:           contractstate.Draft.String(),
 		ContractData:    renewalContractData,
 		TemplateDID:     original.TemplateDID,

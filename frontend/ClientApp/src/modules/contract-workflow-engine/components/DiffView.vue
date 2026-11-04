@@ -63,6 +63,8 @@ const detailKeys: (keyof ContractDetailsSnapshot)[] = [
   'exp_date',
   'exp_notice_period',
   'exp_policy',
+  'signing_deadline',
+  'signing_order',
 ]
 
 function displayDetail(

@@ -188,8 +188,16 @@ it('compares an older proposal against its historical version rather than the li
   const pinia = createPinia()
   setActivePinia(pinia)
   useAuthStore().user = { issuer: USER_ISSUER, holder: 'user', roles: ['CONTRACT_NEGOTIATOR'] }
-  const historicalData = { '@id': 'historical' }
-  const proposedData = { '@id': 'proposal' }
+  const historicalData = {
+    '@id': 'historical',
+    'dcs:signingDeadline': { '@value': '2026-11-04', '@type': 'xsd:date' },
+    'dcs:signatureFields': [{ 'dcs:signatoryName': 'did:web:peer.example', 'dcs:signingOrder': 1 }],
+  }
+  const proposedData = {
+    '@id': 'proposal',
+    'dcs:signingDeadline': { '@value': '2026-11-05', '@type': 'xsd:date' },
+    'dcs:signatureFields': [{ 'dcs:signatoryName': 'did:web:peer.example', 'dcs:signingOrder': 2 }],
+  }
   retrieveHistoryByDid.mockResolvedValue([
     { contract_version: 1, name: 'Historical name', contract_data: historicalData },
   ])
@@ -219,8 +227,18 @@ it('compares an older proposal against its historical version rather than the li
   await flushPromises()
   expect(retrieveHistoryByDid).toHaveBeenCalledWith({ did: original.did })
   const details = wrapper.findComponent({ name: 'ContractDetailsDiffView' })
-  expect(details.props('left')).toMatchObject({ name: 'Historical name', contract_version: 1 })
-  expect(details.props('right')).toMatchObject({ name: 'Proposed name', contract_version: 1 })
+  expect(details.props('left')).toMatchObject({
+    name: 'Historical name',
+    contract_version: 1,
+    signing_deadline: '2026-11-04',
+    signing_order: '1 did:web:peer.example',
+  })
+  expect(details.props('right')).toMatchObject({
+    name: 'Proposed name',
+    contract_version: 1,
+    signing_deadline: '2026-11-05',
+    signing_order: '2 did:web:peer.example',
+  })
   const content = wrapper.findComponent({ name: 'DiffView' })
   expect(content.props('leftContractData')).toEqual(historicalData)
   expect(content.props('rightContractData')).toEqual(proposedData)

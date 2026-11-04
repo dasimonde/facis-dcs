@@ -60,9 +60,12 @@ describe('Webhooks view', () => {
     await flushPromises()
 
     expect(create).toHaveBeenCalledWith('contract.signed', 'https://orce.example/hook')
-    expect((wrapper.get('[data-testid="webhook-secret-value"]').element as HTMLInputElement).value).toBe(
-      'whsec_c2VjcmV0',
+    const secretInput = wrapper.get('[data-testid="webhook-secret-value"]')
+    expect((secretInput.element as HTMLInputElement).value).toBe('whsec_c2VjcmV0')
+    expect(wrapper.get('[data-testid="webhook-secret"]').classes()).toEqual(
+      expect.arrayContaining(['grid-cols-1', 'grid-flow-row']),
     )
+    expect(secretInput.classes()).toEqual(expect.arrayContaining(['flex-1', 'min-w-0']))
     expect(wrapper.findAll('[data-testid="webhook-row"]')).toHaveLength(1)
 
     await wrapper.get('[data-testid="webhook-secret-done"]').trigger('click')

@@ -49,6 +49,8 @@ const minSelectableDate = computed(() => {
   return d.toISOString().slice(0, 10)
 })
 
+const minSigningDeadline = computed(() => new Date().toISOString().slice(0, 10))
+
 function toDateInputValue(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -96,6 +98,7 @@ function onSigningPosition(field: string, event: Event) {
 const signingDeadlineInput = computed({
   get: () => workflow.value.deadline?.toISOString().slice(0, 10) ?? '',
   set: (value: string) => {
+    if (value && value < minSigningDeadline.value) return
     if (contract.value.contract_data) setSigningDeadline(contract.value.contract_data, value)
   },
 })
@@ -283,6 +286,7 @@ const signingDeadlineInput = computed({
             type="date"
             class="input-bordered input w-full"
             data-testid="contract-signing-deadline"
+            :min="minSigningDeadline"
             :disabled="disabled"
           />
           <p class="label">No signature is accepted after this day (UTC).</p>

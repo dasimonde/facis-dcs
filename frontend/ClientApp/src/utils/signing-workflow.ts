@@ -66,3 +66,30 @@ export function setSigningDeadline(contractData: object, date: string): void {
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) doc['dcs:signingDeadline'] = { '@value': date, '@type': 'xsd:date' }
   else delete doc['dcs:signingDeadline']
 }
+
+/** Calendar date (YYYY-MM-DD) of dcs:signingDeadline, or empty when unset. */
+export function signingDeadlineDateString(contractData: unknown): string {
+  const raw = literal(((contractData ?? {}) as Record<string, unknown>)['dcs:signingDeadline'])
+  if (typeof raw !== 'string' || raw.trim() === '') return ''
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(raw.trim())
+  return match ? match[1]! : raw.trim()
+}
+
+/** Human-readable signing order for Diff / details. */
+export function formatSigningOrderForDisplay(contractData: unknown): string {
+  const { order } = signingWorkflow(contractData)
+  if (order.length === 0) return ''
+  return order.map((entry) => `${entry.position} ${entry.field}`).join('\n')
+}
+
+/**
+ * Stable fingerprint of the signing workflow fields in a document. Used to
+ * detect negotiation redlines that only touch deadline/order.
+ */
+export function signingWorkflowFingerprint(contractData: unknown): string {
+  const deadline = signingDeadlineDateString(contractData)
+  const order = signingWorkflow(contractData)
+    .order.map((entry) => `${entry.field}:${entry.position}`)
+    .join('|')
+  return `${deadline}#${order}`
+}

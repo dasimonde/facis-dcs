@@ -14,19 +14,28 @@ import type { UserRole } from '@/types/user-role'
  */
 
 const routeName = vi.hoisted(() => ({ value: 'contracts.view' }))
+const push = vi.hoisted(() => vi.fn())
 
 vi.mock(import('vue-router'), async (importOriginal) => ({
   ...(await importOriginal()),
-  useRouter: () => ({ push: vi.fn(), go: vi.fn(), back: vi.fn() }) as never,
+  useRouter: () => ({ push, go: vi.fn(), back: vi.fn() }) as never,
   useRoute: () => ({ name: routeName.value }) as never,
 }))
 
-const service = vi.hoisted(() => ({ publishCatalogue: vi.fn() }))
+const service = vi.hoisted(() => ({
+  publishCatalogue: vi.fn(),
+  renew: vi.fn(() => Promise.resolve({ did: 'did:web:example.com:renewal' })),
+}))
 vi.mock('@/services/contract-workflow-service', () => ({
   contractWorkflowService: service,
 }))
 
-function mountActions(roles: UserRole[], state: ContractState, contractData?: Contract['contract_data']) {
+function mountActions(
+  roles: UserRole[],
+  state: ContractState,
+  contractData?: Contract['contract_data'],
+  stubs?: Record<string, unknown>,
+) {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles }
@@ -36,7 +45,10 @@ function mountActions(roles: UserRole[], state: ContractState, contractData?: Co
     updated_at: '2026-07-31T00:00:00Z',
     ...(contractData ? { contract_data: contractData } : {}),
   } as Contract
-  return mount(ContractManagerActions, { props: { contract }, global: { plugins: [pinia] } })
+  return mount(ContractManagerActions, {
+    props: { contract },
+    global: { plugins: [pinia], ...(stubs ? { stubs } : {}) },
+  })
 }
 
 const FEE_FIELD = 'urn:uuid:contract#field-monthly-fee'
@@ -99,6 +111,24 @@ describe('contract off-ramps', () => {
 
   it('does not offer Renew before the contract is approved', () => {
     expect(labels(mountActions(['CONTRACT_MANAGER'], 'NEGOTIATION'))).not.toContain('Renew')
+  })
+
+  it('opens the renewal draft in the editor', async () => {
+    push.mockClear()
+    service.renew.mockClear()
+    const wrapper = mountActions(['CONTRACT_MANAGER'], 'EXPIRED', undefined, {
+      ConfirmationModal: {
+        template: '<div />',
+        methods: { reveal: () => Promise.resolve({ isCanceled: false }) },
+      },
+    })
+    await wrapper.get('[data-testid="renew-contract"]').trigger('click')
+    await flushPromises()
+    expect(service.renew).toHaveBeenCalled()
+    expect(push).toHaveBeenCalledWith({
+      name: 'contracts.edit',
+      params: { did: 'did:web:example.com:renewal' },
+    })
   })
 
   // The responder instance drives its inbound contracts as Contract Manager,

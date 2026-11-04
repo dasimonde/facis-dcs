@@ -75,6 +75,9 @@ func TestRenewerMovesAnExpiredTermForward(t *testing.T) {
 	require.True(t, repo.updates[0].ExpDate.After(now))
 
 	require.NotNil(t, repo.created)
+	require.False(t, repo.created.CreatedAt.IsZero(), "renewal created_at must not be the zero time")
+	require.Equal(t, time.UTC, repo.created.CreatedAt.Location())
+	require.False(t, repo.created.CreatedAt.Before(now.Add(-time.Minute)))
 	meta := renewalMetadata(t, repo.created.ContractData)
 	require.Equal(t, repo.updates[0].ExpDate.Format(time.RFC3339), meta[metaExpirationDate].(map[string]any)["@value"])
 }

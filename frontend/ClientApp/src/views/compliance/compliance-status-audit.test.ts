@@ -72,6 +72,14 @@ function rowNames(wrapper: Awaited<ReturnType<typeof mountAndSelect>>) {
 }
 
 describe('Compliance Viewer compliance status, audit facts and registry alert', () => {
+  it('keeps the selected contract text readable on its light background', async () => {
+    const wrapper = await mountAndSelect()
+    const selectedRow = wrapper.get('[data-testid="compliance-contract-row"][aria-current="true"]')
+
+    expect(selectedRow.classes()).toContain('bg-base-100')
+    expect(selectedRow.classes()).toContain('!text-base-content')
+  })
+
   it('filters contracts by the result of their last check', async () => {
     const wrapper = await mountAndSelect()
     const filter = wrapper.get('[data-testid="compliance-status-filter"]')

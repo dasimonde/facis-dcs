@@ -39,6 +39,7 @@ import {
   locallyActionableNegotiations,
 } from '@/utils/contract-negotiations'
 import { reportActionError } from '@/utils/report-action-error'
+import { signingWorkflowFingerprint } from '@/utils/signing-workflow'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
 import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -121,6 +122,7 @@ const hasChangeRequest = computed(() => {
     changedName.value ||
     changedDescription.value ||
     changedContractData.value ||
+    changedSigningWorkflow.value ||
     changedStartDate.value ||
     changedExpDate.value ||
     changeExpNoticePeriod.value ||
@@ -156,6 +158,11 @@ const changedContractData = computed(() => {
   const storedValues = contractContentValuesStore.semanticConditionValues
   return !semanticConditionValuesEqual(storedValues, contractSemanticConditionValueSnapshot.value)
 })
+
+const signingBaselineFingerprint = ref('')
+const changedSigningWorkflow = computed(
+  () => signingWorkflowFingerprint(editedContract.value?.contract_data) !== signingBaselineFingerprint.value,
+)
 
 const semanticConditionValuesEqual = (a: SemanticConditionValue[], b: SemanticConditionValue[]) => {
   if (a.length !== b.length) return false
@@ -203,6 +210,9 @@ const loadContract = async () => {
       contract.value = loaded
       const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
       editedContract.value = baseline ? { ...baseline } : null
+      // Capture before restoreNegotiationDraft: a saved draft may already change
+      // signing fields, and those must still count as a pending proposal.
+      signingBaselineFingerprint.value = signingWorkflowFingerprint(baseline?.contract_data)
       applyContractDataToDraft(baseline?.contract_data)
       await restoreNegotiationDraft()
       if (route.params.did !== id) return
@@ -265,7 +275,7 @@ function buildChangeRequest(): ContractChangeRequest {
   if (changeExpPolicy.value) {
     changeRequest.exp_policy = editedContract.value.exp_policy
   }
-  if (changedContractData.value) {
+  if (changedContractData.value || changedSigningWorkflow.value) {
     changeRequest.contract_data = buildCurrentContractData()
   }
   if (proposalComment.value.trim()) {
@@ -598,7 +608,7 @@ const exportPDF = async () => {
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
             <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Negotiate Contract</p>
-            <div role="tablist" class="tabs-border tabs tabs-lg">
+            <div role="tablist" class="tabs tabs-border tabs-lg">
               <button
                 v-for="tab in tabs"
                 :key="tab.id"

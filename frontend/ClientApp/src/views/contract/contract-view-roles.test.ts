@@ -79,6 +79,15 @@ it('offers the version comparison to an observer', async () => {
   const diff = wrapper.findComponent({ name: 'ContractHistoryDiffView' })
   expect(diff.exists()).toBe(true)
   expect(diff.props('restorable')).toBeFalsy()
+  expect(diff.props('currentDetails')).toEqual({
+    name: 'Current',
+    description: undefined,
+    contract_version: 1,
+    start_date: undefined,
+    exp_date: undefined,
+    exp_policy: undefined,
+    exp_notice_period: undefined,
+  })
 })
 
 // DCS-IR-CWE-12: Auditor and Compliance Officer inspect the contract with its
