@@ -1418,6 +1418,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	summary, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, statusEntry, provenance.SigningSummary{
 		ContractID:           cmd.DID,
 		SignerDID:            cmd.SignerDID,
+		PoASubjectDID:        derefStr(ceremony.PoASubjectDID),
 		CeremonyID:           ceremony.ID,
 		FieldName:            ceremony.FieldName,
 		ContentHash:          contentHash,

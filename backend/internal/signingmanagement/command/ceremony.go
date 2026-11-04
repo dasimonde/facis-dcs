@@ -129,8 +129,7 @@ type PresentationCmd struct {
 	PidClaims       any
 	PoAOrganization string
 	PoARoles        []string
-	// PoASubjectDID is the holder the PoA is issued to. It must be the
-	// signatory the PID identifies (SignerDID).
+	// PoASubjectDID is the credential-specific holder identifier of the PoA.
 	PoASubjectDID string
 	// PoAVpToken is the Power-of-Attorney presentation as the wallet delivered
 	// it, retained so the counterparty can verify this signature's authority
@@ -195,10 +194,9 @@ func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd Pres
 	if poaOrganization != ceremony.FieldName {
 		return nil, fmt.Errorf("%w: Power of Attorney authorizes %q, not the signed party %q", ErrPoAUnauthorized, poaOrganization, ceremony.FieldName)
 	}
-	// The PoA authorizes the person the PID identifies, and it authorizes
-	// that person to sign (FR-SM-03): natural persons sign (ADR-17).
-	if strings.TrimSpace(cmd.PoASubjectDID) != signerDID {
-		return nil, fmt.Errorf("%w: Power of Attorney is issued to %q, not to the signatory %q", ErrPoAUnauthorized, cmd.PoASubjectDID, signerDID)
+	poaSubjectDID := strings.TrimSpace(cmd.PoASubjectDID)
+	if poaSubjectDID == "" {
+		return nil, fmt.Errorf("%w: Power of Attorney carries no holder subject", ErrPoAUnauthorized)
 	}
 	if !slices.Contains(cmd.PoARoles, userrole.ContractSigner.String()) {
 		return nil, fmt.Errorf("%w: Power of Attorney grants %v, not the %q role", ErrPoAUnauthorized, cmd.PoARoles, userrole.ContractSigner)
@@ -215,6 +213,7 @@ func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd Pres
 		PidClaims:       pidBytes,
 		KbSdHash:        sdHash,
 		PoAOrganization: poaOrganization,
+		PoASubjectDID:   poaSubjectDID,
 		PoARoles:        poaRoles,
 		PoAVpToken:      strings.TrimSpace(cmd.PoAVpToken),
 	}); err != nil {

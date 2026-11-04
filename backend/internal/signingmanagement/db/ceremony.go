@@ -41,6 +41,7 @@ type SignatureCeremony struct {
 	// counterparty needs to verify this signature's authority for itself
 	// (ADR-31). All nil until the ceremony's PoA presentation is verified.
 	PoAOrganization *string    `db:"poa_organization"`
+	PoASubjectDID   *string    `db:"poa_subject_did"`
 	PoARoles        []byte     `db:"poa_roles"`
 	PoAVpToken      *string    `db:"poa_vp_token"`
 	CreatedAt       time.Time  `db:"created_at"`
@@ -131,6 +132,7 @@ type VerifiedPresentation struct {
 	PidClaims       []byte
 	KbSdHash        string
 	PoAOrganization string
+	PoASubjectDID   string
 	PoARoles        []byte
 	PoAVpToken      string
 }

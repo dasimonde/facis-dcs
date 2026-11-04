@@ -112,8 +112,8 @@ func newChainFixture(t *testing.T, anchorClaims map[string]any) chainFixture {
 
 func (f chainFixture) verify(link delegationLink) (*CounterpartyPoA, error) {
 	return VerifyCounterpartyPoA(link.Presentation, f.trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: link.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: link.SignatoryDID,
 	})
 }
 

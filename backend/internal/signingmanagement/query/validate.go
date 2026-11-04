@@ -353,8 +353,8 @@ func (h *Validator) verifyEmbeddedPoA(attachment provenance.SigningEvidenceAttac
 			"The Power of Attorney embedded for %s cannot be checked: no issuer trust is configured on this instance", subject.FieldName)}
 	}
 	if _, err := oid4vp.VerifyCounterpartyPoA(attachment.PoAPresentation, h.Trust, oid4vp.CounterpartyPoAExpectation{
-		Organization: subject.FieldName,
-		SignatoryDID: subject.Signatory,
+		Organization:  subject.FieldName,
+		PoASubjectDID: subject.PoASubjectDID,
 	}); err != nil {
 		return []string{fmt.Sprintf("The Power of Attorney embedded for %s does not verify: %v", subject.FieldName, err)}
 	}
