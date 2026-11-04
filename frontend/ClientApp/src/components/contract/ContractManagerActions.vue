@@ -242,7 +242,7 @@ const renew = async () => {
       did: props.contract.did,
       updated_at: props.contract.updated_at,
     })
-    await router.push({ name: ROUTES.CONTRACTS.VIEW, params: { did: response.did } })
+    await router.push({ name: ROUTES.CONTRACTS.EDIT, params: { did: response.did } })
   } catch (err) {
     reportActionError(err, 'Renew contract')
   } finally {
