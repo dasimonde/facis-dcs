@@ -144,3 +144,43 @@ func TestSearchFilterTextTypesAndReferencedCatalogPostgres(t *testing.T) {
 		require.Equal(t, tc.expected, count, tc.id)
 	}
 }
+
+func TestSeededJurisdictionUsesExactCodesAndIndustryRemainsText(t *testing.T) {
+	db := pgtest.Open(t)
+	ctx := context.Background()
+	require.NoError(t, Seed(ctx, db))
+	tx, err := db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.Exec(`CREATE TEMP TABLE catalog_search_projection (projection jsonb)`)
+	require.NoError(t, err)
+	_, err = tx.Exec(`INSERT INTO catalog_search_projection VALUES
+		('{"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction":["DEU"],"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-industry":["Automotive"]}'),
+		('{"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction":["AUT"],"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-industry":["Finance"]}')`)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		id, value string
+		text      bool
+		count     int
+	}{
+		{"jurisdiction", "DEU", false, 1},
+		{"jurisdiction", "AUT", false, 1},
+		{"jurisdiction", "DE", false, 0},
+		{"jurisdiction", "deu", false, 0},
+		{"jurisdiction", "Germany", false, 0},
+		{"industry", "MOT", true, 1},
+	} {
+		t.Run(tc.id+"/"+tc.value, func(t *testing.T) {
+			raw, err := json.Marshal([]map[string]string{{"filter_id": tc.id, "value": tc.value}})
+			require.NoError(t, err)
+			filters, err := ResolveSearchFilters(ctx, tx, string(raw))
+			require.NoError(t, err)
+			require.Len(t, filters, 1)
+			require.Equal(t, tc.text, filters[0].Text)
+			condition, args := SearchFilterSQL(filters, "projection", 1)
+			var count int
+			require.NoError(t, tx.GetContext(ctx, &count, `SELECT count(*) FROM catalog_search_projection WHERE `+condition, args...))
+			require.Equal(t, tc.count, count)
+		})
+	}
+}
