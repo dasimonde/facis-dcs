@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestTemplateSearchMetadataIsNeverCreatedInMigrations(t *testing.T) {
+	obsolete := regexp.MustCompile(`(?i)\b(jurisdiction|industry)\b`)
+	for name, sql := range migrationSQL(t) {
+		if obsolete.MatchString(sql) {
+			t.Errorf("%s references obsolete template search metadata", name)
+		}
+	}
+}
+
 // "A field can never be signed twice" (DCS-FR-SM-07/-17) is a rule two
 // concurrent submits can only be held to by the database: each reads the other's
 // row before it exists, so whichever check the application runs, the constraint
