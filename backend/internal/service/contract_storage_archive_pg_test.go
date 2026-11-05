@@ -94,13 +94,13 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 func TestArchiveSearchFiltersByJurisdiction(t *testing.T) {
 	db := pgtest.Open(t)
 	require.NoError(t, semantichub.Seed(context.Background(), db))
-	for did, value := range map[string]string{"did:web:dcs.example:contract:de": "Germany", "did:web:dcs.example:contract:fr": "France"} {
+	for did, value := range map[string]string{"did:web:dcs.example:contract:de": "DEU", "did:web:dcs.example:contract:fr": "FRA"} {
 		_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version) VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'SIGNED', 'tpl', 1)`, did)
 		require.NoError(t, err)
 		_, err = db.Exec(`INSERT INTO contract_archive_entries (did, contract_version, stored_by, contract_snapshot, content_hash, snapshot_cid, evidence, search_projection) VALUES ($1, 1, 'did:web:creator', '{"did":"x"}', 'sha256:`+zeroHash+`', 'bafy-snapshot', '{"source":"SIGNING_WORKFLOW_COMPLETION","snapshot_hash_algorithm":"SHA-256"}', jsonb_build_object('https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction', jsonb_build_array($2::text)))`, did, value)
 		require.NoError(t, err)
 	}
-	filters := `[{"filter_id":"jurisdiction","value":"germ"}]`
+	filters := `[{"filter_id":"jurisdiction","value":"DEU"}]`
 	found, err := archiveTestService(t, db).Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{SemanticFilters: &filters})
 	require.NoError(t, err)
 	require.Len(t, found, 1)
@@ -108,7 +108,7 @@ func TestArchiveSearchFiltersByJurisdiction(t *testing.T) {
 	searched := archiveEvents(t, db, "SEARCH_ARCHIVED_CONTRACTS")
 	require.Len(t, searched, 1)
 	criteria := searched[0]["criteria"].(map[string]any)
-	require.JSONEq(t, `[{"filter_id":"jurisdiction","field_iri":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction","value":"germ"}]`, criteria["semantic_filters"].(string))
+	require.JSONEq(t, `[{"filter_id":"jurisdiction","field_iri":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction","value":"DEU"}]`, criteria["semantic_filters"].(string))
 }
 
 func TestFailedArchiveOperationsAreAuditedWithTheirOutcome(t *testing.T) {

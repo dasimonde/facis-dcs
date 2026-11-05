@@ -25,7 +25,7 @@ def create_equivalent_templates(context):
     context.semantic_filters_by_label = {item["label"]: item for item in response.json()["filters"]}
     field_iris = {label: context.semantic_filters_by_label[label]["field_iri"] for label in ("Jurisdiction", "Industry")}
     for suffix, literal in (("Scalar", False), ("JSON-LD", True)):
-        row = {"name": f"BDD Literal Search {suffix}", "jurisdiction": "Berlin", "industry": "Energy", "literal": literal}
+        row = {"name": f"BDD Literal Search {suffix}", "jurisdiction": "DEU", "industry": "Energy", "literal": literal}
         response = SemanticTemplateSearchService.create(context, row, field_iris)
         assert response.status_code == 200, response.text
 
@@ -36,7 +36,7 @@ def create_empty_and_constrained_templates(context):
     assert response.status_code == 200, response.text
     context.semantic_filters_by_label = {item["label"]: item for item in response.json()["filters"]}
     field_iris = {label: context.semantic_filters_by_label[label]["field_iri"] for label in ("Jurisdiction", "Industry")}
-    for suffix, value, constraint in (("Filled", "Berlin", False), ("Empty", None, False), ("Constraint", None, True)):
+    for suffix, value, constraint in (("Filled", "DEU", False), ("Empty", None, False), ("Constraint", None, True)):
         row = {"name": f"BDD Empty Search {suffix}", "jurisdiction": value, "industry": "Energy", "constraint": constraint}
         response = SemanticTemplateSearchService.create(context, row, field_iris)
         assert response.status_code == 200, response.text

@@ -26,7 +26,7 @@ func TestTemplateSearchUsesSemanticValuesPostgres(t *testing.T) {
 	require.NoError(t, semantichub.Seed(ctx, database))
 	defer validation.SwapShapeSource(semantichub.HubShapeSource{DB: database})()
 	repo := &pg.PostgresContractTemplateRepo{}
-	for did, jurisdiction := range map[string]string{"tpl-de": "Germany", "tpl-fr": "France"} {
+	for did, jurisdiction := range map[string]string{"tpl-de": "DEU", "tpl-fr": "FRA"} {
 		var doc map[string]any
 		require.NoError(t, json.Unmarshal([]byte(compliantTemplateData), &doc))
 		fields, _ := doc["dcs:contractFields"].([]any)
@@ -36,7 +36,7 @@ func TestTemplateSearchUsesSemanticValuesPostgres(t *testing.T) {
 		data := datatype.JSON(raw)
 		require.NoError(t, (&command.Creator{DB: database, CTRepo: repo}).Handle(ctx, command.CreateCmd{DID: did, CreatedBy: "org", TemplateType: contracttemplatetype.ContractTemplate, PartyType: "SINGLE_PARTY", TemplateData: &data, UserRoles: userrole.UserRoles{userrole.TemplateCreator}}))
 	}
-	rows, err := (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"germ"}]`})
+	rows, err := (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"DEU"}]`})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "tpl-de", rows[0].DID)
@@ -45,15 +45,15 @@ func TestTemplateSearchUsesSemanticValuesPostgres(t *testing.T) {
 	_, err = repo.CopyFromDID(ctx, tx, "tpl-de", "tpl-copy")
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	rows, err = (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"germ"}]`})
+	rows, err = (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"DEU"}]`})
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
-	changed := datatype.JSON(`{"dcs:contractFields":[{"dcs:shape":{"@id":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},"dcs:value":"Spain"}]}`)
+	changed := datatype.JSON(`{"dcs:contractFields":[{"dcs:shape":{"@id":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},"dcs:value":"ESP"}]}`)
 	tx, err = database.BeginTxx(ctx, nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Update(ctx, tx, db.ContractTemplateUpdateData{DID: "tpl-copy", TemplateData: &changed}))
 	require.NoError(t, tx.Commit())
-	rows, err = (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"germ"}]`})
+	rows, err = (&contracttemplate.GetAllMetaDataByFilterHandler{DB: database, CTRepo: repo}).Handle(ctx, contracttemplate.GetAllMetadataByFilterQry{SemanticFilters: `[{"filter_id":"jurisdiction","value":"DEU"}]`})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "tpl-de", rows[0].DID)

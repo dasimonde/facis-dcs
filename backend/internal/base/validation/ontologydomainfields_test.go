@@ -10,7 +10,7 @@ func hubSLAOntologyTTL() string {
 	return mustReadRepoFile("backend/internal/semantichub/assets/facis-sla-ontology.ttl")
 }
 
-func TestDefaultSearchFieldsAreTextDomainFields(t *testing.T) {
+func TestDefaultSearchFieldsPreserveCatalogAndFreeTextSemantics(t *testing.T) {
 	ontology, err := parseDomainOntology(hubSLAOntologyTTL())
 	require.NoError(t, err)
 	for _, name := range []string{"jurisdiction", "type", "industry", "regulatoryComplianceStatus"} {
@@ -18,7 +18,27 @@ func TestDefaultSearchFieldsAreTextDomainFields(t *testing.T) {
 		require.True(t, ok, name)
 		require.NotEmpty(t, field.Label)
 		require.Equal(t, "http://www.w3.org/2001/XMLSchema#string", field.Range)
-		require.Nil(t, field.Constraint)
+		switch name {
+		case "jurisdiction", "type":
+			require.NotNil(t, field.Constraint)
+			require.NotEmpty(t, field.Constraint.AllowedValues)
+			labels := map[string]string{}
+			for _, option := range field.Constraint.ValueOptions {
+				labels[option.Value] = option.Label
+			}
+			require.Len(t, labels, len(field.Constraint.AllowedValues))
+			if name == "jurisdiction" {
+				require.Equal(t, "Germany", labels["DEU"])
+				require.Equal(t, "Austria", labels["AUT"])
+				require.Contains(t, field.Constraint.AllowedValues, "DEU")
+				require.Contains(t, field.Constraint.AllowedValues, "AUT")
+			} else {
+				require.Equal(t, "Service Agreement", labels["serviceAgreement"])
+				require.Contains(t, field.Constraint.AllowedValues, "serviceAgreement")
+			}
+		default:
+			require.Nil(t, field.Constraint)
+		}
 	}
 }
 

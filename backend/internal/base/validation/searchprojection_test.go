@@ -28,12 +28,12 @@ func TestSearchProjectionExpandsDocumentContext(t *testing.T) {
 	document := map[string]any{
 		"dcs:contractFields": []any{map[string]any{
 			"dcs:shape": map[string]any{"@id": "dcst:field-contract-jurisdiction"},
-			"dcs:value": "Germany",
+			"dcs:value": "DEU",
 		}},
 	}
 	projection, err := SearchProjection(context.Background(), document, fixtureShapeSource{contextJSON: contextJSON})
 	require.NoError(t, err)
-	require.Equal(t, []any{"Germany"}, projection["https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"])
+	require.Equal(t, []any{"DEU"}, projection["https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"])
 }
 
 func TestExpandedSearchProjectionUsesFilledValuesAndFullIRIs(t *testing.T) {

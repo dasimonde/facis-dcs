@@ -31,7 +31,7 @@ class SemanticTemplateSearchService:
             if label == "Jurisdiction" and row.get("constraint"):
                 document["@context"]["odrl"] = "http://www.w3.org/ns/odrl/2/"
                 clause_id = document["dcs:documentStructure"]["dcs:blocks"]["@list"][0]["@id"]
-                policy = odrl_set_policies(clause_id, "country", "eq", "Berlin")
+                policy = odrl_set_policies(clause_id, "country", "eq", "DEU")
                 policy["odrl:obligation"][0]["odrl:constraint"]["odrl:leftOperand"] = {"@id": field["@id"]}
                 policy["odrl:obligation"][0]["dcs:prose"] = {"@id": clause_id}
                 document["dcs:policies"] = policy

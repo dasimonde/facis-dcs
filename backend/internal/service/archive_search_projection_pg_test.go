@@ -27,7 +27,7 @@ func TestArchiveSearchProjectionUsesEachSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	evidence, err := datatype.NewJSON(map[string]any{"source": "SIGNING_WORKFLOW_COMPLETION", "snapshot_hash_algorithm": "SHA-256"})
 	require.NoError(t, err)
-	for i, value := range []string{"Germany", "France"} {
+	for i, value := range []string{"DEU", "FRA"} {
 		snapshot, err := datatype.NewJSON(map[string]any{"contract_data": map[string]any{"dcs:contractFields": []any{map[string]any{"dcs:shape": map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"}, "dcs:value": value}}}})
 		require.NoError(t, err)
 		tx, err := database.BeginTxx(ctx, nil)
@@ -36,14 +36,14 @@ func TestArchiveSearchProjectionUsesEachSnapshot(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit())
 	}
-	for version, expected := range map[int]string{1: "Germany", 2: "France"} {
+	for version, expected := range map[int]string{1: "DEU", 2: "FRA"} {
 		var value string
 		err := database.Get(&value, `SELECT search_projection -> $3 ->> 0 FROM contract_archive_entries WHERE did=$1 AND contract_version=$2`, did, version, "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction")
 		require.NoError(t, err)
 		require.Equal(t, expected, value)
 	}
 	service := archiveTestService(t, database)
-	for version, value := range map[int]string{1: "Germany", 2: "France"} {
+	for version, value := range map[int]string{1: "DEU", 2: "FRA"} {
 		filter := `[{"filter_id":"jurisdiction","value":"` + value + `"}]`
 		rows, err := service.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{ContractVersion: &version, SemanticFilters: &filter})
 		require.NoError(t, err)
@@ -58,10 +58,10 @@ func TestArchiveSearchProjectionUsesEachSnapshot(t *testing.T) {
 	require.Equal(t, "jurisdiction", audited[0]["filter_id"])
 	require.Equal(t, "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction", audited[0]["field_iri"])
 	require.NotEmpty(t, audited[0]["value"])
-	wrong := `[{"filter_id":"jurjurisdiction","value":"Germany"}]`
+	wrong := `[{"filter_id":"jurjurisdiction","value":"DEU"}]`
 	_, err = service.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{SemanticFilters: &wrong})
 	require.Error(t, err)
-	wrong = `[{"filter_id":"jurisdiction","value":"Germany"}]`
+	wrong = `[{"filter_id":"jurisdiction","value":"DEU"}]`
 	version := 2
 	rows, err := service.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{ContractVersion: &version, SemanticFilters: &wrong})
 	require.NoError(t, err)
