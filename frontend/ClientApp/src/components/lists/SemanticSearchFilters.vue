@@ -19,6 +19,10 @@ function options(filter: SearchFilter) {
   return resolveValueOptions(field(filter)?.valueConstraint)
 }
 
+function inputId(filter: SearchFilter) {
+  return `semantic-filter-${filter.id}`
+}
+
 watch(
   values,
   () => {
@@ -83,22 +87,33 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-wrap items-end gap-2">
-    <label v-for="filter in filters" :key="filter.id" class="form-control">
-      <span class="label">{{ filter.label }}</span>
-      <select v-if="field(filter)?.type === 'boolean'" v-model="values[filter.id]" class="select-bordered select">
+  <div class="flex flex-wrap items-end gap-3">
+    <div v-for="filter in filters" :key="filter.id" class="flex max-w-56 min-w-36 flex-col gap-1">
+      <label :for="inputId(filter)" class="text-xs font-medium text-base-content/70">{{ filter.label }}</label>
+      <select
+        v-if="field(filter)?.type === 'boolean'"
+        :id="inputId(filter)"
+        v-model="values[filter.id]"
+        class="select-bordered select w-full"
+      >
         <option value="">Any</option>
         <option value="true">Yes</option>
         <option value="false">No</option>
       </select>
-      <select v-else-if="options(filter).length" v-model="values[filter.id]" class="select-bordered select">
+      <select
+        v-else-if="options(filter).length"
+        :id="inputId(filter)"
+        v-model="values[filter.id]"
+        class="select-bordered select w-full"
+      >
         <option value="">Any</option>
         <option v-for="option in options(filter)" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
       <input
         v-else
+        :id="inputId(filter)"
         :value="values[filter.id]"
-        class="input-bordered input"
+        class="input-bordered input w-full"
         :step="field(filter)?.type === 'decimal' ? 'any' : undefined"
         :type="
           field(filter)?.type === 'date'
@@ -109,7 +124,7 @@ onMounted(async () => {
         "
         @input="values[filter.id] = ($event.target as HTMLInputElement).value"
       />
-    </label>
-    <p v-if="error" role="alert" class="text-error">{{ error }}</p>
+    </div>
+    <p v-if="error" role="alert" class="text-sm text-error">{{ error }}</p>
   </div>
 </template>

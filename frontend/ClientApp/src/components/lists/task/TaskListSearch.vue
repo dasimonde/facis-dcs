@@ -42,6 +42,9 @@ const filterLabels: Partial<Record<keyof Searchable | ContractOnlyFilter, string
 }
 
 const semanticFilters = ref('')
+const extraRequest = computed(() => ({
+  ...(semanticFilters.value ? { semantic_filters: semanticFilters.value } : {}),
+}))
 
 const emptyItem: Searchable = {
   did: '',
@@ -166,14 +169,25 @@ const handleSearchResult = (searchResults: Searchable[] | null) => {
 </script>
 
 <template>
-  <SemanticSearchFilters v-model="semanticFilters" />
-  <ListSearch
-    :items="searchableItems"
-    :filter-labels="filterLabels"
-    :search-fn="search"
-    :empty-item="emptyItem"
-    :filters="{ semantic_filters: semanticFilters || undefined }"
-    :placeholder="placeholder || 'Search templates/contracts'"
-    @search-result="handleSearchResult"
-  />
+  <div class="flex w-full min-w-0 flex-col gap-3">
+    <div class="flex min-w-0 flex-wrap items-center gap-3">
+      <ListSearch
+        :items="searchableItems"
+        :filter-labels="filterLabels"
+        :search-fn="search"
+        :empty-item="emptyItem"
+        :extra-request="extraRequest"
+        :placeholder="placeholder || 'Search templates/contracts'"
+        class="min-w-0 flex-1"
+        @search-result="handleSearchResult"
+      />
+      <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
+        <slot name="actions" />
+      </div>
+    </div>
+
+    <section class="flex flex-col gap-2 border-t border-base-300 pt-3" aria-label="Refine tasks">
+      <SemanticSearchFilters v-model="semanticFilters" />
+    </section>
+  </div>
 </template>

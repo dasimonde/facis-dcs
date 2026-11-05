@@ -16,6 +16,14 @@ vi.mock('@/services/contract-template-service', () => ({
   },
 }))
 
+async function clickSearch(wrapper: ReturnType<typeof mount>) {
+  await wrapper
+    .findAll('button')
+    .find((button) => button.text() === 'Search')!
+    .trigger('click')
+  await flushPromises()
+}
+
 it('sends the chosen state and keeps the creator of each result', async () => {
   search.mockResolvedValue([
     {
@@ -33,7 +41,7 @@ it('sends the chosen state and keeps the creator of each result', async () => {
   const stateLabel = wrapper.findAll('label').find((label) => label.text() === 'State')!
 
   await wrapper.get(`#${CSS.escape(stateLabel.attributes('for')!)}`).setValue('REJECTED')
-  await flushPromises()
+  await clickSearch(wrapper)
 
   expect(search).toHaveBeenCalledWith(expect.objectContaining({ state: 'REJECTED' }))
   const emitted = wrapper.emitted('searchResult')!
@@ -53,7 +61,7 @@ it('sends the creation days and the owner', async () => {
 
   await input('Created from').setValue('2026-03-01')
   await input('Created to').setValue('2026-03-31')
-  await flushPromises()
+  await clickSearch(wrapper)
 
   expect(search).toHaveBeenLastCalledWith(
     expect.objectContaining({ created_from: '2026-03-01', created_to: '2026-03-31' }),

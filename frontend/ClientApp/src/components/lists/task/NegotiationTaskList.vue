@@ -70,26 +70,27 @@ onUnmounted(() => stateFilterStore.reset())
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
-      <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide [&>.join]:m-0">
+      <li class="px-4 py-2 tracking-wide [&>.join]:m-0">
         <TaskListSearch
-          class="w-full min-w-0 lg:w-auto lg:flex-1"
+          class="w-full min-w-0"
           :tasks="tasks"
           placeholder="Search contracts"
           @search-result="applySearchResult"
-        />
-        <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
-          <ListStateFilter
-            label="Negotiation Task"
-            :filters="negotiationTaskStates"
-            store-type="negotiationTasks"
-            :disabled="!hasTasks"
-          />
-          <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
-        </div>
+        >
+          <template #actions>
+            <ListStateFilter
+              label="Negotiation Task"
+              :filters="negotiationTaskStates"
+              store-type="negotiationTasks"
+              :disabled="!hasTasks"
+            />
+            <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+          </template>
+        </TaskListSearch>
       </li>
       <template v-if="filteredTasks.length > 0">
         <li v-for="task in filteredTasks" :key="task.did" class="list-row">
-          <div class="list-col-grow card border-base-content/10 bg-base-100 card-border hover:bg-base-300">
+          <div class="card border-base-content/10 bg-base-100 list-col-grow card-border hover:bg-base-300">
             <div class="card-body">
               <h2 class="card-title flex-wrap justify-between">
                 <div>Contract Name: {{ getContractName(task) }}</div>
@@ -104,7 +105,7 @@ onUnmounted(() => stateFilterStore.reset())
                 <div class="card-actions justify-end">
                   <RouterLink
                     :to="{ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: task.did } }"
-                    class="btn btn-sm btn-primary"
+                    class="btn btn-primary btn-sm"
                   >
                     View
                   </RouterLink>
