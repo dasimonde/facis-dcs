@@ -9,8 +9,6 @@ export type TemplateComplianceStatus = (typeof templateComplianceStatuses)[numbe
 
 /** DCS-FR-TR-10: the searchable template metadata. */
 export interface TemplateSearchableMetadata {
-  jurisdiction?: string
-  industry?: string
   compliance_status?: TemplateComplianceStatus
 }
 

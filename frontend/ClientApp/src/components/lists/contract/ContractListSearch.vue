@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import ListSearch from '../ListSearch.vue'
+import SemanticSearchFilters from '../SemanticSearchFilters.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractSearchResponse } from '@/models/responses/contract-response'
 
@@ -13,7 +14,7 @@ const emit = defineEmits<{
   searchResult: [value: Contract[] | null]
 }>()
 
-const filterLabels: Partial<Record<keyof Contract | 'party' | 'jurisdiction', string>> = {
+const filterLabels: Partial<Record<keyof Contract | 'party', string>> = {
   did: 'DID',
   name: 'Name',
   description: 'Description',
@@ -21,14 +22,16 @@ const filterLabels: Partial<Record<keyof Contract | 'party' | 'jurisdiction', st
   contract_data: 'Contract Data',
   party: 'Party',
   template_did: 'Template',
-  jurisdiction: 'Jurisdiction',
 }
 
 const deadlineUntil = ref('')
+const semanticFilters = ref('')
 
 const extraRequest = computed(() => {
-  if (!deadlineUntil.value) return {}
-  return { valid_until: `${deadlineUntil.value}T23:59:59Z` }
+  return {
+    ...(deadlineUntil.value ? { valid_until: `${deadlineUntil.value}T23:59:59Z` } : {}),
+    ...(semanticFilters.value ? { semantic_filters: semanticFilters.value } : {}),
+  }
 })
 
 const responseMapper = (response: ContractSearchResponse): Contract[] =>
@@ -66,35 +69,53 @@ defineExpose({ rerun })
 </script>
 
 <template>
-  <ListSearch
-    :items="contracts"
-    :filter-labels="filterLabels"
-    :search-fn="search"
-    :empty-item="empty"
-    :extra-request="extraRequest"
-    placeholder="Search contracts"
-    class="min-w-0 flex-1"
-    @search-result="(result) => emit('searchResult', result)"
-  >
-    <template #before-search-button="{ submit }">
-      <label
-        class="deadline-until-field input join-item -mt-px w-full shrink-0 rounded-none border-s-0 input-secondary sm:mt-0 sm:w-auto"
+  <div class="flex w-full min-w-0 flex-col gap-3">
+    <div class="flex min-w-0 flex-wrap items-center gap-3">
+      <ListSearch
+        :items="contracts"
+        :filter-labels="filterLabels"
+        :search-fn="search"
+        :empty-item="empty"
+        :extra-request="extraRequest"
+        placeholder="Search contracts"
+        class="min-w-0 flex-1"
+        @search-result="(result) => emit('searchResult', result)"
       >
-        <span class="label whitespace-nowrap">Deadline until</span>
-        <input
-          v-model="deadlineUntil"
-          type="date"
-          class="deadline-until-date grow"
-          aria-label="Deadline until"
-          data-testid="contract-deadline-filter"
-          @keydown.enter.prevent="submit()"
-        />
-      </label>
-    </template>
-  </ListSearch>
+        <template #before-search-button="{ submit }">
+          <label
+            class="deadline-until-field input join-item -mt-px w-full shrink-0 rounded-none border-s-0 input-secondary sm:mt-0 sm:w-auto"
+          >
+            <span class="label whitespace-nowrap">Deadline until</span>
+            <input
+              v-model="deadlineUntil"
+              type="date"
+              class="deadline-until-date grow"
+              aria-label="Deadline until"
+              data-testid="contract-deadline-filter"
+              @keydown.enter.prevent="submit()"
+            />
+          </label>
+        </template>
+      </ListSearch>
+      <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
+        <slot name="actions" />
+      </div>
+    </div>
+
+    <section class="flex flex-col gap-2 border-t border-base-300 pt-3" aria-label="Refine contracts">
+      <SemanticSearchFilters v-model="semanticFilters" />
+    </section>
+  </div>
 </template>
 
 <style scoped>
+.deadline-until-field {
+  box-sizing: border-box;
+  height: calc(var(--size-field, 0.25rem) * 10);
+  min-height: calc(var(--size-field, 0.25rem) * 10);
+  padding-block: 0;
+}
+
 .deadline-until-field :deep(.label) {
   border-inline-end: none;
   margin-inline-end: 0.25rem;

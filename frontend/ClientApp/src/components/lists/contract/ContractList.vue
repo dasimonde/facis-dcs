@@ -220,27 +220,28 @@ const bulkArchive = () =>
   <div class="flex h-full min-h-0 flex-col">
     <!-- The search, filter and sort controls stay mounted while a filter or sort reloads the page. -->
     <ul class="list flex-1 overflow-y-auto">
-      <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide [&>.join]:m-0">
+      <li class="px-4 py-2 tracking-wide [&>.join]:m-0">
         <ContractListSearch
           ref="list-search"
           :contracts="contracts"
-          class="w-full min-w-0 lg:w-auto lg:flex-1"
+          class="w-full min-w-0"
           @search-result="applySearchResult"
-        />
-        <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
-          <ListStateFilter
-            label="Contract"
-            :filters="contractStates"
-            store-type="contracts"
-            :disabled="isRepositoryEmpty"
-          />
-          <ListSort
-            v-model:sort-by="sortBy"
-            v-model:sort-order="sortOrder"
-            :sorter="sorter"
-            :disabled="isRepositoryEmpty"
-          />
-        </div>
+        >
+          <template #actions>
+            <ListStateFilter
+              label="Contract"
+              :filters="contractStates"
+              store-type="contracts"
+              :disabled="isRepositoryEmpty"
+            />
+            <ListSort
+              v-model:sort-by="sortBy"
+              v-model:sort-order="sortOrder"
+              :sorter="sorter"
+              :disabled="isRepositoryEmpty"
+            />
+          </template>
+        </ContractListSearch>
       </li>
       <li v-if="loading" class="pl-4"><span role="status" aria-live="polite">Loading contracts...</span></li>
       <li v-else-if="error" class="pl-4">
@@ -260,7 +261,7 @@ const bulkArchive = () =>
         >
           <span class="text-sm">{{ selectedContracts.length }} selected</span>
           <button v-if="isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkRenew">Renew selected</button>
-          <button v-if="isManager" class="btn btn-sm btn-error" :disabled="bulkRunning" @click="bulkTerminate">
+          <button v-if="isManager" class="btn btn-error btn-sm" :disabled="bulkRunning" @click="bulkTerminate">
             Terminate selected
           </button>
           <button v-if="isApprover || isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkPublish">
@@ -288,7 +289,7 @@ const bulkArchive = () =>
             Contracts are created from templates that are approved and registered in the Template Catalogue, then move
             through negotiation, review, approval and signing. Start by creating one from a registered template.
           </p>
-          <RouterLink v-if="isCreator" :to="{ name: ROUTES.CONTRACTS.NEW }" class="btn mt-1 btn-sm btn-primary">
+          <RouterLink v-if="isCreator" :to="{ name: ROUTES.CONTRACTS.NEW }" class="btn mt-1 btn-primary btn-sm">
             New Contract
           </RouterLink>
         </li>

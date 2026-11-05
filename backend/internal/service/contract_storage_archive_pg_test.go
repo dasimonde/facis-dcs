@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/db/pg"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/semantichub"
 )
 
 // archiveManager is the organization of the Archive Manager; it created the
@@ -92,22 +93,22 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 // entry records the filter.
 func TestArchiveSearchFiltersByJurisdiction(t *testing.T) {
 	db := pgtest.Open(t)
-	for did, jurisdiction := range map[string]string{"did:web:dcs.example:contract:de": "Germany", "did:web:dcs.example:contract:fr": "France"} {
-		seedArchivedContract(t, db, did, "SIGNED")
-		_, err := db.Exec(`UPDATE contracts SET contract_data = jsonb_build_object('dcs:contractFields', jsonb_build_array(jsonb_build_object(
-			'dcs:shape', jsonb_build_object('@id', 'https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction'), 'dcs:value', $2::text))) WHERE did = $1`, did, jurisdiction)
+	require.NoError(t, semantichub.Seed(context.Background(), db))
+	for did, value := range map[string]string{"did:web:dcs.example:contract:de": "Germany", "did:web:dcs.example:contract:fr": "France"} {
+		_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version) VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'SIGNED', 'tpl', 1)`, did)
+		require.NoError(t, err)
+		_, err = db.Exec(`INSERT INTO contract_archive_entries (did, contract_version, stored_by, contract_snapshot, content_hash, snapshot_cid, evidence, search_projection) VALUES ($1, 1, 'did:web:creator', '{"did":"x"}', 'sha256:`+zeroHash+`', 'bafy-snapshot', '{"source":"SIGNING_WORKFLOW_COMPLETION","snapshot_hash_algorithm":"SHA-256"}', jsonb_build_object('https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction', jsonb_build_array($2::text)))`, did, value)
 		require.NoError(t, err)
 	}
-	svc := archiveTestService(t, db)
-
-	jurisdiction := "germ"
-	found, err := svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{Jurisdiction: &jurisdiction})
+	filters := `[{"filter_id":"jurisdiction","value":"germ"}]`
+	found, err := archiveTestService(t, db).Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{SemanticFilters: &filters})
 	require.NoError(t, err)
 	require.Len(t, found, 1)
 	require.Equal(t, "did:web:dcs.example:contract:de", found[0].Did)
 	searched := archiveEvents(t, db, "SEARCH_ARCHIVED_CONTRACTS")
 	require.Len(t, searched, 1)
-	require.Equal(t, map[string]any{"jurisdiction": "germ"}, searched[0]["criteria"])
+	criteria := searched[0]["criteria"].(map[string]any)
+	require.JSONEq(t, `[{"filter_id":"jurisdiction","field_iri":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction","value":"germ"}]`, criteria["semantic_filters"].(string))
 }
 
 func TestFailedArchiveOperationsAreAuditedWithTheirOutcome(t *testing.T) {

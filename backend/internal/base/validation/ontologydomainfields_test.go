@@ -10,6 +10,18 @@ func hubSLAOntologyTTL() string {
 	return mustReadRepoFile("backend/internal/semantichub/assets/facis-sla-ontology.ttl")
 }
 
+func TestDefaultSearchFieldsAreTextDomainFields(t *testing.T) {
+	ontology, err := parseDomainOntology(hubSLAOntologyTTL())
+	require.NoError(t, err)
+	for _, name := range []string{"jurisdiction", "type", "industry", "regulatoryComplianceStatus"} {
+		field, ok := ontology.fields["https://w3id.org/facis/dcs/taxonomy/v1#field-contract-"+name]
+		require.True(t, ok, name)
+		require.NotEmpty(t, field.Label)
+		require.Equal(t, "http://www.w3.org/2001/XMLSchema#string", field.Range)
+		require.Nil(t, field.Constraint)
+	}
+}
+
 func TestParseDomainOntologyIndexesFieldsByIRIOnly(t *testing.T) {
 	ontology, err := parseDomainOntology(hubSLAOntologyTTL())
 	require.NoError(t, err)

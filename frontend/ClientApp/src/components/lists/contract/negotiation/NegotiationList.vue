@@ -374,7 +374,7 @@ watch(
               :key="decision.negotiator"
               class="list-row px-0 py-2"
             >
-              <div class="flex w-full justify-between gap-2 list-col-grow">
+              <div class="list-col-grow flex w-full justify-between gap-2">
                 <div class="min-w-0 break-all">
                   {{ decision.negotiator }}
                   <span v-if="isOwnDecision(decision)" class="ml-1 badge badge-ghost badge-xs">you</span>
@@ -435,7 +435,7 @@ watch(
           <div class="card-actions justify-end">
             <button
               v-if="canWithdraw(negotiation)"
-              class="btn btn-primary btn-sm"
+              class="btn btn-sm btn-primary"
               :disabled="isSubmitting"
               @click="withdrawNegotiation(negotiation)"
             >
@@ -444,7 +444,7 @@ watch(
             </button>
             <button
               v-if="canRespondTo(negotiation) && isExpanded(negotiation.id)"
-              class="btn btn-primary btn-sm"
+              class="btn btn-sm btn-primary"
               data-testid="accept-negotiation"
               :disabled="isSubmitting || acceptBlockedBySync"
               :title="acceptBlockedBySync ? acceptBlockedReason : undefined"
@@ -462,14 +462,14 @@ watch(
             </p>
             <button
               v-if="canRespondTo(negotiation) && isExpanded(negotiation.id)"
-              class="btn btn-primary btn-sm"
+              class="btn btn-sm btn-primary"
               :disabled="isSubmitting"
               @click="rejectNegotiation(negotiation)"
             >
               <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
               Reject
             </button>
-            <button class="btn btn-primary btn-sm" @click="handleShowBtn(negotiation)">
+            <button class="btn btn-sm btn-primary" @click="handleShowBtn(negotiation)">
               {{ isExpanded(negotiation.id) ? 'Hide' : 'Show' }}
             </button>
           </div>

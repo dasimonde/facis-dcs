@@ -16,6 +16,7 @@ var ArchiveRetrieveResponse = Type("ArchiveRetrieveResponse", func() {
 })
 
 var ArchiveSearchRequest = Type("ArchiveSearchRequest", func() {
+	Attribute("semantic_filters", String, "JSON array of configured filter identifiers and scalar values")
 	Description("Archive search request")
 
 	Token("token", String, "JWT token")
@@ -30,7 +31,6 @@ var ArchiveSearchRequest = Type("ArchiveSearchRequest", func() {
 	Attribute("party", String, "Return only contracts where this DID is a contract party — creator or counterparty (DCS-FR-CSA-10, DCS-FR-CSA-13)")
 	Attribute("valid_from", String, "Return only contracts whose validity period starts at or after this RFC3339 timestamp (DCS-FR-CSA-10, DCS-FR-CSA-13)")
 	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before this RFC3339 timestamp (DCS-FR-CSA-10, DCS-FR-CSA-13)")
-	Attribute("jurisdiction", String, "Return only contracts whose jurisdiction field contains this text (DCS-FR-CSA-10)")
 })
 
 var ArchiveRecentAction = Type("ArchiveRecentAction", func() {
@@ -267,7 +267,7 @@ var _ = Service("ContractStorageArchive", func() {
 			Param("party")
 			Param("valid_from")
 			Param("valid_until")
-			Param("jurisdiction")
+			Param("semantic_filters")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

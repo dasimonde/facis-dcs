@@ -21,8 +21,6 @@ var (
 	dcsPartyTypeIRI          = fcasset.DCSContextURL + "partyType"
 	dcsTemplateTypeIRI       = fcasset.DCSContextURL + "templateType"
 	dcsTemplateDataStringIRI = fcasset.DCSContextURL + "templateDataString"
-	dcsJurisdictionIRI       = fcasset.DCSContextURL + "jurisdiction"
-	dcsIndustryIRI           = fcasset.DCSContextURL + "industry"
 	dcsTemplateLevelIRI      = fcasset.DCSContextURL + "templateLevel"
 	schemaNameIRI            = fcasset.SchemaContextURL + "name"
 	schemaDescriptionIRI     = fcasset.SchemaContextURL + "description"

@@ -21,18 +21,18 @@ const erasedDID = "did:web:dcs.example:contract:erase-1"
 func seedErasableContract(t *testing.T, db *sqlx.DB) {
 	t.Helper()
 	statements := []string{
-		`INSERT INTO contracts (did, created_by, state, template_did, template_version, contract_data)
-		 VALUES ($1, 'did:web:creator', 'SIGNED', 'did:web:tpl', 1, '{"clause":"secret terms"}')`,
+		`INSERT INTO contracts (did, created_by, state, template_did, template_version, contract_data, search_projection)
+		 VALUES ($1, 'did:web:creator', 'SIGNED', 'did:web:tpl', 1, '{"clause":"secret terms"}', '{"urn:field":["secret terms"]}')`,
 		`INSERT INTO contract_history (did, created_by, state, template_did, template_version, contract_data)
 		 VALUES ($1, 'did:web:creator', 'DRAFT', 'did:web:tpl', 1, '{"clause":"older secret terms"}')`,
 		`INSERT INTO contract_negotiations (did, contract_version, change_request, created_by)
 		 VALUES ($1, 1, '{"clause":"proposed secret terms"}', 'did:web:creator')`,
 		`INSERT INTO contract_negotiation_drafts (contract_did, saved_by, change_request)
 		 VALUES ($1, 'did:web:creator', '{"clause":"draft secret terms"}')`,
-		`INSERT INTO contract_archive_entries (did, contract_version, stored_by, contract_snapshot, content_hash, snapshot_cid, evidence)
+		`INSERT INTO contract_archive_entries (did, contract_version, stored_by, contract_snapshot, content_hash, snapshot_cid, evidence, search_projection)
 		 VALUES ($1, 1, 'did:web:creator', '{"contract_data":{"clause":"secret terms"}}',
 		         'sha256:` + "0000000000000000000000000000000000000000000000000000000000000000" + `', 'bafy-snapshot',
-		         '{"source":"SIGNING_WORKFLOW_COMPLETION","snapshot_hash_algorithm":"SHA-256"}')`,
+		         '{"source":"SIGNING_WORKFLOW_COMPLETION","snapshot_hash_algorithm":"SHA-256"}', '{"urn:field":["secret terms"]}')`,
 		`INSERT INTO signature_ceremonies (id, contract_did, field_name, requested_by, nonce, expires_at, pinned_payload)
 		 VALUES (gen_random_uuid(), $1, 'sig', 'did:web:creator', 'n', now(), 'secret terms'::bytea)`,
 		`INSERT INTO content_encryption_keys (scope_kind, scope_id, recipient_did, wrapped_cek)
@@ -70,6 +70,9 @@ func TestShredDestroysTheWrappedKeyAndErasesPlaintextContent(t *testing.T) {
 		     + (SELECT count(*) FROM contract_archive_entries WHERE did = $1 AND contract_snapshot::text LIKE '%secret%')
 		     + (SELECT count(*) FROM signature_ceremonies WHERE contract_did = $1 AND pinned_payload IS NOT NULL)`, erasedDID))
 	require.Zero(t, plaintext, "plaintext contract content survived the erasure")
+	var projections int
+	require.NoError(t, db.Get(&projections, `SELECT (SELECT count(*) FROM contracts WHERE did = $1 AND search_projection <> '{}'::jsonb) + (SELECT count(*) FROM contract_archive_entries WHERE did = $1 AND search_projection <> '{}'::jsonb)`, erasedDID))
+	require.Zero(t, projections, "search values survived the erasure")
 
 	var shredEvents int
 	require.NoError(t, db.Get(&shredEvents, `SELECT count(*) FROM outbox_events WHERE did = $1 AND event_type = 'KEY_SHREDDED'`, erasedDID))
@@ -91,7 +94,7 @@ func TestArchiveSnapshotIsErasableOnlyAfterTheKeysAreShredded(t *testing.T) {
 	_, err = db.Exec(`UPDATE contract_archive_entries SET contract_snapshot = '{"forged":true}'::jsonb WHERE did = $1`, erasedDID)
 	require.ErrorContains(t, err, "immutable", "a shredded scope let the snapshot be replaced, not erased")
 
-	_, err = db.Exec(`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb WHERE did = $1`, erasedDID)
+	_, err = db.Exec(`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb, search_projection = '{}'::jsonb WHERE did = $1`, erasedDID)
 	require.NoError(t, err)
 }
 

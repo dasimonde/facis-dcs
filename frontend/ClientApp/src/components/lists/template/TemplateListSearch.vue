@@ -1,15 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
-import {
-  type PartialContractTemplate,
-  type TemplateComplianceStatus,
-  templateComplianceStatuses,
-} from '@/models/contract-template/contract-template'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { type ContractTemplateState, contractTemplateStates } from '@/types/contract-template-state'
 import { type PartyType, partyTypes } from '@/types/party-type'
 import { toProperCase } from '@/utils/string'
 import ListSearch from '../ListSearch.vue'
+import SemanticSearchFilters from '../SemanticSearchFilters.vue'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 import type { ContractTemplateSearchResponse } from '@/models/responses/template-response'
 
 defineProps<{
@@ -18,8 +15,6 @@ defineProps<{
 
 const partyType = ref<PartyType | ''>('')
 const partyTypeId = useId()
-const complianceStatus = ref<TemplateComplianceStatus | ''>('')
-const complianceStatusId = useId()
 // DCS-IR-TR-07, DCS-IR-TR-08: the dashboard filters the templates by state.
 const state = ref<ContractTemplateState | ''>('')
 const stateId = useId()
@@ -28,12 +23,13 @@ const createdFrom = ref('')
 const createdFromId = useId()
 const createdTo = ref('')
 const createdToId = useId()
-const filters = computed(() => ({
+const semanticFilters = ref('')
+const extraRequest = computed(() => ({
   party_type: partyType.value || undefined,
-  compliance_status: complianceStatus.value || undefined,
   state: state.value || undefined,
   created_from: createdFrom.value || undefined,
   created_to: createdTo.value || undefined,
+  semantic_filters: semanticFilters.value || undefined,
 }))
 const emit = defineEmits<{
   searchResult: [value: PartialContractTemplate[] | null]
@@ -45,8 +41,6 @@ const filterLabels: Partial<Record<keyof PartialContractTemplate, string>> = {
   description: 'Description',
   version: 'Version',
   template_data: 'Template Data',
-  jurisdiction: 'Jurisdiction',
-  industry: 'Industry',
   created_by: 'Owner',
 }
 
@@ -74,57 +68,69 @@ const responseMapper = (response: ContractTemplateSearchResponse) =>
     template_type: item.template_type,
     party_type: item.party_type,
     created_by: item.created_by,
-    jurisdiction: item.jurisdiction,
-    industry: item.industry,
     compliance_status: item.compliance_status,
     template_level: item.template_level,
   }))
 </script>
 
 <template>
-  <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center [&>.join]:m-0">
-    <div class="shrink-0 text-sm">
-      <label :for="partyTypeId" class="sr-only">Party type</label>
-      <select :id="partyTypeId" v-model="partyType" class="select w-max min-w-44">
-        <option value="">All party types</option>
-        <option v-for="option in partyTypes" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
+  <div class="flex w-full min-w-0 flex-col gap-3">
+    <div class="flex min-w-0 flex-wrap items-center gap-3">
+      <ListSearch
+        class="min-w-0 flex-1"
+        :items="templates"
+        :filter-labels="filterLabels"
+        :extra-request="extraRequest"
+        :empty-item="emptyTemplate"
+        :search-fn="async (request) => responseMapper(await contractTemplateService.search(request))"
+        placeholder="Search templates"
+        @search-result="(result) => emit('searchResult', result)"
+      />
+      <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
+        <slot name="actions" />
+      </div>
     </div>
-    <div class="shrink-0 text-sm">
-      <label :for="complianceStatusId" class="sr-only">Compliance status</label>
-      <select :id="complianceStatusId" v-model="complianceStatus" class="select w-max min-w-44">
-        <option value="">All compliance statuses</option>
-        <option v-for="status in templateComplianceStatuses" :key="status" :value="status">
-          {{ toProperCase(status.replace('_', ' ')) }}
-        </option>
-      </select>
-    </div>
-    <div class="shrink-0 text-sm">
-      <label :for="stateId" class="sr-only">State</label>
-      <select :id="stateId" v-model="state" class="select w-max min-w-44">
-        <option value="">Any state</option>
-        <option v-for="option in contractTemplateStates" :key="option" :value="option">
-          {{ toProperCase(option) }}
-        </option>
-      </select>
-    </div>
-    <div class="shrink-0 text-sm">
-      <label :for="createdFromId" class="sr-only">Created from</label>
-      <input :id="createdFromId" v-model="createdFrom" type="date" class="input w-max" title="Created from" />
-    </div>
-    <div class="shrink-0 text-sm">
-      <label :for="createdToId" class="sr-only">Created to</label>
-      <input :id="createdToId" v-model="createdTo" type="date" class="input w-max" title="Created to" />
-    </div>
-    <ListSearch
-      class="w-full min-w-0 sm:w-auto sm:max-w-full sm:min-w-80 sm:flex-1"
-      :items="templates"
-      :filter-labels="filterLabels"
-      :filters="filters"
-      :empty-item="emptyTemplate"
-      :search-fn="async (request) => responseMapper(await contractTemplateService.search(request))"
-      placeholder="Search templates"
-      @search-result="(result) => emit('searchResult', result)"
-    />
+
+    <section class="flex flex-col gap-2 border-t border-base-300 pt-3" aria-label="Refine templates">
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="flex min-w-36 flex-col gap-1">
+          <label :for="partyTypeId" class="text-xs font-medium text-base-content/70">Party type</label>
+          <select :id="partyTypeId" v-model="partyType" class="select-bordered select w-max min-w-44">
+            <option value="">All party types</option>
+            <option v-for="option in partyTypes" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </div>
+        <div class="flex min-w-36 flex-col gap-1">
+          <label :for="stateId" class="text-xs font-medium text-base-content/70">State</label>
+          <select :id="stateId" v-model="state" class="select-bordered select w-max min-w-44">
+            <option value="">Any state</option>
+            <option v-for="option in contractTemplateStates" :key="option" :value="option">
+              {{ toProperCase(option) }}
+            </option>
+          </select>
+        </div>
+        <div class="flex min-w-36 flex-col gap-1">
+          <label :for="createdFromId" class="text-xs font-medium text-base-content/70">Created from</label>
+          <input
+            :id="createdFromId"
+            v-model="createdFrom"
+            type="date"
+            class="input-bordered input w-max"
+            title="Created from"
+          />
+        </div>
+        <div class="flex min-w-36 flex-col gap-1">
+          <label :for="createdToId" class="text-xs font-medium text-base-content/70">Created to</label>
+          <input
+            :id="createdToId"
+            v-model="createdTo"
+            type="date"
+            class="input-bordered input w-max"
+            title="Created to"
+          />
+        </div>
+        <SemanticSearchFilters v-model="semanticFilters" />
+      </div>
+    </section>
   </div>
 </template>

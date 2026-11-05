@@ -17,7 +17,7 @@ func TestCreateRemoteQueryOmitsZeroCreatedAt(t *testing.T) {
 		UpdatedAt: time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC),
 		CreatedBy: "did:web:example",
 		Origin:    "did:web:example",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, query)
 	require.NotContains(t, *query, "created_at")
@@ -34,7 +34,7 @@ func TestCreateRemoteQueryIncludesNonZeroCreatedAt(t *testing.T) {
 		UpdatedAt: time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC),
 		CreatedBy: "did:web:example",
 		Origin:    "did:web:example",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, query)
 	require.True(t, strings.Contains(*query, "created_at"))

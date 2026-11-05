@@ -13,7 +13,7 @@ defineProps<{
 
 const partyType = ref<PartyType | ''>('')
 const partyTypeId = useId()
-const filters = computed(() => ({ party_type: partyType.value || undefined }))
+const extraRequest = computed(() => ({ party_type: partyType.value || undefined }))
 const emit = defineEmits<{
   searchResult: [value: TemplateResourcesItem[] | null]
 }>()
@@ -58,23 +58,26 @@ const searchFn = async (request: Record<string, unknown>) => {
 </script>
 
 <template>
-  <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center [&>.join]:m-0">
-    <div class="shrink-0 text-sm">
-      <label :for="partyTypeId" class="sr-only">Party type</label>
-      <select :id="partyTypeId" v-model="partyType" class="select w-max min-w-44">
-        <option value="">All party types</option>
-        <option v-for="option in partyTypes" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
-    </div>
+  <div class="flex w-full min-w-0 flex-col gap-3">
     <ListSearch
-      class="w-full min-w-0 sm:w-auto sm:max-w-full sm:min-w-80 sm:flex-1"
+      class="w-full min-w-0"
       :items="templates"
       :filter-labels="filterLabels"
-      :filters="filters"
+      :extra-request="extraRequest"
       :empty-item="emptyTemplate"
       :search-fn="searchFn"
       placeholder="Search catalogue templates"
       @search-result="(result) => emit('searchResult', result)"
     />
+
+    <section class="flex flex-col gap-2 border-t border-base-300 pt-3" aria-label="Refine catalogue templates">
+      <div class="flex min-w-36 flex-col gap-1">
+        <label :for="partyTypeId" class="text-xs font-medium text-base-content/70">Party type</label>
+        <select :id="partyTypeId" v-model="partyType" class="select-bordered select w-max min-w-44">
+          <option value="">All party types</option>
+          <option v-for="option in partyTypes" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+      </div>
+    </section>
   </div>
 </template>

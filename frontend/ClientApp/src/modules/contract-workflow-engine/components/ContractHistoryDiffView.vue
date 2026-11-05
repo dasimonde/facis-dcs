@@ -308,7 +308,7 @@ watch([leftPick, rightPick], () => ensureDistinctPicks())
       <div v-if="restorable && leftHistoryItem" class="mt-4 border-t border-base-300 pt-4">
         <button
           type="button"
-          class="btn btn-secondary btn-sm"
+          class="btn btn-sm btn-secondary"
           data-testid="restore-history-version"
           @click="emit('restore', leftHistoryItem)"
         >

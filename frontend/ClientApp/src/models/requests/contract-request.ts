@@ -71,6 +71,7 @@ export interface ContractReviewRequest {
 }
 
 export interface ContractSearchRequest {
+  semantic_filters?: string
   offset?: number
   limit?: number
   did?: string
@@ -83,7 +84,6 @@ export interface ContractSearchRequest {
   valid_until?: string
   party?: string
   template_did?: string
-  jurisdiction?: string
   filter?: string
 }
 

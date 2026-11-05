@@ -1521,6 +1521,7 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 	}
 
 	qry := contract.GetAllMetadataByFilterQry{
+		SemanticFilters: base.DerefString(req.SemanticFilters),
 		DID:             base.DerefString(req.Did),
 		ContractVersion: base.DerefInt(req.ContractVersion),
 		States:          states,
@@ -1534,7 +1535,6 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 		ValidUntil:      validUntil,
 		Party:           base.DerefString(req.Party),
 		TemplateDID:     base.DerefString(req.TemplateDid),
-		Jurisdiction:    base.DerefString(req.Jurisdiction),
 		Pagination:      pagination,
 	}
 	qryHandler := contract.GetAllMetaDataByFilterHandler{
@@ -1543,6 +1543,9 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 	}
 	result, err := qryHandler.Handle(ctx, qry)
 	if err != nil {
+		if errors.Is(err, semantichub.ErrInvalidSearchFilter) {
+			return nil, contractworkflowengine.MakeBadRequest(err)
+		}
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 

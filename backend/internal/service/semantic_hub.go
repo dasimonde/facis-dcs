@@ -126,6 +126,56 @@ func NewSemanticHub(db *sqlx.DB, jwtAuth auth.JWTAuthenticator) semantichubgen.S
 	}
 }
 
+func (s *semanticHubsrvc) GetSearchFilters(ctx context.Context) (*semantichubgen.SearchFilterConfig, error) {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, semantichubgen.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	config, err := semantichub.LoadSearchFilters(ctx, tx)
+	if err != nil {
+		return nil, semantichubgen.MakeInternalError(err)
+	}
+	return searchFilterResult(config), nil
+}
+
+func (s *semanticHubsrvc) PutSearchFilters(ctx context.Context, p *semantichubgen.PutSearchFiltersPayload) (*semantichubgen.SearchFilterConfig, error) {
+	config := semantichub.SearchFilterConfig{Revision: p.Revision, Filters: make([]semantichub.SearchFilter, 0, len(p.Filters))}
+	for _, item := range p.Filters {
+		if item == nil || item.Source == nil {
+			return nil, semantichubgen.MakeBadRequest(errors.New("filter and source are required"))
+		}
+		config.Filters = append(config.Filters, semantichub.SearchFilter{ID: item.ID, Label: item.Label, FieldIRI: item.FieldIri, Source: semantichub.SearchFilterSource{Name: item.Source.Name, Kind: item.Source.Kind, Version: item.Source.Version}})
+	}
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, semantichubgen.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	config, err = semantichub.SaveSearchFilters(ctx, tx, config)
+	if errors.Is(err, semantichub.ErrSearchFilterConflict) {
+		return nil, semantichubgen.MakeConflict(err)
+	}
+	if err != nil {
+		if errors.Is(err, semantichub.ErrInvalidSearchFilter) {
+			return nil, semantichubgen.MakeBadRequest(err)
+		}
+		return nil, semantichubgen.MakeInternalError(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, semantichubgen.MakeInternalError(err)
+	}
+	return searchFilterResult(config), nil
+}
+
+func searchFilterResult(config semantichub.SearchFilterConfig) *semantichubgen.SearchFilterConfig {
+	result := &semantichubgen.SearchFilterConfig{Revision: config.Revision, Filters: make([]*semantichubgen.SearchFilter, 0, len(config.Filters))}
+	for _, filter := range config.Filters {
+		result.Filters = append(result.Filters, &semantichubgen.SearchFilter{ID: filter.ID, Label: filter.Label, FieldIri: filter.FieldIRI, Source: &semantichubgen.SearchFilterSource{Name: filter.Source.Name, Kind: filter.Source.Kind, Version: filter.Source.Version}})
+	}
+	return result
+}
+
 func (s *semanticHubsrvc) Register(ctx context.Context, p *semantichubgen.RegisterPayload) (res *semantichubgen.SemanticSchemaRegisterResponse, err error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()

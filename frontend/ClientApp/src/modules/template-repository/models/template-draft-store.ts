@@ -28,8 +28,6 @@ interface TemplateDraftState {
   customMetaData: MetaData[]
   partyType: PartyType | undefined
   /** DCS-FR-TR-10 searchable metadata. */
-  jurisdiction: string
-  industry: string
   /** DCS-FR-TR-02, DCS-FR-TR-23 template structure. */
   templateLevel: TemplateLevel
   requiredTemplates: string[]

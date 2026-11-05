@@ -103,6 +103,7 @@ export interface ArchiveComplianceItem {
 
 /** The filters of /archive/search (DCS-FR-CSA-10, DCS-FR-CSA-13, DCS-FR-CSA-22). */
 export interface ArchiveSearchQuery {
+  semantic_filters?: string
   did?: string
   state?: string
   name?: string
@@ -112,7 +113,6 @@ export interface ArchiveSearchQuery {
   party?: string
   valid_from?: string
   valid_until?: string
-  jurisdiction?: string
   contract_version?: number
 }
 

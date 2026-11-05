@@ -548,7 +548,7 @@ function exportPdf() {
             type="text"
             placeholder="Search DID or name…"
             aria-label="Search contract DID or name"
-            class="input-bordered input w-full input-sm"
+            class="input-bordered input input-sm w-full"
           />
           <select
             :id="statusFilterId"
@@ -649,15 +649,15 @@ function exportPdf() {
               </button>
             </div>
             <div class="flex shrink-0 flex-nowrap gap-2">
-              <button class="btn btn-outline whitespace-nowrap btn-sm" :disabled="!canExport" @click="exportJson">
+              <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportJson">
                 Export JSON
               </button>
-              <button class="btn btn-outline whitespace-nowrap btn-sm" :disabled="!canExport" @click="exportPdf">
+              <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportPdf">
                 Export PDF
               </button>
               <button
                 v-if="canAudit"
-                class="btn btn-outline whitespace-nowrap btn-sm"
+                class="btn whitespace-nowrap btn-outline btn-sm"
                 :disabled="!selected"
                 @click="downloadServerPartyReport"
               >
@@ -683,7 +683,7 @@ function exportPdf() {
             <!-- Validation tab: trust anchors, crypto integrity, timestamps -->
             <div v-if="activeTab === 'validation'" class="space-y-4">
               <div class="flex items-center gap-2">
-                <button class="btn btn-primary btn-sm" :disabled="!canManage || busy" @click="runValidate">
+                <button class="btn btn-sm btn-primary" :disabled="!canManage || busy" @click="runValidate">
                   <span v-if="busy" class="loading loading-xs loading-spinner" />
                   Validate
                 </button>
@@ -841,7 +841,7 @@ function exportPdf() {
                     <td class="text-xs">{{ sig.revoked_at ?? sig.signed_at ?? '—' }}</td>
                     <td>
                       <button
-                        class="btn btn-outline btn-error btn-xs"
+                        class="btn btn-outline btn-xs btn-error"
                         :disabled="!canManage || revocationPending(sig) || sig.status.toUpperCase() === 'REVOKED'"
                         @click="revoke(sig)"
                       >
@@ -862,7 +862,7 @@ function exportPdf() {
             <!-- Compliance Checks tab: party-segmented report (PACM-07 partial) + level table -->
             <div v-else-if="activeTab === 'compliance'" class="space-y-4">
               <div class="flex items-center gap-2">
-                <button class="btn btn-primary btn-sm" :disabled="!canManage || busy" @click="runCompliance">
+                <button class="btn btn-sm btn-primary" :disabled="!canManage || busy" @click="runCompliance">
                   <span v-if="busy" class="loading loading-xs loading-spinner" />
                   Run Compliance
                 </button>
@@ -965,7 +965,7 @@ function exportPdf() {
             <!-- Audit Reports tab -->
             <div v-else class="space-y-3">
               <div class="flex items-center gap-2">
-                <button class="btn btn-primary btn-sm" :disabled="!canAudit || busy" @click="loadAudit">
+                <button class="btn btn-sm btn-primary" :disabled="!canAudit || busy" @click="loadAudit">
                   <span v-if="busy" class="loading loading-xs loading-spinner" />
                   Load Audit Report
                 </button>

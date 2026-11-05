@@ -194,8 +194,11 @@ it('searches submitted contracts and preserves the wrapping toolbar', async () =
   await input.setValue('agreement')
   await flushPromises()
   expect(search).toHaveBeenLastCalledWith({ did: 'agreement', state: [ContractState.submitted] })
-  expect(wrapper.get('li').classes()).toContain('flex-wrap')
-  const controls = wrapper.get('li > div.ml-auto')
+  const toolbar = wrapper
+    .findAll('div')
+    .find((node) => node.classes().includes('flex-wrap') && node.classes().includes('items-center'))
+  expect(toolbar).toBeTruthy()
+  const controls = wrapper.get('div.ml-auto')
   expect(controls.classes()).toEqual(expect.arrayContaining(['flex', 'shrink-0']))
   expect(controls.findAll('button').length).toBeGreaterThanOrEqual(2)
   wrapper.unmount()

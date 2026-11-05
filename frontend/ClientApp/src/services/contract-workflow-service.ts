@@ -162,13 +162,7 @@ export const contractWorkflowService: ContractWorkflowService = {
   },
 
   async search(request: ContractSearchRequest) {
-    return http
-      .get<ContractSearchResponse>('/contract/search', { params: request })
-      .then((res) => res.data)
-      .catch((err: unknown) => {
-        console.error('Search Error:', err)
-        return []
-      })
+    return http.get<ContractSearchResponse>('/contract/search', { params: request }).then((res) => res.data)
   },
 
   async approve(request: ContractApproveRequest) {

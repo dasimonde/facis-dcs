@@ -43,9 +43,7 @@ type FilterLabelValue = FilterLabels[FilterLabelKey]
 const selectedFilter = ref<FilterLabelValue>(Object.values(props.filterLabels)[0] ?? '')
 const filterPopover = useTemplateRef('filter-popover')
 const searchResults: ShallowRef<T[]> = shallowRef([])
-// The search currently in flight, so a caller that has to publish a result can
-// wait for it rather than read searchResults mid-request.
-let pendingSearch: Promise<boolean> | null = null
+// Bumped to drop stale in-flight searches when filters/extraRequest change.
 let requestVersion = 0
 onBeforeUnmount(() => requestVersion++)
 const requestFilters = computed(() => ({
@@ -79,7 +77,6 @@ watch(
   () => props.extraRequest,
   () => {
     requestVersion++
-    pendingSearch = null
     searchResults.value = []
     searchError.value = null
     isSearching.value = false
@@ -109,12 +106,11 @@ function searchRequest(): Promise<boolean> {
   searchError.value = null
   isSearching.value = false
   if (!hasQuery.value) {
-    pendingSearch = null
     return Promise.resolve(true)
   }
   isSearching.value = true
   const request = { ...requestFilters.value }
-  const run = (async () => {
+  return (async () => {
     try {
       const result = await props.searchFn(request)
       if (version !== requestVersion) return false
@@ -128,8 +124,6 @@ function searchRequest(): Promise<boolean> {
       if (version === requestVersion) isSearching.value = false
     }
   })()
-  pendingSearch = run
-  return run
 }
 
 async function publishSearch(run: Promise<boolean>) {
@@ -137,13 +131,22 @@ async function publishSearch(run: Promise<boolean>) {
   if ((await run) && version === requestVersion) emit('searchResult', hasQuery.value ? searchResults.value : null)
 }
 
-async function searchList(event?: Event) {
-  if (event?.target instanceof HTMLInputElement && event.target.value !== searchQuery.value) {
+const searchJoin = useTemplateRef('search-join')
+
+function syncSearchQueryFromInput(event?: Event) {
+  if (event?.target instanceof HTMLInputElement) {
     searchQuery.value = event.target.value
-    await publishSearch(searchRequest())
     return
   }
-  await publishSearch(searchError.value ? searchRequest() : (pendingSearch ?? searchRequest()))
+  const input = searchJoin.value?.querySelector<HTMLInputElement>('input')
+  if (input && input.value !== searchQuery.value) searchQuery.value = input.value
+}
+
+async function searchList(event?: Event) {
+  // Combobox @change can lag behind typing; sync before Search/Enter so an empty
+  // Filters row still searches the text the user typed.
+  syncSearchQueryFromInput(event)
+  await publishSearch(searchRequest())
 }
 
 function getDisplayValue(template: T | null): string {
@@ -160,6 +163,10 @@ function autocompleteOptionClasses(active: boolean, selected: boolean) {
 
 async function onComboboxFocus() {
   await searchRequest()
+}
+
+function onSearchInput(event: Event) {
+  searchQuery.value = (event.target as HTMLInputElement).value
 }
 
 async function onSearchChange(event: Event) {
@@ -202,12 +209,12 @@ function handlePopoverToggle(event: ToggleEvent) {
 
 <template>
   <div class="w-full min-w-0">
-    <div class="join m-2 flex w-full min-w-0 flex-col sm:flex-row">
-      <div class="join-item shrink-0">
+    <div ref="search-join" class="join m-2 flex w-full min-w-0 flex-col items-stretch sm:flex-row">
+      <div class="join-item flex shrink-0 self-stretch">
         <button
           id="list-btn-search"
           type="button"
-          class="select-button btn w-full cursor-default rounded-t-md rounded-b-none border-secondary btn-outline-default sm:rounded-l-md sm:rounded-tr-none"
+          class="select-button btn h-full min-h-0 w-full cursor-default rounded-t-md rounded-b-none border-secondary btn-outline-default px-4 py-0 sm:rounded-l-md sm:rounded-tr-none"
           popovertarget="list-popover-search"
           aria-haspopup="listbox"
           :aria-expanded="filterPopover?.matches(':popover-open')"
@@ -247,14 +254,17 @@ function handlePopoverToggle(event: ToggleEvent) {
           </template>
         </ul>
       </div>
-      <div class="relative min-w-0 grow">
+      <div class="relative min-w-0 grow self-stretch">
         <Combobox v-model="selectedOption" nullable @update:model-value="onComboboxUpdate">
-          <label class="input join-item ms-0 -mt-px w-full min-w-0 rounded-none input-secondary sm:-ms-px sm:mt-0">
+          <label
+            class="input join-item ms-0 -mt-px h-full min-h-0 w-full min-w-0 rounded-none input-secondary sm:-ms-px sm:mt-0"
+          >
             <ComboboxInput
               :display-value="(item) => getDisplayValue(item as T | null)"
               :placeholder="placeholder || 'Search'"
               class="w-full min-w-0 grow bg-transparent"
               :aria-label="placeholder || 'Search'"
+              @input="onSearchInput"
               @change="onSearchChange"
               @focus="onComboboxFocus"
               @keydown.enter="searchList"
@@ -290,7 +300,7 @@ function handlePopoverToggle(event: ToggleEvent) {
       <slot name="before-search-button" :submit="searchList" />
       <button
         type="button"
-        class="btn join-item ms-0 -mt-px shrink-0 rounded-t-none rounded-b-md btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
+        class="btn join-item ms-0 -mt-px h-full min-h-0 shrink-0 rounded-t-none rounded-b-md px-4 py-0 btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
         :class="{ 'btn-disabled': isSearching }"
         :disabled="isSearching"
         @click="searchList"
@@ -317,6 +327,19 @@ function handlePopoverToggle(event: ToggleEvent) {
 </template>
 
 <style scoped>
+.join {
+  --list-search-control-height: calc(var(--size-field, 0.25rem) * 10);
+}
+
+.join :deep(.input.join-item),
+.join :deep(.btn.join-item),
+#list-btn-search {
+  box-sizing: border-box;
+  height: var(--list-search-control-height);
+  min-height: var(--list-search-control-height);
+  padding-block: 0;
+}
+
 #list-btn-search {
   anchor-name: --anchor-list-search;
 }

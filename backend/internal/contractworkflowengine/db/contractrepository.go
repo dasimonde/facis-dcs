@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/semantichub"
 )
 
 type Responsible struct {
@@ -226,6 +227,7 @@ type ListOptions struct {
 }
 
 type SearchValues struct {
+	SemanticFilters []semantichub.ResolvedSearchFilter
 	DID             string
 	ContractVersion int
 	// States keeps contracts in one of these states. Empty keeps all.
@@ -253,9 +255,6 @@ type SearchValues struct {
 	// TemplateDID matches the template the contract was created from
 	// (DCS-IR-CWE-07).
 	TemplateDID string
-	// Jurisdiction matches the value of the contract field whose shape is the
-	// contract-jurisdiction taxonomy concept (DCS-FR-CWE-13, DCS-FR-CSA-10).
-	Jurisdiction string
 }
 
 // SignedSignature is one SIGNED signature of a contract.

@@ -99,6 +99,16 @@ func TestBuildTemplateJSONLDPassesThrough(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestParseJSONBPreservesLargeNumbers(t *testing.T) {
+	raw := datatype.JSON(`{"value":18446744073709551615}`)
+	value, err := parseJSONB(&raw)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"value":18446744073709551615}`, string(encoded))
+	require.Contains(t, string(encoded), "18446744073709551615")
+}
+
 func TestBuildTemplateJSONLDRejectsNonCanonicalFormat(t *testing.T) {
 	template := templatedb.ContractTemplate{
 		DID:       "did:web:example:template:1",

@@ -111,9 +111,17 @@ export function useSemanticValueVerification() {
       case 'boolean':
         return typeof value === 'boolean'
       case 'integer':
-        return typeof value === 'number' && Number.isInteger(value)
+        return (
+          ((typeof value === 'number' && Number.isInteger(value)) ||
+            (typeof value === 'string' && /^[+-]?\d+$/.test(value))) &&
+          compareXsdValues(value, value) === 0
+        )
       case 'decimal':
-        return typeof value === 'number' && !Number.isNaN(value)
+        return (
+          ((typeof value === 'number' && Number.isFinite(value)) ||
+            (typeof value === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value))) &&
+          compareXsdValues(value, value) === 0
+        )
       case 'date':
         return typeof value === 'string' && !isNaN(Date.parse(value))
       default:
@@ -124,6 +132,7 @@ export function useSemanticValueVerification() {
   function validateValueConstraint(
     value: string | number | boolean,
     constraint?: SemanticValueConstraint,
+    numeric = false,
   ): string | null {
     if (!constraint) return null
     const allowedValues = resolveAllowedValues(constraint)
@@ -137,11 +146,11 @@ export function useSemanticValueVerification() {
         return `Expected format ${constraint.allowedValuesRef ?? constraint.format ?? constraint.pattern}.`
       }
     }
-    if (typeof value === 'number') {
-      if (constraint.min !== undefined && value < constraint.min) {
+    if (numeric || typeof value === 'number') {
+      if (constraint.min !== undefined && compareXsdValues(value, constraint.min) === -1) {
         return `Expected a value greater than or equal to ${constraint.min}.`
       }
-      if (constraint.max !== undefined && value > constraint.max) {
+      if (constraint.max !== undefined && compareXsdValues(value, constraint.max) === 1) {
         return `Expected a value less than or equal to ${constraint.max}.`
       }
     }
@@ -227,7 +236,8 @@ export function useSemanticValueVerification() {
           })
           return
         }
-        const constraintError = validateValueConstraint(value.parameterValue, parameter.valueConstraint)
+        const numeric = parameter.type === 'integer' || parameter.type === 'decimal'
+        const constraintError = validateValueConstraint(value.parameterValue, parameter.valueConstraint, numeric)
         if (constraintError) {
           errors.push({
             blockId: value.blockId,
@@ -237,7 +247,12 @@ export function useSemanticValueVerification() {
           })
           return
         }
-        const operatorError = validateParameterOperators(value.parameterValue, parameter.operators ?? [], boundaries)
+        const operatorError = validateParameterOperators(
+          value.parameterValue,
+          parameter.operators ?? [],
+          boundaries,
+          numeric,
+        )
         if (operatorError) {
           errors.push({
             blockId: value.blockId,
@@ -262,6 +277,7 @@ function validateParameterOperators(
   value: string | number | boolean,
   operators: { operate: string; targets: unknown[]; targetRefs?: string[] }[],
   boundaries: Map<string, string | number | boolean>,
+  numeric: boolean,
 ): string | null {
   for (const operator of operators) {
     // A boundary that references a contract field is bound to whatever that
@@ -275,7 +291,7 @@ function validateParameterOperators(
     const operands = [...operator.targets, ...referenced]
     if (!operands.length) continue
     const target = operator.operate === 'odrl:isAnyOf' || operator.operate === 'odrl:isNoneOf' ? operands : operands[0]
-    if (!compareOperator(value, operator.operate, target)) {
+    if (!compareOperator(value, operator.operate, target, numeric)) {
       return `Expected ${formatOperator(operator.operate)} ${String(target)}.`
     }
   }
@@ -307,16 +323,21 @@ function currentFieldValues(
   return values
 }
 
-function compareOperator(value: string | number | boolean, operator: string, target: unknown): boolean {
+function compareOperator(
+  value: string | number | boolean,
+  operator: string,
+  target: unknown,
+  numeric: boolean,
+): boolean {
   switch (operator) {
     case 'odrl:eq':
-      return value === coerceTarget(target, value)
+      return numeric ? compareXsdValues(value, target) === 0 : value === coerceTarget(target, value)
     case 'odrl:neq':
-      return value !== coerceTarget(target, value)
+      return numeric ? compareXsdValues(value, target) !== 0 : value !== coerceTarget(target, value)
     case 'odrl:isAnyOf':
-      return operatorTargetsContain(value, target)
+      return operatorTargetsContain(value, target, numeric)
     case 'odrl:isNoneOf':
-      return !operatorTargetsContain(value, target)
+      return !operatorTargetsContain(value, target, numeric)
     case 'odrl:gt':
       return compareOrdered(value, target, (left, right) => left > right)
     case 'odrl:gteq':
@@ -384,7 +405,7 @@ function formatOperator(operator: string): string {
   }
 }
 
-function operatorTargetsContain(value: string | number | boolean, target: unknown): boolean {
+function operatorTargetsContain(value: string | number | boolean, target: unknown, numeric: boolean): boolean {
   const targets = Array.isArray(target) ? target : [target]
-  return targets.some((item) => coerceTarget(item, value) === value)
+  return targets.some((item) => (numeric ? compareXsdValues(value, item) === 0 : coerceTarget(item, value) === value))
 }

@@ -14,6 +14,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
 	"digital-contracting-service/internal/templaterepository/db"
@@ -21,24 +22,22 @@ import (
 )
 
 type GetAllMetadataByFilterQry struct {
-	RetrievedBy      string
-	DID              string
-	Version          int
-	State            *contracttemplatestate.ContractTemplateState
-	TemplateType     *contracttemplatetype.ContractTemplateType
-	PartyType        string
-	Name             string
-	Description      string
-	TemplateData     string
-	Jurisdiction     string
-	Industry         string
-	ComplianceStatus string
-	CreatedBy        string
-	CreatedFrom      string
-	CreatedTo        string
-	HolderDID        string
-	Pagination       datatype.Pagination
-	UserRoles        userrole.UserRoles
+	SemanticFilters string
+	RetrievedBy     string
+	DID             string
+	Version         int
+	State           *contracttemplatestate.ContractTemplateState
+	TemplateType    *contracttemplatetype.ContractTemplateType
+	PartyType       string
+	Name            string
+	Description     string
+	TemplateData    string
+	CreatedBy       string
+	CreatedFrom     string
+	CreatedTo       string
+	HolderDID       string
+	Pagination      datatype.Pagination
+	UserRoles       userrole.UserRoles
 }
 
 type GetAllMetadataByFilterResult struct {
@@ -85,22 +84,24 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		templateType = query.TemplateType.String()
 	}
 
+	semanticFilters, err := semantichub.ResolveSearchFilters(ctx, tx, query.SemanticFilters)
+	if err != nil {
+		return nil, err
+	}
 	searchValues := db.SearchValues{
-		DID:          query.DID,
-		Version:      query.Version,
-		State:        state,
-		TemplateType: templateType,
-		PartyType:    query.PartyType,
-		Name:         query.Name,
-		Description:  query.Description,
-		TemplateData: query.TemplateData,
+		SemanticFilters: semanticFilters,
+		DID:             query.DID,
+		Version:         query.Version,
+		State:           state,
+		TemplateType:    templateType,
+		PartyType:       query.PartyType,
+		Name:            query.Name,
+		Description:     query.Description,
+		TemplateData:    query.TemplateData,
 
-		Jurisdiction:     query.Jurisdiction,
-		Industry:         query.Industry,
-		ComplianceStatus: query.ComplianceStatus,
-		CreatedBy:        query.CreatedBy,
-		CreatedFrom:      query.CreatedFrom,
-		CreatedTo:        query.CreatedTo,
+		CreatedBy:   query.CreatedBy,
+		CreatedFrom: query.CreatedFrom,
+		CreatedTo:   query.CreatedTo,
 	}
 
 	contractTemplates, err := h.CTRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues, query.Pagination)

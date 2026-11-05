@@ -51,6 +51,9 @@ describe('compareXsdValues', () => {
     expect(compareXsdValues(9500, 10000)).toBeLessThan(0)
     expect(compareXsdValues('9500', 10000)).toBeLessThan(0)
     expect(compareXsdValues(99.5, 99.5)).toBe(0)
+    expect(compareXsdValues('1.00', '1')).toBe(0)
+    expect(compareXsdValues('18446744073709551615', '18446744073709551614')).toBeGreaterThan(0)
+    expect(compareXsdValues('12345678901234567890.123456789', '12345678901234567890.123456788')).toBeGreaterThan(0)
   })
 
   it('orders instants as instants', () => {

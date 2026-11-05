@@ -14,6 +14,28 @@ import (
 	"digital-contracting-service/migrations"
 )
 
+func TestFreshSchemaHasComplianceWithoutObsoleteTemplateMetadata(t *testing.T) {
+	db := pgtest.Open(t)
+	for _, table := range []string{"contract_templates", "contract_templates_history"} {
+		var columns []string
+		if err := db.Select(&columns, `SELECT column_name FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = $1
+			AND column_name IN ('jurisdiction', 'industry', 'compliance_status')`, table); err != nil {
+			t.Fatal(err)
+		}
+		if len(columns) != 1 || columns[0] != "compliance_status" {
+			t.Errorf("%s has unexpected search metadata columns: %v", table, columns)
+		}
+	}
+	var triggerDefinition string
+	if err := db.Get(&triggerDefinition, `SELECT pg_get_functiondef('contract_templates_content_updated_at_column()'::regprocedure)`); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(triggerDefinition, "jurisdiction") || strings.Contains(triggerDefinition, "industry") {
+		t.Error("template update trigger references removed search metadata")
+	}
+}
+
 // The erasure migration upgrades a database that holds a key shredded before
 // it: such a row still has its wrapped key, and the migration removes it.
 func TestErasureMigrationUpgradesAShreddedKeyThatKeptItsWrappedKey(t *testing.T) {

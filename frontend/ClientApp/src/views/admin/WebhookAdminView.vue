@@ -205,7 +205,7 @@ const remove = async (sub: WebhookSubscription) => {
               <td class="text-xs">{{ new Date(sub.created_at).toLocaleString() }}</td>
               <td>
                 <button
-                  class="btn btn-outline btn-error btn-xs"
+                  class="btn btn-outline btn-xs btn-error"
                   data-testid="webhook-delete"
                   :disabled="pendingRemovals.has(sub.id)"
                   @click="remove(sub)"

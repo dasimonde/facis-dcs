@@ -32,8 +32,6 @@ type UpdateCmd struct {
 	Name         *string
 	Description  *string
 	TemplateData *datatype.JSON
-	Jurisdiction *string
-	Industry     *string
 	// TemplateLevel and RequiredTemplates are left unchanged when nil.
 	TemplateLevel     *string
 	RequiredTemplates []string
@@ -136,8 +134,6 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,
-		Jurisdiction: cmd.Jurisdiction,
-		Industry:     cmd.Industry,
 
 		TemplateLevel:     cmd.TemplateLevel,
 		RequiredTemplates: cmd.RequiredTemplates,
@@ -179,8 +175,6 @@ func classification(template *db.ContractTemplate) templateevents.Classification
 	return templateevents.Classification{
 		TemplateType:      template.TemplateType,
 		PartyType:         template.PartyType,
-		Jurisdiction:      template.Jurisdiction,
-		Industry:          template.Industry,
 		TemplateLevel:     template.TemplateLevel,
 		RequiredTemplates: template.RequiredTemplates,
 	}

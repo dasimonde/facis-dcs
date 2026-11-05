@@ -6,6 +6,7 @@ import ContractManagerActions from './ContractManagerActions.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractState } from '@/types/contract-state'
 import type { UserRole } from '@/types/user-role'
+import type { Stubs } from '@vue/test-utils'
 
 /**
  * The off-ramps a contract has from the list and detail pages. WITHDRAW and
@@ -34,7 +35,7 @@ function mountActions(
   roles: UserRole[],
   state: ContractState,
   contractData?: Contract['contract_data'],
-  stubs?: Record<string, unknown>,
+  stubs?: Stubs,
 ) {
   const pinia = createPinia()
   setActivePinia(pinia)

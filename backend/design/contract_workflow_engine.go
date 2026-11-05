@@ -379,6 +379,7 @@ var ContractReviewResponse = Type("ContractReviewResponse", func() {
 })
 
 var ContractSearchRequest = Type("ContractSearchRequest", func() {
+	Attribute("semantic_filters", String, "JSON array of configured filter identifiers and scalar values")
 	Description("Contract search request")
 
 	Token("token", String, "JWT token")
@@ -397,7 +398,6 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before the specified date and time)")
 	Attribute("party", String, "Return only contracts naming this party DID as creator or counterparty (DCS-IR-CWE-07)")
 	Attribute("template_did", String, "Return only contracts created from this template (DCS-IR-CWE-07)")
-	Attribute("jurisdiction", String, "Return only contracts whose jurisdiction field contains this text (DCS-FR-CWE-13)")
 })
 
 var ContractSearchResponse = Type("ContractSearchResponse", func() {
@@ -1600,7 +1600,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("valid_until")
 			Param("party")
 			Param("template_did")
-			Param("jurisdiction")
+			Param("semantic_filters")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

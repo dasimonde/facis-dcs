@@ -77,8 +77,8 @@ export interface SemanticValueConstraint {
   valueCatalog?: SemanticValueCatalog
   allowedValuesRef?: string
   odrlLeftOperands?: readonly string[]
-  min?: number
-  max?: number
+  min?: number | string
+  max?: number | string
   description?: string
 }
 

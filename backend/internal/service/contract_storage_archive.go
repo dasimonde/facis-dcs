@@ -27,6 +27,7 @@ import (
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/semantichub"
 
 	"github.com/jmoiron/sqlx"
 	"goa.design/clue/log"
@@ -142,6 +143,7 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 	}
 
 	qry := contract.SearchArchivedContractsQry{
+		SemanticFilters: stringValue(p.SemanticFilters),
 		DID:             stringValue(p.Did),
 		ContractVersion: intValue(p.ContractVersion),
 		State:           state,
@@ -155,7 +157,6 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		Party:           stringValue(p.Party),
 		ValidFrom:       validFrom,
 		ValidUntil:      validUntil,
-		Jurisdiction:    stringValue(p.Jurisdiction),
 	}
 	queryHandler := contract.GetArchivedContractsHandler{
 		DB:    s.DB,
@@ -164,6 +165,9 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 
 	result, err := queryHandler.Search(ctx, qry)
 	if err != nil {
+		if errors.Is(err, semantichub.ErrInvalidSearchFilter) {
+			return nil, contractstoragearchive.MakeBadRequest(err)
+		}
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 

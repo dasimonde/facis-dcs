@@ -9,6 +9,7 @@ import (
 	"github.com/lib/pq"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/semantichub"
 )
 
 var ErrContractTemplateNotFound = errors.New("template not found")
@@ -38,9 +39,7 @@ type ContractTemplate struct {
 
 // SearchableMetadata is the template metadata searched by DCS-FR-TR-10.
 type SearchableMetadata struct {
-	Jurisdiction     *string `db:"jurisdiction"`
-	Industry         *string `db:"industry"`
-	ComplianceStatus string  `db:"compliance_status"`
+	ComplianceStatus string `db:"compliance_status"`
 }
 
 // Structure is the hierarchy level of the template and the templates it
@@ -93,8 +92,6 @@ type ContractTemplateUpdateData struct {
 	Name         *string        `db:"name"`
 	Description  *string        `db:"description"`
 	TemplateData *datatype.JSON `db:"template_data"`
-	Jurisdiction *string        `db:"jurisdiction"`
-	Industry     *string        `db:"industry"`
 	// TemplateLevel and RequiredTemplates are left unchanged when nil.
 	TemplateLevel     *string
 	RequiredTemplates []string
@@ -122,18 +119,15 @@ type ContractTemplateHistory struct {
 }
 
 type SearchValues struct {
-	DID          string
-	Version      int
-	State        string
-	TemplateType string
-	PartyType    string
-	Name         string
-	Description  string
-	TemplateData string
-
-	Jurisdiction     string
-	Industry         string
-	ComplianceStatus string
+	SemanticFilters []semantichub.ResolvedSearchFilter
+	DID             string
+	Version         int
+	State           string
+	TemplateType    string
+	PartyType       string
+	Name            string
+	Description     string
+	TemplateData    string
 
 	// CreatedBy matches part of the creator identifier. CreatedFrom and
 	// CreatedTo are days (YYYY-MM-DD); both ends are included.
