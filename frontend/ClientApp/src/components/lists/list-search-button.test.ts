@@ -30,35 +30,41 @@ it('Search uses typed text even when Filters are empty and change has not fired'
   wrapper.unmount()
 })
 
-it('keeps Search enabled while autocomplete is in flight', async () => {
-  let resolveSearch!: (value: { did: string }[]) => void
-  const searchFn = vi.fn(
-    () =>
-      new Promise<{ did: string }[]>((resolve) => {
-        resolveSearch = resolve
-      }),
-  )
+it('keeps Search enabled and accepts a newer query while an older search is still open', async () => {
+  let resolveFirst!: (value: { did: string }[]) => void
+  const searchFn = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<{ did: string }[]>((resolve) => {
+          resolveFirst = resolve
+        }),
+    )
+    .mockResolvedValueOnce([{ did: 'did:web:second' }])
+
   const wrapper = mount(ListSearch, {
     props: {
       items: [],
       emptyItem: { did: '' },
       filterLabels: { did: 'DID' },
       searchFn,
-      extraRequest: {},
+      extraRequest: { party_type: 'SINGLE_PARTY' },
     },
   })
 
-  const input = wrapper.get('input')
-  ;(input.element as HTMLInputElement).value = 'did:web:hit'
-  await input.trigger('input')
-  await input.trigger('change')
-  await flushPromises()
-
-  expect(searchFn).toHaveBeenCalled()
+  await searchButton(wrapper).trigger('click')
   expect(searchButton(wrapper).attributes('disabled')).toBeUndefined()
 
-  resolveSearch([{ did: 'did:web:hit' }])
+  await wrapper.setProps({ extraRequest: { party_type: 'MULTI_PARTY' } })
+  await searchButton(wrapper).trigger('click')
   await flushPromises()
-  expect(wrapper.emitted('searchResult')).toBeUndefined()
+
+  expect(searchFn).toHaveBeenCalledTimes(2)
+  expect(searchFn).toHaveBeenLastCalledWith({ party_type: 'MULTI_PARTY' })
+  expect(wrapper.emitted('searchResult')?.at(-1)?.[0]).toEqual([{ did: 'did:web:second' }])
+
+  resolveFirst([{ did: 'did:web:stale' }])
+  await flushPromises()
+  expect(wrapper.emitted('searchResult')?.at(-1)?.[0]).toEqual([{ did: 'did:web:second' }])
   wrapper.unmount()
 })

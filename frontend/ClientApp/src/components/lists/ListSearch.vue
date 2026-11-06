@@ -34,7 +34,6 @@ const slots = useSlots()
 
 const searchQuery = ref('')
 const isSearching = ref(false)
-const listSearchPending = ref(false)
 const searchError = ref<string | null>(null)
 
 type FilterLabels = typeof props.filterLabels
@@ -147,12 +146,7 @@ async function searchList(event?: Event) {
   // Combobox @change can lag behind typing; sync before Search/Enter so an empty
   // Filters row still searches the text the user typed.
   syncSearchQueryFromInput(event)
-  listSearchPending.value = true
-  try {
-    await publishSearch(searchRequest())
-  } finally {
-    listSearchPending.value = false
-  }
+  await publishSearch(searchRequest())
 }
 
 function getDisplayValue(template: T | null): string {
@@ -307,8 +301,7 @@ function handlePopoverToggle(event: ToggleEvent) {
       <button
         type="button"
         class="btn join-item ms-0 -mt-px h-full min-h-0 shrink-0 rounded-t-none rounded-b-md px-4 py-0 btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
-        :class="{ 'btn-disabled': listSearchPending }"
-        :disabled="listSearchPending"
+        @mousedown.prevent
         @click="searchList"
       >
         Search
