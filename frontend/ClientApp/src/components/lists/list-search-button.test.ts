@@ -30,6 +30,31 @@ it('Search uses typed text even when Filters are empty and change has not fired'
   wrapper.unmount()
 })
 
+it('Search keeps a typed query that was never selected from the autocomplete', async () => {
+  const searchFn = vi.fn().mockResolvedValue([{ did: 'did:web:hit' }])
+  const wrapper = mount(ListSearch, {
+    props: {
+      items: [] as { did: string }[],
+      emptyItem: { did: '' },
+      filterLabels: { did: 'DID' },
+      searchFn,
+      extraRequest: {},
+    },
+  })
+
+  const input = wrapper.get('input')
+  ;(input.element as HTMLInputElement).value = 'did:web:hit'
+  await input.trigger('input')
+  expect((input.element as HTMLInputElement).value).toBe('did:web:hit')
+  await searchButton(wrapper).trigger('click')
+  await flushPromises()
+
+  expect(searchFn).toHaveBeenCalledWith({ did: 'did:web:hit' })
+  const emitted = wrapper.emitted('searchResult')!
+  expect(emitted[emitted.length - 1]?.[0]).toEqual([{ did: 'did:web:hit' }])
+  wrapper.unmount()
+})
+
 it('keeps Search enabled and accepts a newer query while an older search is still open', async () => {
   let resolveFirst!: (value: { did: string }[]) => void
   const searchFn = vi
@@ -61,10 +86,12 @@ it('keeps Search enabled and accepts a newer query while an older search is stil
 
   expect(searchFn).toHaveBeenCalledTimes(2)
   expect(searchFn).toHaveBeenLastCalledWith({ party_type: 'MULTI_PARTY' })
-  expect(wrapper.emitted('searchResult')?.at(-1)?.[0]).toEqual([{ did: 'did:web:second' }])
+  const afterSecond = wrapper.emitted('searchResult')!
+  expect(afterSecond[afterSecond.length - 1]?.[0]).toEqual([{ did: 'did:web:second' }])
 
   resolveFirst([{ did: 'did:web:stale' }])
   await flushPromises()
-  expect(wrapper.emitted('searchResult')?.at(-1)?.[0]).toEqual([{ did: 'did:web:second' }])
+  const afterStale = wrapper.emitted('searchResult')!
+  expect(afterStale[afterStale.length - 1]?.[0]).toEqual([{ did: 'did:web:second' }])
   wrapper.unmount()
 })
