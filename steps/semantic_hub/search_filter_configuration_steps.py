@@ -75,7 +75,9 @@ def add_and_rename_filter(context):
         response = SearchFilterConfigurationService.retrieve(context)
         assert response.status_code == 200, response.text
         configuration = response.json()
-        context.added_search_filter = next(item for item in configuration["filters"] if item["id"] == added["id"])
+        context.added_search_filter = deepcopy(
+            next(item for item in configuration["filters"] if item["id"] == added["id"])
+        )
         for item in configuration["filters"]:
             if item["id"] == added["id"]:
                 item["label"] = "BDD renamed jurisdiction"

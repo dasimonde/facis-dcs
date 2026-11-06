@@ -57,10 +57,10 @@ test.describe('contract management dashboard backed by contracts in two lifecycl
       // popover for a metadata search.
       await page.locator('#list-btn-search').click()
       await page.locator('#list-popover-search').getByText('Name', { exact: true }).click()
-      const searched = page.waitForResponse((r) => r.url().includes('/contract/search') && r.ok())
       await page.getByLabel('Search contracts').fill(draft.contractTemplateName)
-      await searched
+      const searched = page.waitForResponse((r) => r.url().includes('/contract/search') && r.ok())
       await page.getByRole('button', { name: 'Search', exact: true }).click()
+      await searched
       await expect(rows).toHaveCount(1)
       await expect(rows.first()).toContainText(draft.contractTemplateName)
       await expect(rows.first()).toContainText('DRAFT')
@@ -68,10 +68,10 @@ test.describe('contract management dashboard backed by contracts in two lifecycl
 
     await test.step('a DID search narrows the list to the APPROVED contract', async () => {
       await page.goto('/ui/contracts')
-      const searched = page.waitForResponse((r) => r.url().includes('/contract/search') && r.ok())
       await page.getByLabel('Search contracts').fill(approvedDid)
-      await searched
+      const searched = page.waitForResponse((r) => r.url().includes('/contract/search') && r.ok())
       await page.getByRole('button', { name: 'Search', exact: true }).click()
+      await searched
       await expect(rows).toHaveCount(1)
       await expect(rows.first()).toContainText('APPROVED')
       await expect(rows.first()).not.toContainText(draft.contractTemplateName)
