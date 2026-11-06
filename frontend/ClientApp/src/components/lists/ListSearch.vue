@@ -149,8 +149,8 @@ async function searchList(event?: Event) {
   await publishSearch(searchRequest())
 }
 
-function getDisplayValue(template: T | null): string {
-  return searchKey.value && template ? String(template[searchKey.value]) : ''
+function inputDisplayValue(_item: T | null): string {
+  return searchQuery.value
 }
 
 function autocompleteOptionClasses(active: boolean, selected: boolean) {
@@ -260,7 +260,7 @@ function handlePopoverToggle(event: ToggleEvent) {
             class="input join-item ms-0 -mt-px h-full min-h-0 w-full min-w-0 rounded-none input-secondary sm:-ms-px sm:mt-0"
           >
             <ComboboxInput
-              :display-value="(item) => getDisplayValue(item as T | null)"
+              :display-value="(item) => inputDisplayValue(item as T | null)"
               :placeholder="placeholder || 'Search'"
               class="w-full min-w-0 grow bg-transparent"
               :aria-label="placeholder || 'Search'"
@@ -301,8 +301,7 @@ function handlePopoverToggle(event: ToggleEvent) {
       <button
         type="button"
         class="btn join-item ms-0 -mt-px h-full min-h-0 shrink-0 rounded-t-none rounded-b-md px-4 py-0 btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
-        :class="{ 'btn-disabled': isSearching }"
-        :disabled="isSearching"
+        @mousedown.prevent
         @click="searchList"
       >
         Search

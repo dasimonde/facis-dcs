@@ -21,8 +21,9 @@ test('semantic hub dashboard lists the registered artifacts', async ({ page, log
 
   await page.goto('/ui/semantic-hub')
   await expect(page.getByRole('heading', { name: 'Semantic Hub' })).toBeVisible()
+  const entryList = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Entries' }) })
   for (const name of names) {
-    await expect(page.getByText(name, { exact: false }).first()).toBeVisible()
+    await expect(entryList.getByRole('button', { name }).first()).toBeVisible()
   }
 })
 

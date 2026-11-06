@@ -114,7 +114,7 @@ describe('contract off-ramps', () => {
     expect(labels(mountActions(['CONTRACT_MANAGER'], 'NEGOTIATION'))).not.toContain('Renew')
   })
 
-  it('opens the renewal draft in the editor', async () => {
+  it('opens the renewal draft in the contract view', async () => {
     push.mockClear()
     service.renew.mockClear()
     const wrapper = mountActions(['CONTRACT_MANAGER'], 'EXPIRED', undefined, {
@@ -127,7 +127,7 @@ describe('contract off-ramps', () => {
     await flushPromises()
     expect(service.renew).toHaveBeenCalled()
     expect(push).toHaveBeenCalledWith({
-      name: 'contracts.edit',
+      name: 'contracts.view',
       params: { did: 'did:web:example.com:renewal' },
     })
   })
