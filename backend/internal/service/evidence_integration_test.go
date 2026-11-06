@@ -24,17 +24,17 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	basepg "digital-contracting-service/internal/base/db/pq"
-	"digital-contracting-service/internal/base/pgtest"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/semantichub/hubtest"
 
 	"github.com/stretchr/testify/require"
 	goahttp "goa.design/goa/v3/http"
 )
 
 func TestContractEvidencePostgres(t *testing.T) {
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()

@@ -155,7 +155,7 @@ onMounted(load)
       <button type="button" class="btn btn-outline btn-sm" :disabled="!config || !options.length" @click="addFilter">
         Add filter
       </button>
-      <button type="button" class="btn btn-primary btn-sm" :disabled="!config || saving" @click="save">
+      <button type="button" class="btn btn-sm btn-primary" :disabled="!config || saving" @click="save">
         {{ saving ? 'Saving…' : 'Save filters' }}
       </button>
       <p

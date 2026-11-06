@@ -131,7 +131,7 @@ onUnmounted(() => stateFilterStore.reset())
         <RouterLink
           v-if="isCreator || isManager"
           :to="{ name: ROUTES.TEMPLATES.NEW }"
-          class="btn mt-1 btn-primary btn-sm"
+          class="btn mt-1 btn-sm btn-primary"
         >
           New Template
         </RouterLink>

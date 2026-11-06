@@ -12,13 +12,14 @@ import (
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
+	"digital-contracting-service/internal/semantichub/hubtest"
 )
 
 // DCS-FR-CWE-08, DCS-FR-CWE-02: a submit that carries contract_data saves the
 // document like an update. The replaced version goes to the history with the
 // actor, and a parent that loops back to the contract is refused.
 func TestSubmitWithContractDataKeepsTheVersionAndChecksTheParentPostgres(t *testing.T) {
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	_, err := database.Exec(`
 		INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,name,contract_data) VALUES
 		('a','did:web:local','Org A','DRAFT','tpl',1,'a','{}'),

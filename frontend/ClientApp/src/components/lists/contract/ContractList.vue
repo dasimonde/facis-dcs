@@ -261,7 +261,7 @@ const bulkArchive = () =>
         >
           <span class="text-sm">{{ selectedContracts.length }} selected</span>
           <button v-if="isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkRenew">Renew selected</button>
-          <button v-if="isManager" class="btn btn-error btn-sm" :disabled="bulkRunning" @click="bulkTerminate">
+          <button v-if="isManager" class="btn btn-sm btn-error" :disabled="bulkRunning" @click="bulkTerminate">
             Terminate selected
           </button>
           <button v-if="isApprover || isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkPublish">
@@ -289,7 +289,7 @@ const bulkArchive = () =>
             Contracts are created from templates that are approved and registered in the Template Catalogue, then move
             through negotiation, review, approval and signing. Start by creating one from a registered template.
           </p>
-          <RouterLink v-if="isCreator" :to="{ name: ROUTES.CONTRACTS.NEW }" class="btn mt-1 btn-primary btn-sm">
+          <RouterLink v-if="isCreator" :to="{ name: ROUTES.CONTRACTS.NEW }" class="btn mt-1 btn-sm btn-primary">
             New Contract
           </RouterLink>
         </li>

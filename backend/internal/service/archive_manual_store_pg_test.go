@@ -9,6 +9,7 @@ import (
 
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/semantichub/hubtest"
 )
 
 // seedLocalSignature records a signature this instance applied to did under
@@ -27,7 +28,7 @@ func seedLocalSignature(t *testing.T, db *sqlx.DB, did string) {
 // and the entry records its signatures and credential hashes, so the
 // signature policy rule passes for it.
 func TestArchiveManagerArchivesASignedContractWithItsSignatures(t *testing.T) {
-	db := pgtest.Open(t)
+	db := hubtest.Open(t)
 	unsigned, signed := "did:web:dcs.example:contract:expired-draft", "did:web:dcs.example:contract:signed"
 	for _, did := range []string{unsigned, signed} {
 		_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)

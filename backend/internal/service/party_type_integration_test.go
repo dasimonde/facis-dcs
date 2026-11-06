@@ -14,6 +14,7 @@ import (
 	server "digital-contracting-service/gen/http/template_repository/server"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/semantichub/hubtest"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/db"
@@ -122,7 +123,7 @@ func TestPartyTypeUpdateManageHistory(t *testing.T) {
 }
 
 func TestPartyTypeCatalogueImport(t *testing.T) {
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	for _, value := range []string{"SINGLE_PARTY", "MULTI_PARTY", "", "invalid"} {
 		t.Run(value, func(t *testing.T) {
 			source := "source-" + value

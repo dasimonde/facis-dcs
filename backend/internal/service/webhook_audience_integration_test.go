@@ -8,13 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/pgtest"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
+	"digital-contracting-service/internal/semantichub/hubtest"
 )
 
 func TestContractEventAudiencePostgres(t *testing.T) {
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	ctx := context.Background()
 	peer := "did:web:local"
 	tx, err := database.BeginTxx(ctx, nil)

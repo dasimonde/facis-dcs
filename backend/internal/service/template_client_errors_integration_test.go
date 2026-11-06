@@ -12,6 +12,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/semantichub/hubtest"
 	"digital-contracting-service/internal/templaterepository/command"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
@@ -81,7 +82,7 @@ func TestTemplateClientErrorsAreBadRequests(t *testing.T) {
 // DCS-IR-TR-04: a command the template's state or the caller's role does not
 // allow is a client error.
 func TestTemplateCommandRefusalsAreBadRequestsPostgres(t *testing.T) {
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	ctx := context.Background()
 	ctRepo := &pg.PostgresContractTemplateRepo{}
 	data := datatype.JSON(sodTemplateData)

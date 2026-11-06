@@ -16,10 +16,10 @@ import (
 
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/ipfs"
-	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
+	"digital-contracting-service/internal/semantichub/hubtest"
 )
 
 // unsignedBase is the PDF both instances hold before either one signs.
@@ -73,7 +73,7 @@ func (a ecdhAgreement) DeriveECDH(peer *ecdsa.PublicKey) ([]byte, error) {
 // from A and holds localPDF as its current copy.
 func signingConflictReceiver(t *testing.T, localPDF []byte) (*PeerPdfReceiver, *sqlx.DB) {
 	t.Helper()
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	receiver := &PeerPdfReceiver{

@@ -50,7 +50,7 @@ func TestTemplateRetrieveByIDReviewNotesPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	require.NoError(t, semantichub.Seed(ctx, database))
-	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
+	t.Cleanup(validation.SwapShapeSource(semantichub.HubShapeSource{DB: database}))
 	ctRepo, rtRepo, atRepo := &pg.PostgresContractTemplateRepo{}, &pg.PostgresReviewTaskRepo{}, &pg.PostgresApprovalTaskRepo{}
 	const org = "did:web:org.example"
 	future := time.Now().Add(time.Hour)

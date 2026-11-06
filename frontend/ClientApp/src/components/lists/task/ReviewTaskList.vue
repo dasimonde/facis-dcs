@@ -139,7 +139,7 @@ onUnmounted(() => stateFilterStore.reset())
       </li>
       <template v-if="filteredTasks.length > 0">
         <li v-for="task in filteredTasks" :key="task.did" class="list-row">
-          <div class="card border-base-content/10 bg-base-100 list-col-grow card-border hover:bg-base-300">
+          <div class="list-col-grow card border-base-content/10 bg-base-100 card-border hover:bg-base-300">
             <div class="card-body">
               <h2 class="card-title flex-wrap justify-between">
                 <div v-if="task.type === 'template'">Template Name: {{ getTemplateName(task) }}</div>
@@ -170,7 +170,7 @@ onUnmounted(() => stateFilterStore.reset())
                       name: resolveViewRouteName(task),
                       params: { did: task.did },
                     }"
-                    class="btn btn-primary btn-sm"
+                    class="btn btn-sm btn-primary"
                   >
                     View
                   </RouterLink>
@@ -180,7 +180,7 @@ onUnmounted(() => stateFilterStore.reset())
                       name: ROUTES.TEMPLATES.EDIT,
                       params: { did: task.did },
                     }"
-                    class="btn gap-2 btn-primary btn-sm"
+                    class="btn gap-2 btn-sm btn-primary"
                   >
                     Edit
                   </RouterLink>

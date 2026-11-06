@@ -25,7 +25,7 @@ func TestTemplateVerifyAgainstProvenanceCredentialPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	require.NoError(t, semantichub.Seed(ctx, database))
-	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
+	t.Cleanup(validation.SwapShapeSource(semantichub.HubShapeSource{DB: database}))
 	ctRepo := &pg.PostgresContractTemplateRepo{}
 	registrar := &command.Registrar{
 		DB: database, CTRepo: ctRepo,

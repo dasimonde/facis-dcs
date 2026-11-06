@@ -853,7 +853,6 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 	if len(values.TemplateDID) > 0 {
 		conditions += ` template_did = $` + strconv.Itoa(paramIndex) + ` AND`
 		params = append(params, values.TemplateDID)
-		paramIndex++
 	}
 
 	l := len(" AND")

@@ -20,6 +20,7 @@ import (
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/semantichub"
+	"digital-contracting-service/internal/semantichub/hubtest"
 )
 
 // archiveManager is the organization of the Archive Manager; it created the
@@ -243,7 +244,7 @@ func (m *memoryArtifacts) Get(_ context.Context, scope artifactstore.Scope, cid 
 }
 
 func TestArchiveManagerStoresAFinalContractOnce(t *testing.T) {
-	db := pgtest.Open(t)
+	db := hubtest.Open(t)
 	did := "did:web:dcs.example:contract:terminated"
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
 		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
@@ -292,7 +293,7 @@ func (stubArchiveTSA) TimestampBytes(context.Context, []byte) (*tsa.Receipt, err
 // receipt the signing workflow gives its archive entry, so the evidence
 // compliance check passes.
 func TestArchiveManagerStoreNotarizesAndTimestampsTheEntry(t *testing.T) {
-	db := pgtest.Open(t)
+	db := hubtest.Open(t)
 	did := "did:web:dcs.example:contract:notarized"
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
 		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)

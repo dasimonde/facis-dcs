@@ -214,7 +214,7 @@ function handlePopoverToggle(event: ToggleEvent) {
         <button
           id="list-btn-search"
           type="button"
-          class="select-button btn h-full min-h-0 w-full cursor-default rounded-t-md rounded-b-none border-secondary btn-outline-default px-4 py-0 sm:rounded-l-md sm:rounded-tr-none"
+          class="select-button btn h-full min-h-0 w-full cursor-default rounded-t-md rounded-b-none border-secondary px-4 py-0 btn-outline-default sm:rounded-l-md sm:rounded-tr-none"
           popovertarget="list-popover-search"
           aria-haspopup="listbox"
           :aria-expanded="filterPopover?.matches(':popover-open')"

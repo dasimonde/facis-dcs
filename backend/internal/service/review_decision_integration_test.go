@@ -11,12 +11,13 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
+	"digital-contracting-service/internal/semantichub/hubtest"
 )
 
 // DCS-FR-CWE-15: rejection returns the contract to draft status. The rejected
 // contract accepts edits like a draft.
 func TestRejectedContractIsEditablePostgres(t *testing.T) {
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)

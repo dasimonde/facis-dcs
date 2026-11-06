@@ -27,7 +27,7 @@ func TestTemplateProvenanceNamesReviewerAndApproverPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	require.NoError(t, semantichub.Seed(ctx, database))
-	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
+	t.Cleanup(validation.SwapShapeSource(semantichub.HubShapeSource{DB: database}))
 	ctRepo, rtRepo, atRepo := &pg.PostgresContractTemplateRepo{}, &pg.PostgresReviewTaskRepo{}, &pg.PostgresApprovalTaskRepo{}
 	const org = "did:web:org.example"
 	const creator, reviewer, approver, registrar = "did:key:creator", "did:key:reviewer", "did:key:approver", "did:key:registrar"

@@ -32,11 +32,12 @@ import (
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/semantichub/hubtest"
 	smpg "digital-contracting-service/internal/signingmanagement/db/pg"
 )
 
 func TestContractReadScopePostgres(t *testing.T) {
-	database := pgtest.Open(t)
+	database := hubtest.Open(t)
 	ctx := context.Background()
 	peer := "did:web:local"
 	repo := &cwepg.PostgresContractRepo{}
