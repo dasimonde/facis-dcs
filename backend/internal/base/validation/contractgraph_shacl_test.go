@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"digital-contracting-service/internal/base/datatype"
 )
 
 // externalLibraryShapes is a vanilla third-party SHACL library: it targets
@@ -107,6 +109,32 @@ func TestExternalLibraryFlagsWrongLiteralDatatype(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, errorFindings(findings))
 	require.Contains(t, fmt.Sprintf("%+v", findings), "countryName")
+}
+
+// A template leaves a negotiable leaf to the contract: the unfilled field
+// reference does not refuse the template, but a missing fixed property and a
+// wrong fixed literal still do.
+func TestTemplateShapesAcceptUnfilledNegotiableLeaf(t *testing.T) {
+	restore := swapExternalLibraryShapeSource(t)
+	defer restore()
+
+	audit := func(document map[string]any) string {
+		raw, err := datatype.NewJSON(document)
+		require.NoError(t, err)
+		findings, err := AuditTemplateShapes(context.Background(), &raw)
+		require.NoError(t, err)
+		return fmt.Sprintf("%+v", errorFindings(findings))
+	}
+
+	require.Equal(t, "[]", audit(nestedDomainContract(t)))
+
+	missingFixed := nestedDomainContract(t)
+	delete(missingFixed["dcs:contractData"].([]any)[0].(map[string]any), "ex:registrationNumber")
+	require.Contains(t, audit(missingFixed), "registrationNumber-MinCountConstraintComponent")
+
+	wrongLiteral := nestedDomainContract(t)
+	wrongLiteral["dcs:contractData"].([]any)[2].(map[string]any)["ex:countryName"] = 276
+	require.Contains(t, audit(wrongLiteral), "countryName")
 }
 
 func TestMaterializeKeepsOriginalUntouched(t *testing.T) {

@@ -4,6 +4,7 @@
 package mapper
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -52,7 +53,9 @@ func parseJSONB(raw *datatype.JSON) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	var result map[string]any
-	if err := json.Unmarshal(*raw, &result); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(*raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&result); err != nil {
 		return nil, err
 	}
 	if result == nil {

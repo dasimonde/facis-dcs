@@ -119,7 +119,8 @@ function onModalClose() {
           <span class="font-medium">Organizations that may read this contract</span>
           <span class="text-xs text-base-content/70">
             Legal names, comma-separated, matched against the organization in the reader's credential. Your own
-            organization always has access.
+            organization always has access. Name the counterparty's organization: its users can read their copy only
+            when it is listed here.
           </span>
           <input
             v-model="readingOrganizations"

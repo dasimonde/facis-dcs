@@ -1,7 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
-import { ONTOLOGY_ASSETS, refreshOntologyDomainFields } from '@template-repository/utils/ontology-domain-fields'
+import {
+  ONTOLOGY_ASSETS,
+  parseSearchFieldFromSchema,
+  refreshOntologyDomainFields,
+} from '@template-repository/utils/ontology-domain-fields'
 
 /**
  * A field declared by importing a hub shapes graph must carry what the
@@ -38,6 +42,13 @@ slah:ManagedKubernetesEnvironmentShape
 
 const NODES = 'https://w3id.org/facis/sla/hosting/v1#provisionedNodes'
 const NODE_CLASS = 'https://w3id.org/facis/sla/hosting/v1#nodeClass'
+
+it('retains precision in numeric SHACL boundaries', () => {
+  const shapes = SHAPES.replace('sh:maxInclusive 500', 'sh:maxInclusive 18446744073709551615')
+  expect(parseSearchFieldFromSchema(shapes, 'shapes', NODES)?.valueConstraint?.max).toBe('18446744073709551615')
+  const large = SHAPES.replace('sh:maxInclusive 500', 'sh:maxInclusive 1e400')
+  expect(parseSearchFieldFromSchema(large, 'shapes', NODES)?.valueConstraint?.max).toBe('1e400')
+})
 const ENVIRONMENT = 'https://w3id.org/facis/sla/hosting/v1#ManagedKubernetesEnvironment'
 
 const realFetch = globalThis.fetch

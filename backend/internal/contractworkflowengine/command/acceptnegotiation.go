@@ -52,6 +52,7 @@ type NegotiationAcceptor struct {
 	CRepo       db.ContractRepo
 	NRepo       db.NegotiationRepo
 	NTRepo      db.NegotiationTaskRepo
+	NORepo      db.NegotiationOutboundRepo
 	SRepo       db2.SyncRepository
 	DIDDocument identity.DIDDocument
 }
@@ -99,9 +100,33 @@ func (h *NegotiationAcceptor) Handle(ctx context.Context, cmd AcceptNegotiationC
 		return ErrConflictOfInterest
 	}
 
+	localPeer, err := h.DIDDocument.GetID()
+	if err != nil {
+		return err
+	}
+
+	// Accept gate: do not Accept while earlier outbound Proposals or
+	// Decisions for this contract still lack peer ACK. First Accept with nothing
+	// pending is allowed.
+	err = requireConfirmedNegotiationDelivery(ctx, tx, h.NORepo, localPeer, cmd.DID)
+	if err != nil {
+		return err
+	}
+
 	err = h.NRepo.Accept(ctx, tx, cmd.ID, cmd.CauserDID)
 	if err != nil {
 		return fmt.Errorf("could not accept negotiation: %w", err)
+	}
+
+	decisionID, err := h.NRepo.ReadDecisionID(ctx, tx, cmd.ID, cmd.CauserDID)
+	if err != nil {
+		return fmt.Errorf("could not read accepted decision: %w", err)
+	}
+
+	err = enqueueNegotiationOutbound(ctx, tx, h.CRepo, h.NORepo, localPeer,
+		db.NegotiationMessageAccept, cmd.ID, &decisionID, cmd.DID, processData.ContractVersion)
+	if err != nil {
+		return err
 	}
 
 	evt := contractevents.AcceptNegotiationEvent{

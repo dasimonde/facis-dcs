@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/semantichub"
 )
 
 type Responsible struct {
@@ -104,6 +105,13 @@ type ContractMetadata struct {
 	LatestTemplateDID    *string      `db:"latest_template_did"`
 	TemplateIsDeprecated *bool        `db:"template_is_deprecated"`
 	ParentContractDID    *string      `db:"parent_contract_did"`
+	// RenewsContractDID is the contract this one renews (dcs:renewsContract).
+	RenewsContractDID *string `db:"renews_contract_did"`
+	// The termination record of a terminated archived contract
+	// (DCS-FR-CSA-16); nil for any other contract.
+	TerminationReason *string    `db:"termination_reason"`
+	TerminatedAt      *time.Time `db:"terminated_at"`
+	TerminationRole   *string    `db:"termination_role"`
 	// The registered target system this contract deploys to (ADR-25), resolved
 	// to its name so the destination is readable without a second lookup.
 	TargetID   *string `db:"target_id"`
@@ -169,6 +177,10 @@ type ContractHistory struct {
 	ContractData    *datatype.JSON `db:"contract_data"`
 	TemplateDID     string         `db:"template_did"`
 	TemplateVersion int            `db:"template_version"`
+	// ModifiedBy and ModifiedAt identify the save that replaced this version.
+	// They are NULL on rows snapshotted before the actor was recorded.
+	ModifiedBy *string    `db:"modified_by"`
+	ModifiedAt *time.Time `db:"modified_at"`
 }
 
 type ContractArchiveEntry struct {
@@ -191,13 +203,38 @@ type ContractArchiveEntry struct {
 	DeletionReason       *string        `db:"deletion_reason"`
 }
 
+// ExecutionProof is the proof of contract execution over every signature
+// (DCS-FR-SM-10), with the notary and TSA receipts over its content hash.
+type ExecutionProof struct {
+	DID           string
+	ContentHash   string
+	Proof         datatype.JSON
+	NotaryReceipt *datatype.JSON
+	TSAReceipt    *datatype.JSON
+}
+
+// ListOptions narrows and orders the contract list before the page is cut
+// (DCS-IR-CWE-11).
+type ListOptions struct {
+	// States keeps contracts in one of these states. Empty keeps all.
+	States []string
+	// ParentDID keeps contracts whose dcs:parentContract references this DID.
+	ParentDID string
+	// SortBy is created_at, updated_at, state or name. Empty is created_at.
+	SortBy string
+	// Ascending sorts from low to high. The default is from high to low.
+	Ascending bool
+}
+
 type SearchValues struct {
+	SemanticFilters []semantichub.ResolvedSearchFilter
 	DID             string
 	ContractVersion int
-	State           string
-	Name            string
-	Description     string
-	ContractData    string
+	// States keeps contracts in one of these states. Empty keeps all.
+	States       []string
+	Name         string
+	Description  string
+	ContractData string
 	// Tag filters archived contracts by an assigned annotation tag
 	// (DCS-FR-CSA-11); only meaningful for the archive queries, whose
 	// backing view exposes archive_tags.
@@ -215,6 +252,19 @@ type SearchValues struct {
 	// returned. It is a reverse-index QUERY over children the instance
 	// legitimately holds locally — never a field on the parent document.
 	ParentDID string
+	// TemplateDID matches the template the contract was created from
+	// (DCS-IR-CWE-07).
+	TemplateDID string
+}
+
+// SignedSignature is one SIGNED signature of a contract.
+type SignedSignature struct {
+	SignerDID      string    `db:"signer_did"`
+	CredentialType string    `db:"credential_type"`
+	FieldName      string    `db:"field_name"`
+	SignedAt       time.Time `db:"signed_at"`
+	PDFHash        string    `db:"pdf_hash"`
+	JAdESSignature string    `db:"jades_signature"`
 }
 
 type ContractPDFState struct {
@@ -222,20 +272,47 @@ type ContractPDFState struct {
 	RendererVersion string `db:"pdf_renderer_version"`
 	C2PAState       string `db:"pdf_c2pa_state"`
 	PayloadHash     string `db:"pdf_payload_hash"`
+	// Signed is true when the stored PDF carries a PAdES signature. UpdatePDFState
+	// never clears it: an incremental update keeps every signature.
+	Signed bool `db:"pdf_signed"`
 }
 
 type ContractRepo interface {
 	Create(ctx context.Context, tx *sqlx.Tx, data Contract) error
 	RemoteCreate(ctx context.Context, tx *sqlx.Tx, data Contract) error
-	CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string) error
+	// CreateHistoryEntryForDID snapshots the current version before a save
+	// replaces it, attributed to modifiedBy, the actor of that save.
+	CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string, modifiedBy string) error
 	ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]ContractHistory, error)
 	ReadDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*Contract, error)
 	ExistsByDID(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
 	// ReadChildrenDIDs returns the DIDs of all locally-known contracts whose
 	// dcs:parentContract references did, ordered by did.
 	ReadChildrenDIDs(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadOpenRenewalDID returns a renewal of originalDID that is not
+	// withdrawn, revoked, terminated or expired, or "" when there is none.
+	ReadOpenRenewalDID(ctx context.Context, tx *sqlx.Tx, originalDID string) (string, error)
 	ReadExpiredContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
+	// ReadRenewalDueContracts returns the SIGNED or ACTIVE contracts whose
+	// notice period before exp_date has started and that have no renewal
+	// notice for their current exp_date yet (DCS-FR-CWE-22).
+	ReadRenewalDueContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
+	// ClaimRenewalNotice records the renewal notice for (did, expDate). It
+	// returns false when the notice is already recorded, so the caller emits
+	// the event at most once per expiry date.
+	ClaimRenewalNotice(ctx context.Context, tx *sqlx.Tx, did string, expDate time.Time) (bool, error)
 	StoreArchiveEntry(ctx context.Context, tx *sqlx.Tx, data ContractArchiveEntry) error
+	// AppendArchivePeerSignatures appends to signature_metadata.peer_signatures
+	// of the latest active archive entry of did each entry of peerSignatures
+	// (a JSON array) that the entry does not hold yet. It returns false when
+	// did has no active archive entry or nothing was new.
+	AppendArchivePeerSignatures(ctx context.Context, tx *sqlx.Tx, did string, peerSignatures []byte) (bool, error)
+	// ReadLatestArchiveEntry returns the latest active archive entry of did,
+	// or nil when there is none.
+	ReadLatestArchiveEntry(ctx context.Context, tx *sqlx.Tx, did string) (*ContractArchiveEntry, error)
+	// StoreExecutionProof keeps a notarized proof of execution of did. It
+	// returns false when the same proof is already kept.
+	StoreExecutionProof(ctx context.Context, tx *sqlx.Tx, proof ExecutionProof) (bool, error)
 	ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]ContractArchiveEntry, error)
 	// MarkArchiveEntryDeleted soft-deletes every not-yet-deleted archive
 	// entry for did (DCS-FR-CSA-17): sets deleted_at/deleted_by/
@@ -255,13 +332,24 @@ type ContractRepo interface {
 	// them against the contract document's declared signatureFields
 	// (DCS-FR-SM-07/-17, DCS-NFR-BR-03).
 	ReadSignedSignatureFieldNames(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadSignedSignatures returns the SIGNED signatures of the contract in the
+	// order they were applied.
+	ReadSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]SignedSignature, error)
 	ReadArchivedContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
 	ReadArchivedContractsByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues) ([]ContractMetadata, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
 	ReadProcessDataByDIDOrNil(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
-	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractMetadata, error)
+	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination, options ListOptions) ([]ContractMetadata, error)
 	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues, pagination datatype.Pagination) ([]ContractMetadata, error)
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	// ExpireContract persists EXPIRED for did if its expiry has passed and it
+	// is in a state that expires (the ReadExpiredContracts condition). It
+	// returns false when another writer expired or ended the contract first,
+	// so the caller emits ContractExpired at most once.
+	ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
+	// UpdateState moves the contract from state from to state to. It fails
+	// with contractstate.ErrInvalidTransition when the contract is no longer
+	// in state from, so a concurrent writer is never overwritten.
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
 	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data Contract) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractPDFState, error)

@@ -23,6 +23,7 @@ test('template state stays workflow-controlled in the builder', async ({ page, l
         version: 1,
         state: 'DRAFT',
         template_type: 'COMPONENT',
+        party_type: 'MULTI_PARTY',
         name,
         description,
         created_by: 'template-manager',
@@ -45,6 +46,7 @@ test('template state stays workflow-controlled in the builder', async ({ page, l
 
   await expect(page.getByText('Template State', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('group').filter({ hasText: 'Contract Type' })).toBeVisible()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await page.getByRole('group').filter({ hasText: 'Base Description' }).getByRole('textbox').fill(description)
   await page.getByRole('tab', { name: /Builder/ }).click()

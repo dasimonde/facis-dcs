@@ -70,12 +70,13 @@ Feature: Template Approval Workflow
     When I submit template "Standard NDA"
     Then the template status is "Submitted"
 
-  @clean_db
-  Scenario: Archive submitted template
+  @clean_db @DCS-IR-TR-07
+  Scenario: A submitted template is not archived
     Given I am authenticated with roles: "Template Manager"
     And template "Standard NDA" is in "Submitted" status
     When I delete template "Standard NDA"
-    Then the template status is "Deleted"
+    Then the request is denied with a client error
+    And template "Standard NDA" is still in "Submitted" status
 
   @clean_db
   Scenario: Archive approved template
@@ -87,6 +88,13 @@ Feature: Template Approval Workflow
   @clean_db @DCS-FR-TR-06
   Scenario: Unauthorized role cannot approve template
     Given I am authenticated with roles: "Template Creator"
+    And template "Standard NDA" is in "Reviewed" status
+    When I approve template "Standard NDA"
+    Then the request is denied with an authorization error
+
+  @clean_db @DCS-FR-TR-06
+  Scenario: Template Manager cannot approve template
+    Given I am authenticated with roles: "Template Manager"
     And template "Standard NDA" is in "Reviewed" status
     When I approve template "Standard NDA"
     Then the request is denied with an authorization error

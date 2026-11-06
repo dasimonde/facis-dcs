@@ -20,7 +20,7 @@ const dataIntegrityContext = "https://w3id.org/security/data-integrity/v2"
 // W3C VC Data Model 2.0 base context) so RDFC-1.0 canonicalization — and
 // therefore the ecdsa-rdfc-2019 signature — actually covers them, instead of
 // silently dropping them as unmapped JSON-LD terms.
-var dcsVocabulary = map[string]interface{}{
+var dcsVocabulary = map[string]interface{}{ // #nosec G101 -- identifier or vocabulary IRI, not a credential
 	"dcs":                           "https://w3id.org/facis/dcs/ontology/v1#",
 	"FederationAgreementCredential": "dcs:FederationAgreementCredential",
 	"TrustFrameworkPolicy":          "dcs:TrustFrameworkPolicy",

@@ -2,7 +2,8 @@
 
 Status: Accepted (2026-07-31). Supersedes the second of the two enforcement
 moments [ADR-11](adr-11-opa-odrl-enforcement.md) established: the execution /
-KPI-monitoring moment, whose call site was `EvaluateKPIViolation`. ADR-11's
+KPI-monitoring moment, whose call site was `EvaluateKPIViolation`. Decision 5
+(deadline monitoring, 2026-10-30) adds the DCS-side check for silence. ADR-11's
 first moment — server-side evaluation of a contract's own declared values
 before a signature is admitted — stands unchanged, as does the OPA/Rego
 evaluator it selected.
@@ -94,6 +95,18 @@ in a running deployment is a green row for a check that never ran.
    *well-formed and closed* — that is a document property, checkable without
    the world.
 
+5. **The DCS monitors contractual deadlines for silence.** A duty in the
+   contract's ODRL (an `odrl:obligation` entry, or an `odrl:duty` nested in a
+   rule) that carries an `odrl:dateTime` constraint with `lt` or `lteq` has a
+   deadline. When that deadline has passed on a contract in force (`ACTIVE`)
+   and the target system sent no report that names the rule, the scheduled
+   compliance sweep (ADR-32) raises an `OBLIGATION_DEADLINE_MISSED` risk. The
+   DCS reads only dates the parties signed and the reports it received; it does
+   not conclude that the duty was breached. Any report on the rule — satisfied,
+   violated or not evaluated — closes the finding, and the target's verdict on
+   the rule stays authoritative. The risk alerts once, through the risk register
+   and the `compliance.risk_detected` webhook event, like every other class.
+
 ## Consequences
 
 The DCS stops needing an ODRL evaluation engine that matches a real enforcer's
@@ -110,9 +123,9 @@ evaluated* — never as compliant. Per the project's greenfield rule the old row
 are not migrated.
 
 The compliance monitor's KPI-breach class (ADR-32) now reads a reported verdict
-instead of re-deriving one. Its other three classes — awaiting approval, denied
-access, deployment never received — are derivations over the DCS's own state
-and are unaffected.
+instead of re-deriving one. Its classes awaiting approval, denied access,
+deployment never received and missed deadline (decision 5) are derivations over
+the DCS's own state and the reports it received.
 
 The audit view must stop rendering a deferred finding in the passing bucket.
 `odrlexpanded.go` already records that "info" means DEFERRED, not passed; under

@@ -65,6 +65,7 @@ func (m *memoryCEKRepo) Shred(_ context.Context, scope artifactstore.Scope, shre
 	var n int64
 	for _, r := range m.records {
 		if r.ScopeKind == string(scope.Kind) && r.ScopeID == scope.ID && r.ShreddedAt == nil {
+			r.WrappedCEK = nil
 			r.ShreddedAt = &now
 			r.ShreddedBy = &shreddedBy
 			r.ShredReason = &reason

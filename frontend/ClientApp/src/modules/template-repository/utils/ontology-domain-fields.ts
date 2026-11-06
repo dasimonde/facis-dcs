@@ -1,6 +1,8 @@
 import { Parser, type Quad } from 'n3'
 import { shallowReactive } from 'vue'
+import { getConfig } from '@/config'
 import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
+import { compareXsdValues } from '@/models/xsd-order'
 import type {
   DomainFieldDefinition,
   SemanticParameterType,
@@ -69,6 +71,14 @@ export class OntologyGraph {
     return Number.isNaN(parsed) ? undefined : parsed
   }
 
+  firstPreciseNumber(subject: string, predicateIRI: string): number | string | undefined {
+    const raw = this.first(subject, predicateIRI)
+    if (raw === '') return undefined
+    const parsed = Number(raw)
+    if (compareXsdValues(raw, raw) !== 0) return undefined
+    return Number.isFinite(parsed) && compareXsdValues(raw, parsed) === 0 ? parsed : raw
+  }
+
   subjects(): string[] {
     return [...this.bySubject.keys()]
   }
@@ -103,9 +113,9 @@ function schemaContentRoute(kind: string, name: string): string | null {
   const encoded = encodeURIComponent(name)
   switch (kind) {
     case 'ontology':
-      return `/api/semantic/ontology/${encoded}`
+      return `${getConfig().API_BASE_URL}/semantic/ontology/${encoded}`
     case 'shapes':
-      return `/api/semantic/shapes/${encoded}`
+      return `${getConfig().API_BASE_URL}/semantic/shapes/${encoded}`
     default:
       return null
   }
@@ -185,8 +195,8 @@ function parseValueConstraints(graph: OntologyGraph): ReadonlyMap<string, Semant
       valueCatalog,
       allowedValuesRef: graph.first(subject, `${DCS}allowedValuesRef`) || undefined,
       odrlLeftOperands: graph.values(subject, `${DCS}odrlLeftOperand`),
-      min: graph.firstNumber(subject, `${DCS}minInclusive`),
-      max: graph.firstNumber(subject, `${DCS}maxInclusive`),
+      min: graph.firstPreciseNumber(subject, `${DCS}minInclusive`),
+      max: graph.firstPreciseNumber(subject, `${DCS}maxInclusive`),
       description: graph.first(subject, `${RDFS}label`) || undefined,
     })
   }
@@ -335,8 +345,8 @@ function buildPropertyField(graph: OntologyGraph, propShape: string, path: strin
     graph.first(propShape, `${RDFS}label`) ||
     formatOntologyLabel(localName(path))
   const pattern = graph.first(propShape, `${SH}pattern`) || undefined
-  const min = graph.firstNumber(propShape, `${SH}minInclusive`)
-  const max = graph.firstNumber(propShape, `${SH}maxInclusive`)
+  const min = graph.firstPreciseNumber(propShape, `${SH}minInclusive`)
+  const max = graph.firstPreciseNumber(propShape, `${SH}maxInclusive`)
   const hasConstraint = allowedValues.length > 0 || pattern !== undefined || min !== undefined || max !== undefined
   // A property with no sh:datatype and no enum is object-valued (sh:class /
   // sh:node) — filled with a reference/identifier, carried as a string.
@@ -391,6 +401,22 @@ function parseShapesAssets(graph: OntologyGraph): HubAsset[] {
   return assets
 }
 
+export function parseSearchFieldFromSchema(
+  content: string,
+  kind: string,
+  iri: string,
+): DomainFieldDefinition | undefined {
+  const graph = new OntologyGraph(new Parser().parse(content))
+  if (kind === 'ontology') {
+    return parseOntologyDomainFields(graph, parseValueConstraints(graph)).find((field) => field.ontologyId === iri)
+  }
+  if (kind === 'shapes') {
+    const shape = graph.subjects().find((subject) => graph.first(subject, `${SH}path`) === iri)
+    return shape ? buildPropertyField(graph, shape, iri) : undefined
+  }
+  return undefined
+}
+
 /**
  * The builder's pickable vocabulary, discovered from the whole Semantic Hub:
  * each registered ontology contributes its dcs:DomainField individuals (flat
@@ -405,7 +431,7 @@ async function loadHub(): Promise<{
   constraints: SemanticValueConstraint[]
   partyRoleOptions: ContractPartyRoleOption[]
 }> {
-  const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const inventory = await fetchHubJson<SchemaListEntry[]>(`${getConfig().API_BASE_URL}/semantic/schema/list`)
   hubFingerprint = fingerprintOf(inventory)
   const loadedSources = await Promise.all(
     inventory
@@ -460,7 +486,7 @@ let hubFingerprint = ''
 function fingerprintOf(inventory: SchemaListEntry[]): string {
   return inventory
     .map((e) => `${e.name}|${e.kind}|${e.active_version ?? ''}|${e.latest_version ?? ''}|${e.updated_at ?? ''}`)
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
     .join(';')
 }
 
@@ -493,7 +519,7 @@ function writeHubCache(fingerprint: string, vocabulary: HubVocabulary): void {
 }
 
 async function loadHubCached(): Promise<HubVocabulary> {
-  const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const inventory = await fetchHubJson<SchemaListEntry[]>(`${getConfig().API_BASE_URL}/semantic/schema/list`)
   const fingerprint = fingerprintOf(inventory)
   const cached = readHubCache(fingerprint)
   if (cached) {
@@ -526,7 +552,7 @@ let refreshInFlight: Promise<void> | null = null
  */
 export function refreshOntologyDomainFields(): Promise<void> {
   refreshInFlight ??= (async () => {
-    const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+    const inventory = await fetchHubJson<SchemaListEntry[]>(`${getConfig().API_BASE_URL}/semantic/schema/list`)
     if (fingerprintOf(inventory) === hubFingerprint) return
     const fresh = await loadHub()
     writeHubCache(hubFingerprint, fresh)

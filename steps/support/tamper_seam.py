@@ -59,10 +59,8 @@ def _ipfs_exec_prefix() -> list:
     """Return the kubectl-exec argv prefix for running commands inside the
     shared IPFS pod.
 
-    IPFS is a SINGLE instance shared across both BDD releases (see
-    deployment/helm/values.bdd2.yml's ipfsClient.mfsBaseURL pointing at
-    "dcs-ipfs" regardless of which DCS instance is calling) — there is no
-    per-instance IPFS to disambiguate.
+    The exec prefix selects the pod serving the tested contract's IPFS
+    endpoint, configured through deployment/helm's ipfs values.
 
     Mirrors the BDD_HSMSIGN_EXEC convention established in
     tests/bdd/scripts/run_bdd_helm.sh: an env-var-provided exec prefix so

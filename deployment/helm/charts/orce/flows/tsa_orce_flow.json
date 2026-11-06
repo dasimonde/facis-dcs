@@ -169,7 +169,7 @@
   "type": "function",
   "z": "tsa_flow",
   "name": "Build ts -reply",
-  "func": "msg.payload = `ts -reply -queryfile ${msg.tsqfile} -config /data/tsa/openssl-tsa.cnf -out ${msg.tsrfile}`;\nreturn msg;",
+  "func": "// openssl reads and rewrites the serial file without a lock. Parallel replies\n// then reuse serial numbers or are rejected (\"Error during serial number\n// generation.\") with exit code 0, so one reply runs at a time.\nmsg.payload = `/data/tsa-state/serial.lock openssl ts -reply -queryfile ${msg.tsqfile} -config /data/tsa/openssl-tsa.cnf -out ${msg.tsrfile}`;\nreturn msg;",
   "outputs": 1,
   "timeout": "",
   "noerr": 0,
@@ -188,7 +188,7 @@
   "id": "exec_reply",
   "type": "exec",
   "z": "tsa_flow",
-  "command": "openssl",
+  "command": "flock",
   "addpay": "payload",
   "append": "",
   "useSpawn": "false",
@@ -237,5 +237,50 @@
   "x": 740,
   "y": 680,
   "wires": []
+ },
+ {
+  "id": "http_in_post",
+  "type": "http in",
+  "z": "tsa_flow",
+  "name": "TSA Endpoint (RFC 3161 POST)",
+  "url": "/tsa",
+  "method": "post",
+  "upload": false,
+  "swaggerDoc": "",
+  "x": 402.5,
+  "y": 320,
+  "wires": [
+   [
+    "accept_tsq"
+   ]
+  ]
+ },
+ {
+  "id": "accept_tsq",
+  "type": "function",
+  "z": "tsa_flow",
+  "name": "Accept TimeStampReq",
+  "func": "// RFC 3161 over HTTP POST (application/timestamp-query), the interface a\n// timestamp client such as DSS uses. The body is the DER TimeStampReq; the\n// reply comes from the same local TSA chain as GET /tsa/:hash.\n// Node-RED hands over a body that is valid UTF-8 as a string, any other as a\n// Buffer; both carry the same bytes.\nconst body = typeof msg.payload === \"string\" ? Buffer.from(msg.payload, \"utf8\") : msg.payload;\nconst type = String((msg.req && msg.req.headers && msg.req.headers[\"content-type\"]) || \"\").split(\";\")[0].trim().toLowerCase();\nif (type !== \"application/timestamp-query\") {\n    msg.statusCode = 415;\n    msg.payload = \"Content-Type must be application/timestamp-query\";\n    return [null, msg];\n}\n// A TimeStampReq is a DER SEQUENCE of a few hundred bytes at most.\nif (!Buffer.isBuffer(body) || body.length < 16 || body.length > 4096 || body[0] !== 0x30) {\n    msg.statusCode = 400;\n    msg.payload = \"Body is not a DER TimeStampReq\";\n    return [null, msg];\n}\nmsg.tsqfile = `/tmp/request-${msg._msgid}.tsq`;\nmsg.tsrfile = `/tmp/request-${msg._msgid}.tsr`;\nfs.writeFileSync(msg.tsqfile, body);\nmsg.payload = `/data/tsa-state/serial.lock openssl ts -reply -queryfile ${msg.tsqfile} -config /data/tsa/openssl-tsa.cnf -out ${msg.tsrfile}`;\nreturn [msg, null];",
+  "outputs": 2,
+  "timeout": "",
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [
+   {
+    "var": "fs",
+    "module": "fs"
+   }
+  ],
+  "x": 622.5,
+  "y": 320,
+  "wires": [
+   [
+    "exec_reply"
+   ],
+   [
+    "http_resp_error_tsa"
+   ]
+  ]
  }
 ]

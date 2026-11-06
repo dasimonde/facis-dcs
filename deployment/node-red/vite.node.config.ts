@@ -33,7 +33,6 @@ export default defineConfig({
                 'crypto',
                 // Runtime dependencies (present in the Node-RED environment)
                 'tmp',
-                'request',
             ],
             output: {
                 exports: 'auto',

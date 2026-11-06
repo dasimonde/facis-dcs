@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -24,6 +23,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
@@ -87,6 +87,15 @@ func (r *negotiationTaskRepoFake) RollForward(_ context.Context, _ *sqlx.Tx, did
 	return nil
 }
 
+func (r *negotiationTaskRepoFake) RollForwardKeepingState(_ context.Context, _ *sqlx.Tx, did string, fromVersion int, toVersion int) error {
+	for i := range r.rows {
+		if r.rows[i].DID == did && r.rows[i].ContractVersion == fromVersion {
+			r.rows[i].ContractVersion = toVersion
+		}
+	}
+	return nil
+}
+
 func (r *negotiationTaskRepoFake) ReadAllByNegotiator(_ context.Context, _ *sqlx.Tx, negotiator string) ([]db.NegotiationTaskData, error) {
 	var out []db.NegotiationTaskData
 	for _, row := range r.rows {
@@ -133,14 +142,21 @@ func (r *negotiationTaskRepoFake) AnyTasksInState(_ context.Context, _ *sqlx.Tx,
 	return false, nil
 }
 
+func (r *taskContractRepoFake) ReadOpenRenewalDID(context.Context, *sqlx.Tx, string) (string, error) {
+	return r.openRenewal, nil
+}
+
 type taskContractRepoFake struct {
 	db.ContractRepo
+	openRenewal    string
 	process        *db.ContractProcessData
 	stored         *db.Contract
 	pdfState       db.ContractPDFState
 	states         []string
 	updates        []db.ContractUpdateData
 	historyEntries int
+	// historyActors holds the modifiedBy of each snapshot, in order.
+	historyActors []string
 	// writes logs the version-bearing writes in order: a snapshot only
 	// preserves the superseded document if it precedes the write replacing it.
 	writes []string
@@ -166,6 +182,9 @@ func (r *taskContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db.Con
 	if data.ContractData != nil {
 		r.stored.ContractData = data.ContractData
 	}
+	if data.ExpNoticePeriod != nil {
+		r.stored.ExpNoticePeriod = data.ExpNoticePeriod
+	}
 	if data.ContractVersion != 0 {
 		r.process.ContractVersion = data.ContractVersion
 		r.writes = append(r.writes, "update")
@@ -189,13 +208,14 @@ func (r *taskContractRepoFake) versionBumps() []int {
 	return out
 }
 
-func (r *taskContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string) error {
+func (r *taskContractRepoFake) CreateHistoryEntryForDID(_ context.Context, _ *sqlx.Tx, _ string, modifiedBy string) error {
 	r.historyEntries++
+	r.historyActors = append(r.historyActors, modifiedBy)
 	r.writes = append(r.writes, "history")
 	return nil
 }
 
-func (r *taskContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _ string, state string) error {
+func (r *taskContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _, _ string, state string) error {
 	r.states = append(r.states, state)
 	r.process.State = state
 	return nil
@@ -229,10 +249,35 @@ type proposedChange struct {
 	data db.NegotiationCreateData
 }
 
-func (r *negotiationRepoFake) Create(_ context.Context, _ *sqlx.Tx, data db.NegotiationCreateData, _ []string) (*time.Time, error) {
-	r.proposed = append(r.proposed, proposedChange{id: fmt.Sprintf("negotiation-%d", len(r.proposed)+1), data: data})
+func (r *negotiationRepoFake) Create(_ context.Context, _ *sqlx.Tx, data db.NegotiationCreateData, _ []string) (string, *time.Time, error) {
+	id := fmt.Sprintf("negotiation-%d", len(r.proposed)+1)
+	r.proposed = append(r.proposed, proposedChange{id: id, data: data})
 	now := time.Now().UTC()
-	return &now, nil
+	return id, &now, nil
+}
+
+func (r *negotiationRepoFake) ReadDecisionID(_ context.Context, _ *sqlx.Tx, negotiationID, _ string) (string, error) {
+	return "decision-for-" + negotiationID, nil
+}
+
+func (r *negotiationRepoFake) ReadNegotiationByID(_ context.Context, _ *sqlx.Tx, id string) (*db.NegotiationData, error) {
+	for _, row := range r.proposed {
+		if row.id == id {
+			return &db.NegotiationData{
+				ID:              row.id,
+				DID:             row.data.DID,
+				ContractVersion: row.data.ContractVersion,
+				ChangeRequest:   row.data.ChangeRequest,
+				CreatedBy:       row.data.CreatedBy,
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *negotiationRepoFake) ReadDecisionByID(_ context.Context, _ *sqlx.Tx, id string) (*db.NegotiationDecisionData, error) {
+	decision := "ACCEPTED"
+	return &db.NegotiationDecisionData{ID: id, Negotiator: localPeerDID, Decision: &decision}, nil
 }
 
 func (r *negotiationRepoFake) Accept(_ context.Context, _ *sqlx.Tx, id string, _ string) error {
@@ -260,6 +305,10 @@ func (r *negotiationRepoFake) ReadCreatedByByNegotiationID(_ context.Context, _ 
 }
 
 func (r *negotiationRepoFake) DeleteDraft(context.Context, *sqlx.Tx, string, string) error {
+	return nil
+}
+
+func (r *negotiationRepoFake) EnsureOpenDecision(context.Context, *sqlx.Tx, string, string) error {
 	return nil
 }
 
@@ -334,8 +383,8 @@ func taskTestDIDDocument(t *testing.T) *identity.DIDDocument {
 				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
-					"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-					"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+					"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+					"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 				},
 			},
 		},
@@ -615,12 +664,14 @@ func TestEveryContractVersionBumpCarriesTheNegotiationTasksForward(t *testing.T)
 	for file, fn := range map[string]string{
 		"submit.go":     "Handle",
 		"receivepdf.go": "Handle",
-		"negotiate.go":  "Handle",
 	} {
 		calls := callsIn(t, file, fn)
 		require.Contains(t, calls, "RollForward",
 			"%s bumps the contract version without carrying the negotiation tasks to the new round", file)
 	}
+	require.Contains(t, callsIn(t, "receivepdf.go", "Handle"), "RollForwardKeepingState",
+		"signed-artifact re-ships must carry tasks forward without reopening them")
+	require.NotContains(t, callsIn(t, "negotiate.go", "Handle"), "RollForward")
 }
 
 // callsIn returns the names of every function and method called anywhere inside

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/contractworkflowengine/db"
 
 	"github.com/stretchr/testify/require"
 )
@@ -174,4 +175,82 @@ func TestSeedingTheClearedRenewalRestoresNoAttribution(t *testing.T) {
 		require.NotContains(t, node, "dcs:hasSignatory", "party %s was re-attributed by the seed", iri)
 		require.NotContains(t, node, "dcs:hasPowerOfAttorney", "party %s was re-attributed by the seed", iri)
 	}
+}
+
+// DCS-FR-CSA-15: a renewal retains references to the prior contract's version,
+// ID and signatures. The copy loses the signatory attribution, so the
+// back-reference must carry it for every signed party, and only for those.
+func TestRenewalReferencesThePreviousTermsSignatures(t *testing.T) {
+	signatures, err := signatureReferences(signedTermDocument(t))
+	require.NoError(t, err)
+	renewal, err := unsignRenewedDocument(signedTermDocument(t))
+	require.NoError(t, err)
+	renewal, err = attachRenewsContractReference(renewal, "contract-1", 3, "ipfs://bafy-signed", signatures)
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(*renewal, &doc))
+	reference, ok := doc["dcs:renewsContract"].(map[string]any)
+	require.True(t, ok)
+	require.EqualValues(t, 3, reference["dcs:version"])
+	require.Equal(t, map[string]any{"@id": "ipfs://bafy-signed"}, reference["dcs:signedDocument"])
+	require.JSONEq(t, `[
+		{"dcs:party": {"@id": "`+originDID+`"}, "dcs:hasSignatory": {"@id": "did:jwk:alice"}, "dcs:hasPowerOfAttorney": {"@id": "`+originDID+`"}},
+		{"dcs:party": {"@id": "`+counterpartyDID+`"}, "dcs:hasSignatory": {"@id": "did:jwk:bob"}, "dcs:hasPowerOfAttorney": {"@id": "`+counterpartyDID+`"}}
+	]`, mustJSON(t, reference["dcs:signatures"]))
+}
+
+// An unsigned original has no signature to reference.
+func TestRenewalOfAnUnsignedContractReferencesNoSignatures(t *testing.T) {
+	seeded, _, err := SeedPartiesAndSignatureFields(documentWithoutParties(t, nil), []string{originDID, counterpartyDID})
+	require.NoError(t, err)
+
+	signatures, err := signatureReferences(&seeded)
+	require.NoError(t, err)
+	renewal, err := attachRenewsContractReference(&seeded, "contract-1", 1, "", signatures)
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(*renewal, &doc))
+	require.NotContains(t, doc["dcs:renewsContract"], "dcs:signatures")
+	require.NotContains(t, doc["dcs:renewsContract"], "dcs:signedDocument")
+}
+
+// A countersignature on an already signed PDF stamps no party node, so the
+// signed artifact is the only reference to it. An unsigned render is not one,
+// whatever lifecycle state it asserts: a contract terminated or expired before
+// signing renders that state unsigned, and a signed one asserts it after signing.
+func TestSignedDocumentReferenceNamesOnlyASignedArtifact(t *testing.T) {
+	for _, asserted := range []string{"active", "suspended", "terminated", "expired"} {
+		require.Equal(t, "ipfs://bafy-signed", signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-signed", C2PAState: asserted, Signed: true}), asserted)
+	}
+	for _, asserted := range []string{"draft", "terminated", "expired"} {
+		require.Empty(t, signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-unsigned", C2PAState: asserted}), asserted)
+	}
+	require.Empty(t, signedDocumentReference(&db.ContractPDFState{C2PAState: "active", Signed: true}))
+	require.Empty(t, signedDocumentReference(nil))
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(b)
+}
+
+// DCS-FR-SM-13: a renewal does not inherit the previous term's signing
+// deadline, which has usually passed and would refuse every signature.
+func TestRenewalDropsThePreviousSigningDeadline(t *testing.T) {
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(*signedTermDocument(t), &doc))
+	doc["dcs:signingDeadline"] = map[string]any{"@value": "2020-01-31", "@type": "xsd:date"}
+	withDeadline, err := datatype.NewJSON(doc)
+	require.NoError(t, err)
+
+	renewal, err := unsignRenewedDocument(&withDeadline)
+	require.NoError(t, err)
+
+	var renewed map[string]any
+	require.NoError(t, json.Unmarshal(*renewal, &renewed))
+	require.NotContains(t, renewed, "dcs:signingDeadline")
 }

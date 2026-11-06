@@ -35,6 +35,18 @@ func TestContractExpiredIsMapped(t *testing.T) {
 	}
 }
 
+// DCS-FR-CWE-22 / DCS-FR-CSA-20: the expiry cron's ContractRenewalDue event
+// must reach webhook subscribers as a renewal-deadline alert.
+func TestContractRenewalDueIsMapped(t *testing.T) {
+	got, ok := DCSEventMap[cweeventtype.ContractRenewalDue.String()]
+	if !ok {
+		t.Fatalf("DCSEventMap has no entry for %q", cweeventtype.ContractRenewalDue.String())
+	}
+	if got != "contract.renewal_due" {
+		t.Fatalf("DCSEventMap[%q] = %q, want %q", cweeventtype.ContractRenewalDue.String(), got, "contract.renewal_due")
+	}
+}
+
 // DCS-FR-TR-22: archiving a registered/published template deprecates it,
 // and Template Users must be notified of the deprecation.
 func TestTemplateDeprecatedIsMapped(t *testing.T) {
@@ -44,5 +56,13 @@ func TestTemplateDeprecatedIsMapped(t *testing.T) {
 	}
 	if got != "template.deprecated" {
 		t.Fatalf("DCSEventMap[%q] = %q, want %q", treventtype.Archive.String(), got, "template.deprecated")
+	}
+}
+
+// DCS-FR-TR-21, DCS-FR-TR-22: a deletion reaches subscribers as a deletion,
+// not as a deprecation.
+func TestTemplateDeletedIsMapped(t *testing.T) {
+	if got := DCSEventMap[treventtype.Delete.String()]; got != "template.deleted" {
+		t.Fatalf("DCSEventMap[%q] = %q, want %q", treventtype.Delete.String(), got, "template.deleted")
 	}
 }

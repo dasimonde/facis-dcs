@@ -137,14 +137,13 @@ test('@REQ-contract-readonly-event-admin-diff-regressions-AC4 selected proposal 
   })
   expect(proposedDocument?.['dcs:policies']).toBeTruthy()
 
-  // Off-canvas by design (NegotiateContractView parks the list at -100vw):
-  // a coordinate click cannot land, so the event is dispatched directly.
-  await page.getByRole('button', { name: 'Show', exact: true }).first().dispatchEvent('click')
+  await page.getByRole('tab', { name: /proposals/i }).click()
+  await page.getByRole('button', { name: 'Show', exact: true }).first().click()
   const comparison = page.getByTestId('proposal-comparison')
   await expect(comparison).toBeVisible()
-  await expect(comparison.getByRole('heading', { name: 'Current contract' })).toBeVisible()
+  await expect(comparison.getByRole('heading', { name: 'Formal contract' })).toBeVisible()
   await expect(comparison.getByRole('heading', { name: 'Proposed contract' })).toBeVisible()
-  await expect(comparison.getByText('Current contract content', { exact: true })).toBeVisible()
+  await expect(comparison.getByText('Formal contract content', { exact: true })).toBeVisible()
   await expect(comparison.getByText('Proposed contract content', { exact: true })).toBeVisible()
   await expect(comparison.getByText(FIXTURE_CLAUSE_PROSE, { exact: false })).toHaveCount(2)
   await expect(comparison.getByText('250', { exact: true })).toBeVisible()

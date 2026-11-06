@@ -72,8 +72,12 @@ Federated Catalogue, TRAIN, and EDC MVD: verification stays on, the trust
    > operating party."
 
 2. **Both directions verify the peer's agreement credential.** Outbound,
-   before shipping; inbound, in the `PostPdf` sequence after the eIDAS chain
-   and challenge verification. Verification = fetch the peer's credential,
+   before shipping; inbound, on every peer endpoint (`admitPeer` in
+   `service/dcs_to_dcs.go`: post_pdf, post_settlement,
+   post_settlement_withdrawal, post_negotiation, erase, get_contract_info,
+   terminate) after the eIDAS chain and the challenge
+   ([ADR-13](adr-13-pdf-exchange-federation.md), "Peer request
+   authentication"). Verification = fetch the peer's credential,
    check its signature against the key in the peer's `did.json`, compare its
    rules hash against the locally embedded expectation. A peer without a
    valid, matching credential is untrusted — the interaction is denied.
@@ -106,7 +110,7 @@ flowchart TB
         S3{"VC signature valid against key<br/>in B's did.json AND rules hash ==<br/>own go:embed hash?"}
         S5["POST to OWN policy endpoint<br/>DCS_TRUST_PDP_URL (Node-RED, low-code)"]
         S6{"2xx?<br/>(unset URL / unreachable = no)"}
-        SHIP["ship PDF (+ JAdES) with<br/>HSM-signed challenge response"]
+        SHIP["ship PDF (+ JAdES) with an HSM-signed<br/>dcs-peer-v1 challenge for B"]
         FAIL_A["do not ship →<br/>sync_fails + incident report"]
     end
 
@@ -116,7 +120,7 @@ flowchart TB
 
     subgraph B["DCS B (receiver)"]
         R1{"layer 1: eIDAS cert chain in<br/>A's did:web vs EU trust pool"}
-        R2{"layer 2: challenge-response<br/>signature vs A's did.json key"}
+        R2{"layer 2: challenge names this op, contract,<br/>A, B and the body; iat within 120 s;<br/>signature vs A's did.json key; nonce new"}
         R4{"layer 3a: A's agreement credential<br/>valid AND hash matches own embed?"}
         R5{"layer 3b: own policy endpoint<br/>allows? (unset/unreachable = no)"}
         ACCEPT["accept: extract JSON-LD via pdf-core,<br/>verify content, upsert local copy"]
@@ -145,7 +149,7 @@ The four resulting layers, and what anchors each:
 
 | Layer | Question | Mechanism | Anchor |
 | --- | --- | --- | --- |
-| 1. Identity | Who are you? | `did:web` + eIDAS chain (`x5c`), challenge-response per request | EU trusted lists / QTSP |
+| 1. Identity | Who are you? | `did:web` + eIDAS chain (`x5c`), a dcs-peer-v1 challenge per request, bound to operation, contract, sender, receiver and body, accepted once ([ADR-13](adr-13-pdf-exchange-federation.md)) | EU trusted lists / QTSP |
 | 2. Rule acceptance | Do you play by the rules? | Self-signed agreement credential, rules embedded via `go:embed` | Layer 1's key + federation accountability |
 | 3. Policy | May *this* interaction happen? | Own low-code policy endpoint (fail-closed, sole peer-authorization authority); bootstrap `200 OK`, extensible to peer policies / trust lists / GXDCH | Whatever the endpoint consults |
 | 4. Legal effect | Does the contract bind? | AES/QES on the document (PAdES/JAdES, DSS-validated) | eIDAS Art. 25/26 |

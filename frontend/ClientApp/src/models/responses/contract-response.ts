@@ -56,6 +56,12 @@ export interface ContractRetrieveByIdResponse {
   /** The data of that contract */
   contract_data: ContractData
   negotiations: ContractNegotiation[]
+  /** True when outbound Proposals/Decisions still await peer ACK. */
+  pending_negotiation_sync?: boolean
+  /** True when own + matching peer settlements are held (Approve/Sign gate). */
+  settlement_ready?: boolean
+  /** When settlement_ready is false, short reason for a UI warning. */
+  settlement_ready_detail?: string
   /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
 }
@@ -148,7 +154,29 @@ export interface ContractAuditResponseItem {
 
 export type ContractAuditResponse = ContractAuditResponseItem[]
 
+/** One lifecycle transition from GET /contract/lifecycle/{did}, without the event body. */
+export interface ContractLifecycleEvent {
+  event_type: string
+  actor?: string
+  occurred_at: string
+  previous_state?: string
+  new_state?: string
+}
+
+/** One reviewer decision from GET /contract/review-findings/{did}. */
+export interface ContractReviewFinding {
+  submitted_by: string
+  holder_did?: string
+  occurred_at: string
+  contract_version: number
+  decision?: 'APPROVAL' | 'REJECT'
+  comments: string[]
+  annotations: { block_id: string; comment: string }[]
+}
+
 export interface ContractHistoryItem {
+  /** Identifier of the history entry; several entries can share one contract_version. */
+  id: string
   did: string
   contract_version: number
   state: ContractState
@@ -163,6 +191,9 @@ export interface ContractHistoryItem {
   exp_notice_period?: number
   responsible?: unknown
   contract_data?: ContractData
+  /** Actor of the save that replaced this version. Absent on versions recorded before the actor was stored. */
+  modified_by?: string
+  modified_at?: string
 }
 
 export type ContractHistoryResponse = ContractHistoryItem[]
@@ -212,4 +243,28 @@ export interface MachineIdentity {
 export interface MachineIdentityCreateResponse {
   identity: MachineIdentity
   credential: MachineCredential
+}
+
+/** The verification of a contract PDF (DCS-OR-C2PA-006, -008): the four named
+ *  checks and the lifecycle state the banner shows. */
+export interface ContractPdfVerifyResult {
+  match: boolean
+  jsonld_hash: string
+  base_pdf_hash: string
+  stored_base_pdf_hash: string
+  c2pa_manifest_found: boolean
+  c2pa_signature_status: string
+  c2pa_signer_status: string
+  c2pa_signer_detail?: string
+  vc_proof_status: string
+  status_list_uri?: string
+  lifecycle_status?: string
+  status_list_status?: string
+  status_list_check: string
+  status_list_error?: string
+  pdf_signature_status: string
+  pdf_signature_source?: string
+  pdf_signature_detail?: string
+  discrepancy?: string
+  c2pa_manifest_source?: string
 }

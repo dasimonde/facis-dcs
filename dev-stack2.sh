@@ -4,7 +4,7 @@
 #
 # Starts a SECOND, independent DCS instance ("instance B") alongside the one
 # started by dev-stack.sh ("instance A"): its own Helm release (Postgres,
-# Keycloak, Hydra, NATS, statuslist-service, ORCE and IPFS — see
+# Keycloak, Hydra, NATS, ORCE and IPFS — see
 # deployment/helm/values.dev2.yml for the full NodePort map). The Federated
 # Catalogue is NOT duplicated: instance B consumes instance A's, over the
 # NodePorts dev-stack.sh already publishes (see backend/.env.dev2), so A must
@@ -43,14 +43,6 @@ echo "=== Setting up dev environment for instance B (:8992 / :5174) ==="
 echo "Building locked Helm dependencies and deploying to Kubernetes..."
 helm dependency build --skip-refresh "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
-
-# Still deployed for the C2PA provenance credentials this instance issues
-# itself. The credentials a signatory presents name the shared issuer's own
-# signed list instead (ADR-34).
-echo "Waiting for statuslist-service..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
-  --timeout=5m
 
 # The credential issuer is shared with instance A, like the Federated Catalogue:
 # a Power of Attorney credential names one status list, and both instances must

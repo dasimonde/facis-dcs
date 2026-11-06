@@ -12,6 +12,21 @@ image:
   tag: "sha-c243a65@sha256:98660d5ecb27afa457afae103c80ad1d44964801ad4883f5e480b2b5caa0b95f"
   pullPolicy: IfNotPresent
 
+# 1000 is the fuseki user of the image. Fuseki writes to its database volume,
+# its base directory /fuseki/run and /tmp (emptyDir) (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
 dataset: "ds"
 javaOptions: "-Xmx1g"
 

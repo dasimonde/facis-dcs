@@ -8,6 +8,9 @@ cleanup() {
   if [[ -f .tmp/port-forward-dcs.pid ]]; then
     kill "$(cat .tmp/port-forward-dcs.pid)" >/dev/null 2>&1 || true
   fi
+  if [[ -f .tmp/port-forward-metrics.pid ]]; then
+    kill "$(cat .tmp/port-forward-metrics.pid)" >/dev/null 2>&1 || true
+  fi
   if [[ -f .tmp/port-forward-orce.pid ]]; then
     kill "$(cat .tmp/port-forward-orce.pid)" >/dev/null 2>&1 || true
   fi
@@ -49,14 +52,6 @@ export ISSUER_BASE_URL="${ISSUER_BASE_URL:-${BDD_PUBLIC_ORIGIN}/issuer}"
 export BDD_DCS_BASE_URL_A="$BDD_DCS_BASE_URL"
 export BDD_DCS_BASE_URL_B="${BDD_DCS_BASE_URL_B:-http://dcs-b.localhost:18080/digital-contracting-service/api}"
 
-# Sign did:web challenges through the in-cluster token: the BDD harness has no
-# local SoftHSM token in the Helm/kind harness (keys are
-# non-extractable, PKCS#11-only). Resolve the pod by label rather than
-# `exec deploy/...`: the DCS deployment's selector also matches pdf-core pods
-# (no component label in matchLabels), so kubectl's deploy→pod resolution can
-# pick a pod that has no digital-contracting-service container. Scoped by
-# instance (see HELM_RELEASE above) so this always signs through instance A's
-# own token, never instance B's, when both releases share the namespace.
 # Resolve a Running pod's name by label, waiting for one to appear: the one-shot
 # get can race a rollout (a rollout-restart transiently has the old pod
 # Terminating and the new one not yet phase=Running, i.e. zero Running matches),
@@ -82,16 +77,17 @@ wait_for_running_pod() {
 # verify-shaped endpoints always re-fetch the SERVER'S OWN stored PDF from
 # IPFS by CID, so tampered-artifact scenarios inject bytes as a NEW CID via
 # `ipfs add` exec'd inside the shared IPFS pod, then repoint the owning row's
-# CID column at it (via the existing context.db test-DB connection). IPFS is
-# a SINGLE instance shared across both BDD releases (values.bdd2.yml's
-# ipfsClient.mfsBaseURL points at "dcs-ipfs" regardless of caller instance),
-# so this is not release-scoped the way BDD_HSMSIGN_EXEC is.
+# CID column at it (via the existing context.db test-DB connection). The
+# exec prefix must select the pod serving the tested contract's IPFS endpoint.
 mkdir -p .tmp .reports/junit
 REPORTS_JUNIT_DIR="$PWD/.reports/junit"
 # A previous local run must not satisfy the fail-closed scenario-count gate
 # below. Behave writes one report per feature, so remove only its generated
 # JUnit XML artifacts before starting the selected suite.
-find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
+# The load run keeps them: it follows the suite in the same CI job.
+if [[ "${RUN_MODE:-bdd}" != "load" ]]; then
+  find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
+fi
 
 # Emits `--resolve <host>:<port>:127.0.0.1` for a URL's host[:port], so
 # *.localhost hostnames the host machine's own resolver may not know (e.g.
@@ -187,9 +183,12 @@ echo "DCS is reachable at $DCS_HEALTH_URL"
 # Resolve test seams only after the deployment startup gate is green. Doing
 # this earlier hid terminal FC failures behind a generic "no Running pod"
 # timeout and delayed the actual workload diagnostics.
-DCS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
-  "app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}")"
-export BDD_HSMSIGN_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec ${DCS_POD} -c digital-contracting-service --"
+# Sign did:web challenges through the in-cluster token: the Helm/kind harness
+# has no local SoftHSM token (keys are non-extractable, PKCS#11-only). Exec
+# through the deployment, not a pod name: the deployment selector holds the
+# backend component label, and kubectl resolves the pod at each call, so a DCS
+# restart (NFR-SF-01 scenario) does not leave a stale pod name here.
+export BDD_HSMSIGN_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec deployment/${DCS_DEPLOYMENT} -c digital-contracting-service --"
 
 IPFS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
   "app.kubernetes.io/name=ipfs,app.kubernetes.io/instance=dcs")"
@@ -200,7 +199,10 @@ IPFS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
 # against an EMPTY stdin (producing the well-known empty-file CID
 # Qmb...4Q7Vs-style hash) instead of the intended bytes, rather than a
 # reliable failure.
-export BDD_IPFS_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec -i ${IPFS_POD} --"
+# The Kubo RPC API requires its bearer token (charts/ipfs, api.auth). The
+# wrapper drops the leading "ipfs" of the step's command and runs
+# "ipfs --api-auth bearer:$IPFS_API_TOKEN <rest>" in the container.
+export BDD_IPFS_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec -i ${IPFS_POD} -c ipfs -- sh -c 'shift; exec ipfs --api-auth \"bearer:\$IPFS_API_TOKEN\" \"\$@\"' ipfs-auth"
 
 # Instance B (dcs2, features/17_peer_trust @two-instance): only checked when
 # the caller tells us it exists (DCS_DEPLOYMENT_B set AND actually present in
@@ -236,11 +238,65 @@ else
   echo "'make -C tests/bdd kind_deploy_b' (or kind_up, which now includes it) if you need instance B." >&2
 fi
 
+# NetworkPolicy enforcement (DCS-NFR-SEC-03, DCS-NFR-SF-02, DCS-NFR-SEC-14).
+# The default CNI of kind v0.24 and later (kindnetd with kube-network-policies)
+# enforces the chart's policies, so the suite runs with them in force. The BDD
+# values name the Traefik ingress (networkPolicy.ingressFrom), so the backend
+# API admits the ingress, the pods of the release and the other BDD release. A
+# pod with the release label reaches the backend API and is dropped at the IPFS
+# RPC API, which admits only the backend; a pod without it is dropped at the
+# backend API too. The API server proxy, which the load test uses to read
+# /metrics, still reaches the backend: the CNI does not filter traffic that
+# root processes on the node start (API server, kubelet probes, port-forwards).
+echo "Checking NetworkPolicy enforcement"
+ipfs_rpc_port="$("$KUBECTL_BIN" -n "$K8S_NAMESPACE" get service "${HELM_RELEASE}-ipfs" \
+  -o jsonpath='{.spec.ports[?(@.name=="https")].port}')"
+# The probe runs detached and its log is read after it ends: "kubectl run -i"
+# attaches after the container starts and loses output written before that.
+np_probe() { # np_probe <name> [labels]
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" run "$1" --image=curlimages/curl:8.11.1 ${2:+--labels="$2"} \
+    --restart=Never --command -- sh -c '
+      curl -s -o /dev/null --connect-timeout 5 --max-time 10 -w "backend=%{http_code}\n" "http://$1:$2/"; echo "backend_exit=$?"
+      curl -sk -o /dev/null --connect-timeout 5 "https://$3:$4/api/v0/version"; echo "ipfs_exit=$?"' \
+    probe "${DCS_SERVICE:-$DCS_DEPLOYMENT}" "${SERVICE_PORT:-8991}" "${HELM_RELEASE}-ipfs" "$ipfs_rpc_port" >/dev/null 2>&1 || true
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$1" --timeout=120s >/dev/null 2>&1 || true
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" logs "pod/$1" 2>&1 || true
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" delete pod "$1" --wait=false >/dev/null 2>&1 || true
+}
+probe_out="$(np_probe "np-probe-$$" "app.kubernetes.io/instance=${HELM_RELEASE}")"
+if ! grep -Eq '^backend=[1-5][0-9]{2}$' <<<"$probe_out"; then
+  echo "NetworkPolicy check: a pod of the release did not reach the backend API, so the check proves nothing:" >&2
+  echo "$probe_out" >&2
+  exit 1
+fi
+# curl exit 28: the connection attempt timed out, the policy dropped it.
+if ! grep -qx 'ipfs_exit=28' <<<"$probe_out"; then
+  echo "NetworkPolicy check: a pod without the backend labels was not dropped at the IPFS RPC API." >&2
+  echo "The cluster does not enforce NetworkPolicy (kind >= v0.24 required, see tests/bdd/kind-config.yaml):" >&2
+  echo "$probe_out" >&2
+  exit 1
+fi
+outsider_out="$(np_probe "np-outsider-$$")"
+if ! grep -qx 'backend_exit=28' <<<"$outsider_out"; then
+  echo "NetworkPolicy check: a pod outside the release and the ingress reached the backend API (networkPolicy.ingressFrom):" >&2
+  echo "$outsider_out" >&2
+  exit 1
+fi
+probe_backend_pod="$(wait_for_running_pod "$K8S_NAMESPACE" \
+  "app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}")"
+if ! "$KUBECTL_BIN" get --raw \
+    "/api/v1/namespaces/${K8S_NAMESPACE}/pods/${probe_backend_pod}:9464/proxy/metrics" >/dev/null; then
+  echo "NetworkPolicy check: the API server proxy to /metrics of ${probe_backend_pod} is blocked;" >&2
+  echo "the load test reads it there. Admit the API server in networkPolicy.extraFrom of the BDD values." >&2
+  exit 1
+fi
+echo "NetworkPolicy is enforced: backend API reachable for the release and dropped for an outsider, IPFS RPC API dropped, metrics proxy reachable"
+
 # The harness owns these loopback ports. A survivor forward from an earlier
 # run — possibly against a DIFFERENT cluster/kubeconfig — binds first, the
 # nc readiness check below then passes against the squatter, and every
 # DB/ORCE test seam silently talks to the wrong stack.
-for harness_port in 5432 18991 18880; do
+for harness_port in 5432 18991 19464 18880; do
   fuser -k -n tcp "$harness_port" >/dev/null 2>&1 || true
 done
 sleep 1
@@ -260,14 +316,16 @@ until nc -z 127.0.0.1 5432 2>/dev/null; do
 done
 echo "Port-forward on 5432 is ready"
 
-# Direct service access for endpoints Traefik does not route (e.g. /metrics,
-# which the backend serves at its root, outside the API prefix).
+# Direct service access for endpoints Traefik does not route (endpoints the
+# backend serves at its root, outside the API prefix).
 DCS_SERVICE="${DCS_SERVICE:-$DCS_DEPLOYMENT}"
 LOCAL_FORWARD_PORT="${LOCAL_FORWARD_PORT:-18991}"
 SERVICE_PORT="${SERVICE_PORT:-8991}"
+# keep_port_forward.sh restarts the forward when the DCS pod is replaced.
 echo "Starting port-forward for DCS service ($DCS_SERVICE)"
-"$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "svc/$DCS_SERVICE" \
-  "$LOCAL_FORWARD_PORT:$SERVICE_PORT" > .tmp/port-forward-dcs.log 2>&1 &
+KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
+  SERVICE_NAME="$DCS_SERVICE" PORT_MAPPING="$LOCAL_FORWARD_PORT:$SERVICE_PORT" \
+  bash "$PWD/scripts/keep_port_forward.sh" > .tmp/port-forward-dcs.log 2>&1 &
 echo $! > .tmp/port-forward-dcs.pid
 
 deadline=$(( $(date +%s) + 30 ))
@@ -281,6 +339,26 @@ until nc -z 127.0.0.1 "$LOCAL_FORWARD_PORT" 2>/dev/null; do
 done
 export BDD_DCS_INTERNAL_ORIGIN="http://localhost:$LOCAL_FORWARD_PORT"
 echo "Port-forward on $LOCAL_FORWARD_PORT is ready"
+
+# /metrics is on its own ClusterIP Service, not on the API port.
+METRICS_LOCAL_FORWARD_PORT="${METRICS_LOCAL_FORWARD_PORT:-19464}"
+echo "Starting port-forward for DCS metrics (${DCS_SERVICE}-metrics)"
+KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
+  SERVICE_NAME="${DCS_SERVICE}-metrics" PORT_MAPPING="$METRICS_LOCAL_FORWARD_PORT:9464" \
+  bash "$PWD/scripts/keep_port_forward.sh" > .tmp/port-forward-metrics.log 2>&1 &
+echo $! > .tmp/port-forward-metrics.pid
+
+deadline=$(( $(date +%s) + 30 ))
+until nc -z 127.0.0.1 "$METRICS_LOCAL_FORWARD_PORT" 2>/dev/null; do
+  if [ "$(date +%s)" -gt "$deadline" ]; then
+    echo "Timed out waiting for port-forward on $METRICS_LOCAL_FORWARD_PORT"
+    cat .tmp/port-forward-metrics.log || true
+    exit 1
+  fi
+  sleep 1
+done
+export BDD_DCS_METRICS_ORIGIN="http://localhost:$METRICS_LOCAL_FORWARD_PORT"
+echo "Port-forward on $METRICS_LOCAL_FORWARD_PORT is ready"
 
 # The wallet-driven signing scenarios call the EU DSS demonstration webapp
 # (charts/dss) as the external SCA that computes getDataToSign/signDocument.
@@ -418,7 +496,12 @@ export BDD_DCS_BASE_URL
 echo "Checking the issuer status list at $ISSUER_BASE_URL"
 python "$PWD/scripts/check_status_list.py"
 
-export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable"
+# The database accepts TLS only (global.internalTLS). Through the port-forward
+# the host name is localhost, which the server certificate does not name, so the
+# harness verifies the chain against the release CA but not the name.
+"$KUBECTL_BIN" -n "$K8S_NAMESPACE" get secret dcs-internal-tls -o jsonpath='{.data.ca\.crt}' \
+  | base64 --decode > "$PWD/.tmp/internal-ca.crt"
+export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=verify-ca sslrootcert=$PWD/.tmp/internal-ca.crt"
 
 # Canonical bdd-executor integration requires the package in the active environment.
 python -c 'import eu.xfsc.bdd.core' >/dev/null
@@ -449,16 +532,25 @@ fi
 # are live at this point and stay alive until this script exits (trap cleanup).
 # RUN_MODE selects what runs against them without tearing anything down:
 #   bdd (default) — the behave suite via the bdd-executor environment;
-#   e2e           — the Playwright suite (its own vite servers + the venv-backed
+#   e2e           — the Playwright suite (the built UI on vite preview + the venv-backed
 #                   signing helpers), so the frontend E2E gets the same live
 #                   two-instance stack + DSS forward the BDD suite uses.
-if [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
+#   load          — the k6 load test (tests/load/run_load.py, NFR-PER-01/02).
+if [[ "${RUN_MODE:-bdd}" == "load" ]]; then
+  echo "Running the load test against the deployed stack"
+  cd "$PROJECT_ROOT"
+  python tests/load/run_load.py
+elif [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
   echo "Running Playwright E2E against the deployed stack"
   cd "$PROJECT_ROOT/frontend/ClientApp"
-  # DCS_HYDRA_TARGET routes the dev server's /oauth2 proxy at the deployed
+  # The suite runs against the production build (the same `build:docker` the
+  # DCS image runs), served by `vite preview` (E2E_BUILT_UI, playwright.config.ts).
+  npm run build:docker
+  # DCS_HYDRA_TARGET routes the UI server's /oauth2 proxy at the deployed
   # Hydra through the same ingress everything else uses. Left unset it defaults
   # to localhost:4444, where nothing listens in CI, so anything reaching for a
   # token gets a proxy error instead of an answer.
+  E2E_BUILT_UI=1 \
   E2E_DCS_API_BASE="${BDD_PUBLIC_ORIGIN}/digital-contracting-service/api" \
   E2E_BDD_PYTHON="$VENV_PATH/bin/python3" \
   DCS_HYDRA_TARGET="${BDD_PUBLIC_ORIGIN}" \

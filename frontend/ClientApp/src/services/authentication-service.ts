@@ -13,6 +13,34 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import type { AuthenticationService } from '@/models/services/authentication-service'
 
+// Hydra rotates the refresh token on every use and refuses a second refresh
+// with the same token ("multiple concurrent requests using the same token").
+// Parallel callers therefore share one /auth/refresh request.
+let refreshInFlight: Promise<boolean> | null = null
+
+function refreshOnce(): Promise<boolean> {
+  return authHttp
+    .post<AuthCallbackResponse>('/auth/refresh')
+    .then((res) => {
+      const authTokenStore = useAuthTokenStore()
+      authTokenStore.setTokens(res.data.token_type, res.data.access_token)
+      const authStore = useAuthStore()
+      const holder = authTokenStore.getHolder
+      if (!holder) throw new Error('JWT Error')
+      authStore.setHolder(holder)
+      return authStore.isAuthenticated
+    })
+    .catch((err: unknown) => {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        const authStore = useAuthStore()
+        authStore.remove()
+        const authTokenStore = useAuthTokenStore()
+        authTokenStore.remove()
+      }
+      return false
+    })
+}
+
 export const authenticationService: AuthenticationService = {
   async login() {
     return authHttp
@@ -64,26 +92,10 @@ export const authenticationService: AuthenticationService = {
   },
 
   async refresh() {
-    return authHttp
-      .post<AuthCallbackResponse>('/auth/refresh')
-      .then((res) => {
-        const authTokenStore = useAuthTokenStore()
-        authTokenStore.setTokens(res.data.token_type, res.data.access_token)
-        const authStore = useAuthStore()
-        const holder = authTokenStore.getHolder
-        if (!holder) throw new Error('JWT Error')
-        authStore.setHolder(holder)
-        return authStore.isAuthenticated
-      })
-      .catch((err: unknown) => {
-        if (axios.isAxiosError(err) && err.response?.status === 401) {
-          const authStore = useAuthStore()
-          authStore.remove()
-          const authTokenStore = useAuthTokenStore()
-          authTokenStore.remove()
-        }
-        return false
-      })
+    refreshInFlight ??= refreshOnce().finally(() => {
+      refreshInFlight = null
+    })
+    return refreshInFlight
   },
 
   logout() {

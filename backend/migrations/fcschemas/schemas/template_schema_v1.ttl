@@ -647,3 +647,16 @@ dcs-template:SubTemplateSnapshotShape
     sh:maxCount 1 ;
     sh:node dcs-template:TemplateDataShape ;
   ] .
+# Published catalogue namespace; separate from the template document vocabulary.
+<https://w3id.org/facis/dcs/1#partyType> a rdf:Property ;
+  rdfs:domain <https://w3id.org/facis/dcs/1#ContractTemplate> ;
+  rdfs:range xsd:string .
+
+<https://w3id.org/facis/dcs/1#PartyTypeShape> a sh:NodeShape ;
+  sh:targetClass <https://w3id.org/facis/dcs/1#ContractTemplate> ;
+  sh:property [
+    sh:path <https://w3id.org/facis/dcs/1#partyType> ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ; sh:maxCount 1 ;
+    sh:in ( "SINGLE_PARTY" "MULTI_PARTY" )
+  ] .

@@ -1,0 +1,12 @@
+{{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+# Client authentication with in-cluster TLS (DCS-NFR-SEC-14): the socket in the
+# pod as in the image default, TCP only with TLS and a password.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-postgresql-hba
+data:
+  pg_hba.conf: |
+    local   all all     trust
+    hostssl all all all scram-sha-256
+{{- end }}

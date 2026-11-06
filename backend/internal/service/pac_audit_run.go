@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	goa "goa.design/goa/v3/pkg"
+
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
@@ -40,9 +42,25 @@ func (s *processAuditAndCompliancesrvc) persistAuditRun(
 		did = request.Resource.DID
 		resourceDID = did
 	}
-	var receipt any
-	if len(response.Receipt) != 0 && string(response.Receipt) != "null" {
-		receipt = string(response.Receipt)
+	if s.ATrailReader.Artifacts == nil {
+		return fmt.Errorf("PAC snapshot encryption is not configured")
+	}
+	store := s.ATrailReader.Artifacts
+	scopes, err := pacEvidenceScopes(requestJSON, store.InstanceScope())
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(pacSnapshotPayload{RequestBytes: requestJSON, ResponseBytes: rawResponse})
+	if err != nil {
+		return fmt.Errorf("marshal PAC snapshot: %w", err)
+	}
+	envelope, err := sealPACSnapshot(ctx, store, request.AuditID, scopes, payload)
+	if err != nil {
+		return err
+	}
+	snapshot, err := store.Encrypt(ctx, store.InstanceScope(), envelope)
+	if err != nil {
+		return fmt.Errorf("encrypt PAC snapshot envelope: %w", err)
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
@@ -56,12 +74,12 @@ func (s *processAuditAndCompliancesrvc) persistAuditRun(
 		INSERT INTO pac_audit_runs (
 			audit_id, correlation_id, contract_version, scope, resource_did,
 			requester, justification, request_hash, response_hash, executor_id,
-			executor_version, executed_at, receipt, response_json, response_bytes
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15)`,
+			executor_version, executed_at, snapshot_bytes
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		request.AuditID, request.CorrelationID, request.ContractVersion, request.Scope,
 		resourceDID, request.Requester.Subject, request.Justification, requestHash,
 		responseHash, response.Executor.ID, response.Executor.Version, executedAt,
-		receipt, string(rawResponse), rawResponse,
+		snapshot,
 	)
 	if err != nil {
 		return fmt.Errorf("insert PAC audit run: %w", err)
@@ -85,25 +103,76 @@ func (s *processAuditAndCompliancesrvc) persistAuditRun(
 	return nil
 }
 
-func (s *processAuditAndCompliancesrvc) latestAuditRun(ctx context.Context, scope, did string) ([]byte, error) {
-	if s.DB == nil {
-		return nil, fmt.Errorf("PAC audit run persistence is not configured")
+func (s *processAuditAndCompliancesrvc) latestAuditRun(ctx context.Context, scope, did string) (persistedAuditRun, error) {
+	var run persistedAuditRun
+	if s.DB == nil || s.ATrailReader.Artifacts == nil {
+		return run, fmt.Errorf("PAC audit run persistence or encryption is not configured")
 	}
-	var raw []byte
-	err := s.DB.QueryRowxContext(ctx, `
-		SELECT response_bytes
+	var before, beforeID any
+	var denied error
+	for {
+		var snapshot []byte
+		var auditID string
+		var createdAt time.Time
+		err := s.DB.QueryRowxContext(ctx, `
+		SELECT audit_id, request_hash, response_hash, snapshot_bytes, created_at
 		FROM pac_audit_runs
 		WHERE scope = $1
 		  AND (($2 = '' AND resource_did IS NULL) OR resource_did = $2)
-		ORDER BY created_at DESC
-		LIMIT 1`, scope, did).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errPACAuditRunNotFound
+		  AND ($3::timestamptz IS NULL OR (created_at, audit_id) < ($3, $4::uuid))
+		ORDER BY created_at DESC, audit_id DESC
+		LIMIT 1`, scope, did, before, beforeID).Scan(&auditID, &run.RequestHash, &run.ResponseHash, &snapshot, &createdAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			if denied != nil {
+				return persistedAuditRun{}, denied
+			}
+			return run, errPACAuditRunNotFound
+		}
+		if err != nil {
+			return run, fmt.Errorf("read latest PAC audit run: %w", err)
+		}
+		store := s.ATrailReader.Artifacts
+		envelope, err := store.Decrypt(ctx, store.InstanceScope(), snapshot)
+		if err != nil {
+			return run, fmt.Errorf("decrypt PAC snapshot envelope: %w", err)
+		}
+		payloadBytes, scopes, err := unsealPACSnapshot(ctx, store, auditID, envelope)
+		if err != nil {
+			return run, err
+		}
+		var payload pacSnapshotPayload
+		if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+			return run, fmt.Errorf("decode PAC snapshot payload: %w", err)
+		}
+		run.RequestBytes, run.ResponseBytes, run.Scopes = payload.RequestBytes, payload.ResponseBytes, scopes
+		if sha256String(run.RequestBytes) != run.RequestHash || sha256String(run.ResponseBytes) != run.ResponseHash {
+			return persistedAuditRun{}, fmt.Errorf("PAC snapshot hash mismatch")
+		}
+		var request auditexecutor.Request
+		if err := json.Unmarshal(run.RequestBytes, &request); err != nil {
+			return persistedAuditRun{}, err
+		}
+		if request.AuditID != auditID || request.Scope != scope || (request.Resource == nil && did != "") || (request.Resource != nil && request.Resource.DID != did) {
+			return persistedAuditRun{}, fmt.Errorf("PAC snapshot does not match selected run")
+		}
+		expectedScopes, err := pacEvidenceScopes(run.RequestBytes, store.InstanceScope())
+		if err != nil {
+			return persistedAuditRun{}, err
+		}
+		if !equalPACScopes(scopes, expectedScopes) {
+			return persistedAuditRun{}, fmt.Errorf("PAC snapshot scopes do not match evidence")
+		}
+		if err := s.authorizeAuditReport(ctx, run); err != nil {
+			var serviceError *goa.ServiceError
+			if !errors.As(err, &serviceError) || serviceError.Name != "forbidden" {
+				return persistedAuditRun{}, err
+			}
+			denied = err
+			before, beforeID = createdAt, auditID
+			continue
+		}
+		return run, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read latest PAC audit run: %w", err)
-	}
-	return raw, nil
 }
 
 // toPACExternalAuditResponse renders the executor verdict plus the timeline the

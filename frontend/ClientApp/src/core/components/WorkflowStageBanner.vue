@@ -21,7 +21,7 @@ const currentIndex = computed(() => props.steps.findIndex((step) => step.key ===
 // rendered: following it lands on the front page with no explanation.
 const canReach = (to: RouteLocationRaw): boolean => {
   const resolved = router.resolve(to)
-  const roles = resolved.matched.at(-1)?.meta.roles
+  const roles = resolved.matched[resolved.matched.length - 1]?.meta.roles
   if (!roles) return true
   return authStore.user?.roles?.some((role) => roles.includes(role)) ?? false
 }

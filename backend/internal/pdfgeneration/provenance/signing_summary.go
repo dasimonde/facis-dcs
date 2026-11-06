@@ -10,16 +10,17 @@ import (
 )
 
 // SigningSummary carries the fields bound into a ContractSigningSummaryCredential
-// (DCS-FR-SM-08). It records who signed (the signer's holder DID — pseudonymous),
+// (DCS-FR-SM-08). It records the PID subject and PoA holder identifiers,
 // through which ceremony, and the hashes the PAdES signature covers. The signer's
 // PID is NOT embedded: the disclosed Person Identification Data (name, birthdate,
 // address) never enters the shared PDF (eIDAS/GDPR data-minimisation). Only the
-// pseudonymous holder DID and the KB-JWT sd_hash of the presented credential are
+// pairwise pseudonymous holder identifiers and the KB-JWT sd_hash are
 // bound in — enough to cryptographically tie the signature to the credential the
 // internal ceremony record holds, without leaking personal data downstream.
 type SigningSummary struct {
 	ContractID     string
 	SignerDID      string
+	PoASubjectDID  string
 	CeremonyID     string
 	FieldName      string
 	ContentHash    string // SHA-256 hex of the JSON-LD contract source
@@ -41,7 +42,7 @@ type SigningSummary struct {
 
 // IssueSigningSummaryVC builds and signs a ContractSigningSummaryCredential over
 // the given summary, using the same VC signer as the lifecycle credentials. It
-// binds the pseudonymous holder DID and the KB-JWT sd_hash — never the PID
+// binds pseudonymous holder identifiers and the KB-JWT sd_hash — never PID
 // disclosures — so the signed PDF carries no personal data (DCS-FR-SM-08,
 // UC-04-03).
 //
@@ -55,7 +56,7 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 		Context: []interface{}{
 			"https://www.w3.org/ns/credentials/v2",
 			dataIntegrityContext,
-			map[string]interface{}{
+			map[string]interface{}{ // #nosec G101 -- identifier or vocabulary IRI, not a credential
 				"dcs":                              "https://w3id.org/facis/dcs/ontology/v1#",
 				"ContractSigningSummaryCredential": "dcs:ContractSigningSummaryCredential",
 				"contract_id":                      "dcs:contractId",
@@ -65,6 +66,7 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 				"pdf_hash":                         "dcs:pdfHash",
 				"credential_type":                  "dcs:credentialType",
 				"kb_sd_hash":                       "dcs:kbSdHash",
+				"poa_subject_did":                  "dcs:poaSubjectDid",
 				"signed_at": map[string]interface{}{
 					"@id":   "dcs:signedAt",
 					"@type": "http://www.w3.org/2001/XMLSchema#dateTime",
@@ -88,6 +90,11 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 			"signed_at":    s.SignedAt.UTC().Format(time.RFC3339),
 		},
 	}
+
+	if s.PoASubjectDID != "" {
+		unsignedVC.CredentialSubject["poa_subject_did"] = normalizeSubjectID(s.PoASubjectDID)
+	}
+
 	// A field whose signatory has not signed yet has no established level, so
 	// the caller leaves CredentialType empty. Emitting "" would seal an empty
 	// eIDAS level claim into an issuer-signed credential inside a PAdES byte

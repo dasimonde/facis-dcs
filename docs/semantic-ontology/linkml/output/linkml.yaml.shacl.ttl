@@ -139,7 +139,27 @@ dcs:ContractMetadata a sh:NodeShape ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
             sh:order 1 ;
-            sh:path dcs:description ] ;
+            sh:path dcs:description ],
+        [ sh:datatype xsd:dateTime ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 2 ;
+            sh:path dcs:startDate ],
+        [ sh:datatype xsd:dateTime ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 3 ;
+            sh:path dcs:expirationDate ],
+        [ sh:datatype xsd:integer ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 4 ;
+            sh:path dcs:expirationNoticePeriod ],
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 5 ;
+            sh:path dcs:expirationPolicy ] ;
     sh:targetClass dcs:ContractMetadata .
 
 dcs:KPIObservation a sh:NodeShape ;

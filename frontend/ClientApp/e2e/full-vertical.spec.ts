@@ -170,6 +170,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
 
     await page.getByRole('button', { name: /Component/ }).click()
+    await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(componentName)
     // An empty description is a verification finding at review time.
     await page
@@ -238,6 +239,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     const parentChoice = page.getByRole('button', { name: /parent for other contracts/ })
     await gotoAsAndFind(page, loginAs, 'Template Creator', '/ui/templates/new', parentChoice)
     await parentChoice.click()
+    await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(contractTemplateName)
     await page
       .getByRole('group')
@@ -357,7 +359,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Submit', exact: true }).click()
+    await page.getByTestId('submit-negotiation').click()
     await accepted
     await assertPdfExport(page, 'contract', contractDid, 'contract in negotiation')
   })

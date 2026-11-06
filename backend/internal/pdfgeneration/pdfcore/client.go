@@ -407,6 +407,16 @@ type VerifyResult struct {
 	JSONLDHash        string
 	BasePDFHash       string
 	StoredBasePDFHash string
+	// Signers names, per manifest in chain order, the x5chain (base64 DER, leaf
+	// first) its claim signature was made under.
+	Signers []ManifestSigner
+}
+
+// ManifestSigner is the signing certificate chain of one C2PA manifest.
+type ManifestSigner struct {
+	Manifest string   `json:"manifest"`
+	Subject  string   `json:"subject"`
+	Chain    []string `json:"chain"`
 }
 
 // verifyBodyLimit caps the /verify response read. The body carries a
@@ -440,14 +450,15 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	}
 
 	var body struct {
-		Match              bool   `json:"match"`
-		C2PASignatureValid bool   `json:"c2pa_signature_valid"`
-		C2PASignatureError string `json:"c2pa_signature_error"`
-		VCBytes            string `json:"vc_bytes"`
-		VCPresent          bool   `json:"vc_present"`
-		JSONLDHash         string `json:"jsonld_hash"`
-		BasePDFHash        string `json:"base_pdf_hash"`
-		StoredBasePDFHash  string `json:"stored_base_pdf_hash"`
+		Match              bool             `json:"match"`
+		C2PASignatureValid bool             `json:"c2pa_signature_valid"`
+		C2PASignatureError string           `json:"c2pa_signature_error"`
+		VCBytes            string           `json:"vc_bytes"`
+		VCPresent          bool             `json:"vc_present"`
+		JSONLDHash         string           `json:"jsonld_hash"`
+		BasePDFHash        string           `json:"base_pdf_hash"`
+		StoredBasePDFHash  string           `json:"stored_base_pdf_hash"`
+		Signers            []ManifestSigner `json:"signers"`
 	}
 	// A non-2xx body is pdf-core's Error schema carrying those same digest fields,
 	// so it is decoded before the status is turned into an error. What decodes is
@@ -471,6 +482,7 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	result.C2PASignatureValid = body.C2PASignatureValid
 	result.C2PASignatureError = body.C2PASignatureError
 	result.VCPresent = body.VCPresent
+	result.Signers = body.Signers
 	if body.VCBytes != "" {
 		decoded, err := base64.StdEncoding.DecodeString(body.VCBytes)
 		if err != nil {
@@ -522,7 +534,20 @@ func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, string, e
 // Nothing is re-rendered, so the answer does not depend on render determinism:
 // the reference is a document the caller already holds. On a mismatch it returns
 // a diagnostic naming the page that diverged and a snippet of both sides.
+//
+// Signature widgets are left out of the comparison, so a submission that adds a
+// PAdES signature to the reference matches it.
 func (c *Client) MatchContent(ctx context.Context, submitted, reference []byte) (bool, string, error) {
+	return c.matchContent(ctx, submitted, reference, false)
+}
+
+// MatchContentExact is MatchContent with the signature widgets compared too:
+// the submission must show exactly what the reference shows.
+func (c *Client) MatchContentExact(ctx context.Context, submitted, reference []byte) (bool, string, error) {
+	return c.matchContent(ctx, submitted, reference, true)
+}
+
+func (c *Client) matchContent(ctx context.Context, submitted, reference []byte, exact bool) (bool, string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	if err := writeField(mw, "pdf", submitted); err != nil {
@@ -530,6 +555,11 @@ func (c *Client) MatchContent(ctx context.Context, submitted, reference []byte) 
 	}
 	if err := writeField(mw, "reference", reference); err != nil {
 		return false, "", fmt.Errorf("pdf-core verify/content-match: write reference field: %w", err)
+	}
+	if exact {
+		if err := writeField(mw, "exact", []byte("true")); err != nil {
+			return false, "", fmt.Errorf("pdf-core verify/content-match: write exact field: %w", err)
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return false, "", fmt.Errorf("pdf-core verify/content-match: close multipart: %w", err)
@@ -642,6 +672,34 @@ func (c *Client) ExtractPayload(ctx context.Context, pdf []byte) ([]byte, error)
 		return nil, fmt.Errorf("pdf-core payload-extract read: %w", err)
 	}
 	return payload, nil
+}
+
+// ManifestReference returns the remote C2PA manifest URL that a PDF references
+// in its XMP metadata, or "" when it references none (DCS-OR-C2PA-008).
+func (c *Client) ManifestReference(ctx context.Context, pdf []byte) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/manifest/reference", bytes.NewReader(pdf))
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if err := checkStatus(resp); err != nil {
+		return "", err
+	}
+	ref, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference read: %w", err)
+	}
+	return strings.TrimSpace(string(ref)), nil
 }
 
 // checkStatus returns an error for non-2xx responses, including the status code

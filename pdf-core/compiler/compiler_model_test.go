@@ -274,7 +274,7 @@ func TestCompilePDF_RendersRootLevelClauseAndTextBlock(t *testing.T) {
 	clause := bytes.Index(pdf, []byte("(Root-level clause body.) Tj"))
 	textBlock := bytes.Index(pdf, []byte("(Root-level text block.) Tj"))
 	second := bytes.Index(pdf, []byte("(2. Second) Tj"))
-	if !(first >= 0 && clause > first && textBlock > clause && second > textBlock) {
+	if first < 0 || clause <= first || textBlock <= clause || second <= textBlock {
 		t.Fatalf("root-level body nodes were not preserved in layout order")
 	}
 }

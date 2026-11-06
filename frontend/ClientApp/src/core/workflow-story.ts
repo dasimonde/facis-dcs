@@ -189,7 +189,7 @@ export function contractStory(
       return story(
         'NEGOTIATION',
         'This contract is in negotiation',
-        'The counterparty proposed changes. Compare versions and respond under Negotiation Tasks. Each accepted adjustment creates a new version of the same contract.',
+        'The counterparty proposed changes. Compare proposals and respond under Negotiation Tasks. Accepted proposals stay pending until Submit merges them into a new formal version.',
         [{ label: 'Open Negotiation Tasks', routeName: 'tasks.negotiations' }],
       )
     case 'SUBMITTED':
@@ -240,7 +240,7 @@ export function contractStory(
       return story(
         'REJECTED',
         'This contract was rejected',
-        'It was returned with findings. Address the comments, adjust the values under Contract Content and resubmit. (Contract Creator)',
+        'Approval returned it with findings. Review the audit trail, then reopen negotiation to continue the round without rewriting the formal document here. (Contract Creator)',
       )
     case 'WITHDRAWN':
       return story(
@@ -252,7 +252,7 @@ export function contractStory(
       return story(
         'REVOKED',
         'This contract was revoked',
-        'Revoked after signing. It is no longer in force. The revocation is recorded in the audit trail and reflected in the C2PA status of the PDF.',
+        'Revoked after signing. It is no longer in force. The revocation is recorded in the audit trail, in the status list, and in a suspended lifecycle manifest appended to the signed PDF.',
       )
     case 'TERMINATED':
       return story(

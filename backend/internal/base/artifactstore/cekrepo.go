@@ -11,7 +11,8 @@ import (
 )
 
 // CEKRecord is one wrapped-CEK row. A shredded row stays in place as the
-// destruction record (shredded_at/by/reason); it is never hard-deleted.
+// destruction record (shredded_at/by/reason) without its wrapped CEK; it is
+// never hard-deleted.
 type CEKRecord struct {
 	ScopeKind    string     `db:"scope_kind"`
 	ScopeID      string     `db:"scope_id"`
@@ -35,8 +36,8 @@ type CEKRepository interface {
 	// already exists (concurrent creator) or the scope was shredded — either
 	// way the caller must re-Fetch instead of using its own key.
 	Insert(ctx context.Context, scope Scope, recipientDID string, wrappedCEK []byte) (bool, error)
-	// Shred marks every live record of the scope destroyed and returns how
-	// many were affected.
+	// Shred destroys the wrapped CEK of every live record of the scope, marks
+	// the records shredded and returns how many were affected.
 	Shred(ctx context.Context, scope Scope, shreddedBy, reason string) (int64, error)
 }
 
@@ -138,9 +139,9 @@ func (r *PostgresCEKRepo) Shred(ctx context.Context, scope Scope, shreddedBy, re
 	return affected, nil
 }
 
-// ShredTx marks every live record of the scope destroyed inside the caller's
-// transaction (so the KEY_SHREDDED audit event commits atomically with the
-// destruction). It takes the scope's advisory lock first: a concurrent Insert
+// ShredTx destroys the wrapped CEK of every live record of the scope and
+// marks the records shredded inside the caller's transaction (so the
+// KEY_SHREDDED audit event commits atomically with the destruction). It takes the scope's advisory lock first: a concurrent Insert
 // either commits before the shred and is caught by the UPDATE, or waits and
 // then refuses because the scope has shredded records — live rows can never
 // regrow after a shred.
@@ -150,7 +151,7 @@ func (r *PostgresCEKRepo) ShredTx(ctx context.Context, tx *sqlx.Tx, scope Scope,
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE content_encryption_keys
-		SET shredded_at = now(), shredded_by = $3, shred_reason = $4
+		SET wrapped_cek = NULL, shredded_at = now(), shredded_by = $3, shred_reason = $4
 		WHERE scope_kind = $1 AND scope_id = $2 AND shredded_at IS NULL`,
 		string(scope.Kind), scope.ID, shreddedBy, reason)
 	if err != nil {

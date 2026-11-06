@@ -7,10 +7,11 @@ lifecycle activities for compliance violations, and to flag and report detected
 risks. `DCS-NFR-SEC-11` adds that detection is measured — mean time to detect.
 
 The detection rules themselves live in the Process Audit and Compliance
-component and cover four violation classes: a contract awaiting a required
+component and cover five violation classes: a contract awaiting a required
 approval, a denied access attempt, a contract in force whose reported KPIs
-breach its own ODRL obligations, and a deployment the target system never
-received. They are pure derivations over persisted state, so they can be
+breach its own ODRL obligations, a deployment the target system never
+received, and an obligation whose contractual deadline passed without a report
+(ADR-33). They are pure derivations over persisted state, so they can be
 evaluated at any moment against the database alone.
 
 `GET /pac/monitor` exposes exactly this evaluation to a Compliance Officer. On

@@ -12,12 +12,13 @@ import (
 )
 
 type ApprovalTaskData struct {
-	ID        string    `db:"id"`
-	DID       string    `db:"did"`
-	State     string    `db:"state"`
-	Approver  string    `db:"approver"`
-	CreatedBy string    `db:"created_by"`
-	CreatedAt time.Time `db:"created_at"`
+	ContractVersion int       `db:"contract_version"`
+	ID              string    `db:"id"`
+	DID             string    `db:"did"`
+	State           string    `db:"state"`
+	Approver        string    `db:"approver"`
+	CreatedBy       string    `db:"created_by"`
+	CreatedAt       time.Time `db:"created_at"`
 }
 
 type ApprovalTaskRepo interface {

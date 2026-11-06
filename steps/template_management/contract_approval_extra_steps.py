@@ -73,18 +73,22 @@ def step_then_approval_logged_with_credentials(context):
     deadline = time.monotonic() + 60
     events = []
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"Audit query failed: {resp.status_code} {resp.text}"
         events = resp.json()
         approve_events = [e for e in events if str(e.get("event_type", "")).upper() == "APPROVE_CONTRACT"]
         if approve_events:
+            # approved_by is the organization; the credential identity is the
+            # holder DID and the roles the presented credential carries.
             event_data = approve_events[-1].get("event_data") or {}
-            if event_data.get("holder_did") or event_data.get("approved_by"):
-                return
+            assert event_data.get("holder_did"), f"APPROVE_CONTRACT event has no holder_did: {event_data}"
+            assert "Contract Approver" in (event_data.get("user_roles") or []), (
+                f"APPROVE_CONTRACT event does not carry the Contract Approver role: {event_data}"
+            )
+            return
         time.sleep(2)
     raise AssertionError(
-        f"Expected an APPROVE_CONTRACT audit event carrying digital-credential identity "
-        f"(holder_did/approved_by) within 60s, got: {events}"
+        f"Expected an APPROVE_CONTRACT audit event carrying holder_did and user_roles within 60s, got: {events}"
     )
 
 
@@ -124,6 +128,24 @@ def step_then_can_highlight_sections(context):
         f"Expected the approval interface's contract_data to expose addressable document "
         f"blocks (dcs:documentStructure.dcs:blocks[].@id) a reviewer/approver can highlight "
         f"for attention: {contract_data}"
+    )
+    # The reviewer's block annotations reach the approver through
+    # GET /contract/review-findings with the block ids the approval view highlights.
+    # The findings are read from the audit trail, which the outbox anchors
+    # after the reviewer's submit commits, so they appear within seconds.
+    expected = set(getattr(context, "review_annotation_block_ids", None) or [])
+    assert expected, "the reviewer submitted no block annotation"
+    annotated = set()
+    deadline = time.monotonic() + 60
+    while True:
+        findings = get_with_headers(context, f"{context.base_url}/contract/review-findings/{body.get('did')}")
+        assert findings.status_code == 200, findings.text
+        annotated = {a.get("block_id") for f in findings.json() for a in (f.get("annotations") or [])}
+        if expected <= annotated or time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+    assert expected <= annotated, (
+        f"Expected the reviewer's annotated blocks {expected} in the review findings within 60s, got: {annotated}"
     )
 
 
@@ -215,7 +237,7 @@ def step_then_validates_organizational_policies(context):
     deadline = time.monotonic() + 60
     events = []
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, resp.text
         events = resp.json()
         if any(str(e.get("event_type", "")).upper() == "APPROVE_CONTRACT" for e in events):
@@ -234,22 +256,36 @@ def step_then_validates_organizational_policies(context):
 
 @then("I see completed approvals with timestamps")
 def step_then_see_completed_approvals_with_timestamps(context):
+    # In REVIEWED the completed approval step is the reviewer's decision: the
+    # review task is APPROVED and the SUBMIT_CONTRACT event that forwarded the
+    # contract to approval carries the decision and its time.
     did, _ = ContractService._contract_data(context, _SERVICE_AGREEMENT)
+    tasks = get_with_headers(context, f"{context.base_url}/contract/retrieve")
+    assert tasks.status_code == 200, tasks.text
+    review_tasks = [t for t in tasks.json().get("review_tasks") or [] if t.get("did") == did]
+    assert review_tasks and all(t.get("state") == "APPROVED" for t in review_tasks), (
+        f"Expected the review tasks of the contract to be APPROVED, got: {review_tasks}"
+    )
     auditor_h = AuthService.get_headers_for_roles(["Auditor"])
     deadline = time.monotonic() + 60
     events = []
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, resp.text
         events = resp.json()
-        submit_events = [e for e in events if str(e.get("event_type", "")).upper() == "SUBMIT_CONTRACT"]
-        if submit_events and all(e.get("created_at") for e in submit_events):
+        forwarded = [
+            e for e in events
+            if str(e.get("event_type", "")).upper() == "SUBMIT_CONTRACT"
+            and (e.get("event_data") or {}).get("action_flag") == "APPROVAL"
+            and (e.get("event_data") or {}).get("occurred_at")
+        ]
+        if forwarded:
             context.approval_routing_events = events
             return
         time.sleep(2)
     raise AssertionError(
-        f"Expected completed routing steps (SUBMIT_CONTRACT events) with timestamps in the "
-        f"audit trail within 60s, got: {events}"
+        f"Expected the reviewer's forward-to-approval decision (SUBMIT_CONTRACT, action_flag APPROVAL) "
+        f"with occurred_at in the audit trail within 60s, got: {events}"
     )
 
 

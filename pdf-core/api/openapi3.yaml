@@ -188,15 +188,18 @@ paths:
                 - dcspdfcore
             summary: Verify a PDF's human-readable content against a reference PDF
             description: |
-                Compare a submitted PDF's visible page content against a reference PDF's, resolving
-                the LAST definition of every object on both sides. Neither side is re-rendered, so
-                this carries none of /verify/content's dependence on render determinism and answers a
-                different question: not whether the PDF renders its own embedded payload (which an
-                appended revision superseding both pages and attachment would still satisfy), but
-                whether it still renders the reference document. An appended revision that supersedes
-                a page content stream diverges; append-only signature, C2PA, evidence and timestamp
-                layers do not. Used to gate a wallet-submitted signed PDF against the bytes pinned at
-                prepare.
+                Compare what each page of a submitted PDF renders against the same page of a reference
+                PDF: the page dictionary and every object it reaches (content streams, resources,
+                fonts, XObjects, annotations and their appearances, inherited attributes), each at the
+                LAST definition a reader resolves. Object numbers, key order, string and number
+                spelling, FlateDecode compression and the split of a page's content into a /Contents
+                array are not compared. Neither side is re-rendered, so this carries none of
+                /verify/content's dependence on render determinism and answers a different question:
+                not whether the PDF renders its own embedded payload, but whether it still renders the
+                reference document. Signature widgets are left out unless exact is true, so a PAdES
+                signer's revision passes; append-only C2PA, evidence and timestamp layers reach no page
+                and pass too. Used to gate a wallet-submitted signed PDF against the bytes pinned at
+                prepare (default) and to compare a copy with the stored contract PDF (exact).
             operationId: verifyContentMatch
             requestBody:
                 required: true
@@ -216,6 +219,10 @@ paths:
                                     type: string
                                     format: binary
                                     description: Reference PDF whose page content the submission must reproduce
+                                exact:
+                                    type: string
+                                    enum: ["true", "false"]
+                                    description: When "true", signature widgets are compared too.
             responses:
                 "200":
                     description: Content comparison result.
@@ -228,7 +235,7 @@ paths:
                                 properties:
                                     match:
                                         type: boolean
-                                        description: True when every page content stream of the submission equals the reference's.
+                                        description: True when every page of the submission renders what the reference's page renders.
                                     mismatch:
                                         type: string
                                         description: Which page diverged and a snippet of both sides, present only when match is false.
@@ -360,6 +367,36 @@ paths:
                                 format: binary
                 "400":
                     $ref: '#/components/responses/BadRequest'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+    /manifest/reference:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Read the remote C2PA manifest reference
+            description: |
+                Return the remote C2PA manifest URL that the PDF references in its XMP
+                dcterms:provenance property (DCS-OR-C2PA-008). The reference stays in the
+                PDF when the embedded manifest is removed, so a verifier gets the
+                manifest from this URL.
+            operationId: manifestReference
+            requestBody:
+                required: true
+                content:
+                    application/pdf:
+                        schema:
+                            type: string
+                            format: binary
+                            description: PDF whose XMP metadata references a remote manifest
+            responses:
+                "200":
+                    description: The remote manifest URL.
+                    content:
+                        text/plain:
+                            schema:
+                                type: string
+                "404":
+                    description: The PDF references no remote manifest.
                 "415":
                     $ref: '#/components/responses/UnsupportedMediaType'
     /ontology/dcs-pdf-core:

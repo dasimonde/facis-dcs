@@ -1,9 +1,14 @@
 import type { DcsTemplateData } from '../dcs-jsonld'
+import type { TemplateLevel } from '@/models/contract-template/contract-template'
 import type { ContractTemplateActionFlag } from '@/types/contract-template-action-flag'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type { TemplateType } from '@/types/template-type'
 
 export interface ContractTemplateCreateRequest {
+  party_type: PartyType
+  template_level?: TemplateLevel
+  required_templates?: string[]
   template_type: TemplateType
   name?: string
   description?: string
@@ -25,6 +30,9 @@ export interface ContractTemplateSubmitRequest {
 }
 
 export interface ContractTemplateUpdateRequest {
+  party_type?: PartyType
+  template_level?: TemplateLevel
+  required_templates?: string[]
   did: string
   updated_at: string
   name?: string
@@ -34,6 +42,9 @@ export interface ContractTemplateUpdateRequest {
 }
 
 export interface ContractTemplateUpdateManageRequest {
+  party_type?: PartyType
+  template_level?: TemplateLevel
+  required_templates?: string[]
   did: string
   updated_at: string
   template_type?: TemplateType
@@ -44,6 +55,8 @@ export interface ContractTemplateUpdateManageRequest {
 }
 
 export interface ContractTemplateSearchRequest {
+  semantic_filters?: string
+  party_type?: PartyType
   offset?: number
   limit?: number
   did?: string
@@ -52,6 +65,9 @@ export interface ContractTemplateSearchRequest {
   state?: ContractTemplateState
   name?: string
   description?: string
+  created_by?: string
+  created_from?: string
+  created_to?: string
   filter?: string
 }
 
@@ -84,6 +100,8 @@ export interface ContractTemplateVerifyRequest {
 export interface ContractTemplateArchiveRequest {
   did: string
   updated_at: string
+  /** DCS-IR-TR-07: why the template is deprecated or deleted */
+  justification: string
 }
 
 export interface ContractTemplateRegisterRequest {
@@ -93,7 +111,8 @@ export interface ContractTemplateRegisterRequest {
 
 export interface ContractTemplateAuditRequest {
   did: string
-  updated_at: string
+  updated_at?: string
+  justification: string
 }
 
 export interface ContractTemplatePublishRequest {

@@ -58,7 +58,7 @@ Feature: Configurable external PAC audit executor
     When the Auditor requests an executor-backed "archive" audit for contract "Persisted Executor Result Contract" with justification "persist executor evidence"
     Then the PAC audit request is accepted with executor "customer-compatible-audit"
     And the audit result contains executor version, execution time, correlated findings, and receipt
-    And the PAC audit run stores audit and correlation IDs, executor provenance, receipt, and request and response hashes
+    And the PAC audit run stores audit and correlation IDs, executor provenance, an encrypted snapshot, and request and response hashes
     And a matching PAC_AUDIT_EXECUTED outbox event records the persisted run hashes
     And the persisted PAC audit run rejects an update as append-only
     When the Auditor reads the persisted "archive" report for contract "Persisted Executor Result Contract"
@@ -109,19 +109,37 @@ Feature: Configurable external PAC audit executor
     And the ORCE audit executor has observed exactly one request
 
   @REQ-external-pac-audit-executor-AC6 @DCS-IR-PACM-02 @DCS-FR-UC-08-1 @DCS-FR-PACM-05 @DCS-FR-PACM-07
+  @REQ-audit-report-export-AC1 @REQ-audit-report-export-AC2 @REQ-audit-report-export-AC3
+  @REQ-audit-report-export-AC4 @REQ-audit-report-export-AC5
   Scenario Outline: Every report format uses the persisted run and never executes the checks again
     Given contract "Persisted Report Contract" is submitted, reviewed, approved, and signed via the standard workflow
+    And the archive storage of contract "Persisted Report Contract" is anchored in the audit trail
     And the reference ORCE audit executor is reachable and returns a valid result with a receipt
     When the Auditor requests an executor-backed "archive" audit for contract "Persisted Report Contract" with justification "report replay BDD"
     Then the PAC audit request is accepted with executor "customer-compatible-audit"
     And the ORCE audit executor has observed exactly one request
+    And the PAC audit run stores audit and correlation IDs, executor provenance, an encrypted snapshot, and request and response hashes
+    And the observed executor request contains the lifecycle evidence expected in the persisted report
     When the Auditor exports format "<format>" from the persisted "archive" run for contract "Persisted Report Contract"
-    Then the "<format>" report represents the same persisted executor run
+    Then get http 200:Success code
+    And the "<format>" report represents the same persisted executor run
+    And the "<format>" report has media type "<mediaType>"
+    And the "<format>" report contains the chronological persisted lifecycle timeline
     And the exact report bytes have a PAC_REPORT_GENERATED SHA-256 hash and IPFS CID
+    When the Auditor exports format "<format>" from the persisted "archive" run for contract "Persisted Report Contract"
+    Then get http 200:Success code
+    And the "<format>" report represents the same persisted executor run
+    And the "<format>" report contains the chronological persisted lifecycle timeline
+    And the ORCE audit executor has still observed exactly one request
+    When the Contract Manager terminates contract "Persisted Report Contract" before the archive deletion
+    And the Archive Manager deletes the archived contract "Persisted Report Contract" with justification "P06 report erasure regression"
+    Then get http 200:Success code
+    When the Auditor exports format "<format>" from the persisted "archive" run for contract "Persisted Report Contract"
+    Then the persisted report is unavailable after resource key shredding
     And the ORCE audit executor has still observed exactly one request
 
     Examples:
-      | format |
-      | json   |
-      | csv    |
-      | pdf    |
+      | format | mediaType        |
+      | json   | application/json |
+      | csv    | text/csv         |
+      | pdf    | application/pdf  |

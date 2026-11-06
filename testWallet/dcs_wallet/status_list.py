@@ -107,6 +107,9 @@ RESERVED_INDEX: dict[str, int] = {
     # revoked PID at the ceremony presentation. The signatory name is the
     # ceremony's field name, so this person exists in that scenario alone.
     "SAHRevokedPidField BDD-Testperson": 2001,
+    # features/14_credential_acquisition/poa_credential_verification.feature —
+    # revoked Power of Attorney at the ceremony presentation.
+    "BDD PoA Revocation Probe Org": 2002,
 }
 
 

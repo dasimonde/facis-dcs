@@ -113,6 +113,7 @@ from steps.support.api_client import (
     signature_revoke_url,
     signature_view_url,
 )
+from steps.support.peer_challenge import peer_challenge
 from steps.support.services.pdf_service import PDFService
 from steps.support.signing import wallet_sign
 from steps.support.services.auth_service import AuthService
@@ -220,19 +221,19 @@ def _orce_synthetic_peer_did() -> str:
     return os.getenv("BDD_TRUST_PDP_SYNTHETIC_PEER_DID", "did:web:dcs-orce%3A1880")
 
 
+def _dev_key_signer(token_dir):
+    """Signs a peer challenge with this instance's own dev key; returns the
+    base64 secret_hash."""
+    return lambda secret_value: base64.b64encode(_sign_secret_value_with_dev_key(token_dir, secret_value)).decode()
+
+
 def _orce_synthetic_peer_credentials(context):
-    """Like _synthetic_peer_credentials, but the DID's hostname component
-    resolves (backend-side) to the orce synthetic-peer route rather than
-    back to this instance's own did.json — see _orce_synthetic_peer_did.
-    Still signs with THIS instance's own dev key, since that route mirrors
-    this instance's own did.json/public key, so the resulting
-    challenge-response signature is genuinely valid against it."""
+    """The DID of the orce synthetic-peer route (see _orce_synthetic_peer_did)
+    and a signer for its peer challenges. The route mirrors this instance's
+    own did.json/public key, so a challenge signed with THIS instance's own
+    dev key is genuinely valid against it."""
     _real_did, token_dir = _own_identity(context)
-    synthetic_did = _orce_synthetic_peer_did()
-    secret_value = str(uuid.uuid4())
-    signature = _sign_secret_value_with_dev_key(token_dir, secret_value)
-    secret_hash = base64.b64encode(signature).decode()
-    return synthetic_did, secret_value, secret_hash
+    return _orce_synthetic_peer_did(), _dev_key_signer(token_dir)
 
 
 def _orce_mismatch_peer_did() -> str:
@@ -251,11 +252,7 @@ def _orce_mismatch_peer_credentials(context):
     static peer (_orce_mismatch_peer_did) — a validly signed credential with
     a wrong rules hash rather than a missing one."""
     _real_did, token_dir = _own_identity(context)
-    mismatch_did = _orce_mismatch_peer_did()
-    secret_value = str(uuid.uuid4())
-    signature = _sign_secret_value_with_dev_key(token_dir, secret_value)
-    secret_hash = base64.b64encode(signature).decode()
-    return mismatch_did, secret_value, secret_hash
+    return _orce_mismatch_peer_did(), _dev_key_signer(token_dir)
 
 
 def _minimal_remote_contract_payload(from_peer_did: str, contract_did: str) -> dict:
@@ -313,10 +310,7 @@ def step_given_peer_identity(context):
     # same peer is not allowed") before any trust layer runs. The orce
     # synthetic-peer Service is a genuinely different authority that mirrors this
     # instance's did.json, so the challenge-response stays honestly valid.
-    synthetic_did, secret_value, secret_hash = _orce_synthetic_peer_credentials(context)
-    context.peer_from_did = synthetic_did
-    context.peer_secret_value = secret_value
-    context.peer_secret_hash = secret_hash
+    context.peer_from_did, context.peer_sign = _orce_synthetic_peer_credentials(context)
 
 
 @given("a cryptographically valid peer whose agreement credential this instance accepts")
@@ -327,10 +321,7 @@ def step_given_peer_identity_with_accepted_credential(context):
     and names the federation rules hash the instance under test currently
     publishes. Every scenario using this Given is therefore testing what its AC
     names — the policy endpoint — and not the credential check in front of it."""
-    peer_did, secret_value, secret_hash = publish_trusted_peer(context)
-    context.peer_from_did = peer_did
-    context.peer_secret_value = secret_value
-    context.peer_secret_hash = secret_hash
+    context.peer_from_did, context.peer_sign = publish_trusted_peer(context)
 
 
 @given("that peer publishes no agreement credential")
@@ -345,10 +336,14 @@ def step_given_peer_no_agreement_credential(context):
     dcs_agreement_credential_steps.py, AC1/AC2) and started returning 200
     instead of 404.
     """
-    synthetic_did, secret_value, secret_hash = _orce_synthetic_peer_credentials(context)
-    context.peer_from_did = synthetic_did
-    context.peer_secret_value = secret_value
-    context.peer_secret_hash = secret_hash
+    context.peer_from_did, context.peer_sign = _orce_synthetic_peer_credentials(context)
+
+
+def _legacy_peer_secret(context):
+    """A secret for the endpoints that predate ADR-13 (post_sync, the peer
+    action endpoint). They no longer exist, so no challenge format applies."""
+    secret_value = str(uuid.uuid4())
+    return secret_value, context.peer_sign(secret_value)
 
 
 @given('contract "{name}" exists locally, created by this instance')
@@ -378,12 +373,15 @@ def _post_pdf_payload(context, name: str) -> dict:
         f"could not export contract '{name}' as PDF to build the post_pdf payload: "
         f"{export.status_code} {export.text}"
     )
+    # The challenge names this instance as receiver and binds the shipped PDF.
+    own_did, _token_dir = _own_identity(context)
+    secret_value = peer_challenge("post_pdf", did, context.peer_from_did, own_did, export.content)
     return {
         "from_peer_did": context.peer_from_did,
         "contract_iri": did,
         "pdf": base64.b64encode(export.content).decode(),
-        "secret_value": context.peer_secret_value,
-        "secret_hash": context.peer_secret_hash,
+        "secret_value": secret_value,
+        "secret_hash": context.peer_sign(secret_value),
     }
 
 
@@ -433,7 +431,7 @@ def step_given_local_contract_offered_to_peer(context, name):
     create_resp = post_json(
         context,
         contract_create_url(context),
-        {"template_did": t_did, "counterparty": context.outbound_peer_did},
+        {"template_did": t_did, "counterparty": context.outbound_peer_did, **ContractService._reading_parties(context)},
         headers=creator_h,
     )
     assert create_resp.status_code == 200, create_resp.text
@@ -479,21 +477,21 @@ def step_when_post_sync_new_contract(context):
     jades_payload = _canonical_jades_payload(contract_did, 1, payload["contract"]["contract_data"])
     payload["jades_signature"] = _jades_sign_as_own_instance(context, jades_payload)
     payload["from_peer_did"] = context.peer_from_did
-    payload["secret_value"] = context.peer_secret_value
-    payload["secret_hash"] = context.peer_secret_hash
+    payload["secret_value"], payload["secret_hash"] = _legacy_peer_secret(context)
     context.requests_response = post_json(context, contract_peer_post_sync_url(context), payload, headers={})
 
 
 @when('that peer attempts to approve contract "{name}" via the peer action endpoint')
 def step_when_peer_action_approve(context, name):
     did, updated_at = ContractService._contract_data(context, name)
+    secret_value, secret_hash = _legacy_peer_secret(context)
     payload = {
         "action": "approve",
         "component": "CONTRACT_WORKFLOW_ENGINE",
         "from_peer_did": context.peer_from_did,
         "payload": {"did": did, "updated_at": updated_at},
-        "secret_value": context.peer_secret_value,
-        "secret_hash": context.peer_secret_hash,
+        "secret_value": secret_value,
+        "secret_hash": secret_hash,
     }
     context.requests_response = post_json(context, contract_peer_action_url(context), payload, headers={})
 
@@ -698,7 +696,7 @@ def step_given_counterparty_synthetic_peer_mismatched_hash(context):
     context.base_url to base_url_a, so it inherits the same "only correct if
     BDD_DCS_BASE_URL_A == BDD_DCS_BASE_URL" assumption.
     """
-    mismatch_did, _secret_value, _secret_hash = _orce_mismatch_peer_credentials(context)
+    mismatch_did, _sign = _orce_mismatch_peer_credentials(context)
     context.peer_did_b = mismatch_did
 
 
@@ -740,7 +738,7 @@ def step_given_counterparty_synthetic_peer_no_credential(context):
     == BDD_DCS_BASE_URL" assumption step_when_create_and_offer_cross_instance
     already documents for the two-instance dev convention.
     """
-    synthetic_did, _secret_value, _secret_hash = _orce_synthetic_peer_credentials(context)
+    synthetic_did, _sign = _orce_synthetic_peer_credentials(context)
     context.peer_did_b = synthetic_did
 
 
@@ -772,6 +770,9 @@ def step_when_create_and_offer_cross_instance(context):
             {
                 "template_did": t_did,
                 "counterparty": context.peer_did_b,
+                # Instance B acts as the default organization and as its
+                # counterparty organization; both read B's copy.
+                "parties": ContractService._reading_parties(context)["parties"] + [_B_COUNTERPARTY_ORG],
             },
             headers=creator_h,
         )
@@ -886,6 +887,9 @@ def _close_the_round_on_a(context):
     counterparty (dcstodcs shipSettlement)."""
     c_did = context.cross_instance_contract_did
     creator_h = context.cross_instance_creator_headers
+    _wait_pending_negotiation_sync_clear(
+        context, context.base_url_a, creator_h, "closing the round on instance A"
+    )
     with _as_instance(context, context.base_url_a):
         for _ in range(4):
             if _cross_instance_state(context, context.base_url_a) == "SUBMITTED":
@@ -1095,9 +1099,10 @@ def _first_clause_content(document: dict):
 
 @when("instance A redlines the reopened contract")
 def step_when_a_redlines_reopened_contract(context):
-    """A structured redline (a change_request carrying contract_data), which
-    negotiate.go applies to the document immediately and the regenerator
-    re-ships to the counterparty as a fresh PDF (ADR-13).
+    """A structured redline (change_request.contract_data). Propose does not
+    apply it to the formal document; it records the proposal and syncs it to
+    the peer on the negotiation outbound channel. Formal apply + PDF ship
+    happen on Accept+Submit (see the Then step below).
 
     This is the call requireUnsettledAgreement gates. It is made by the same
     participant that submitted the round — the negotiation decision it records
@@ -1134,14 +1139,83 @@ def step_when_a_redlines_reopened_contract(context):
 
 @then("the redlined document reaches instance B within a few seconds")
 def step_then_redline_reaches_b(context):
-    """The redline travels as a re-rendered PDF over the DCS-to-DCS exchange,
-    and instance B has to hold it BEFORE it runs its own round: B settles
-    whatever document it holds, and a B that settled the pre-redline version
-    would name a digest instance A's settlement never matches — the signing
-    gate would then refuse both parties forever, for a divergence this scenario
-    did not intend to create."""
+    """The redline first arrives as a synced proposal; B Accepts; A Submit
+    merges and ships the formal PDF. B must hold that formal document BEFORE it
+    settles — otherwise settlement digests diverge and signing deadlocks.
+
+    (Feature wording still says "document"; the formal document only appears
+    after Accept+Submit, which this step drives.)"""
+    c_did = context.cross_instance_contract_did
     deadline = time.monotonic() + 120
+    negotiation_id = None
+    while time.monotonic() < deadline:
+        body, _ = _cross_instance_contract(context, context.base_url_b)
+        for negotiation in body.get("negotiations") or []:
+            blob = json.dumps(negotiation.get("change_request") or {})
+            if _REDLINED_CLAUSE_TEXT in blob:
+                negotiation_id = negotiation.get("id")
+                break
+        if negotiation_id:
+            break
+        time.sleep(3)
+    assert negotiation_id, (
+        f"Expected instance A's redline proposal to sync to instance B for "
+        f"{c_did} within a few seconds"
+    )
+
+    counterparty_h = AuthService.get_headers_for_roles(
+        _B_COUNTERPARTY_ROLES,
+        api_base=context.base_url_b,
+        organization=_B_COUNTERPARTY_ORG,
+    )
+    with _as_instance(context, context.base_url_b):
+        resp = post_json(
+            context,
+            f"{context.base_url_b}/contract/respond",
+            {
+                "id": str(negotiation_id),
+                "did": c_did,
+                "action_flag": "ACCEPTING",
+                "rejected_by": "",
+                "rejection_reason": "",
+            },
+            headers=counterparty_h,
+        )
+        assert resp.status_code == 200, (
+            f"instance B accepting the redline proposal failed: {resp.status_code} {resp.text}"
+        )
+
+    # B's ACCEPT must reach A before A's Submit can fold the round; otherwise
+    # a premature submit advances to SUBMITTED without merging and the next
+    # attempt hits the reviewer branch as "invalid user permission".
+    creator_h = context.cross_instance_creator_headers
+    _wait_pending_negotiation_sync_clear(
+        context, context.base_url_b, counterparty_h, "A merging the accepted redline"
+    )
+
+    # Fold the accepted redline on A and ship the formal PDF to B.
+    with _as_instance(context, context.base_url_a):
+        for _ in range(4):
+            retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
+            assert retrieve.status_code == 200, retrieve.text
+            body = retrieve.json()
+            if str(body.get("state", "")).upper() == "SUBMITTED":
+                break
+            try:
+                if _first_clause_content(body.get("contract_data")).get("@list") == [_REDLINED_CLAUSE_TEXT]:
+                    break
+            except AssertionError:
+                pass
+            resp = post_json(
+                context,
+                f"{context.base_url_a}/contract/submit",
+                {"did": c_did, "updated_at": body.get("updated_at")},
+                headers=creator_h,
+            )
+            assert resp.status_code == 200, f"submit merge of redline failed: {resp.status_code} {resp.text}"
+
     observed = None
+    deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         body, _ = _cross_instance_contract(context, context.base_url_b)
         try:
@@ -1152,9 +1226,8 @@ def step_then_redline_reaches_b(context):
             return
         time.sleep(3)
     raise AssertionError(
-        f"Expected instance A's redline to reach instance B's copy of "
-        f"{context.cross_instance_contract_did} over the PDF exchange, last observed clause "
-        f"content: {observed!r}"
+        f"Expected instance A's merged redline to reach instance B's formal copy of "
+        f"{c_did} over the PDF exchange, last observed clause content: {observed!r}"
     )
 
 
@@ -1245,7 +1318,12 @@ def _run_ceremony_and_sign(context, base_url, label, field_name, given_name, awa
             gate_refusal = resp.status_code == 400 and "counterparty_not_settled" in resp.text
             waiting_for_own = gate_refusal and "this instance has not settled" in resp.text
             waiting_for_peer = gate_refusal and "no settlement from" in resp.text
-            keep_waiting = waiting_for_own or (await_settlement and waiting_for_peer)
+            # The peer's signed copy can land on this instance between prepare
+            # and submit. Submit then refuses the signature over the older
+            # revision (apply.go ErrStaleRevision), and the client prepares
+            # again from the copy that carries the peer's signature.
+            stale_revision = resp.status_code == 422 and "a later signature has superseded" in resp.text
+            keep_waiting = waiting_for_own or stale_revision or (await_settlement and waiting_for_peer)
             if not keep_waiting or time.monotonic() > deadline:
                 return resp
             time.sleep(3)
@@ -1670,8 +1748,7 @@ def step_when_post_sync_tampered_jades(context):
     jades_payload = _canonical_jades_payload(contract_did, 1, tampered_document)
     payload["jades_signature"] = _jades_sign_as_own_instance(context, jades_payload)
     payload["from_peer_did"] = context.peer_from_did
-    payload["secret_value"] = context.peer_secret_value
-    payload["secret_hash"] = context.peer_secret_hash
+    payload["secret_value"], payload["secret_hash"] = _legacy_peer_secret(context)
     context.requests_response = post_json(context, contract_peer_post_sync_url(context), payload, headers={})
 
 
@@ -1719,8 +1796,6 @@ def step_when_ship_settlement_for_another_document(context):
     body, _manager_h = _cross_instance_contract(context, context.base_url_a)
     with _as_instance(context, context.base_url_a):
         _real_did, token_dir = _own_identity(context)
-        secret_value = str(uuid.uuid4())
-        secret_hash = base64.b64encode(_sign_secret_value_with_dev_key(token_dir, secret_value)).decode()
         payload = _canonical_settlement_payload(
             contract_did=context.cross_instance_contract_did,
             contract_version=int(body.get("contract_version") or 1),
@@ -1730,6 +1805,11 @@ def step_when_ship_settlement_for_another_document(context):
             settled_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
         settlement_jades = _jades_sign_as_own_instance(context, payload)
+        secret_value = peer_challenge(
+            "post_settlement", context.cross_instance_contract_did, context.peer_did_a, context.peer_did_b,
+            settlement_jades.encode(),
+        )
+        secret_hash = _dev_key_signer(token_dir)(secret_value)
 
     with _as_instance(context, context.base_url_b):
         context.requests_response = post_json(
@@ -1938,6 +2018,33 @@ _B_COUNTERPARTY_ORG = "BDD Peer Trust Counterparty"
 _B_COUNTERPARTY_ROLES = ["Contract Manager", "Contract Negotiator"]
 
 
+def _wait_pending_negotiation_sync_clear(context, base_url: str, headers: dict, what: str):
+    """Submit refuses while this instance still has undelivered negotiation
+    outbound (PROPOSAL / ACCEPT / OFFER_ACCEPTED, …). BDD used to race the
+    synchronizer and fail with ErrNegotiationSyncPending; wait until retrieve
+    reports the queue drained."""
+    c_did = context.cross_instance_contract_did
+    deadline = time.monotonic() + 90
+    last_pending = None
+    while time.monotonic() < deadline:
+        with _as_instance(context, base_url):
+            retrieve = get_with_headers(
+                context, contract_retrieve_by_id_url(context, c_did), headers=headers
+            )
+        assert retrieve.status_code == 200, (
+            f"could not read {c_did} on {base_url} while waiting for negotiation sync "
+            f"before {what}: {retrieve.status_code} {retrieve.text}"
+        )
+        last_pending = retrieve.json().get("pending_negotiation_sync")
+        if not last_pending:
+            return
+        time.sleep(2)
+    raise AssertionError(
+        f"negotiation outbound for {c_did} on {base_url} was still pending "
+        f"(pending_negotiation_sync={last_pending!r}) after 90s before {what}"
+    )
+
+
 def _post_on_b_with_fresh_updated_at(context, path: str, payload: dict, headers: dict, what: str):
     """POST a mutating contract command to instance B, reading updated_at from
     B's OWN copy immediately beforehand. B's copy moves without B acting — the
@@ -2004,6 +2111,11 @@ def step_when_drive_to_approved_on_b(context):
             "opening the negotiation on the received offer",
         )
 
+        # Negotiate enqueues a PROPOSAL toward A; Submit is gated on peer ACK.
+        _wait_pending_negotiation_sync_clear(
+            context, context.base_url_b, counterparty_h, "submit after opening negotiation on B"
+        )
+
         # Submit, from the participant that opened the round, until the round
         # closes: the first submit closes B's negotiation task and folds the
         # round into contract_version + 1, leaving the contract in NEGOTIATION;
@@ -2043,7 +2155,21 @@ def step_when_drive_to_approved_on_b(context):
 def step_when_countersign_on_b(context):
     """The counterparty's own signature, on its own copy, for its OWN seeded
     field (its peer DID) — the signature A's database will never hold a row
-    for."""
+    for.
+
+    Signatures are applied in sequence (ADR-38 §2): B signs over the copy that
+    carries A's signature. B's copy is "agreed" once it holds A's signed copy
+    and A's JAdES. A signature over the older revision is refused by A as a
+    signing conflict."""
+    deadline = time.monotonic() + 90
+    while True:
+        body, _ = _cross_instance_contract(context, context.base_url_b)
+        if body.get("extrinsic_lifecycle") == "agreed" or time.monotonic() > deadline:
+            break
+        time.sleep(2)
+    assert body.get("extrinsic_lifecycle") == "agreed", (
+        f"instance B did not receive the copy that instance A signed: {body.get('extrinsic_lifecycle')!r}"
+    )
     apply_resp = _run_ceremony_and_sign(
         context, context.base_url_b, "B", context.peer_did_b, "PeerCountersignature",
     )
@@ -2122,3 +2248,69 @@ def step_then_cross_instance_deploy_accepted(context, label):
         f"Expected instance {label} to deploy the countersigned contract, got "
         f"{resp.status_code if resp is not None else 'no request made'}: {resp.text if resp is not None else ''}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Contract information for a counterparty (POST /peer/contracts/info,
+# DCS-IR-SI-06) and the dcs-peer-v1 challenge it carries (ADR-13).
+# ---------------------------------------------------------------------------
+
+
+def _info_request_as_a(context, contract_iri: str) -> dict:
+    """An info request signed by instance A for instance B."""
+    with _as_instance(context, context.base_url_a):
+        _real_did, token_dir = _own_identity(context)
+        secret_value = peer_challenge("get_contract_info", contract_iri, context.peer_did_a, context.peer_did_b)
+        secret_hash = _dev_key_signer(token_dir)(secret_value)
+    return {
+        "from_peer_did": context.peer_did_a,
+        "contract_iri": contract_iri,
+        "secret_value": secret_value,
+        "secret_hash": secret_hash,
+    }
+
+
+def _post_info_to_b(context, payload: dict):
+    return _requests.post(
+        f"{context.base_url_b}/peer/contracts/info", json=payload, timeout=context.http_timeout_seconds
+    )
+
+
+@when("instance A asks instance B for the information of the cross-instance contract")
+def step_when_a_asks_b_for_info(context):
+    context.peer_info_request = _info_request_as_a(context, context.cross_instance_contract_did)
+    context.requests_response = _post_info_to_b(context, context.peer_info_request)
+
+
+@then("instance B answers with the contract information in state {state}")
+def step_then_b_answers_info(context, state):
+    resp = context.requests_response
+    assert resp.status_code == 200, f"Expected the contract information, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body.get("did") == context.cross_instance_contract_did, body
+    assert body.get("state") == state.upper(), body
+    assert str(body.get("contract_document_digest", "")).startswith("sha256:"), body
+
+
+@when("instance A sends the same signed information request to instance B again")
+def step_when_a_replays_info(context):
+    context.requests_response = _post_info_to_b(context, context.peer_info_request)
+
+
+@then("instance B refuses the repeated request as a replay")
+def step_then_b_refuses_replay(context):
+    resp = context.requests_response
+    assert resp.status_code == 400, f"Expected the repeated signed request to be refused, got {resp.status_code}: {resp.text}"
+    assert "already used" in resp.text, f"Expected the refusal to name the replay, got: {resp.text}"
+
+
+@when("instance A asks instance B for the information of a contract instance B does not share with it")
+def step_when_a_asks_b_for_unshared_info(context):
+    unshared = f"{context.peer_did_a}:contract:bdd-not-shared-{uuid.uuid4()}"
+    context.requests_response = _post_info_to_b(context, _info_request_as_a(context, unshared))
+
+
+@then("instance B answers that the contract is not found")
+def step_then_b_answers_not_found(context):
+    resp = context.requests_response
+    assert resp.status_code == 404, f"Expected not_found for a contract that is not shared, got {resp.status_code}: {resp.text}"

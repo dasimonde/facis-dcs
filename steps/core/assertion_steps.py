@@ -3,6 +3,7 @@ import ast
 import json
 import os
 import re
+from urllib.parse import urlsplit
 
 import requests as _requests
 
@@ -26,7 +27,7 @@ def step_then_denied_authorization(context):
 @then('the request is denied because of credential expiration')
 def step_then_denied_credential_invalid(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "token is expired" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
 
 
 @then("the request is denied")
@@ -36,7 +37,17 @@ def step_then_denied(context):
 @then('the request is denied because of too many failed attempts')
 def step_then_denied_to_many_attempts(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
+    # The refusal text is the same for any refused credential; the lock row
+    # proves the lockout itself (FR-UC-01-4).
+    cursor = context.db.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM lockouts WHERE locked_until > NOW()")
+        locked = cursor.fetchone()[0]
+    finally:
+        cursor.close()
+    context.db.rollback()
+    assert locked >= 1, "No active IP lockout after the refused attempts"
 
 # ---------------------------------------------------------------------------
 # Generic HTTP response assertions
@@ -97,11 +108,21 @@ def step_when_request_with_payload(context, method, endpoint, payload=None):
 
 @when('the system sends "{method}" request to internal endpoint "{endpoint}"')
 def step_when_internal_request(context, method, endpoint):
-    # Internal endpoints (e.g. /metrics) live at the service root, outside the
-    # API prefix; the ingress does not route them. Prefer the direct service
-    # origin (port-forward set up by run_bdd_helm.sh), falling back to the
-    # base URL's origin for local air/Vite runs.
-    origin = os.getenv("BDD_DCS_INTERNAL_ORIGIN", "").strip().rstrip("/")
+    # Internal endpoints live at the service root, outside the API prefix; the
+    # ingress does not route them. Prefer the direct service origin
+    # (port-forward set up by run_bdd_helm.sh), falling back to the base URL's
+    # origin for local air/Vite runs. /metrics has its own listener
+    # (DCS_METRICS_PORT, default 9464).
+    if endpoint == "/metrics":
+        origin = os.getenv("BDD_DCS_METRICS_ORIGIN", "").strip().rstrip("/")
+        if not origin:
+            # The metrics listener is plain HTTP on the backend host.
+            host = urlsplit(context.base_url).hostname or "localhost"
+            if ":" in host:
+                host = f"[{host}]"
+            origin = f"http://{host}:{os.getenv('DCS_METRICS_PORT', '9464')}"
+    else:
+        origin = os.getenv("BDD_DCS_INTERNAL_ORIGIN", "").strip().rstrip("/")
     if not origin:
         origin = "/".join(context.base_url.split("/", 3)[:3])
     url = origin + endpoint

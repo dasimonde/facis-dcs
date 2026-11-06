@@ -109,6 +109,7 @@ watch(
         name: data.name ?? '',
         description: data.description ?? '',
         templateType: toTemplateType(data.template_type),
+        partyType: data.party_type,
         state: TemplateState.draft,
         version: data.version ?? null,
         updated_at: data.updated_at ?? null,
@@ -161,18 +162,20 @@ async function registerTemplate() {
     <!-- Tabs -->
     <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
       <div class="mx-auto max-w-4xl px-6 pt-3">
-        <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">View Template Catalogue</p>
+        <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">View Template Catalogue</p>
         <div role="tablist" class="tabs-border tabs tabs-lg">
-          <a
+          <button
             v-for="tab in tabs"
             :key="tab.id"
+            type="button"
             role="tab"
+            :aria-selected="activeTab === tab.id"
             class="tab"
             :class="{ 'tab-active text-primary': activeTab === tab.id }"
             @click="setActiveTab(tab.id)"
           >
             {{ tab.label }}
-          </a>
+          </button>
         </div>
       </div>
     </div>

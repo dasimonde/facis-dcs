@@ -112,9 +112,23 @@ classes:
     slot_usage:
       title:
         required: true
+      description:
+        required: false
+      startDate:
+        required: false
+      expirationDate:
+        required: false
+      expirationNoticePeriod:
+        required: false
+      expirationPolicy:
+        required: false
     slots:
       - title
       - description
+      - startDate
+      - expirationDate
+      - expirationNoticePeriod
+      - expirationPolicy
 
   TemplateMetadata:
     class_uri: dcs:TemplateMetadata
@@ -328,6 +342,26 @@ slots:
     range: string
     exact_mappings:
       - dcterms:description
+
+  startDate:
+    slot_uri: dcs:startDate
+    range: datetime
+    description: Contract validity start (maps to contracts.start_date). Optional for compatibility with documents authored before this slot existed.
+
+  expirationDate:
+    slot_uri: dcs:expirationDate
+    range: datetime
+    description: Contract expiration instant (maps to contracts.exp_date). Optional for compatibility.
+
+  expirationNoticePeriod:
+    slot_uri: dcs:expirationNoticePeriod
+    range: integer
+    description: Notice period in days before expiration (maps to contracts.exp_notice_period). Optional for compatibility.
+
+  expirationPolicy:
+    slot_uri: dcs:expirationPolicy
+    range: string
+    description: Post-expiration policy such as RENEWAL, TERMINATION, or ARCHIVING (maps to contracts.exp_policy). Optional for compatibility.
 
   layout:
     slot_uri: dcs:layout

@@ -101,15 +101,14 @@ def step_when_compliance_officer_monitors(context):
     import requests as _requests  # noqa: PLC0415
 
     headers = AuthService.get_headers_for_roles(["Compliance Officer"])
+    # The denied actors are named only to a request that gives a
+    # justification (DCS-FR-PACM-04).
     context.requests_response = _requests.get(
-        pac_monitor_url(context), headers=headers, timeout=context.http_timeout_seconds
+        pac_monitor_url(context),
+        params={"justification": "BDD continuous monitoring"},
+        headers=headers,
+        timeout=context.http_timeout_seconds,
     )
-
-
-@when("the Compliance Officer submits a non-compliance incident report")
-def step_when_compliance_officer_submits_incident(context):
-    headers = AuthService.get_headers_for_roles(["Compliance Officer"])
-    context.requests_response = post_json(context, pac_report_url(context), {}, headers=headers)
 
 
 @when(
@@ -118,15 +117,8 @@ def step_when_compliance_officer_submits_incident(context):
 )
 def step_when_compliance_officer_submits_incident_for_contract(context, name, risk_type, detail):
     """POST /pac/report with a typed, contract-linked finding (DCS-IR-PACM-04,
-    non-compliance-investigation-ui AC5). The Goa design for incident_report
-    currently only declares a Token payload attribute — contract_did/
-    template_did/findings do not exist there yet, so today these extra JSON
-    fields are silently dropped by the generated decoder and nothing is
-    persisted (the handler is a no-op, see
-    backend/internal/service/process_audit_and_compliance.go IncidentReport).
-    This is the contract the implementer builds against: typed fields
-    contract_did (or template_did) plus a findings list of {risk_type, detail}.
-    """
+    non-compliance-investigation-ui AC5): contract_did plus a findings list
+    of {risk_type, detail}."""
     did, _ = ContractService._contract_data(context, name)
     headers = AuthService.get_headers_for_roles(["Compliance Officer"])
     payload = {

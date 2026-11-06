@@ -99,15 +99,23 @@ onUnmounted(() => stateFilterStore.reset())
     <div v-if="loading" class="pl-4" role="status" aria-live="polite">Loading templates...</div>
     <div v-else-if="error" class="pl-4" role="status" aria-live="assertive">{{ error }}</div>
     <ul v-else class="list flex-1 overflow-y-auto">
-      <li class="flex flex-col justify-between px-4 tracking-wide sm:flex-row">
-        <TemplateListSearch :templates="templates" class="flex-1" @search-result="applySearchResult" />
-        <ListStateFilter
-          label="Template"
-          :filters="contractTemplateStates"
-          store-type="templates"
-          :disabled="!hasTemplates"
-        />
-        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTemplates" />
+      <li class="px-4 py-2 tracking-wide">
+        <TemplateListSearch :templates="templates" class="w-full min-w-0" @search-result="applySearchResult">
+          <template #actions>
+            <ListStateFilter
+              label="Template"
+              :filters="contractTemplateStates"
+              store-type="templates"
+              :disabled="!hasTemplates"
+            />
+            <ListSort
+              v-model:sort-by="sortBy"
+              v-model:sort-order="sortOrder"
+              :sorter="sorter"
+              :disabled="!hasTemplates"
+            />
+          </template>
+        </TemplateListSearch>
       </li>
       <TemplateListItem
         v-for="template in filteredTemplates"

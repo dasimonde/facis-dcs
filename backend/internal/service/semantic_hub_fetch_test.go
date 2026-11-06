@@ -8,9 +8,48 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"digital-contracting-service/internal/base/safehttp"
 )
 
+// allowLoopbackSchemaFetch lets the fetch reach the httptest servers on
+// 127.0.0.1; every other address rule stays.
+func allowLoopbackSchemaFetch(t *testing.T) {
+	t.Helper()
+	previous := schemaFetchClient
+	schemaFetchClient = schemaClient(safehttp.Policy{AllowLoopback: true, DenyPrivate: true})
+	t.Cleanup(func() { schemaFetchClient = previous })
+}
+
+// DCS-FR-TR-03: a source_url on the host itself is refused.
+func TestFetchSchemaFromURLRefusesLoopback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("internal"))
+	}))
+	defer srv.Close()
+	_, err := fetchSchemaFromURL(context.Background(), srv.URL)
+	require.ErrorContains(t, err, "loopback")
+}
+
+// DCS-FR-TR-03: a redirect does not lead the fetch to a link-local or a
+// private address.
+func TestFetchSchemaFromURLRefusesRedirectToInternalAddress(t *testing.T) {
+	allowLoopbackSchemaFetch(t)
+	for target, reason := range map[string]string{
+		"http://169.254.169.254/latest/meta-data/": "link-local",
+		"http://10.0.0.1/admin":                    "private",
+	} {
+		redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target, http.StatusFound)
+		}))
+		_, err := fetchSchemaFromURL(context.Background(), redirector.URL)
+		redirector.Close()
+		require.ErrorContains(t, err, reason)
+	}
+}
+
 func TestFetchSchemaFromURLFollowsRedirects(t *testing.T) {
+	allowLoopbackSchemaFetch(t)
 	const body = "@prefix ex: <http://example.org/> . ex:s a ex:Shape ."
 	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(body))
@@ -31,6 +70,7 @@ func TestFetchSchemaFromURLFollowsRedirects(t *testing.T) {
 // SemanticSchemaItem envelope, so installing the peer's library from exactly
 // that anchor has to store the shapes graph — not the JSON around it.
 func TestFetchSchemaFromURLUnwrapsAPeerHubAnchor(t *testing.T) {
+	allowLoopbackSchemaFetch(t)
 	const shapes = "@prefix ex: <http://example.org/> . ex:s a ex:Shape ."
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -48,6 +88,7 @@ func TestFetchSchemaFromURLUnwrapsAPeerHubAnchor(t *testing.T) {
 // Outside a hub path, and without the envelope's full shape, the fetched bytes
 // are the schema — a JSON-LD context with a "content" term stays verbatim.
 func TestFetchSchemaFromURLKeepsANonHubJSONDocumentVerbatim(t *testing.T) {
+	allowLoopbackSchemaFetch(t)
 	const doc = `{"@context":{"content":"http://example.org/content"}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(doc))
@@ -65,6 +106,7 @@ func TestFetchSchemaFromURLRejectsNonHTTPScheme(t *testing.T) {
 }
 
 func TestFetchSchemaFromURLRejectsNon200(t *testing.T) {
+	allowLoopbackSchemaFetch(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))

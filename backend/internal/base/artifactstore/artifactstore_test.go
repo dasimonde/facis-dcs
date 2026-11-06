@@ -118,6 +118,7 @@ func (m *memoryCEKRepo) Shred(_ context.Context, scope Scope, shreddedBy, reason
 	now := time.Now().UTC()
 	for _, r := range m.records {
 		if r.ScopeKind == string(scope.Kind) && r.ScopeID == scope.ID && r.ShreddedAt == nil {
+			r.WrappedCEK = nil
 			r.ShreddedAt = &now
 			r.ShreddedBy = &shreddedBy
 			r.ShredReason = &reason
@@ -233,6 +234,36 @@ func TestShreddedScopeReturnsDefinedError(t *testing.T) {
 	}
 	if _, err := store.Decrypt(ctx, scope, []byte("blob")); !IsShredded(err) {
 		t.Fatalf("Decrypt after shred: got %v, want ShreddedError", err)
+	}
+}
+
+// DCS-NFR-SEC-13 with more than one replica: replica A shreds a scope whose
+// plaintext CEK replica B holds in its cache. Replica B must stop decrypting
+// and encrypting under that scope at once, not when its cache drops the key.
+func TestShredOnOneReplicaStopsTheCachedKeyOnAnother(t *testing.T) {
+	replicaA, objects, repo := newTestStore(t)
+	replicaB := New(objects, repo, replicaA.agreement, replicaA.ownDID, replicaA.ownMethodID, replicaA.ownPub)
+	ctx := context.Background()
+	scope := ContractScope("did:web:test.local:contract:erase-on-a")
+
+	cid, err := replicaA.Put(ctx, scope, []byte("to be erased"))
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if _, err := replicaB.Get(ctx, scope, cid); err != nil {
+		t.Fatalf("Get on replica B before the shred: %v", err)
+	}
+
+	if _, err := repo.Shred(ctx, scope, "did:web:test.local", "Art. 17 request"); err != nil {
+		t.Fatalf("Shred: %v", err)
+	}
+	replicaA.Forget(scope)
+
+	if _, err := replicaB.Get(ctx, scope, cid); !IsShredded(err) {
+		t.Fatalf("Get on replica B after the shred on A: got %v, want ShreddedError", err)
+	}
+	if _, err := replicaB.Encrypt(ctx, scope, []byte("resurrection")); !IsShredded(err) {
+		t.Fatalf("Encrypt on replica B after the shred on A: got %v, want ShreddedError", err)
 	}
 }
 

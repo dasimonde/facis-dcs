@@ -155,6 +155,31 @@ func (r *submitContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db.C
 	return nil
 }
 
+func (r *submitContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string, string) error {
+	return nil
+}
+
 func (r *submitContractRepoFake) Create(context.Context, *sqlx.Tx, db.Contract) error {
 	panic("not implemented")
+}
+
+func TestCollectDocumentBlockIDsIndexesLayoutNodes(t *testing.T) {
+	doc := map[string]any{
+		"@id": "urn:contract",
+		"dcs:documentStructure": map[string]any{
+			"dcs:blocks": map[string]any{
+				"@list": []any{
+					map[string]any{"@id": "urn:contract#block-a", "@type": "dcs:Clause"},
+					map[string]any{"@id": "urn:contract#block-b", "@type": "dcs:Section"},
+				},
+			},
+		},
+	}
+	ids, err := collectDocumentBlockIDs(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ids["urn:contract#block-a"] || !ids["urn:contract#block-b"] {
+		t.Fatalf("expected block ids, got %#v", ids)
+	}
 }

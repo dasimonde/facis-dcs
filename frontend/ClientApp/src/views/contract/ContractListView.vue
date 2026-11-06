@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
+import ContractAttention from '@/components/lists/contract/ContractAttention.vue'
 import ContractList from '@/components/lists/contract/ContractList.vue'
 import { ROUTES } from '@/router/router'
 
 const { isCreator } = useContractPermissions()
+// A contract change reloads the attention list (DCS-FR-CSA-23).
+const attentionVersion = ref(0)
 </script>
 
 <template>
@@ -23,8 +27,9 @@ const { isCreator } = useContractPermissions()
       </RouterLink>
       <div v-else></div>
     </div>
+    <ContractAttention :version="attentionVersion" />
     <div class="min-h-0 flex-1 overflow-hidden">
-      <ContractList />
+      <ContractList @change="attentionVersion++" />
     </div>
   </div>
 </template>

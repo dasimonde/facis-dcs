@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-07-21). Refines
-[ADR-3](docs/backend/en/decisions/0003-event-sourced-audit-trail.md) — the
+[ADR-3](backend/en/decisions/0003-event-sourced-audit-trail.md) — the
 event-sourced audit trail and its per-resource hash chains stand; what changes
 is how tamper evidence is produced *across* resources, and where the evidence
 is ultimately held.

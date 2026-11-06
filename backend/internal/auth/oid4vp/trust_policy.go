@@ -64,7 +64,7 @@ func policyModule() (string, string, error) {
 	if path == "" {
 		return "policy/trust.rego", trustPolicySource, nil
 	}
-	source, err := os.ReadFile(path)
+	source, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return "", "", fmt.Errorf("read trust policy %s: %w", path, err)
 	}

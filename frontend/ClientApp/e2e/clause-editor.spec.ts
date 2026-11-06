@@ -9,6 +9,7 @@ async function gotoAs(page: Page, loginAs: LoginAs, role: DcsRole, url: string):
 }
 
 async function fillRequiredTemplateDetails(page: Page, name: string): Promise<void> {
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByTestId('template-global-name').fill(name)
   await page.getByTestId('template-base-description').fill('Playwright clause-editor fixture.')
 }

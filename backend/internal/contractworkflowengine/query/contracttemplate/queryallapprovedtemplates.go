@@ -37,6 +37,7 @@ type GetApprovedTemplateResult struct {
 	Version      int
 	State        contracttemplatestate.ContractTemplateState
 	TemplateType contracttemplatetype.ContractTemplateType
+	PartyType    string
 	Name         *string
 	Description  *string
 	CreatedBy    string
@@ -102,6 +103,7 @@ func (h *GetAllApprovedTemplateHandler) Handle(ctx context.Context, query GetAll
 			Version:      data.Version,
 			State:        state,
 			TemplateType: templateType,
+			PartyType:    data.PartyType,
 			Name:         data.Name,
 			Description:  data.Description,
 			CreatedBy:    data.CreatedBy,

@@ -58,7 +58,7 @@ func SetRefreshTokenInContext(ctx context.Context, refreshToken string) {
 	if !ok || refreshToken == "" {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // #nosec G124 -- Secure is true unless AUTH_INSECURE_COOKIES=true (plain-HTTP dev); HttpOnly and SameSite are set
 		Name:     "refresh_token",
 		Value:    refreshToken,
 		HttpOnly: true,
@@ -75,7 +75,7 @@ func SetOAuthStateCookie(ctx context.Context, state string) {
 	if !ok || state == "" {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // #nosec G124 -- Secure is true unless AUTH_INSECURE_COOKIES=true (plain-HTTP dev); HttpOnly and SameSite are set
 		Name:     oauthStateCookieName,
 		Value:    state,
 		HttpOnly: true,
@@ -103,7 +103,7 @@ func ClearOAuthStateCookie(ctx context.Context) {
 	if !ok {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // #nosec G124 -- Secure is true unless AUTH_INSECURE_COOKIES=true (plain-HTTP dev); HttpOnly and SameSite are set
 		Name:     oauthStateCookieName,
 		Value:    "",
 		HttpOnly: true,
@@ -128,7 +128,7 @@ func SetIDTokenCookie(ctx context.Context, idToken string) {
 	if !ok || idToken == "" {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // #nosec G124 -- Secure is true unless AUTH_INSECURE_COOKIES=true (plain-HTTP dev); HttpOnly and SameSite are set
 		Name:     idTokenCookieName,
 		Value:    idToken,
 		HttpOnly: true,
@@ -156,7 +156,7 @@ func ClearIDTokenCookie(ctx context.Context) {
 	if !ok {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // #nosec G124 -- Secure is true unless AUTH_INSECURE_COOKIES=true (plain-HTTP dev); HttpOnly and SameSite are set
 		Name:     idTokenCookieName,
 		Value:    "",
 		HttpOnly: true,
@@ -173,7 +173,7 @@ func ClearRefreshTokenCookie(ctx context.Context) {
 	if !ok {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // #nosec G124 -- Secure is true unless AUTH_INSECURE_COOKIES=true (plain-HTTP dev); HttpOnly and SameSite are set
 		Name:     "refresh_token",
 		Value:    "",
 		HttpOnly: true,

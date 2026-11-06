@@ -93,6 +93,22 @@ export function signatureStatusIndicator(status: string, activeLabel = 'ACTIVE')
   }
 }
 
+// The live status-list state of the credential the signer presented
+// (DCS-FR-SM-18). Only VALID is green; anything the backend could not establish
+// reads UNKNOWN.
+export function credentialStatusIndicator(state: string | undefined): VerdictIndicator {
+  switch ((state ?? '').trim().toUpperCase()) {
+    case 'VALID':
+      return { label: 'VALID', cls: 'badge-success' }
+    case 'REVOKED':
+      return { label: 'REVOKED', cls: 'badge-error' }
+    case 'SUSPENDED':
+      return { label: 'SUSPENDED', cls: 'badge-warning' }
+    default:
+      return { label: 'UNKNOWN', cls: 'badge-ghost' }
+  }
+}
+
 // DCS-FR-SM-21: the signature level (SES/AES/QES) the signature actually
 // ACHIEVED, recorded from what DSS validated at submit (ADR-20) and never
 // re-derived here. An absent level means the system does not know it, which is
@@ -113,4 +129,23 @@ export function signatureLevelBadgeClass(level: string): string {
     default:
       return 'badge-ghost'
   }
+}
+
+// A credential status the trust registry or a status list could not provide.
+const REGISTRY_UNREACHABLE = /(could not be determined|unreachable|status list|revocation list|trust registry)/i
+
+// The findings and per-signature reasons that report such a status, without
+// duplicates.
+export function registryUnreachableReasons(
+  findings: string[],
+  signatures: { credential_status?: string; credential_status_reason?: string }[],
+): string[] {
+  const reasons = findings.filter((f) => findingVerdict(f) !== 'pass' && REGISTRY_UNREACHABLE.test(f))
+  for (const sig of signatures) {
+    const reason = sig.credential_status_reason ?? ''
+    if (credentialStatusIndicator(sig.credential_status).label === 'UNKNOWN' && REGISTRY_UNREACHABLE.test(reason)) {
+      reasons.push(reason)
+    }
+  }
+  return [...new Set(reasons)]
 }

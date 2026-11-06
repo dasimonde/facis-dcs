@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +17,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/auth/oid4vp"
+	"digital-contracting-service/internal/auth/oid4vp/status"
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -57,8 +59,8 @@ func evidenceIssuerDocument(t *testing.T, credentialKey *ecdsa.PublicKey) *ident
 			"publicKeyJwk": map[string]any{
 				"kty": "EC",
 				"crv": "P-256",
-				"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-				"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+				"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+				"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 			},
 		}
 	}
@@ -99,6 +101,7 @@ func signingSummary(t *testing.T, key *ecdsa.PrivateKey, signerDID, reportHash s
 		provenance.SigningSummary{
 			ContractID:           "did:example:contract-1",
 			SignerDID:            signerDID,
+			PoASubjectDID:        "did:example:poa-holder-1",
 			CeremonyID:           "ceremony-1",
 			FieldName:            "party-1",
 			ContentHash:          "aa",
@@ -175,7 +178,7 @@ func TestSigningEvidenceIsUsedOnlyAfterItsProofVerifies(t *testing.T) {
 	if len(evidence.Findings) != 0 {
 		t.Fatalf("a verified summary must raise no finding, got %v", evidence.Findings)
 	}
-	if collected := collectSigningEvidence(evidence.Documents); len(collected) != 1 || collected[0].SignerDID == "" {
+	if collected := collectSigningEvidence(evidence); len(collected) != 1 || collected[0].SignerDID == "" {
 		t.Fatalf("the compliance viewer must see the verified signer, got %+v", collected)
 	}
 }
@@ -202,7 +205,7 @@ func TestSigningEvidenceSignedByAForeignKeyIsRefusedAndReported(t *testing.T) {
 	}
 	// The three consumers of the evidence must all fall back to "nothing to
 	// report" rather than reading the unverified claims.
-	if collected := collectSigningEvidence(evidence.Documents); len(collected) != 0 {
+	if collected := collectSigningEvidence(evidence); len(collected) != 0 {
 		t.Fatalf("the compliance viewer must not surface unverified evidence, got %+v", collected)
 	}
 	if findings := validator.crossCheckEmbeddedPID(context.Background(), nil, "did:example:contract-1", evidence.Documents); findings != nil {
@@ -282,11 +285,12 @@ func signingSummaryForField(t *testing.T, key *ecdsa.PrivateKey, field string) j
 		provenance.NewHSMVCSigner(key, "dcs-vc"), evidenceIssuerDID,
 		provenance.CredentialStatusRef{StatusListCredential: "https://dcs.example.org/status-list/1", Index: 3},
 		provenance.SigningSummary{
-			ContractID: "did:example:contract-1",
-			SignerDID:  "did:example:signer-1",
-			CeremonyID: "ceremony-1",
-			FieldName:  field,
-			KBSDHash:   "cc",
+			ContractID:    "did:example:contract-1",
+			SignerDID:     "did:example:signer-1",
+			PoASubjectDID: "did:example:poa-holder-1",
+			CeremonyID:    "ceremony-1",
+			FieldName:     field,
+			KBSDHash:      "cc",
 		})
 	if err != nil {
 		t.Fatalf("issue signing summary: %v", err)
@@ -341,5 +345,69 @@ func TestNoSigningEvidenceYieldsNoFindings(t *testing.T) {
 	evidence := validator.readSigningEvidence(context.Background(), nil, "did:example:contract-1")
 	if len(evidence.Documents) != 0 || len(evidence.Findings) != 0 {
 		t.Fatalf("an unsigned contract reports nothing, got %+v", evidence)
+	}
+}
+
+// Each signature row carries the credential state the live status list gave.
+// An outage or an unreadable entry is UNKNOWN with the reason, never VALID.
+func TestCredentialStatusFromState(t *testing.T) {
+	cases := []struct {
+		name  string
+		state status.State
+		err   error
+		want  string
+	}{
+		{"valid", status.StateValid, nil, CredentialValid},
+		{"revoked", status.StateInvalid, nil, CredentialRevoked},
+		{"suspended", status.StateSuspended, nil, CredentialSuspended},
+		{"unreadable entry", status.StateApplicationSpecific, nil, CredentialUnknown},
+		{"unreachable list", "", errors.New("status list check: retrieval failed"), CredentialUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := credentialStatusFromState(tc.state, tc.err)
+			if got.State != tc.want {
+				t.Fatalf("state %q, err %v: got %q, want %q", tc.state, tc.err, got.State, tc.want)
+			}
+			if (got.State == CredentialUnknown) != (got.Reason != "") {
+				t.Fatalf("only UNKNOWN carries a reason, got %+v", got)
+			}
+		})
+	}
+}
+
+// A signature whose stored evidence allows no lookup is UNKNOWN with the
+// reason, and the rest of its evidence stays usable.
+func TestSigningEvidenceCredentialStatusIsUnknownWithAReasonWhenNoLookupIsPossible(t *testing.T) {
+	key := evidenceTestKey(t)
+	verifier := &provenance.CredentialVerifier{
+		Resolve: func(string) (*identity.DIDDocument, error) { return evidenceIssuerDocument(t, &key.PublicKey), nil },
+	}
+	cases := []struct {
+		name         string
+		presentation string
+		trust        *oid4vp.TrustConfig
+		reason       string
+	}{
+		{"no presentation embedded", "", &oid4vp.TrustConfig{}, "no Power of Attorney"},
+		{"no trust configured", "a-presentation", nil, "no issuer trust"},
+		{"presentation does not parse", "a-presentation", &oid4vp.TrustConfig{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := signingSummaryForField(t, key, "did:web:peer.example")
+			validator := evidenceValidator(t, extracted(t, evidenceAttachment(t, summary, tc.presentation)), verifier)
+			validator.Trust = tc.trust
+			validator.LocalPeer = "did:web:us.example"
+
+			collected := collectSigningEvidence(validator.readSigningEvidence(context.Background(), nil, "did:example:contract-1"))
+			if len(collected) != 1 {
+				t.Fatalf("the verified summary must still be collected, got %+v", collected)
+			}
+			got := collected[0].CredentialStatus
+			if got.State != CredentialUnknown || got.Reason == "" || !strings.Contains(got.Reason, tc.reason) {
+				t.Fatalf("expected UNKNOWN with a reason containing %q, got %+v", tc.reason, got)
+			}
+		})
 	}
 }

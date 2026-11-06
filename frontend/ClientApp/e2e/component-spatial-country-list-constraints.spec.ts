@@ -2,7 +2,7 @@ import { expect, test } from './dcs-test'
 import { selectBilateralClauseRoles } from './lifecycle-helpers'
 import type { Locator, Page } from '@playwright/test'
 const COUNTRY_OPTIONS = ['Germany (DEU)', 'Austria (AUT)', 'Switzerland (CHE)', 'United States (USA)'] as const
-const SPATIAL_OPTION_COUNT = 7
+const SPATIAL_OPTION_COUNT = 26
 
 async function openSpatialConstraint(page: Page, loginAs: (role: 'Template Creator') => Promise<void>) {
   await loginAs('Template Creator')
@@ -115,6 +115,7 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
   await loginAs('Template Creator')
   await page.goto('/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page
     .getByRole('group')
     .filter({ hasText: 'Global Name' })

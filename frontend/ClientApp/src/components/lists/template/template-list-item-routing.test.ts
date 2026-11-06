@@ -14,18 +14,20 @@ import type { UserRole } from '@/types/user-role'
  * role landed on the Review or Approve page with the actions greyed out.
  */
 
-function viewTarget(roles: UserRole[], state: string) {
+function viewTarget(roles: UserRole[], state: PartialContractTemplate['state']) {
   setActivePinia(createPinia())
   useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles }
-  const template = {
+  const template: PartialContractTemplate = {
     did: 'did:web:example.com:template',
     name: 'Supply template',
     state,
     template_type: 'CONTRACT_TEMPLATE',
-    contract_template_version: 1,
+    party_type: 'SINGLE_PARTY',
+    version: 1,
+    created_by: 'did:web:example.com:creator',
     created_at: '2026-07-31T00:00:00Z',
     updated_at: '2026-07-31T00:00:00Z',
-  } as PartialContractTemplate
+  }
   const wrapper = mount(TemplateListItem, {
     props: { template },
     global: { stubs: { RouterLink: RouterLinkStub } },
@@ -47,10 +49,10 @@ describe('template row View destination', () => {
     expect(viewTarget(['TEMPLATE_APPROVER'], TemplateState.reviewed)).toBe(ROUTES.TEMPLATES.APPROVE)
   })
 
-  // template_repository.go verify/approve both scope Template Manager.
-  it('sends a manager to the pages the backend authorises it for', () => {
-    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.submitted)).toBe(ROUTES.TEMPLATES.REVIEW)
-    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.reviewed)).toBe(ROUTES.TEMPLATES.APPROVE)
+  // DCS-FR-TR-06: the Template Manager neither reviews nor approves.
+  it('sends a manager to the read-only view of a submitted or reviewed template', () => {
+    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.submitted)).toBe(ROUTES.TEMPLATES.VIEW)
+    expect(viewTarget(['TEMPLATE_MANAGER'], TemplateState.reviewed)).toBe(ROUTES.TEMPLATES.VIEW)
   })
 
   it('sends a creator to the read-only view instead of a page it cannot act on', () => {

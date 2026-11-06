@@ -18,8 +18,14 @@ vi.mock(import('vue-router'), async (importOriginal) => ({
   useRoute: () => ({ params: { did: 'did:web:example.com:contract' } }) as never,
 }))
 
+const LOCAL_PEER = 'did:web:counterparty.example'
+const ORIGIN_PEER = 'did:web:origin.example'
+
+const getLocalDIDFile = vi.fn(() => Promise.resolve({ id: LOCAL_PEER }))
+
 vi.mock('@/services/did-service', () => ({
-  getLocalDIDFile: () => Promise.resolve({ id: 'did:web:example.com' }),
+  getLocalDIDFile: (...args: unknown[]) => getLocalDIDFile(...(args as [])),
+  resolveLocalInstanceDid: async () => (await getLocalDIDFile()).id,
 }))
 
 const contractDocument = {
@@ -38,18 +44,26 @@ const contractDocument = {
 const acceptOffer = vi.fn(() => Promise.resolve({ did: 'did:web:example.com:contract' }))
 const negotiate = vi.fn(() => Promise.resolve({ did: 'did:web:example.com:contract' }))
 
+const offeredContract = (counterparty: string) => ({
+  did: 'did:web:example.com:contract',
+  name: 'Supply agreement',
+  description: '',
+  state: 'OFFERED',
+  updated_at: '2026-07-31T00:00:00Z',
+  contract_data: contractDocument,
+  negotiations: [],
+  responsible: {
+    creator: ORIGIN_PEER,
+    approvers: [ORIGIN_PEER],
+    reviewers: [ORIGIN_PEER],
+    negotiators: [ORIGIN_PEER],
+    counterparty,
+  },
+})
+
 vi.mock('@/services/contract-workflow-service', () => ({
   contractWorkflowService: {
-    retrieveById: () =>
-      Promise.resolve({
-        did: 'did:web:example.com:contract',
-        name: 'Supply agreement',
-        description: '',
-        state: 'OFFERED',
-        updated_at: '2026-07-31T00:00:00Z',
-        contract_data: contractDocument,
-        negotiations: [],
-      }),
+    retrieveById: () => Promise.resolve(offeredContract(LOCAL_PEER)),
     retrieveNegotiationDraft: () => Promise.resolve(null),
     acceptOffer: (...args: unknown[]) => acceptOffer(...(args as [])),
     negotiate: (...args: unknown[]) => negotiate(...(args as [])),
@@ -74,17 +88,17 @@ function buttonLabelled(wrapper: Awaited<ReturnType<typeof mountOfferedContract>
 describe('accepting an inbound offer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    getLocalDIDFile.mockResolvedValue({ id: LOCAL_PEER })
   })
 
-  it('offers an enabled Accept action on an OFFERED contract with nothing edited', async () => {
+  it('offers an enabled Accept action on an OFFERED contract and hides Change Proposal', async () => {
     const wrapper = await mountOfferedContract()
 
     const accept = buttonLabelled(wrapper, 'Accept offer')
     expect(accept).toBeDefined()
     expect(accept?.attributes('disabled')).toBeUndefined()
-    // The pre-existing route forward still requires an edit, which is why it
-    // could not carry a plain acceptance.
-    expect(buttonLabelled(wrapper, 'Change Proposal')?.attributes('disabled')).toBeDefined()
+    // Redlines wait until NEGOTIATION; OFFERED is accept-as-is (or wait) only.
+    expect(buttonLabelled(wrapper, 'Change Proposal')).toBeUndefined()
   })
 
   it('accepts the offer as it stands, without a change request', async () => {
@@ -117,7 +131,7 @@ describe('accepting an inbound offer', () => {
     const wrapper = await mountOfferedContract(['CONTRACT_OBSERVER'])
 
     expect(buttonLabelled(wrapper, 'Accept offer')?.attributes('disabled')).toBeDefined()
-    expect(buttonLabelled(wrapper, 'Change Proposal')?.attributes('disabled')).toBeDefined()
+    expect(buttonLabelled(wrapper, 'Change Proposal')).toBeUndefined()
   })
 
   it('does not offer Submit before the offer has been accepted', async () => {
@@ -125,5 +139,12 @@ describe('accepting an inbound offer', () => {
 
     // Submit settles a negotiation round; an offer nobody has entered has none.
     expect(buttonLabelled(wrapper, 'Submit')).toBeUndefined()
+  })
+
+  it('hides Accept offer on the origin instance that sent the offer', async () => {
+    getLocalDIDFile.mockResolvedValue({ id: ORIGIN_PEER })
+    const wrapper = await mountOfferedContract(['CONTRACT_CREATOR'])
+
+    expect(buttonLabelled(wrapper, 'Accept offer')).toBeUndefined()
   })
 })

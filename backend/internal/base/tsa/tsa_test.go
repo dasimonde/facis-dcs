@@ -270,3 +270,24 @@ func mustTSACert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	require.NoError(t, err)
 	return cert, key
 }
+
+// A TimeStampResp with status "rejection", as `openssl ts -reply` writes it when
+// it cannot read its serial file.
+const rejectedResponseB64 = "MDUwMwIBAjAoDCZFcnJvciBkdXJpbmcgc2VyaWFsIG51bWJlciBnZW5lcmF0aW9uLgMEBgAAQA=="
+
+func TestAPIClient_Timestamp_RejectionNamesTheTSAReason(t *testing.T) {
+	rejected, err := base64.StdEncoding.DecodeString(rejectedResponseB64)
+	require.NoError(t, err)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/timestamp-reply")
+		_, _ = w.Write(rejected)
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(srv.URL + "/")
+	require.NoError(t, err)
+
+	_, err = client.Timestamp(context.Background(), map[string]string{"key": "value"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the request is rejected: Error during serial number generation.")
+}

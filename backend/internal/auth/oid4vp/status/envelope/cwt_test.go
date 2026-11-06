@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"math/big"
 	"testing"
 
@@ -276,6 +277,81 @@ func TestStatusListCWT_RejectsTTLZero(t *testing.T) {
 		},
 	})
 	require.ErrorContains(t, err, "ttl")
+}
+
+func TestStatusListCWT_RejectsOutOfRangeTimeClaims(t *testing.T) {
+	privateKey := testECPrivateKey(t)
+	base := map[int64]any{
+		int64(2): "https://example.com/statuslists/1",
+		int64(6): int64(1686920170),
+		int64(65533): map[string]any{
+			"bits": uint64(1),
+			"lst":  []byte{0x78, 0x01, 0x03, 0x00, 0x00},
+		},
+	}
+
+	cases := []struct {
+		name  string
+		claim int64
+		value any
+		want  string
+	}{
+		{name: "nbf-maxint64-plus-one", claim: 5, value: uint64(math.MaxInt64) + 1, want: "nbf"},
+		{name: "exp-maxuint64", claim: 4, value: uint64(math.MaxUint64), want: "exp"},
+		{name: "iat-maxuint64", claim: 6, value: uint64(math.MaxUint64), want: "iat"},
+		{name: "ttl-maxuint64", claim: 65534, value: uint64(math.MaxUint64), want: "ttl"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payloadClaims := make(map[int64]any, len(base)+1)
+			for k, v := range base {
+				payloadClaims[k] = v
+			}
+			payloadClaims[tc.claim] = tc.value
+			payload, err := cbor.Marshal(payloadClaims)
+			require.NoError(t, err)
+
+			signed, err := signStatusListCWTForTest(t, payload, privateKey, "kid-1")
+			require.NoError(t, err)
+
+			_, err = envelope.VerifyStatusListCWT(signed, envelope.CWTVerifier{
+				ResolveECDSAByKID: func(string, string) (*ecdsa.PublicKey, error) {
+					return &privateKey.PublicKey, nil
+				},
+			})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestStatusListCWT_AcceptsMaxInt64TimeClaims(t *testing.T) {
+	privateKey := testECPrivateKey(t)
+	payload, err := cbor.Marshal(map[int64]any{
+		int64(2):     "https://example.com/statuslists/1",
+		int64(4):     uint64(math.MaxInt64),
+		int64(5):     uint64(0),
+		int64(6):     uint64(math.MaxInt64),
+		int64(65534): uint64(math.MaxInt64),
+		int64(65533): map[string]any{
+			"bits": uint64(1),
+			"lst":  []byte{0x78, 0x01, 0x03, 0x00, 0x00},
+		},
+	})
+	require.NoError(t, err)
+
+	signed, err := signStatusListCWTForTest(t, payload, privateKey, "kid-1")
+	require.NoError(t, err)
+
+	verified, err := envelope.VerifyStatusListCWT(signed, envelope.CWTVerifier{
+		ResolveECDSAByKID: func(string, string) (*ecdsa.PublicKey, error) {
+			return &privateKey.PublicKey, nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(math.MaxInt64), verified["exp"])
+	require.Equal(t, int64(0), verified["nbf"])
+	require.Equal(t, int64(math.MaxInt64), verified["iat"])
+	require.Equal(t, int64(math.MaxInt64), verified["ttl"])
 }
 
 func TestStatusListCWT_Draft21ExampleStructure(t *testing.T) {

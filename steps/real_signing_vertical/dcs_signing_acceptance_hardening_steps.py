@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 
 import requests as _requests
 from behave import given, then, when
@@ -98,17 +99,21 @@ def step_when_wallet_signs_ordinary_aes(context, name, signatory):
         context.signing_error = str(exc)
 
 
-@then('the ceremony callback for contract "{name}" rejects the signature')
-def step_then_callback_rejects(context, name):
+@then('the ceremony callback for contract "{name}" rejects the signature with "{error_name}"')
+def step_then_callback_rejects(context, name, error_name):
+    """The refusal names the gate that fired: the goa error name in the
+    callback's error body, whether the step posted the callback itself or the
+    test wallet raised on a non-200 callback."""
+    del name
     resp = getattr(context, "requests_response", None)
     if resp is not None:
         assert resp.status_code >= 400, f"expected rejection, got {resp.status_code}: {resp.text}"
-        return
-    err = getattr(context, "signing_error", None)
-    callback = getattr(context, "wallet_callback_response", None)
-    assert err or (callback is not None and callback.get("status") != "SIGNED"), (
-        f"expected the ceremony callback to reject the signature, got callback={callback!r} err={err!r}"
-    )
+        detail = resp.text
+    else:
+        detail = getattr(context, "signing_error", None) or ""
+        assert detail, f"expected the ceremony callback to reject the signature, got {context.wallet_callback_response!r}"
+    match = re.search(r'"name"\s*:\s*"([a-z_]+)"', detail)
+    assert match and match.group(1) == error_name, f"expected refusal {error_name!r}, got: {detail[:2000]}"
 
 
 @when('the wallet signs a byte-tampered copy of the to-be-signed document for contract "{name}" as "{signatory}"')

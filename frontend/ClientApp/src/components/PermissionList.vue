@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { toProperCase } from '@/utils/string'
 
 const authStore = useAuthStore()
-const roles = computed(() => [...(authStore.user?.roles ?? [])].sort())
+const roles = computed(() => [...(authStore.user?.roles ?? [])].sort((a, b) => a.localeCompare(b)))
 
 const formatRole = (role: string): string => toProperCase(role)
 </script>

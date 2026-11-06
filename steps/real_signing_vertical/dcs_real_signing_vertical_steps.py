@@ -134,11 +134,13 @@ def _fetch_pending_nonce(context, ceremony_id: str) -> str:
     return nonce
 
 
-def _build_poa_presentation(*, organization: str, roles: list[str], aud: str, nonce: str) -> str:
+def _build_poa_presentation(*, organization: str, roles: list[str], aud: str, nonce: str, holder_private=None) -> str:
     """Build a Power of Attorney SD-JWT VC + KB-JWT presentation authorizing
     organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03). It
     names the same issuer status list AuthService.build_vp_token issues the
-    login credential against, on the organization's own index."""
+    login credential against, on the organization's own index. holder_private
+    is the holder key of the PID presented with it: the ceremony accepts a PoA
+    only for the subject of the PID."""
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.issuer import issue_access_credential  # noqa: PLC0415
     from dcs_wallet.status_list import role_credential_index  # noqa: PLC0415
@@ -147,7 +149,7 @@ def _build_poa_presentation(*, organization: str, roles: list[str], aud: str, no
     return issue_access_credential(
         organization=organization,
         roles=roles,
-        wallet_private=keys.wallet_private,
+        wallet_private=holder_private or keys.wallet_private,
         status_index=role_credential_index(organization=organization, roles=roles),
         aud=aud,
         nonce=nonce,
@@ -333,7 +335,7 @@ def _start_ceremony(context, name, field_name, headers):
 
 def _complete_ceremony_via_presentation(
     context, ceremony_id, presentation, subject_did, given_name, family_name,
-    *, poa_organization=None, nonce=None,
+    *, poa_organization=None, nonce=None, holder_private=None, poa_presentation=None,
 ):
     """Complete a ceremony's PID(+PoA) presentation the way a wallet actually
     does it: direct_post a vp_token — keyed by the PID and PoA DCQL credential
@@ -343,7 +345,8 @@ def _complete_ceremony_via_presentation(
     poa_organization=None omits the PoA credential from vp_token entirely
     (the "no PoA presented" negative case); any other value builds a PoA
     credential authorizing that organization (a mismatched one for the
-    "wrong PoA" negative case). subject_did/given_name/family_name are
+    "wrong PoA" negative case). poa_presentation, when given, is presented
+    as the PoA instead. subject_did/given_name/family_name are
     unused by the request itself (the callback derives them by verifying
     presentation) but kept for symmetry with the old signature so callers
     changed minimally.
@@ -351,9 +354,14 @@ def _complete_ceremony_via_presentation(
     del subject_did, given_name, family_name
     nonce = nonce or _fetch_pending_nonce(context, ceremony_id)
     vp_token = {PID_QUERY_ID: [presentation]}
-    if poa_organization:
+    if poa_presentation:
+        vp_token[POA_QUERY_ID] = [poa_presentation]
+    elif poa_organization:
         vp_token[POA_QUERY_ID] = [
-            _build_poa_presentation(organization=poa_organization, roles=["Contract Signer"], aud=ceremony_aud(context), nonce=nonce)
+            _build_poa_presentation(
+                organization=poa_organization, roles=["Contract Signer"], aud=ceremony_aud(context), nonce=nonce,
+                holder_private=holder_private,
+            )
         ]
     import json  # noqa: PLC0415
 
@@ -396,7 +404,7 @@ def _run_full_ceremony(context, name, field_name, signatory_name, holder_private
     )
     resp = _complete_ceremony_via_presentation(
         context, ceremony_id, presentation, subject_did, given_name, family_name,
-        poa_organization=poa_organization, nonce=nonce,
+        poa_organization=poa_organization, nonce=nonce, holder_private=holder_private,
     )
     assert resp.status_code == 200, (
         f"ceremony presentation failed for ceremony '{ceremony_id}': "
@@ -703,8 +711,12 @@ def step_then_pid_x5c_accepted(context, name):
 @then('the x5c PID presentation for contract "{name}" is rejected as untrusted')
 def step_then_pid_x5c_untrusted_rejected(context, name):
     resp = context.requests_response
-    assert resp.status_code >= 400, (
+    assert resp.status_code == 400, (
         f"expected the untrusted-issuer x5c PID presentation to be rejected, got {resp.status_code}: {resp.text}"
+    )
+    body = resp.json()
+    assert body.get("name") == "bad_request" and "vp verification failed: PID" in body.get("message", ""), (
+        f"expected the PID verification to refuse the untrusted issuer, got: {resp.text}"
     )
 
 
@@ -1176,3 +1188,13 @@ def step_then_jades_verifies(context, name):
     signing_input = (parts[0] + "." + parts[1]).encode()
     # Raises InvalidSignature if the signature does not verify.
     pub.verify(der_sig, signing_input, ec.ECDSA(hashes.SHA256()))
+
+    from steps.support.api_client import contract_retrieve_by_id_url  # noqa: PLC0415
+
+    retrieve = _requests.get(
+        contract_retrieve_by_id_url(context, did), headers=manager_h, timeout=context.http_timeout_seconds,
+    )
+    assert retrieve.status_code == 200, f"contract retrieve failed: {retrieve.status_code} {retrieve.text}"
+    assert payload["dcs:contractDocument"] == retrieve.json().get("contract_data"), (
+        f"the JAdES payload of '{name}' is not the contract's stored JSON-LD document"
+    )

@@ -5,19 +5,44 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
+
+	"digital-contracting-service/internal/base/datatype/userrole"
 )
 
 // CallbackHandler is called when ORCE sends a callback after processing a webhook.
 type CallbackHandler func(ctx context.Context, pending PendingCallback, status string, result json.RawMessage)
 
-// TokenValidator validates a Bearer token and returns the caller's holderDID.
-type TokenValidator func(ctx context.Context, token string) (holderDID string, err error)
+// Caller is the validated identity behind a Bearer token.
+type Caller struct {
+	HolderDID string
+	// ParticipantDID is the caller's organization. It owns the subscriptions
+	// the caller creates.
+	ParticipantDID string
+	Roles          []string
+}
+
+// TokenValidator validates a Bearer token and returns the caller.
+type TokenValidator func(ctx context.Context, token string) (Caller, error)
+
+// managementRoles may create, list and delete webhook subscriptions. A
+// subscription connects a third-party system to DCS events, which ADR-29
+// assigns to the Integration Manager and the System Administrator. The
+// machine role Sys. Integration Manager lets an integration (ORCE) manage its
+// subscriptions with its own credential.
+var managementRoles = []string{
+	userrole.IntegrationManager.String(),
+	userrole.SystemAdministrator.String(),
+	userrole.SystemIntegrationManager.String(),
+}
 
 // Platform is the webhook subscription HTTP handler.
 // Mount it on any path prefix with http.StripPrefix.
 type Platform struct {
-	store      *SubscriptionStore
+	subs       Subscriptions
+	store      Deliveries
 	dispatcher *Dispatcher
 	validate   TokenValidator
 	onCallback CallbackHandler
@@ -27,8 +52,9 @@ type Platform struct {
 // New creates a ready-to-use Platform.
 // validate:   JWT validator — use middleware.HydraJWTValidator.ValidateToken
 // onCallback: called when ORCE POSTs to /callbacks (may be nil)
-func New(store *SubscriptionStore, dispatcher *Dispatcher, validate TokenValidator, onCallback CallbackHandler) *Platform {
+func New(subs Subscriptions, store Deliveries, dispatcher *Dispatcher, validate TokenValidator, onCallback CallbackHandler) *Platform {
 	p := &Platform{
+		subs:       subs,
 		store:      store,
 		dispatcher: dispatcher,
 		validate:   validate,
@@ -46,18 +72,18 @@ func (p *Platform) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // routes wires all endpoints.
 // GET  /health     — no auth (liveness probe)
 // GET  /events     — authenticated
-// GET  /webhooks   — authenticated
-// POST /webhooks   — authenticated
-// DELETE /webhooks/{id} — authenticated
-// POST /callbacks  — authenticated
+// GET  /webhooks   — management role
+// POST /webhooks   — management role
+// DELETE /webhooks/{id} — management role
+// POST /callbacks  — management role
 func (p *Platform) routes() {
 	p.mux.HandleFunc("GET /health", p.health)
 	p.mux.HandleFunc("GET /events", p.auth(p.listEvents))
-	p.mux.HandleFunc("GET /webhooks", p.auth(p.listWebhooks))
-	p.mux.HandleFunc("POST /webhooks", p.auth(p.subscribe))
-	p.mux.HandleFunc("DELETE /webhooks/{id}", p.auth(p.unsubscribe))
-	p.mux.HandleFunc("POST /callbacks", p.auth(p.callback))
-	p.mux.HandleFunc("GET /deliveries", p.auth(p.listDeliveries))
+	p.mux.HandleFunc("GET /webhooks", p.auth(p.manage(p.listWebhooks)))
+	p.mux.HandleFunc("POST /webhooks", p.auth(p.manage(p.subscribe)))
+	p.mux.HandleFunc("DELETE /webhooks/{id}", p.auth(p.manage(p.unsubscribe)))
+	p.mux.HandleFunc("POST /callbacks", p.auth(p.manage(p.callback)))
+	p.mux.HandleFunc("GET /deliveries", p.auth(p.manage(p.listDeliveries)))
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -65,29 +91,64 @@ func (p *Platform) routes() {
 // auth wraps a handler with JWT Bearer token validation.
 func (p *Platform) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		// The scheme is case-insensitive (RFC 7235): Hydra issues token_type
+		// "bearer", and the UI sends it as given.
+		scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+		token = strings.TrimSpace(token)
+		if !strings.EqualFold(scheme, "Bearer") || token == "" {
 			jsonError(w, http.StatusUnauthorized, "missing Bearer token")
 			return
 		}
-		token := strings.TrimPrefix(header, "Bearer ")
 
-		holderDID, err := p.validate(r.Context(), token)
+		caller, err := p.validate(r.Context(), token)
 		if err != nil {
 			jsonError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), ctxKeyHolderDID{}, holderDID)
+		ctx := context.WithValue(r.Context(), ctxKeyCaller{}, caller)
 		next(w, r.WithContext(ctx))
 	}
 }
 
-type ctxKeyHolderDID struct{}
+// manage admits only callers with a management role and an organization to
+// scope their subscriptions to.
+func (p *Platform) manage(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		caller := callerFromCtx(r.Context())
+		isManager := slices.ContainsFunc(caller.Roles, func(role string) bool {
+			return slices.Contains(managementRoles, role)
+		})
+		if !isManager || caller.ParticipantDID == "" {
+			jsonError(w, http.StatusForbidden, "a webhook subscription management role is required")
+			return
+		}
+		next(w, r)
+	}
+}
+
+type ctxKeyCaller struct{}
+
+func callerFromCtx(ctx context.Context) Caller {
+	v, _ := ctx.Value(ctxKeyCaller{}).(Caller)
+	return v
+}
 
 func holderDIDFromCtx(ctx context.Context) string {
-	v, _ := ctx.Value(ctxKeyHolderDID{}).(string)
-	return v
+	return callerFromCtx(ctx).HolderDID
+}
+
+// subscriptionView is the response shape of a subscription. It has no secret;
+// only POST /webhooks adds it, once.
+type subscriptionView struct {
+	ID          string    `json:"id"`
+	Event       string    `json:"event"`
+	CallbackURL string    `json:"callback_url"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func viewOf(sub Subscription) subscriptionView {
+	return subscriptionView{ID: sub.ID, Event: sub.Event, CallbackURL: sub.CallbackURL, CreatedAt: sub.CreatedAt}
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -103,21 +164,38 @@ func (p *Platform) listEvents(w http.ResponseWriter, r *http.Request) {
 
 // GET /webhooks
 func (p *Platform) listWebhooks(w http.ResponseWriter, r *http.Request) {
-	jsonOK(w, p.store.ListAll())
+	subs, err := p.subs.ListByOwner(r.Context(), callerFromCtx(r.Context()).ParticipantDID)
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not list subscriptions")
+		return
+	}
+	views := make([]subscriptionView, 0, len(subs))
+	for _, sub := range subs {
+		views = append(views, viewOf(sub))
+	}
+	jsonOK(w, views)
 }
 
 // GET /deliveries — recent notification outcomes (status code / error /
-// acknowledged), the monitoring surface for DCS-FR-TR-22 subscribers.
+// acknowledged) of the caller organization's subscriptions, the monitoring
+// surface for DCS-FR-TR-22 subscribers.
 func (p *Platform) listDeliveries(w http.ResponseWriter, r *http.Request) {
-	jsonOK(w, p.store.ListDeliveries())
+	deliveries, err := p.store.ListDeliveries(r.Context(), callerFromCtx(r.Context()).ParticipantDID)
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not list deliveries")
+		return
+	}
+	jsonOK(w, deliveries)
 }
 
 // POST /webhooks
 func (p *Platform) subscribe(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Event       string `json:"event"`
-		CallbackURL string `json:"callback_url"`
-		Secret      string `json:"secret,omitempty"`
+		Event       string          `json:"event"`
+		CallbackURL string          `json:"callback_url"`
+		Secret      json.RawMessage `json:"secret"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -127,23 +205,65 @@ func (p *Platform) subscribe(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "event and callback_url are required")
 		return
 	}
+	if err := ValidateCallbackURL(req.CallbackURL); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error()+"; plain http only for a host the deployment names")
+		return
+	}
 	if !isKnownEvent(req.Event) {
 		jsonError(w, http.StatusBadRequest, "unknown event: "+req.Event)
 		return
 	}
+	// A client that sends its own secret expects deliveries signed with it.
+	// DCS does not use it, so the request fails and the client notices.
+	if req.Secret != nil {
+		jsonError(w, http.StatusBadRequest, "do not send a secret: DCS generates it and returns it in the 201 response")
+		return
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not create subscription")
+		return
+	}
 
-	sub := p.store.Add(req.Event, req.CallbackURL, req.Secret)
-	log.Printf("webhookplatform: new subscription id=%s event=%s url=%s caller=%s",
-		sub.ID, sub.Event, sub.CallbackURL, holderDIDFromCtx(r.Context()))
+	caller := callerFromCtx(r.Context())
+	sub, err := p.subs.Add(r.Context(), Subscription{
+		Event:       req.Event,
+		CallbackURL: req.CallbackURL,
+		Secret:      secret,
+		OwnerDID:    caller.ParticipantDID,
+		CreatedBy:   caller.HolderDID,
+	})
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not store subscription")
+		return
+	}
+	log.Printf("webhookplatform: new subscription id=%s event=%s url=%s caller=%s owner=%s",
+		sub.ID, sub.Event, sub.CallbackURL, caller.HolderDID, caller.ParticipantDID)
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	jsonOK(w, sub)
+	// The only response that carries the secret: DCS does not show it again.
+	jsonOK(w, struct {
+		subscriptionView
+		Secret string `json:"secret"`
+	}{viewOf(sub), secret})
 }
 
 // DELETE /webhooks/{id}
+//
+// A subscription of another organization gives 404 like a missing one, so the
+// response does not show which ids exist for other organizations.
 func (p *Platform) unsubscribe(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !p.store.Delete(id) {
+	deleted, err := p.subs.DeleteOwned(r.Context(), id, callerFromCtx(r.Context()).ParticipantDID)
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not delete subscription")
+		return
+	}
+	if !deleted {
 		jsonError(w, http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -168,7 +288,14 @@ func (p *Platform) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, ok := p.store.ResolvePending(req.EventID)
+	// Only an organization that received the event acknowledges it, and
+	// only its own deliveries.
+	pending, ok, err := p.store.ResolvePending(r.Context(), req.EventID, callerFromCtx(r.Context()).ParticipantDID)
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not resolve the callback")
+		return
+	}
 	if !ok {
 		jsonError(w, http.StatusNotFound, "unknown event_id")
 		return
@@ -178,7 +305,7 @@ func (p *Platform) callback(w http.ResponseWriter, r *http.Request) {
 		req.EventID, pending.Event, pending.DID, req.Status, holderDIDFromCtx(r.Context()))
 
 	if p.onCallback != nil {
-		go p.onCallback(r.Context(), pending, req.Status, req.Result)
+		go p.onCallback(context.WithoutCancel(r.Context()), pending, req.Status, req.Result)
 	}
 
 	jsonOK(w, map[string]string{"status": "accepted"})

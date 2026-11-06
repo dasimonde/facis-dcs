@@ -3,4 +3,5 @@ export interface ContractResponsible {
   approvers: string[]
   reviewers: string[]
   negotiators: string[]
+  counterparty?: string
 }

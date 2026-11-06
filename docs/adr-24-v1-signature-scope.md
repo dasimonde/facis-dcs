@@ -39,13 +39,17 @@ upgrades the same flow toward QES without architectural change.
    `features/22_real_signing_vertical`. The login architecture keeps later
    additional mechanisms possible — role evaluation and verification are
    policy steps, not assumptions baked into the transport.
-4. **PoA chain length 1** is the confirmed scope of this deliverable.
+4. **PoA chains.** At login and for a local signer, the PoA is verified
+   against this instance's login issuer, one hop
+   ([ADR-35](adr-35-peer-issuers-are-anchored-not-enumerated.md)). The PoA
+   chain of a counterparty signer is walked up to 3 links (DCS-FR-SM-04).
 5. **The term "rQES" is retired** from all documents: the model is named
    for what v1 delivers — a wallet-based AES signature. References to the
    CSC protocol remain, since that protocol is precisely the
    qualified-provider upgrade path.
-6. **DCS-FR-PACM-03 (autonomous system-side legal-conformity assessment) is
-   descoped** (client decision). The technical conformance gates (SHACL hub
+6. **Superseded by [ADR-37](adr-37-regulatory-rule-pack.md).**
+   DCS-FR-PACM-03 (autonomous system-side legal-conformity assessment) was
+   descoped (client decision). The technical conformance gates (SHACL hub
    conformance, policy audits), the alerting mechanism, and Compliance
    Officer / Auditor access to compliance information including check
    initiation remain in the deliverable — they assess technical and

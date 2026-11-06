@@ -39,6 +39,8 @@ Feature: Multi-signer signing workflow
     When the signer of field "SignerOne" applies their signature to contract "Incomplete Ceremonies Contract"
     Then the signature apply is rejected because not all declared fields have a completed ceremony
 
+  # A ceremony serves one signature only, so the second attempt runs with a
+  # new completed ceremony for the same field and meets the field guard.
   @clean_db @DCS-FR-SM-17
   Scenario: A declared signature field cannot be signed twice
     Given contract "Double Field Contract" is a fresh draft declaring signature fields "SignerOne" and "SignerTwo"
@@ -47,5 +49,6 @@ Feature: Multi-signer signing workflow
     And a completed signing ceremony exists for field "SignerTwo" of contract "Double Field Contract"
     When the signer of field "SignerOne" applies their signature to contract "Double Field Contract"
     Then get http 200:Success code
+    Given a completed signing ceremony exists for field "SignerOne" of contract "Double Field Contract"
     When the signer of field "SignerOne" applies their signature to contract "Double Field Contract"
     Then the signature apply is rejected because the field is already signed

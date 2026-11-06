@@ -42,16 +42,24 @@ const DefaultListID = 1
 const statusListEntryType = "TokenStatusList"
 
 // StatusListRevocations is the persistence a served status list is built from:
-// which of this deployment's allocated entries carry a set bit.
+// which of this deployment's allocated entries are revoked and which are
+// suspended.
 type StatusListRevocations interface {
-	// Revoke sets subjectID's bit. Revoking an already-revoked subject keeps
-	// the original moment: a status list is asked after the fact when a
-	// credential stopped being valid, and re-stamping it on every republished
-	// terminal state would move that answer.
+	// Revoke marks subjectID revoked, which is final. Revoking an
+	// already-revoked subject keeps the original moment: a status list is asked
+	// after the fact when a credential stopped being valid, and re-stamping it
+	// on every republished terminal state would move that answer.
 	Revoke(ctx context.Context, subjectID string) error
 
-	// RevokedIndices returns the entry indices of listID whose bit is set.
+	// Suspend marks subjectID suspended, and Resume ends the suspension. Neither
+	// changes a revoked subject.
+	Suspend(ctx context.Context, subjectID string) error
+	Resume(ctx context.Context, subjectID string) error
+
+	// RevokedIndices returns the entry indices of listID that are revoked, and
+	// SuspendedIndices those that are suspended.
 	RevokedIndices(ctx context.Context, listID int) ([]uint32, error)
+	SuspendedIndices(ctx context.Context, listID int) ([]uint32, error)
 }
 
 // DCSStatusListPublisher places a contract in the status list this deployment
@@ -128,11 +136,12 @@ func (p *DCSStatusListPublisher) entryFor(ctx context.Context, contractID string
 }
 
 // PublishStatus records the contract status in the status list
-// (DCS-OR-C2PA-005). Terminal states (terminated, expired, replaced, suspended)
-// set the revocation bit. Comparison is case-insensitive so CWE UPPERCASE
-// states (TERMINATED, EXPIRED, …) are handled correctly alongside the SRS
-// lowercase vocabulary. Active/draft/approved/amended states are the default —
-// not revoked — and set nothing.
+// (DCS-OR-C2PA-005). Terminal states (terminated, expired, replaced) revoke the
+// entry. Suspended (a revoked signature) suspends it, and active (a contract
+// signed again) ends the suspension; neither touches a revoked entry.
+// Comparison is case-insensitive so CWE UPPERCASE states (TERMINATED,
+// EXPIRED, …) are handled alongside the SRS lowercase vocabulary. Draft and
+// amended states set nothing.
 func (p *DCSStatusListPublisher) PublishStatus(
 	ctx context.Context,
 	contractID string,
@@ -146,10 +155,15 @@ func (p *DCSStatusListPublisher) PublishStatus(
 	}
 
 	switch strings.ToLower(status) {
-	case "terminated", "expired", "replaced", "suspended":
-		if err := p.setRevoked(ctx, contractID); err != nil {
-			return CredentialStatusRef{}, fmt.Errorf("publish status %s for %s: %w", status, contractID, err)
-		}
+	case "terminated", "expired", "replaced":
+		err = p.change(ctx, contractID, StatusListRevocations.Revoke)
+	case "suspended":
+		err = p.change(ctx, contractID, StatusListRevocations.Suspend)
+	case "active":
+		err = p.change(ctx, contractID, StatusListRevocations.Resume)
+	}
+	if err != nil {
+		return CredentialStatusRef{}, fmt.Errorf("publish status %s for %s: %w", status, contractID, err)
 	}
 	return ref, nil
 }
@@ -167,10 +181,16 @@ func (p *DCSStatusListPublisher) RevokeStatus(ctx context.Context, contractID st
 }
 
 func (p *DCSStatusListPublisher) setRevoked(ctx context.Context, contractID string) error {
+	return p.change(ctx, contractID, StatusListRevocations.Revoke)
+}
+
+// change applies one status change to the contract's entry.
+func (p *DCSStatusListPublisher) change(ctx context.Context, contractID string,
+	apply func(StatusListRevocations, context.Context, string) error) error {
 	if p.revocations == nil {
-		return fmt.Errorf("status list publisher has no revocation store: the bit for %s would never be set", contractID)
+		return fmt.Errorf("status list publisher has no revocation store: the status of %s would never be set", contractID)
 	}
-	return p.revocations.Revoke(ctx, contractID)
+	return apply(p.revocations, ctx, contractID)
 }
 
 // CredentialStatusRef locates one credential's entry in a status list.

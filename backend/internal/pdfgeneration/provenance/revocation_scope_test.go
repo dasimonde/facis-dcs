@@ -100,11 +100,12 @@ func TestTheSigningSummaryNamesTheContractsEntryToo(t *testing.T) {
 
 	signer := &captureSigner{}
 	_, _, err = IssueSigningSummaryVC(context.Background(), signer, "did:web:example.org:issuer", ref, SigningSummary{
-		ContractID: contractID,
-		SignerDID:  "did:example:signatory",
-		CeremonyID: "ceremony-1",
-		FieldName:  "party-1",
-		SignedAt:   time.Now(),
+		ContractID:    contractID,
+		SignerDID:     "did:example:pid-subject",
+		PoASubjectDID: "did:example:poa-subject",
+		CeremonyID:    "ceremony-1",
+		FieldName:     "party-1",
+		SignedAt:      time.Now(),
 	})
 	require.NoError(t, err)
 
@@ -112,6 +113,10 @@ func TestTheSigningSummaryNamesTheContractsEntryToo(t *testing.T) {
 	require.NoError(t, json.Unmarshal(signer.lastUnsigned, &doc))
 	cs, ok := doc["credentialStatus"].(map[string]interface{})
 	require.True(t, ok, "a signing summary must advertise a revocation entry")
+
+	subject := doc["credentialSubject"].(map[string]interface{})
+	assert.Equal(t, "did:example:pid-subject", subject["id"])
+	assert.Equal(t, "did:example:poa-subject", subject["poa_subject_did"])
 
 	_, lifecycle := issuedCredentialStatus(t, contractID, ref, "active", time.Now())
 	assert.Equal(t, lifecycle["statusListCredential"], cs["statusListCredential"])

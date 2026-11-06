@@ -230,3 +230,46 @@ func TestFetchKuboFileAsksOffline(t *testing.T) {
 		t.Fatalf("cat must be requested with offline=true, got %q", gotOffline)
 	}
 }
+
+// Every Kubo RPC call carries the API token when one is set, so a Kubo node
+// with API.Authorizations refuses callers without it (DCS-NFR-SF-02).
+func TestEveryKuboCallSendsTheAPIToken(t *testing.T) {
+	var unauthorized []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer s3cret" {
+			unauthorized = append(unauthorized, r.URL.Path)
+			http.Error(w, "Kubo RPC Access Denied", http.StatusForbidden)
+			return
+		}
+		if r.URL.Path == "/api/v0/add" {
+			_, _ = w.Write([]byte(`{"Hash":"bafy-test-cid"}`))
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL).WithBearerToken("s3cret")
+	if _, err := client.CreateFile(context.Background(), []byte("x")); err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+	if _, err := client.FetchFile("bafy-test-cid"); err != nil {
+		t.Fatalf("FetchFile: %v", err)
+	}
+	if err := client.DeleteFile("bafy-test-cid"); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
+	}
+	if len(unauthorized) > 0 {
+		t.Fatalf("calls without the API token: %v", unauthorized)
+	}
+}
+
+func TestNoTokenSendsNoAuthorizationHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h := r.Header.Get("Authorization"); h != "" {
+			t.Errorf("Authorization header %q without a token", h)
+		}
+	}))
+	defer server.Close()
+	if err := NewClient(server.URL).WithBearerToken("").DeleteFile("bafy-test-cid"); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
+	}
+}

@@ -21,6 +21,7 @@ vi.mock(import('vue-router'), async (importOriginal) => ({
 
 vi.mock('@/services/did-service', () => ({
   getLocalDIDFile: () => Promise.resolve({ id: 'did:web:example.com' }),
+  resolveLocalInstanceDid: () => Promise.resolve('did:web:example.com'),
 }))
 
 const availabilityFieldIri = 'did:web:example.com:contract#field-availability'
@@ -72,7 +73,7 @@ vi.mock('@/services/contract-workflow-service', () => ({
       Promise.resolve({
         did: 'did:web:example.com:contract',
         name: 'SLA',
-        description: '',
+        description: 'Service level agreement',
         state: 'NEGOTIATION',
         updated_at: '2026-07-29T00:00:00Z',
         contract_data: contractDocument,

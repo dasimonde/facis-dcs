@@ -35,6 +35,8 @@ from steps.support.api_client import (
     archive_erasure_status_url,
     archive_retrieve_url,
     contract_export_pdf_url,
+    contract_retrieve_by_id_url,
+    contract_terminate_url,
     delete_with_params,
     did_document_url,
     get_with_headers,
@@ -442,6 +444,28 @@ def step_when_capture_anchored_entry_cid(context):
         f"240s (candidate entry CIDs: {last_candidates}) — the outbox processor "
         f"anchors and checkpoints asynchronously, but not this slowly"
     )
+
+
+@when("the Contract Manager of the dedicated organization terminates the cross-instance contract on instance A")
+def step_when_org_manager_terminates_on_a(context):
+    """A contract in force is not erased: the archive deletion and the peer
+    erase both need a terminated copy (DCS-FR-CWE-20). Terminating on A also
+    sends B the termination notice, so B's copy follows."""
+    did = context.cross_instance_contract_did
+    with _as_instance(context, context.base_url_a):
+        headers = _org_headers(context, ["Contract Manager"], api_base=context.base_url_a)
+        current = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=headers)
+        assert current.status_code == 200, (
+            f"could not read the cross-instance contract on instance A: {current.status_code} {current.text}"
+        )
+        resp = post_json(
+            context,
+            contract_terminate_url(context),
+            {"did": did, "reason": "BDD erasure precondition", "updated_at": current.json().get("updated_at")},
+            headers=headers,
+        )
+    assert resp.status_code == 200, f"terminate on instance A failed: {resp.status_code} {resp.text}"
+    context.requests_response = resp
 
 
 @when('the Archive Manager of the dedicated organization deletes the archived cross-instance contract with justification "{justification}"')

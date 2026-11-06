@@ -13,6 +13,7 @@ const draftStore = useDcsDraftStore()
 const trigger = ref<HTMLButtonElement | null>(null)
 const findingsModal = ref<HTMLDialogElement | null>(null)
 const findings = ref<string[]>([])
+const warnings = ref<string[]>([])
 const error = ref('')
 const isVerifying = ref(false)
 const verificationSucceeded = ref(false)
@@ -22,6 +23,7 @@ const comment = ref('')
 function resetResult() {
   error.value = ''
   findings.value = []
+  warnings.value = []
   verificationSucceeded.value = false
   isConfirming.value = false
   comment.value = ''
@@ -33,11 +35,13 @@ async function verifyTemplate() {
 
   error.value = ''
   findings.value = []
+  warnings.value = []
   verificationSucceeded.value = false
   isVerifying.value = true
   try {
     const verificationResult = await contractTemplateService.verify({ did })
     findings.value = verificationResult.findings
+    warnings.value = verificationResult.warnings ?? []
     verificationSucceeded.value = true
   } catch (err) {
     console.error('Template verification failed', err)
@@ -131,6 +135,20 @@ function confirmApproval() {
 
         <div v-else-if="verificationSucceeded" class="my-5 alert alert-success" role="status">
           Verification completed with no findings.
+        </div>
+
+        <!-- DCS-IR-TR-05: warnings do not block the review. -->
+        <div v-if="verificationSucceeded && warnings.length > 0" class="mb-5">
+          <p class="text-sm font-medium">Warnings</p>
+          <ul class="mt-2 max-h-48 space-y-2 overflow-y-auto" aria-label="Verification warnings">
+            <li
+              v-for="(warning, idx) in warnings"
+              :key="idx"
+              class="rounded-box border border-base-300 bg-base-100 p-3 text-sm break-words"
+            >
+              {{ warning }}
+            </li>
+          </ul>
         </div>
 
         <label v-if="verificationSucceeded && findings.length === 0" class="form-control">

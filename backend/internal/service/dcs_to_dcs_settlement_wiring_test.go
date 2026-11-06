@@ -34,7 +34,7 @@ func TestPostSettlementStoresNothingItHasNotVerified(t *testing.T) {
 	// Transport authentication and the ADR-19 federation gate are what the PDF
 	// ship applies before it accepts anything; a settlement deposits evidence a
 	// signature hangs on, so it cannot apply less.
-	for _, gate := range []string{"VerifyPeerChallenge", "Check"} {
+	for _, gate := range []string{"admitPeer"} {
 		sites := callSites(body, gate)
 		if len(sites) == 0 {
 			t.Errorf("PostSettlement no longer calls %s: any host can deposit counterparty evidence", gate)
@@ -110,7 +110,7 @@ func TestPostSettlementWithdrawalDeletesNothingItHasNotVerified(t *testing.T) {
 	if len(del) != 1 {
 		t.Fatalf("PostSettlementWithdrawal calls DeleteSettlementsBy %d times, want exactly once", len(del))
 	}
-	for _, gate := range []string{"VerifyPeerChallenge", "Check", "verifyShippedWithdrawal", "withdrawalTakesBack"} {
+	for _, gate := range []string{"admitPeer", "verifyShippedWithdrawal", "withdrawalTakesBack"} {
 		sites := callSites(body, gate)
 		if len(sites) == 0 {
 			t.Errorf("PostSettlementWithdrawal no longer calls %s: any host could strip the evidence a signature is gated on", gate)

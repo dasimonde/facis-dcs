@@ -37,13 +37,17 @@ type MetadataItem struct {
 	Version      int
 	State        contracttemplatestate.ContractTemplateState
 	TemplateType contracttemplatetype.ContractTemplateType
+	PartyType    string
 	Name         *string
 	Description  *string
 	CreatedBy    string
+	UpdatedBy    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	MetaData     datatype.JSON
 	LatestDID    *string
+	db.SearchableMetadata
+	db.Structure
 }
 
 type ReviewTaskItem struct {
@@ -140,12 +144,17 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 			Version:      data.Version,
 			State:        state,
 			TemplateType: templateType,
+			PartyType:    data.PartyType,
 			Name:         data.Name,
 			Description:  data.Description,
 			CreatedBy:    data.CreatedBy,
+			UpdatedBy:    data.UpdatedBy,
 			CreatedAt:    data.CreatedAt,
 			UpdatedAt:    data.UpdatedAt,
 			LatestDID:    data.LatestDID,
+
+			SearchableMetadata: data.SearchableMetadata,
+			Structure:          data.Structure,
 		}
 		contractTemplatesItems = append(contractTemplatesItems, metadata)
 

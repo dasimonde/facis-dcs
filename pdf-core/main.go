@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
 )
 
 // loadEnvFile reads KEY=VALUE pairs from path and sets them in the environment.
@@ -20,7 +19,7 @@ func loadEnvFile(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {

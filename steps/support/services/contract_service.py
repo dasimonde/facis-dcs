@@ -151,6 +151,7 @@ class ContractService:
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Contract Source Template",
                 "description": "BDD template for contract workflows",
                 "template_data": template_data
@@ -222,12 +223,23 @@ class ContractService:
 
 
     @staticmethod
+    def _reading_parties(context) -> dict:
+        """Create-payload `parties`: the organizations that may read the contract.
+        The creating organization reads its own contract; a copy received by a
+        peer is readable there only by the organizations named here. The BDD
+        users of both instances present the default organization; a scenario
+        with a dedicated organization (steps/encryption_at_rest) adds it."""
+        org = getattr(context, "encryption_org", None)
+        return {"parties": [AuthService.DEFAULT_ORGANIZATION] + ([org] if org else [])}
+
+    @staticmethod
     def _create_contract_in_draft(context, contract_name: str, template_data=None):
         t_did = ContractService._create_approved_template_for_contract(context, template_data=template_data)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
         create_payload = {
             "template_did": t_did,
+            **ContractService._reading_parties(context),
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -248,8 +260,11 @@ class ContractService:
         t_did = ContractService._create_approved_template_for_contract(context)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
+        # The negotiation steps respond as "TechVendor Inc". Reads and changes
+        # are scoped to the creating organization and the declared parties.
         create_payload = {
             "template_did": t_did,
+            "parties": [AuthService.DEFAULT_ORGANIZATION, "TechVendor Inc"],
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -290,6 +305,7 @@ class ContractService:
         create_payload = {
             "template_did": t_did,
             "counterparty": other_peer_did,
+            **ContractService._reading_parties(context),
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -351,6 +367,7 @@ class ContractService:
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Signature-Field Source Template",
                 "description": "BDD template for real-signing-vertical scenarios",
                 "template_data": {
@@ -512,16 +529,38 @@ class ContractService:
         # POST /contract/verify was removed (commit 2712047e, "Remove unneeded
         # code") — validation now runs server-side inside submit, so the
         # reviewer submit no longer needs a prior verify call.
-        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
-        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
-        assert retrieve.status_code == 200, retrieve.text
-        updated_at = retrieve.json().get("updated_at")
+        # Same lost-update retry as the creator submits above: async PDF/C2PA
+        # writers can bump updated_at between retrieve and reviewer submit.
+        import time as _time  # noqa: PLC0415
 
-        review_submit = post_json(
-            context,
-            contract_submit_url(context),
-            ContractService._contract_reviewer_submit_payload(context, did, updated_at),
-            headers=reviewer_h,
+        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
+        review_submit = None
+        for _ in range(4):
+            retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
+            assert retrieve.status_code == 200, retrieve.text
+            updated_at = retrieve.json().get("updated_at")
+            payload = ContractService._contract_reviewer_submit_payload(context, did, updated_at)
+            # The reviewer forwards with a finding: a comment and an annotation
+            # on the first document block, which the approver reads back.
+            structure = (retrieve.json().get("contract_data") or {}).get("dcs:documentStructure") or {}
+            blocks = (structure.get("dcs:blocks") or {}).get("@list") or []
+            payload["comments"] = ["BDD review: payment terms checked"]
+            context.review_comments = payload["comments"]
+            if blocks and blocks[0].get("@id"):
+                payload["annotations"] = [{"block_id": blocks[0]["@id"], "comment": "Check this clause"}]
+                context.review_annotation_block_ids = [blocks[0]["@id"]]
+            review_submit = post_json(
+                context,
+                contract_submit_url(context),
+                payload,
+                headers=reviewer_h,
+            )
+            if review_submit.status_code != 409 and "updated elsewhere" not in review_submit.text.lower():
+                break
+            _time.sleep(1)
+        assert review_submit is not None and review_submit.status_code == 200, (
+            f"reviewer forward-to-approval failed for '{contract_name}': "
+            f"{review_submit.status_code if review_submit is not None else 'no request'} "
+            f"{review_submit.text if review_submit is not None else ''}"
         )
-        assert review_submit.status_code == 200, review_submit.text
         ContractService._refresh_contract(context, contract_name)

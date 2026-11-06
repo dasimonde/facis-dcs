@@ -6,6 +6,13 @@ import { bindHydraLoginChallengeFromURL } from './hydra-login-guard'
 import { router } from './router/router'
 import { useErrorStore } from './stores/error-store'
 
+window.__DCS_VERSION__ = {
+  frontend: {
+    git_sha: import.meta.env.DCS_GIT_SHA ?? 'unknown',
+    ...(import.meta.env.DCS_BUILD_TIME ? { built_at: import.meta.env.DCS_BUILD_TIME } : {}),
+  },
+}
+
 const app = createApp(App).use(createPinia())
 
 window.addEventListener('unhandledrejection', (event) => {

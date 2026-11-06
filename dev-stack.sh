@@ -79,14 +79,6 @@ kubectl get secret "$TSA_TRUST_SECRET" \
   -o jsonpath='{.data.tsa-cert\.pem}' | base64 --decode > "$TSA_TRUST_CERT_FILE"
 echo "✓ ORCE TSA trust certificate exported"
 
-# Still deployed, but nothing reads it: the C2PA provenance credentials the DCS
-# issues now name the DCS's own signed list, served at /status-list/1 by the
-# backend below (ADR-34). Removing the subchart is a separate step.
-echo "Waiting for statuslist-service..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
-  --timeout=5m
-
 echo "Installing testWallet dependencies..."
 make -C testWallet install
 

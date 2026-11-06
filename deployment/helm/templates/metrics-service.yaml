@@ -1,0 +1,22 @@
+# /metrics has its own Service so service.type (NodePort, LoadBalancer) never
+# publishes it. Always ClusterIP: only in-cluster scrapers reach it.
+{{- if eq (int .Values.service.metricsPort) (int .Values.service.port) }}
+{{- fail "service.metricsPort must differ from service.port" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "digital-contracting-service.metricsServiceName" . }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "digital-contracting-service.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: backend

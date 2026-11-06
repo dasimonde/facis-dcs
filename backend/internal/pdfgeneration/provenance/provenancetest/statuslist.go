@@ -50,8 +50,14 @@ type SignedStatusList struct {
 	Root *x509.Certificate
 	// Verifier resolves a credential's status against this list, through the
 	// ordinary path.
-	Verifier *provenance.CredentialStatusVerifier
-	fetched  *bool
+	Verifier    *provenance.CredentialStatusVerifier
+	fetched     *bool
+	revocations *fixedRevocations
+}
+
+// Suspend marks entry index suspended in the served list.
+func (s *SignedStatusList) Suspend(index uint32) {
+	s.revocations.suspended = append(s.revocations.suspended, index)
 }
 
 // Fetched reports whether the list was actually retrieved — the observable
@@ -131,13 +137,14 @@ func newSignedStatusList(t *testing.T, credentialIssuer string, revoked []uint32
 	leafKey, leafDER := mintLeaf(t, ca, caKey, sans...)
 
 	fetched := false
+	revocations := &fixedRevocations{indices: revoked}
 	signer := &provenance.StatusListSigner{
 		Issuer:      identity,
 		ListURI:     func(listID int) string { return provenance.StatusListURI(issuerURL, listID) },
 		ListID:      provenance.DefaultListID,
 		Chain:       []string{base64.StdEncoding.EncodeToString(leafDER), base64.StdEncoding.EncodeToString(ca.Raw)},
 		Signer:      leafKey,
-		Revocations: &fixedRevocations{indices: revoked},
+		Revocations: revocations,
 		Size:        1024,
 	}
 	served := provenance.StatusListHandler(signer)
@@ -164,6 +171,7 @@ func newSignedStatusList(t *testing.T, credentialIssuer string, revoked []uint32
 		Root:             ca,
 		Verifier:         provenance.NewCredentialStatusVerifier(VerifierAnchoring(roots)),
 		fetched:          &fetched,
+		revocations:      revocations,
 	}
 }
 
@@ -226,9 +234,14 @@ func mintLeaf(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, issue
 	return key, der
 }
 
-type fixedRevocations struct{ indices []uint32 }
+type fixedRevocations struct{ indices, suspended []uint32 }
 
-func (r *fixedRevocations) Revoke(context.Context, string) error { return nil }
+func (r *fixedRevocations) Revoke(context.Context, string) error  { return nil }
+func (r *fixedRevocations) Suspend(context.Context, string) error { return nil }
+func (r *fixedRevocations) Resume(context.Context, string) error  { return nil }
 func (r *fixedRevocations) RevokedIndices(context.Context, int) ([]uint32, error) {
 	return r.indices, nil
+}
+func (r *fixedRevocations) SuspendedIndices(context.Context, int) ([]uint32, error) {
+	return r.suspended, nil
 }

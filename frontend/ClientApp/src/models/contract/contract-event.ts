@@ -40,6 +40,11 @@ export interface ContractUpdateEvent {
   user_roles: UserRole[]
 }
 
+export interface ContractBlockAnnotationEvent {
+  block_id: string
+  comment: string
+}
+
 export interface ContractSubmitEvent {
   did: string
   holder_did: string
@@ -50,6 +55,8 @@ export interface ContractSubmitEvent {
   contract_version: number
   action_flag: ContractActionFlag
   comments: string[]
+  /** Block-level review annotations, when present on the submit snapshot. */
+  annotations?: ContractBlockAnnotationEvent[]
   responsible?: ContractResponsible
   user_roles: UserRole[]
 }

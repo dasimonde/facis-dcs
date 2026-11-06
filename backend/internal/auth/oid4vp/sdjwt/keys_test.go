@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"digital-contracting-service/internal/base/ecutil"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -104,7 +106,7 @@ func TestVerificationKeyFromX5C_TrustedChainReturnsLeafKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected an *ecdsa.PublicKey, got %T", key)
 	}
-	if pub.X.Cmp(leafKey.X) != 0 || pub.Y.Cmp(leafKey.Y) != 0 {
+	if !ecutil.Equal(ecutil.AsPublic(pub), ecutil.AsPublic(leafKey)) {
 		t.Fatalf("returned key does not match the leaf certificate's public key")
 	}
 }
@@ -368,8 +370,8 @@ func publicJWKSFor(t *testing.T, key *ecdsa.PublicKey) json.RawMessage {
 	raw, err := json.Marshal(map[string]any{"keys": []map[string]string{{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-		"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+		"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+		"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 	}}})
 	if err != nil {
 		t.Fatalf("marshal jwks: %v", err)
@@ -434,8 +436,8 @@ func TestResolveIssuerVerificationKey_BareJWKRefusedForX5CIssuer(t *testing.T) {
 	header := map[string]any{"jwk": map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(issuerKey.X.FillBytes(make([]byte, 32))),
-		"y":   base64.RawURLEncoding.EncodeToString(issuerKey.Y.FillBytes(make([]byte, 32))),
+		"x":   ecutil.MustJWKX(ecutil.AsPublic(issuerKey)),
+		"y":   ecutil.MustJWKY(ecutil.AsPublic(issuerKey)),
 	}}
 	// The key is even the right one — but this issuer publishes certificates, so
 	// a bare key arrives with nothing vouching for it.
@@ -448,7 +450,7 @@ func TestResolveIssuerVerificationKey_BareJWKRefusedForX5CIssuer(t *testing.T) {
 		t.Fatalf("the configured x5c path must resolve: %v", err)
 	}
 	pub, ok := key.(*ecdsa.PublicKey)
-	if !ok || pub.X.Cmp(issuerKey.X) != 0 {
+	if !ok || !ecutil.Equal(pub, ecutil.AsPublic(issuerKey)) {
 		t.Fatal("x5c resolution must return the leaf certificate's key")
 	}
 }

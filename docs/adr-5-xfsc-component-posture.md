@@ -105,20 +105,28 @@ this replacement boundary by selecting the compatible
 `/customer-audit/run` endpoint (`deployment/helm/values.bdd.yml:422-424`).
 
 Only a validated successful response is persisted. `pac_audit_runs` is
-append-only and keeps both queryable JSONB and the exact response bytes,
-together with request/response hashes and executor provenance
-(`backend/migrations/sql/20260728b_pac_audit_runs.sql:1-36`). The run and its
+append-only and keeps the exact request and response bytes in an encrypted
+snapshot, together with request/response hashes and executor provenance
+(`backend/migrations/sql/20261015_pac_audit_snapshot.sql`). The run and its
 `PAC_AUDIT_EXECUTED` outbox event are committed in the same database
-transaction (`backend/internal/service/pac_audit_run.go:48-82`). Reports never
-execute the checks again: JSON returns the exact stored response bytes, while
-CSV and PDF are projections of that same run
-(`backend/internal/service/audit_report.go:107-127`,
-`backend/internal/service/process_audit_and_compliance.go:449-503`). The exact
-emitted report bytes are hashed, stored in IPFS when configured, and recorded
+transaction (`backend/internal/service/pac_audit_run.go`). Reports never
+execute the checks again. The P06 decision of 2026-10-15 makes JSON a complete
+DCS report with executor provenance, receipt, findings, resource counts and the
+chronological lifecycle timeline captured in that request. CSV and paginated
+PDF project the same saved run (`backend/internal/service/audit_report.go`).
+`responseHash` identifies the unchanged original executor bytes; the hash of
+the final download is recorded separately. The exact
+emitted report bytes are hashed, encrypted, stored in IPFS when configured, and recorded
 with scope, format, CID, justification and summary in
 `PAC_REPORT_GENERATED`
-(`backend/internal/service/process_audit_and_compliance.go:481-500`,
-`backend/internal/service/process_audit_and_compliance.go:520-563`).
+(`backend/internal/service/process_audit_and_compliance.go`).
+
+Request, response and generated reports depend on every resource CEK whose
+private evidence they contain. An authenticated outer instance envelope
+protects the scope list and run identity. Shredding any such key makes the
+whole affected saved run/report unreadable; report export returns 404 without
+selecting an older run. Plaintext JSONB/receipt copies are removed. This
+extends the erasure boundary in [ADR-28](adr-28-ipfs-encryption-at-rest-key-shredding.md).
 
 ### Status-list compatibility and publication
 

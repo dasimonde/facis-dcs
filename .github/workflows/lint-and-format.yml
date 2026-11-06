@@ -40,6 +40,9 @@ jobs:
       - name: Frontend unit tests (vitest)
         run: npm test
 
+      - name: E2E button labels exist in the frontend
+        run: npm run check:buttons
+
       - name: Write frontend success summary
         if: success()
         run: |
@@ -85,11 +88,10 @@ jobs:
             exit 1
           fi
 
-      - name: Install Goa
-        run: go install goa.design/goa/v3/cmd/goa@v3
-
+      # go run uses the goa version pinned in go.mod, as the Dockerfile does.
+      # "goa@v3" resolves to the newest release, which can need a newer Go.
       - name: Generate Goa code
-        run: goa gen digital-contracting-service/design
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -117,10 +119,118 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> 💡 **Hint:** If your local commit didn't catch this, make sure you ran \`go mod tidy\` and have \`npm install\` executed in the project root to initialize Husky hooks." >> $GITHUB_STEP_SUMMARY
 
+  validate-pdf-core:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'pdf-core/go.mod'
+          cache: true
+          cache-dependency-path: 'pdf-core/go.sum'
+
+      # server.go embeds the ontology artefacts; the type check needs them.
+      - name: Build ontology artefacts
+        run: make -C pdf-core docs/semantic-ontology/linkml/output/linkml.yaml.context.jsonld
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: pdf-core
+
+  # Render tests of the Helm chart (deployment/helm/tests). They need helm,
+  # openssl and python3 with PyYAML.
+  helm-chart-tests:
+    name: Helm chart tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      # charts/*.tgz is gitignored: fetch the remote dependencies
+      # (kube-prometheus-stack, traefik). run_all.sh removes the packed copies
+      # of the local subcharts again.
+      - name: Build chart dependencies
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add traefik https://traefik.github.io/charts
+          helm dependency build deployment/helm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: python3 -m pip install pyyaml
+
+      - name: Run chart tests
+        run: bash deployment/helm/tests/run_all.sh
+
+  # Scan Go code against the Go vulnerability database.
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'backend/go.mod'
+          cache: true
+          cache-dependency-path: 'backend/go.sum'
+
+      # gen/ is gitignored; govulncheck must load the same packages as go test.
+      - name: Generate Goa code
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+      - name: Run govulncheck (pdf-core)
+        working-directory: pdf-core
+        run: govulncheck ./...
+
   go-tests:
     name: Go unit tests (backend + pdf-core)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 ships pg_dump 16, the major of the postgres service below and
+    # of the backup CronJob. A newer pg_dump writes settings a 16 server refuses.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # The Postgres-backed tests read QA_DATABASE_URL. In CI (CI=true) a test
+    # without it fails instead of skipping (internal/base/pgtest.URL).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: qa
+          POSTGRES_PASSWORD: qa
+          POSTGRES_DB: qa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      QA_DATABASE_URL: postgres://qa:qa@localhost:5432/qa?sslmode=disable
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -133,9 +243,7 @@ jobs:
       # The generated transport is gitignored; tests build against it.
       - name: Generate Goa transport
         working-directory: backend
-        run: |
-          go install goa.design/goa/v3/cmd/goa@v3
-          goa gen digital-contracting-service/design
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
       - name: Backend unit tests
         working-directory: backend

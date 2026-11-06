@@ -14,7 +14,16 @@
 // parties agreed the contract would carry.
 package negotiationmerging
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// ErrInvalidChangeRequest refuses a change request that is neither a
+// free-text note nor a ChangeRequest object.
+var ErrInvalidChangeRequest = errors.New("invalid change request: send a JSON string note or an object with name, description, contract_data, start_date, exp_date (RFC 3339), exp_notice_period or exp_policy")
 
 type ChangeRequest struct {
 	Name            *string          `json:"name"`
@@ -24,4 +33,26 @@ type ChangeRequest struct {
 	ExpDate         *string          `json:"exp_date,omitempty"`
 	ExpNoticePeriod *int             `json:"exp_notice_period,omitempty"`
 	ExpPolicy       *string          `json:"exp_policy,omitempty"`
+}
+
+// Decode reads a change request. A JSON string (or null) is a free-text note
+// for the negotiation audit trail: note is true and the merge changes nothing
+// for it. Any other value must be a ChangeRequest object with RFC 3339 dates.
+func Decode(raw []byte) (change ChangeRequest, note bool, err error) {
+	var text *string
+	if json.Unmarshal(raw, &text) == nil {
+		return ChangeRequest{}, true, nil
+	}
+	if err := json.Unmarshal(raw, &change); err != nil {
+		return ChangeRequest{}, false, fmt.Errorf("%w: %v", ErrInvalidChangeRequest, err)
+	}
+	for _, date := range []*string{change.StartDate, change.ExpDate} {
+		if date == nil {
+			continue
+		}
+		if _, err := time.Parse(time.RFC3339, *date); err != nil {
+			return ChangeRequest{}, false, fmt.Errorf("%w: %v", ErrInvalidChangeRequest, err)
+		}
+	}
+	return change, false, nil
 }

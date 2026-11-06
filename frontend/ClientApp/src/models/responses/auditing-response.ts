@@ -113,3 +113,38 @@ export interface AuditReportDownload {
 }
 
 export type AuditReportResponse = AuditReport | AuditReportDownload
+
+export interface AccessAttempt {
+  id: number
+  attempted_at: string
+  attempt_by?: string
+  roles: string[]
+  service: string
+  method: string
+  scope?: string
+  did?: string
+  justification: string
+  outcome: 'SUCCESS' | 'DENIED' | 'FAILED'
+}
+
+export interface AccessAttemptsResponse {
+  attempts: AccessAttempt[]
+  next_cursor?: string
+}
+
+/** A Merkle inclusion proof of one audit entry in a timestamped checkpoint (ADR-16). */
+export interface CheckpointProof {
+  entry_cid: string
+  leaf_hash: string
+  leaf_index: number
+  siblings: string[]
+  head: {
+    seq: number
+    root: string
+    prev_root?: string
+    leaf_count: number
+    created_at: string
+    tsa_timestamp?: string
+    timestamped_at?: string
+  }
+}

@@ -2,6 +2,23 @@ image:
   repository: postgres
   tag: "16-alpine"
   pullPolicy: IfNotPresent
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
+
+# 70 is the postgres user of the postgres alpine image. PostgreSQL writes to
+# the data volume and to /var/run/postgresql (emptyDir) (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 70
+  runAsGroup: 70
+  fsGroup: 70
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 service:
   type: ClusterIP
@@ -10,7 +27,8 @@ service:
 
 auth:
   username: dcs
-  password: dcs
+  # Empty: random on install, kept from the Secret on upgrade.
+  password: ""
   database: dcs
 
 # Additional databases to create on init (list of names)

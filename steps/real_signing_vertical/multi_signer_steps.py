@@ -40,6 +40,14 @@ def step_given_dual_field_draft(context, name, field_one, field_two):
         {"@type": "dcs:SignatureField", "@id": f"{did}#{field}", "dcs:signatoryName": field}
         for field in (field_one, field_two)
     ]
+    # A signature field must name a party of the contract (prepare refuses any
+    # other field), and each field's PoA is issued for the organization of the
+    # same name. Declare both signatories as parties and keep the parties the
+    # contract already has.
+    doc["dcs:parties"] = (doc.get("dcs:parties") or []) + [
+        {"@id": f"{did}#party-{field}", "@type": "dcs:CompanyParty", "dcs:legalName": field}
+        for field in (field_one, field_two)
+    ]
     resp = put_json(
         context,
         contract_update_url(context),

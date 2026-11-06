@@ -29,6 +29,14 @@ import (
 // client error by service.mapContractCommandError.
 var ErrContractNotRenewable = errors.New("contract is not in a renewable state")
 
+// ErrInvalidRenewalTerm is returned when the renewal's term dates are
+// inconsistent. Mapped to a client error by service.mapContractCommandError.
+var ErrInvalidRenewalTerm = errors.New("invalid renewal term")
+
+// ErrRenewalExists is returned when the original already has a renewal that
+// is not withdrawn, revoked, terminated or expired. It is mapped to 409.
+var ErrRenewalExists = errors.New("the contract already has an open renewal")
+
 // renewableStates are the original-contract states from which a renewal
 // instance may be created. A contract must at least have been agreed
 // (APPROVED) or be in its performance/archival lifecycle (SIGNED, ACTIVE,
@@ -109,6 +117,18 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	if !renewableStates[originalState] {
 		return nil, fmt.Errorf("%w: original contract is in state %s", ErrContractNotRenewable, originalState)
 	}
+	// One open renewal per original (DCS-FR-CWE-22). The lock serializes two
+	// renewals of the same original that run at the same time.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('contract-renewal:' || $1))`, cmd.OriginalDID); err != nil {
+		return nil, fmt.Errorf("could not lock the original contract: %w", err)
+	}
+	renewal, err := h.CRepo.ReadOpenRenewalDID(ctx, tx, cmd.OriginalDID)
+	if err != nil {
+		return nil, fmt.Errorf("could not look up open renewals: %w", err)
+	}
+	if renewal != "" {
+		return nil, fmt.Errorf("%w: %s", ErrRenewalExists, renewal)
+	}
 
 	localPeer, err := h.DIDDocument.GetID()
 	if err != nil {
@@ -127,7 +147,16 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	if err != nil {
 		return nil, fmt.Errorf("could not clear the previous term's signature attribution: %w", err)
 	}
-	renewalContractData, err := attachRenewsContractReference(unsignedContractData, cmd.OriginalDID, original.ContractVersion)
+	priorSignatures, err := signatureReferences(original.ContractData)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the previous term's signatures: %w", err)
+	}
+	originalPDF, err := h.CRepo.ReadPDFState(ctx, tx, cmd.OriginalDID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the original contract's PDF state: %w", err)
+	}
+	renewalContractData, err := attachRenewsContractReference(unsignedContractData, cmd.OriginalDID, original.ContractVersion,
+		signedDocumentReference(originalPDF), priorSignatures)
 	if err != nil {
 		return nil, fmt.Errorf("could not attach renewal reference: %w", err)
 	}
@@ -157,13 +186,10 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 		renewalContractData = &seeded
 	}
 
-	newStartDate := original.StartDate
-	if cmd.NewStartDate != nil {
-		newStartDate = cmd.NewStartDate
-	}
-	newExpDate := original.ExpDate
-	if cmd.NewExpDate != nil {
-		newExpDate = cmd.NewExpDate
+	newStartDate, newExpDate, err := renewalTerm(original.StartDate, original.ExpDate, cmd.NewStartDate, cmd.NewExpDate,
+		original.State == contractstate.Terminated.String(), time.Now().UTC())
+	if err != nil {
+		return nil, err
 	}
 	newExpPolicy := original.ExpPolicy
 	if cmd.NewExpPolicy != nil {
@@ -174,10 +200,23 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 		newExpNoticePeriod = cmd.NewExpNoticePeriod
 	}
 
+	renewalContractData, err = stampRenewalTerm(renewalContractData, sharedContractDetails{
+		StartDate:       newStartDate,
+		ExpDate:         newExpDate,
+		ExpPolicy:       newExpPolicy,
+		ExpNoticePeriod: newExpNoticePeriod,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	createdAt := time.Now().UTC()
 	data := db.Contract{
 		DID:             cmd.DID,
 		Origin:          localPeer,
 		CreatedBy:       cmd.RenewedBy,
+		CreatedAt:       createdAt,
+		UpdatedAt:       createdAt,
 		State:           contractstate.Draft.String(),
 		ContractData:    renewalContractData,
 		TemplateDID:     original.TemplateDID,
@@ -285,6 +324,10 @@ func unsignRenewedDocument(raw *datatype.JSON) (*datatype.JSON, error) {
 		}
 	}
 
+	// The signing deadline belongs to the previous term (DCS-FR-SM-13); the
+	// renewal's parties set their own.
+	delete(doc, "dcs:signingDeadline")
+
 	// Break the seal: the first signature retyped the offered policy set into
 	// the odrl:Agreement those signatures bind. A renewal is a fresh offer of
 	// the same terms, and nobody has accepted it yet.
@@ -301,25 +344,170 @@ func unsignRenewedDocument(raw *datatype.JSON) (*datatype.JSON, error) {
 	return &encoded, nil
 }
 
-// attachRenewsContractReference adds the dcs:renewsContract back-reference
-// (DCS-FR-CWE-11: "reference links"; DCS-FR-CSA-15: "retain references to
-// the prior contract's version [and] ID") to an already-normalized contract
-// document. It is a plain top-level JSON-LD property, distinct from
-// dcs:parentContract (ADR-7's frame-agreement hierarchy link, which must
-// stay child->parent only and singular) — a renewal is not a sub-contract of
-// the original, it supersedes it.
-func attachRenewsContractReference(raw *datatype.JSON, originalDID string, originalVersion int) (*datatype.JSON, error) {
+// signatureReferences returns one dcs:signatures entry per party node of the
+// original that carries a signatory: the party, its signatory and the Power of
+// Attorney they signed under. These are the predicates unsignRenewedDocument
+// clears from the copy. A countersignature applied to an already signed PDF
+// stamps no party node (apply.go contractDocumentForSignature), so only the
+// signed PDF holds it: see signedDocumentReference.
+func signatureReferences(raw *datatype.JSON) ([]any, error) {
+	if raw == nil {
+		return nil, nil
+	}
 	var doc map[string]any
 	if err := json.Unmarshal(*raw, &doc); err != nil {
 		return nil, fmt.Errorf("could not decode contract data: %w", err)
 	}
-	doc["dcs:renewsContract"] = map[string]any{
+	nodes, _ := doc["dcs:parties"].([]any)
+	var refs []any
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok || node["dcs:hasSignatory"] == nil {
+			continue
+		}
+		ref := map[string]any{
+			"dcs:party":        map[string]any{"@id": node["@id"]},
+			"dcs:hasSignatory": node["dcs:hasSignatory"],
+		}
+		if poa, ok := node["dcs:hasPowerOfAttorney"]; ok {
+			ref["dcs:hasPowerOfAttorney"] = poa
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
+}
+
+// signedDocumentReference returns the IPFS reference of the original's stored
+// PDF when that artifact holds a signature, else "". The PDF carries every
+// PAdES signature of the original, the counterparty's included.
+func signedDocumentReference(state *db.ContractPDFState) string {
+	if state == nil || state.IPFSCID == "" || !state.Signed {
+		return ""
+	}
+	return "ipfs://" + state.IPFSCID
+}
+
+// attachRenewsContractReference adds the dcs:renewsContract back-reference
+// (DCS-FR-CWE-11: "retaining linked metadata and signatures", "reference
+// links"; DCS-FR-CSA-15: "retain references to the prior contract's version,
+// ID, and signatures") to an already-normalized contract document. It is a
+// plain top-level JSON-LD property, distinct from dcs:parentContract (ADR-7's
+// frame-agreement hierarchy link, which must stay child->parent only and
+// singular) — a renewal is not a sub-contract of the original, it supersedes
+// it. dcs:signedDocument and dcs:signatures are omitted when empty.
+func attachRenewsContractReference(raw *datatype.JSON, originalDID string, originalVersion int, signedDocument string, signatures []any) (*datatype.JSON, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(*raw, &doc); err != nil {
+		return nil, fmt.Errorf("could not decode contract data: %w", err)
+	}
+	reference := map[string]any{
 		"@id":         base.ResourceIRI("contract", originalDID),
 		"dcs:version": originalVersion,
 	}
+	if signedDocument != "" {
+		reference["dcs:signedDocument"] = map[string]any{"@id": signedDocument}
+	}
+	if len(signatures) > 0 {
+		reference["dcs:signatures"] = signatures
+	}
+	doc["dcs:renewsContract"] = reference
 	encoded, err := datatype.NewJSON(doc)
 	if err != nil {
 		return nil, fmt.Errorf("could not encode contract data: %w", err)
 	}
 	return &encoded, nil
+}
+
+// renewalTerm returns the renewal's start and expiry. The renewal follows the
+// original: it starts at the original's expiry, or tomorrow if that is
+// earlier, and runs for the original's term length. A copied expiry would end
+// the renewal together with the original, and a past one makes the new DRAFT
+// read EXPIRED at once (contracts_effective view). Given dates win; a given
+// start without a given expiry still gets the original's term length. Without
+// the original's start or expiry the length is unknown, so the expiry stays
+// empty. A terminated original never reached its expiry, so its renewal
+// starts tomorrow. Dates before tomorrow are refused, as Update refuses them,
+// so the draft stays editable.
+func renewalTerm(origStart, origExp, newStart, newExp *time.Time, terminated bool, now time.Time) (*time.Time, *time.Time, error) {
+	tomorrow := now.UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
+	var start, exp *time.Time
+	if origExp != nil {
+		s := origExp.UTC()
+		if terminated || tomorrow.After(s) {
+			s = tomorrow
+		}
+		start = &s
+	}
+	if newStart != nil {
+		s := newStart.UTC()
+		start = &s
+	}
+	if newExp != nil {
+		e := newExp.UTC()
+		exp = &e
+	} else if start != nil && origStart != nil && origExp != nil && origExp.After(*origStart) {
+		e := addTerm(*start, origStart.UTC(), origExp.UTC())
+		exp = &e
+	}
+	if start != nil && start.Before(tomorrow) {
+		return nil, nil, fmt.Errorf("%w: start date must be at least one day in the future", ErrInvalidRenewalTerm)
+	}
+	if exp != nil && exp.Before(tomorrow) {
+		return nil, nil, fmt.Errorf("%w: expiration date must be at least one day in the future", ErrInvalidRenewalTerm)
+	}
+	if start != nil && exp != nil && !exp.After(*start) {
+		return nil, nil, fmt.Errorf("%w: expiration date must be after start date", ErrInvalidRenewalTerm)
+	}
+	return start, exp, nil
+}
+
+// addTerm adds the term from origStart to origExp to from. A term of whole
+// calendar months is added as months, so a yearly term keeps its anniversary
+// across leap years; a day past the target month's end is clamped to it.
+func addTerm(from, origStart, origExp time.Time) time.Time {
+	months := (origExp.Year()-origStart.Year())*12 + int(origExp.Month()) - int(origStart.Month())
+	if months > 0 && addMonths(origStart, months).Equal(origExp) {
+		return addMonths(from, months)
+	}
+	return from.Add(origExp.Sub(origStart))
+}
+
+// addMonths adds months to t and clamps the day to the target month's last
+// day: Jan 31 plus one month is Feb 28 (or 29), not Mar 3 as with AddDate.
+func addMonths(t time.Time, months int) time.Time {
+	first := time.Date(t.Year(), t.Month()+time.Month(months), 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+	lastDay := first.AddDate(0, 1, -1).Day()
+	return first.AddDate(0, 0, min(t.Day(), lastDay)-1)
+}
+
+// stampRenewalTerm writes the renewal's term into dcs:metadata. The copy
+// carries the original's term, so an empty date removes the original's key.
+func stampRenewalTerm(payload *datatype.JSON, term sharedContractDetails) (*datatype.JSON, error) {
+	stamped, _, err := stampSharedDetailsIntoContractData(payload, term)
+	if err != nil {
+		return nil, err
+	}
+	if stamped == nil || (term.StartDate != nil && term.ExpDate != nil) {
+		return stamped, nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(*stamped), &doc); err != nil {
+		return nil, fmt.Errorf("could not parse contract data for the renewal term: %w", err)
+	}
+	meta, _ := doc["dcs:metadata"].(map[string]any)
+	if meta == nil {
+		return stamped, nil
+	}
+	if term.StartDate == nil {
+		delete(meta, metaStartDate)
+	}
+	if term.ExpDate == nil {
+		delete(meta, metaExpirationDate)
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("could not marshal contract data with the renewal term: %w", err)
+	}
+	cleared := datatype.JSON(raw)
+	return &cleared, nil
 }

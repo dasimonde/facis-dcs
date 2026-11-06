@@ -47,9 +47,20 @@ watch(
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
-      <li class="flex flex-col justify-between px-4 tracking-wide sm:flex-row">
-        <TemplateCatalogueListSearch :templates="templates" class="flex-1" @search-result="applySearchResult" />
-        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTemplates" />
+      <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide">
+        <TemplateCatalogueListSearch
+          :templates="templates"
+          class="w-full lg:w-auto lg:flex-1"
+          @search-result="applySearchResult"
+        />
+        <div class="ml-auto flex shrink-0 items-center [&>button]:m-0">
+          <ListSort
+            v-model:sort-by="sortBy"
+            v-model:sort-order="sortOrder"
+            :sorter="sorter"
+            :disabled="!hasTemplates"
+          />
+        </div>
       </li>
       <TemplateCatalogueListItem
         v-for="template in sortedTemplates"

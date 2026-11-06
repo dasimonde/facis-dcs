@@ -34,6 +34,8 @@ type NegotiationTaskRepo interface {
 	// round n+1. It never creates a task, so a party that never engaged stays
 	// without one.
 	RollForward(ctx context.Context, tx *sqlx.Tx, did string, fromVersion int, toVersion int) error
+	// RollForwardKeepingState advances tasks from fromVersion to toVersion without reopening them.
+	RollForwardKeepingState(ctx context.Context, tx *sqlx.Tx, did string, fromVersion int, toVersion int) error
 	ReadAllByNegotiator(ctx context.Context, tx *sqlx.Tx, negotiator string) ([]NegotiationTaskData, error)
 	ReadNegotiatorsForDID(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
 	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, negotiator string, contractVersion int, state string) error

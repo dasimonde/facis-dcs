@@ -2,6 +2,7 @@
 import { storeToRefs } from 'pinia'
 import { computed, useTemplateRef } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import BuildVersion from '@core/components/BuildVersion.vue'
 import { usePageStore } from '@core/store/page'
 import facisLogo from '@/assets/FACIS_color.svg'
 import { ROUTES } from '@/router/router'
@@ -98,6 +99,8 @@ const hideTooltip = (index: number) => {
       </li>
     </ul>
   </nav>
+
+  <BuildVersion v-show="!isSidebarCollapsed" class="mt-auto" />
 </template>
 
 <style scoped>

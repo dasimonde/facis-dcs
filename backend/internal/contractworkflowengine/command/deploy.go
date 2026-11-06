@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -48,7 +50,15 @@ type DeployCmd struct {
 	// one the contract designates (ADR-25). The designation itself is unchanged:
 	// this is the operator directing one delivery, not editing the contract.
 	TargetIDOverride string
+	// EventID is the id of the event that requests an automatic deployment. It
+	// is the correlation id of the deployment, so a redelivered event
+	// dispatches nothing (ErrAlreadyDispatched).
+	EventID string
 }
+
+// ErrAlreadyDispatched reports that the deployment of DeployCmd.EventID is
+// recorded already.
+var ErrAlreadyDispatched = errors.New("the deployment for this event is dispatched already")
 
 // DeployResult is what both the manual /contract/deploy endpoint and the
 // automatic post-signing subscriber receive back from Deployer.Handle.
@@ -80,6 +90,14 @@ type Deployer struct {
 	// gate needs for a federated contract. Required: a deployer without it
 	// cannot tell a countersigned contract from a half-signed one.
 	PeerSigs PeerSignatures
+	// Artifacts reads the signed PDF the deployment carries (DCS-FR-SM-12).
+	Artifacts SignedPDFReader
+}
+
+// SignedPDFReader reads a stored contract artifact (artifactstore.Store
+// satisfies it).
+type SignedPDFReader interface {
+	Get(ctx context.Context, scope artifactstore.Scope, cid string) ([]byte, error)
 }
 
 // PeerSignatures reads the cross-instance signature artifact a peer ships with
@@ -88,6 +106,54 @@ type Deployer struct {
 // stored (internal/service/dcs_to_dcs.go verifyShippedJades).
 type PeerSignatures interface {
 	GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*db2.SyncSignature, error)
+}
+
+// Deployable reports whether the contract may deploy now: it is SIGNED and
+// every declared signature field is signed. Callers run it before the
+// deployment workflow gate, so a partially signed contract dispatches no gate.
+func (h *Deployer) Deployable(ctx context.Context, did, localPeer string) error {
+	tx, err := h.DB.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	data, err := h.CRepo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read contract %s: %w", did, err)
+	}
+	return h.deployable(ctx, tx, did, data, localPeer)
+}
+
+func (h *Deployer) deployable(ctx context.Context, tx *sqlx.Tx, did string, data *db.Contract, localPeer string) error {
+	if err := contractstate.ValidateTransition(contractstate.ContractState(data.State), contractstate.EventDeploy); err != nil {
+		return err
+	}
+
+	// Multi-signer gate (DCS-FR-SM-07/-17, DCS-NFR-BR-03): a contract that
+	// declares signature fields may only deploy once EVERY declared field is
+	// signed. The auto-deploy subscriber fires after each signature, so a
+	// partially signed contract hits this gate until the last signatory
+	// signs.
+	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
+		required := validation.RequiredSignatureFields([]byte(*data.ContractData))
+		if len(required) > 0 {
+			signedFields, err := h.CRepo.ReadSignedSignatureFieldNames(ctx, tx, did)
+			if err != nil {
+				return fmt.Errorf("could not read signed signature fields: %w", err)
+			}
+			if h.PeerSigs == nil {
+				return fmt.Errorf("could not check counterparty signatures for %s: no peer signature store is configured", did)
+			}
+			peerSig, err := h.PeerSigs.GetSyncSignature(ctx, tx, did)
+			if err != nil {
+				return fmt.Errorf("could not read the counterparty signature for %s: %w", did, err)
+			}
+			if missing := signatureEvidence(required, signedFields, data.Responsible, localPeer, peerSig).Unsigned(); len(missing) > 0 {
+				return fmt.Errorf("%w: unsigned signature fields: %s", ErrSigningIncomplete, strings.Join(missing, ", "))
+			}
+		}
+	}
+	return nil
 }
 
 func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, error) {
@@ -105,33 +171,19 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 	if err != nil {
 		return nil, fmt.Errorf("could not read contract %s: %w", cmd.DID, err)
 	}
-
-	if err := contractstate.ValidateTransition(contractstate.ContractState(data.State), contractstate.EventDeploy); err != nil {
+	if err := h.deployable(ctx, tx, cmd.DID, data, cmd.LocalPeer); err != nil {
 		return nil, err
 	}
 
-	// Multi-signer gate (DCS-FR-SM-07/-17, DCS-NFR-BR-03): a contract that
-	// declares signature fields may only deploy once EVERY declared field is
-	// signed. The auto-deploy subscriber fires after each signature, so a
-	// partially signed contract hits this gate until the last signatory
-	// signs.
-	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
-		required := validation.RequiredSignatureFields([]byte(*data.ContractData))
-		if len(required) > 0 {
-			signedFields, err := h.CRepo.ReadSignedSignatureFieldNames(ctx, tx, cmd.DID)
-			if err != nil {
-				return nil, fmt.Errorf("could not read signed signature fields: %w", err)
-			}
-			if h.PeerSigs == nil {
-				return nil, fmt.Errorf("could not check counterparty signatures for %s: no peer signature store is configured", cmd.DID)
-			}
-			peerSig, err := h.PeerSigs.GetSyncSignature(ctx, tx, cmd.DID)
-			if err != nil {
-				return nil, fmt.Errorf("could not read the counterparty signature for %s: %w", cmd.DID, err)
-			}
-			if missing := signatureEvidence(required, signedFields, data.Responsible, cmd.LocalPeer, peerSig).Unsigned(); len(missing) > 0 {
-				return nil, fmt.Errorf("%w: unsigned signature fields: %s", ErrSigningIncomplete, strings.Join(missing, ", "))
-			}
+	correlationID := uuid.NewString()
+	if cmd.EventID != "" {
+		correlationID = cmd.EventID
+		existing, err := h.DeploymentRepo.FindDeploymentByCorrelationID(ctx, tx, correlationID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			return nil, ErrAlreadyDispatched
 		}
 	}
 
@@ -149,7 +201,6 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		return nil, fmt.Errorf("could not decode contract document for %s: %w", cmd.DID, err)
 	}
 
-	correlationID := uuid.NewString()
 	now := time.Now().UTC()
 
 	payload := map[string]any{
@@ -164,6 +215,13 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		"dcs:correlationId":    correlationID,
 		"dcs:contractDocument": contractDocument,
 		"odrl:policy":          deploymentPolicy(contractDocument, correlationID),
+	}
+	signed, err := h.signedContract(ctx, tx, cmd.DID)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range signed {
+		payload[key] = value
 	}
 
 	contentHash, err := hashDeploymentPayload(payload)
@@ -239,6 +297,75 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		TargetID:        target.ID,
 		TargetName:      target.Name,
 	}, nil
+}
+
+// signedContract reads what the deployment carries of the signed contract
+// (DCS-FR-SM-12): the signed PDF with its CID and hash, the signatures this
+// instance holds and the counterparty's cross-instance signature.
+func (h *Deployer) signedContract(ctx context.Context, tx *sqlx.Tx, did string) (map[string]any, error) {
+	if h.Artifacts == nil {
+		return nil, errors.New("the deployment needs the artifact store to carry the signed contract")
+	}
+	state, err := h.CRepo.ReadPDFState(ctx, tx, did)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the signed PDF of %s: %w", did, err)
+	}
+	if state == nil || state.IPFSCID == "" {
+		return nil, fmt.Errorf("contract %s has no signed PDF to deploy", did)
+	}
+	pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(did), state.IPFSCID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the signed PDF of %s: %w", did, err)
+	}
+	signatures, err := h.CRepo.ReadSignedSignatures(ctx, tx, did)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the signatures of %s: %w", did, err)
+	}
+	var peer *db2.SyncSignature
+	if h.PeerSigs != nil {
+		if peer, err = h.PeerSigs.GetSyncSignature(ctx, tx, did); err != nil {
+			return nil, fmt.Errorf("could not read the counterparty signature for %s: %w", did, err)
+		}
+	}
+	return signedContractPayload(state.IPFSCID, pdf, signatures, peer), nil
+}
+
+// signedContractPayload is the signed-contract part of the deployment payload.
+// The PDF travels as base64 because the target cannot read this instance's
+// encrypted artifact store; the CID names it there.
+func signedContractPayload(cid string, pdf []byte, signatures []db.SignedSignature, peer *db2.SyncSignature) map[string]any {
+	sum := sha256.Sum256(pdf)
+	entries := make([]any, 0, len(signatures)+1)
+	for _, sig := range signatures {
+		entries = append(entries, map[string]any{
+			"@type":              "dcs:Signature",
+			"dcs:signer":         sig.SignerDID,
+			"dcs:credentialType": sig.CredentialType,
+			"dcs:signatureField": sig.FieldName,
+			"dcs:signedAt":       sig.SignedAt.UTC().Format(time.RFC3339Nano),
+			"dcs:pdfHash":        "sha256:" + strings.TrimPrefix(sig.PDFHash, "sha256:"),
+			"dcs:jadesSignature": sig.JAdESSignature,
+		})
+	}
+	if peer != nil {
+		entries = append(entries, map[string]any{
+			"@type":              "dcs:Signature",
+			"dcs:signer":         peer.FromPeerDID,
+			"dcs:signatureField": peer.FromPeerDID,
+			"dcs:receivedAt":     peer.ReceivedAt.UTC().Format(time.RFC3339Nano),
+			"dcs:jadesSignature": peer.JadesSignature,
+		})
+	}
+	return map[string]any{
+		"dcs:signedContract": map[string]any{
+			"@type":         "dcs:SignedPDF",
+			"dcs:mediaType": "application/pdf",
+			"dcs:cid":       cid,
+			"dcs:sha256":    "sha256:" + hex.EncodeToString(sum[:]),
+			"dcs:content":   base64.StdEncoding.EncodeToString(pdf),
+		},
+		"dcs:signatures": entries,
+	}
 }
 
 // recordDispatchFailure marks the deployment row so the failure survives the

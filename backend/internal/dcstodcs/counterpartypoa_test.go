@@ -17,6 +17,7 @@ const (
 	testSignedParty     = "did:web:peer.example"
 	testLocalParty      = "did:web:us.example"
 	testSignedSignatory = "did:jwk:eyJrdHkiOiJFQyJ9"
+	testPoAHolder       = "did:jwk:eyJrdHkiOiJFQyIsImtpZCI6InBvYSJ9"
 	testContract        = "urn:contract:1"
 )
 
@@ -30,6 +31,7 @@ func summaryVC(organization, signatory string) string {
 	  "issuer": "` + organization + `",
 	  "credentialSubject": {
 	    "id": "` + signatory + `",
+	    "poa_subject_did": "` + testPoAHolder + `",
 	    "field_name": "` + organization + `",
 	    "contract_id": "` + testContract + `"
 	  },
@@ -122,7 +124,7 @@ func acceptingGate(seen *[]oid4vp.CounterpartyPoAExpectation) CounterpartyPoAGat
 		Trust: &oid4vp.TrustConfig{},
 		Verify: func(_ string, _ *oid4vp.TrustConfig, expected oid4vp.CounterpartyPoAExpectation) (*oid4vp.CounterpartyPoA, error) {
 			*seen = append(*seen, expected)
-			return &oid4vp.CounterpartyPoA{Organization: expected.Organization, SignatoryDID: expected.SignatoryDID}, nil
+			return &oid4vp.CounterpartyPoA{Organization: expected.Organization, SignatoryDID: expected.PoASubjectDID}, nil
 		},
 	}
 }
@@ -139,8 +141,8 @@ func TestCounterpartyPoAGate_VerifiedEvidenceIsAccepted(t *testing.T) {
 
 	require.Len(t, seen, 1, "the embedded credential must actually be verified, not skipped")
 	assert.Equal(t, testSignedParty, seen[0].Organization)
-	assert.Equal(t, testSignedSignatory, seen[0].SignatoryDID,
-		"the credential is bound to the signatory the embedded summary attests, not to one the peer names")
+	assert.Equal(t, testPoAHolder, seen[0].PoASubjectDID,
+		"the credential is bound to the PoA holder attested by the embedded summary")
 }
 
 // The summary must verify against the key of the instance that OWNS the field,
@@ -253,4 +255,22 @@ func TestCounterpartyPoAGate_EvidenceWithoutAPresentationIsAccepted(t *testing.T
 	require.NoError(t, gate.Check(testSignedParty, testLocalParty, testContract, verifier(),
 		[]json.RawMessage{attachment(summaryVC(testSignedParty, testSignedSignatory), "")}))
 	assert.Empty(t, seen)
+}
+
+// The receiving instance records what it accepted for each signature a peer
+// owns, because a countersignature on an already signed PDF never reaches its
+// contract document. Its own signatures stay out: they were judged where they
+// were made.
+func TestPeerSignaturesRecordsEachPeerSignatureAndItsPowerOfAttorney(t *testing.T) {
+	const thirdParty = "did:web:third.example"
+	signatures, err := PeerSignatures(testLocalParty, []json.RawMessage{
+		evidenceFor(testLocalParty),
+		evidenceFor(testSignedParty),
+		attachment(summaryVC(thirdParty, "did:jwk:third"), ""),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []PeerSignature{
+		{Party: testSignedParty, Signatory: testSignedSignatory, PoAOrganization: testSignedParty},
+		{Party: thirdParty, Signatory: "did:jwk:third"},
+	}, signatures)
 }

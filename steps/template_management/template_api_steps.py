@@ -16,6 +16,7 @@ from steps.support.api_client import (
 def step_when_create_template(context, template_name, category):
     payload = {
         "template_type": TemplateService.template_type_for_category(category),
+        "party_type": TemplateService.MULTI_PARTY_TYPE,
         "name": template_name,
         "description": "BDD executable template creation",
         "template_data": TemplateService.canonical_document_data(template_name),
@@ -27,6 +28,7 @@ def step_when_create_template(context, template_name, category):
 def step_when_create_template(context, template_name, category):
     payload = {
         "template_type": TemplateService.template_type_for_category(category),
+        "party_type": TemplateService.MULTI_PARTY_TYPE,
         "name": template_name,
         "description": "BDD executable template creation",
         "template_data": TemplateService.canonical_document_data(template_name),
@@ -42,6 +44,7 @@ def step_when_attempt_create_template(context):
     # Uses whatever role headers are currently on context (set by Given "I am authenticated with roles: X").
     payload = {
         "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+        "party_type": TemplateService.MULTI_PARTY_TYPE,
         "name": "BDD Unauthorized Template",
         "description": "Should be blocked by RBAC",
         "template_data": TemplateService.canonical_document_data("BDD Unauthorized Template"),
@@ -241,6 +244,7 @@ def step_then_uuid_unique(context):
     # DID format encodes uniqueness; a second create produces a different DID.
     payload = {
         "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+        "party_type": TemplateService.MULTI_PARTY_TYPE,
         "name": "BDD UUID Check",
         "description": "Duplicate to verify UUID uniqueness",
         "template_data": TemplateService.canonical_document_data("BDD UUID Check"),

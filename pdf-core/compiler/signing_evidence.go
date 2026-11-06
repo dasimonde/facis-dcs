@@ -86,18 +86,18 @@ func EmbedSigningEvidence(pdfBytes, evidence []byte) ([]byte, error) {
 	buf.Write(signingEvidenceMarker)
 
 	fileOffset := baseLen + buf.Len()
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", fileObjID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", fileObjID)
 	buf.Write(streamObject(evidence, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fjson /Length %d >>", len(evidence))))
 	buf.WriteString("\nendobj\n")
 
 	specOffset := baseLen + buf.Len()
-	buf.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&buf,
 		"%d 0 obj\n<< /Type /Filespec /F (%s) /UF (%s) /AFRelationship /Supplement /EF << /F %d 0 R >> >>\nendobj\n",
-		specObjID, fileName, fileName, fileObjID))
+		specObjID, fileName, fileName, fileObjID)
 
 	catalogOffset := baseLen + buf.Len()
-	buf.WriteString(fmt.Sprintf("%d 0 obj\n", catalogObjID))
+	fmt.Fprintf(&buf, "%d 0 obj\n", catalogObjID)
 	buf.Write(patchedCatalog)
 	buf.WriteString("\nendobj\n")
 
@@ -105,19 +105,19 @@ func EmbedSigningEvidence(pdfBytes, evidence []byte) ([]byte, error) {
 	buf.WriteString("xref\n")
 	// The superseded catalog is a separate subsection from the two appended
 	// objects, which always follow it: their ids start past the current maximum.
-	buf.WriteString(fmt.Sprintf("%d 1\n", catalogObjID))
-	buf.WriteString(fmt.Sprintf("%010d 00000 n \n", catalogOffset))
-	buf.WriteString(fmt.Sprintf("%d 2\n", fileObjID))
-	buf.WriteString(fmt.Sprintf("%010d 00000 n \n", fileOffset))
-	buf.WriteString(fmt.Sprintf("%010d 00000 n \n", specOffset))
+	fmt.Fprintf(&buf, "%d 1\n", catalogObjID)
+	fmt.Fprintf(&buf, "%010d 00000 n \n", catalogOffset)
+	fmt.Fprintf(&buf, "%d 2\n", fileObjID)
+	fmt.Fprintf(&buf, "%010d 00000 n \n", fileOffset)
+	fmt.Fprintf(&buf, "%010d 00000 n \n", specOffset)
 
 	idEntry := ""
 	if fileID != "" {
 		idEntry = " /ID " + fileID
 	}
-	buf.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&buf,
 		"trailer\n<< /Size %d /Root %d 0 R /Prev %d%s >>\nstartxref\n%d\n%%%%EOF\n",
-		specObjID+1, catalogObjID, prevStartXref, idEntry, xrefStart))
+		specObjID+1, catalogObjID, prevStartXref, idEntry, xrefStart)
 
 	return append(append([]byte(nil), pdfBytes...), buf.Bytes()...), nil
 }

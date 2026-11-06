@@ -271,6 +271,7 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
   await test.step('Stage 2 [DCS-IR-TR-01, ADR-23, ADR-11]: A authors the SLA clause and its ODRL', async () => {
     await a.gotoAs('Template Creator', '/ui/templates/new')
     await a.page.getByRole('button', { name: /Component/ }).click()
+    await a.page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
     await a.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(componentName)
     await a.page
       .getByRole('group')
@@ -473,18 +474,10 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
   })
 
   // ---- Stage 9 [DCS-FR-CWE-18, DCS-IR-CWE-03]: one negotiation round. A
-  // redlines the fee on its received copy and ships it back to B. What must
-  // hold afterwards is that negotiation moved a VALUE and left the policy
-  // structure exactly as authored — on both copies.
-  //
-  // The round ends at B holding the redline rather than at B pressing an
-  // Accept: under ADR-13 §2 the counter-offer IS the shipped document ("the
-  // counterparty receives it as a proposal"), and the change request A recorded
-  // for its own audit trail is local to A — nothing carries negotiation rows or
-  // their decisions across the boundary. Agreeing to the terms on the table is
-  // SETTLEMENT (ADR-13 §3: a ship of the same version stamped `agreed`), which
-  // the two-instance vertical covers; repeating it here would prove nothing
-  // this spec exists for.
+  // redlines the fee on its received copy; that syncs as a proposal to B
+  // (formal contract_data stays put until Accept+Submit). What must hold
+  // afterwards is that negotiation moved a VALUE in the proposal and left the
+  // policy structure exactly as authored on the formal documents.
   //
   // The redline is the inline fee rather than a service level: the negotiate
   // view renders only the clause preview, so a value that lives on a
@@ -497,17 +490,19 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
     // the Negotiations tab is the route the redline helper arrives by.
     await acceptOfferOn(a, contractDid)
     await stagedCounterOffer(a, contractDid, { value: '18500' })
-    // The counter travels back over the PDF exchange while B's own copy stays
-    // OFFERED — a received proposal does not move the peer's intrinsic state.
-    const onB = (await awaitPeerRedlineOn(b, contractDid, {
+    // The counter travels as a synced negotiation proposal; B's formal copy
+    // stays at the offered fee until Accept+Submit.
+    const proposedOnB = (await awaitPeerRedlineOn(b, contractDid, {
       label: 'Payment Amount',
       value: '18500',
     })) as ContractDocument
 
-    const onA = (await contractDocumentOn(a, contractDid)) as ContractDocument
-    expect(policyShapeOf(onA), 'the round moved a value, not the policy').toEqual(before)
-    expect(policyShapeOf(onB), 'and both parties still hold the same policy').toEqual(before)
-    const fee = (onA['dcs:contractFields'] ?? []).find((field) => field['dcs:label'] === 'Payment Amount')
-    expect(JSON.stringify(fee?.['dcs:value']), 'the proposing party holds the redlined fee').toContain('18500')
+    const formalA = (await contractDocumentOn(a, contractDid)) as ContractDocument
+    const formalB = (await contractDocumentOn(b, contractDid)) as ContractDocument
+    expect(policyShapeOf(formalA), 'the round moved a value, not the policy').toEqual(before)
+    expect(policyShapeOf(formalB), 'and both parties still hold the same formal policy').toEqual(before)
+    expect(policyShapeOf(proposedOnB), 'the synced proposal keeps the same policy shape').toEqual(before)
+    const fee = (proposedOnB['dcs:contractFields'] ?? []).find((field) => field['dcs:label'] === 'Payment Amount')
+    expect(JSON.stringify(fee?.['dcs:value']), 'the synced proposal holds the redlined fee').toContain('18500')
   })
 })

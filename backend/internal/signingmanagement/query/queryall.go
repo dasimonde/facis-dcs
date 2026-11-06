@@ -109,7 +109,6 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		return nil, fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	didToMetadata := make(map[string]MetadataItem)
 	var contractItems []MetadataItem
 	for _, data := range contractsMetadata {
 
@@ -143,8 +142,6 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 			Responsible:     data.Responsible,
 		}
 		contractItems = append(contractItems, metadata)
-
-		didToMetadata[data.DID] = metadata
 	}
 
 	var signingTaskItems []SigningTaskItem
@@ -155,16 +152,10 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 			return nil, fmt.Errorf("could not create signing status: %w", err)
 		}
 
-		metadata, exists := didToMetadata[data.ContractDID]
-		var contractVersion int
-		if exists {
-			contractVersion = metadata.ContractVersion
-		}
-
 		signingTaskItems = append(signingTaskItems, SigningTaskItem{
 			DID:             data.ContractDID,
 			State:           state,
-			ContractVersion: contractVersion,
+			ContractVersion: data.ContractVersion,
 			SignerDID:       data.SignerDID,
 			CreatedAt:       data.CreatedAt,
 		})

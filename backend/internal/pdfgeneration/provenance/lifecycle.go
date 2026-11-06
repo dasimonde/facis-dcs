@@ -1,6 +1,8 @@
 package provenance
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -54,6 +56,25 @@ type LifecycleAssertion struct {
 	// VCId is the identifier of the W3C VC that records this lifecycle event
 	// (DCS-OR-C2PA-004). Empty until the VC is issued.
 	VCId string `json:"vc_id,omitempty"`
+
+	// Timestamp is the RFC 3161 timestamp token (base64 DER) over
+	// TimestampedAssertionBytes of this assertion (DCS-OR-C2PA-009). Empty when
+	// no TSA is configured or the TSA did not answer.
+	Timestamp string `json:"rfc3161_timestamp,omitempty"`
+}
+
+// TimestampedAssertionBytes is what the RFC 3161 timestamp of a lifecycle
+// assertion covers: its contract_id, file_hash, status, reason and
+// effective_at, as the JSON object the credential subject carries them in.
+func TimestampedAssertionBytes(a LifecycleAssertion) []byte {
+	raw, _ := json.Marshal(struct {
+		ContractID  string `json:"contract_id"`
+		FileHash    string `json:"file_hash"`
+		Status      string `json:"status"`
+		Reason      string `json:"reason"`
+		EffectiveAt string `json:"effective_at"`
+	}{a.ContractID, a.FileHash, a.Status, a.Reason, a.EffectiveAt.UTC().Format(time.RFC3339)})
+	return raw
 }
 
 const lifecycleAssertionLabel = "org.facis.dcs.contract.lifecycle"
@@ -124,6 +145,39 @@ func MapCWEStateToC2PA(cweState string) (string, error) {
 	}
 }
 
+// DefaultLifecycleReason is the reason a lifecycle assertion records when the
+// event that caused it names none: the expiry cron and the retry sweep carry no
+// reason, and an assertion must carry one (DCS-OR-C2PA-003).
+func DefaultLifecycleReason(state string) string {
+	switch state {
+	case "draft":
+		return "Contract created as draft"
+	case "active":
+		return "Contract activated for execution"
+	case "amended":
+		return "Contract amended with new terms"
+	case "suspended":
+		return "Contract suspended pending review"
+	case "terminated":
+		return "Contract terminated by parties"
+	case "expired":
+		return "Contract reached expiration date"
+	case "replaced":
+		return "Contract replaced with newer version"
+	default:
+		return "Contract state changed to: " + state
+	}
+}
+
+// LifecycleReason is the event's reason, or DefaultLifecycleReason when the
+// event names none.
+func LifecycleReason(eventReason, state string) string {
+	if strings.TrimSpace(eventReason) != "" {
+		return eventReason
+	}
+	return DefaultLifecycleReason(state)
+}
+
 // IsFrozenC2PAState reports whether a cached PDF's C2PA state means the artifact
 // is immutable. Every pre-signing contract-formation state maps to "draft" (see
 // MapCWEStateToC2PA), so anything past "draft" is a PAdES-signed (or
@@ -134,13 +188,22 @@ func IsFrozenC2PAState(c2paState string) bool {
 	return c2paState != "" && c2paState != "draft"
 }
 
-// ArtifactCarriesSignature reports whether a stored artifact's RECORDED C2PA
-// lifecycle state says the artifact itself holds a signature. ArtifactC2PAState
-// files a PAdES-carrying PDF as "active" whatever the local workflow state, so a
-// received copy whose own workflow is still OFFERED answers true here from the
-// moment the counterparty's signed bytes were stored — no re-parsing the PDF.
-func ArtifactCarriesSignature(c2paState string) bool {
-	return c2paState == "active"
+// IsPostSigningLifecycleState reports whether c2paState is a lifecycle state a
+// signed contract reaches after signing. Its lifecycle manifest and credential
+// are appended to the signed PDF as an incremental update, as the re-anchor is
+// (ADR-26), so every signature keeps verifying.
+func IsPostSigningLifecycleState(c2paState string) bool {
+	switch c2paState {
+	case "suspended", "terminated", "expired":
+		return true
+	}
+	return false
+}
+
+// SignedLifecycleAppendPending reports whether the signed PDF stored for a
+// contract does not yet assert the post-signing lifecycle state target.
+func SignedLifecycleAppendPending(signed bool, storedC2PAState, target string) bool {
+	return signed && IsPostSigningLifecycleState(target) && storedC2PAState != target
 }
 
 // CarriesPAdESSignature reports whether pdf already holds a PAdES signature: a
@@ -179,6 +242,15 @@ func CarriesPAdESSignature(pdf []byte) bool {
 		}
 	}
 	return false
+}
+
+// ExtendsSignedRevision reports whether next can replace current without
+// dropping a signature: current holds no PAdES signature, or next starts with
+// current (an incremental update). Each PAdES signature covers all earlier
+// revisions, so a document that does not start with a signed revision does
+// not contain the signatures of that revision.
+func ExtendsSignedRevision(current, next []byte) bool {
+	return !CarriesPAdESSignature(current) || bytes.HasPrefix(next, current)
 }
 
 // pdfNameToken is one PDF name in a document, as a reader resolves it.

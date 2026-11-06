@@ -9,11 +9,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 // TrustConfig is the verifier trust anchor loaded from trust.dev.json (OID4VP_TRUST_DATA_PATH).
@@ -226,11 +226,12 @@ func canonicalCoordinate(value string) string {
 	return hex.EncodeToString(bytes.TrimLeft(raw, "\x00"))
 }
 
-func canonicalCoordinateFromInt(x *big.Int) string {
-	if x == nil {
+func canonicalCoordinateFromPub(pub *ecdsa.PublicKey) string {
+	x, _, err := ecutil.UncompressedXY(pub)
+	if err != nil {
 		return ""
 	}
-	return hex.EncodeToString(x.Bytes())
+	return hex.EncodeToString(bytes.TrimLeft(x, "\x00"))
 }
 
 // devKeyMaterial names the committed key an issuer entry is keyed to, or "".
@@ -283,7 +284,7 @@ func devKeyInLeafPins(pins []string) string {
 		if !ok {
 			continue
 		}
-		if source, ok := devIssuerKeyX[canonicalCoordinateFromInt(pub.X)]; ok {
+		if source, ok := devIssuerKeyX[canonicalCoordinateFromPub(pub)]; ok {
 			return source
 		}
 	}
@@ -344,7 +345,7 @@ func devCertificateKey(cert *x509.Certificate) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	source, ok := devIssuerKeyX[canonicalCoordinateFromInt(pub.X)]
+	source, ok := devIssuerKeyX[canonicalCoordinateFromPub(pub)]
 	return source, ok
 }
 
@@ -361,7 +362,7 @@ func LoadTrustConfig(path string) (*TrustConfig, error) {
 		return nil, fmt.Errorf("trust config path is empty")
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read trust config %q: %w", path, err)
 	}
@@ -882,7 +883,7 @@ func LoadX5CTrustAnchors(path string) ([]*x509.Certificate, error) {
 		return nil, fmt.Errorf("x5c trust anchors path is empty")
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read x5c trust anchors %q: %w", path, err)
 	}

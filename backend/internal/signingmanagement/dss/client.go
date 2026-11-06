@@ -170,6 +170,28 @@ func (r *Report) AssertMeetsLevel(required string) error {
 	return r.AssertValidAES()
 }
 
+// AssertQualifiedSignatures enforces that at least qualified of a document's
+// signatures pass AssertValidQES. A contract records how many of its
+// signatures are QES, not where each one is in the document, so the gate
+// counts. A QES signature without long-term validation data fails here once
+// its signing certificate expires.
+func AssertQualifiedSignatures(reports []*Report, qualified int) error {
+	valid := 0
+	var last error
+	for _, report := range reports {
+		err := report.AssertValidQES()
+		if err == nil {
+			valid++
+		} else {
+			last = err
+		}
+	}
+	if valid < qualified {
+		return fmt.Errorf("dss: %d of the document's signatures validate as QES, the contract records %d: %v", valid, qualified, last)
+	}
+	return nil
+}
+
 // ParseSubjectAttributes extracts GIVENNAME/SURNAME/CN/SERIALNUMBER RDN
 // attributes from a certificate subject distinguished name string (DSS's
 // SignedBy, e.g. "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane"). Used as a
@@ -210,13 +232,50 @@ func (r *Report) SubjectSurname() string {
 }
 
 // ValidatePDF submits pdf to POST {base}/services/rest/validation/validateSignature
-// and returns the simple report's indication. Any transport or protocol
+// and returns the report of its last signature. Any transport or protocol
 // failure is an error — the caller treats a configured DSS as required.
 func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Report, error) {
-	if c == nil || c.baseURL == "" {
-		return nil, fmt.Errorf("dss: no base URL configured")
+	respBody, err := c.validate(ctx, pdf, name)
+	if err != nil {
+		return nil, err
 	}
-	body, err := json.Marshal(map[string]any{
+	return parseReport(respBody)
+}
+
+// ValidatePDFSignatures submits pdf to the same DSS validation and returns one
+// report per signature, in the order the document carries them. A PDF whose
+// report names no signature is an error.
+func (c *Client) ValidatePDFSignatures(ctx context.Context, pdf []byte) ([]*Report, error) {
+	respBody, err := c.validate(ctx, pdf, "contract.pdf")
+	if err != nil {
+		return nil, err
+	}
+	var doc any
+	if err := json.Unmarshal(respBody, &doc); err != nil {
+		return nil, fmt.Errorf("dss: parse validation response: %w", err)
+	}
+	var reports []*Report
+	for _, entry := range signatureEntries(doc) {
+		report := &Report{}
+		walkReport(entry.signature, report)
+		if cert := resolveSigningCertificate(doc, entry.id); cert != nil {
+			walkReport(cert, report)
+		}
+		if report.Indication == "" {
+			return nil, fmt.Errorf("dss: a signature in the validation response carries no Indication")
+		}
+		reports = append(reports, report)
+	}
+	if len(reports) == 0 {
+		return nil, fmt.Errorf("dss: validation response names no signature")
+	}
+	return reports, nil
+}
+
+// validate posts pdf to the DSS validation endpoint and returns the raw
+// response body.
+func (c *Client) validate(ctx context.Context, pdf []byte, name string) ([]byte, error) {
+	return c.post(ctx, "/services/rest/validation/validateSignature", "validation", map[string]any{
 		"signedDocument": map[string]any{
 			"bytes": base64.StdEncoding.EncodeToString(pdf),
 			"name":  name,
@@ -225,6 +284,47 @@ func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Rep
 		"policy":            nil,
 		"signatureId":       nil,
 	})
+}
+
+// ExtendPDF submits a signed PDF to POST
+// {base}/services/rest/signature/one-document/extendDocument and returns the
+// PDF that DSS extended to level (e.g. PAdES_BASELINE_LTA). DSS appends the
+// validation data and the document timestamp as an incremental update, with
+// the timestamp from its configured TSP source.
+func (c *Client) ExtendPDF(ctx context.Context, pdf []byte, level string) ([]byte, error) {
+	respBody, err := c.post(ctx, "/services/rest/signature/one-document/extendDocument", "extension", map[string]any{
+		"toExtendDocument": map[string]any{
+			"bytes": base64.StdEncoding.EncodeToString(pdf),
+			"name":  "contract.pdf",
+		},
+		"parameters": map[string]any{
+			"signatureLevel":     level,
+			"signaturePackaging": "ENVELOPED",
+			"digestAlgorithm":    "SHA256",
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var extended struct {
+		Bytes []byte `json:"bytes"`
+	}
+	if err := json.Unmarshal(respBody, &extended); err != nil {
+		return nil, fmt.Errorf("dss: parse extension response: %w", err)
+	}
+	if len(extended.Bytes) == 0 {
+		return nil, fmt.Errorf("dss: extension response carries no document")
+	}
+	return extended.Bytes, nil
+}
+
+// post sends body as JSON to the DSS path and returns the raw response body.
+// what names the call in errors.
+func (c *Client) post(ctx context.Context, path, what string, payload any) ([]byte, error) {
+	if c == nil || c.baseURL == "" {
+		return nil, fmt.Errorf("dss: no base URL configured")
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +335,7 @@ func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Rep
 	var resp *http.Response
 	deadline := time.Now().Add(90 * time.Second)
 	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			c.baseURL+"/services/rest/validation/validateSignature", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -248,24 +347,20 @@ func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Rep
 			break
 		}
 		if ctx.Err() != nil || time.Now().After(deadline) {
-			return nil, fmt.Errorf("dss: validation request failed: %w", err)
+			return nil, fmt.Errorf("dss: %s request failed: %w", what, err)
 		}
 		time.Sleep(3 * time.Second)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("dss: read validation response: %w", err)
+		return nil, fmt.Errorf("dss: read %s response: %w", what, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("dss: validation returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, fmt.Errorf("dss: %s returned HTTP %d: %s", what, resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
-	report, err := parseReport(respBody)
-	if err != nil {
-		return nil, err
-	}
-	return report, nil
+	return respBody, nil
 }
 
 // parseReport extracts the Indication/SubIndication pair — and everything
@@ -322,28 +417,44 @@ func parseReport(raw []byte) (*Report, error) {
 // callers can cross-reference the rest of the response for this exact
 // signature. "" if the entry carries no (string) Id.
 func latestSignatureEntry(doc any) (any, string) {
+	entries := signatureEntries(doc)
+	if len(entries) == 0 {
+		return nil, ""
+	}
+	last := entries[len(entries)-1]
+	return last.signature, last.id
+}
+
+// signatureEntry is one Signature entry of a simple report and its Id.
+type signatureEntry struct {
+	signature any
+	id        string
+}
+
+// signatureEntries returns every Signature-typed entry of
+// simpleReport.signatureOrTimestampOrEvidenceRecord, in report order.
+func signatureEntries(doc any) []signatureEntry {
 	root, ok := doc.(map[string]any)
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	simpleReportAny, ok := lookupCI(root, "simpleReport")
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	simpleReport, ok := simpleReportAny.(map[string]any)
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	entriesAny, ok := lookupCI(simpleReport, "signatureOrTimestampOrEvidenceRecord")
 	if !ok {
-		return nil, ""
+		return nil
 	}
 	entries, ok := entriesAny.([]any)
 	if !ok {
-		return nil, ""
+		return nil
 	}
-	var last any
-	var lastID string
+	var out []signatureEntry
 	for _, entry := range entries {
 		obj, ok := entry.(map[string]any)
 		if !ok {
@@ -353,13 +464,13 @@ func latestSignatureEntry(doc any) (any, string) {
 		if !ok {
 			continue
 		}
-		last = sigAny
-		lastID = ""
+		id := ""
 		if sig, ok := sigAny.(map[string]any); ok {
-			lastID = idString(sig)
+			id = idString(sig)
 		}
+		out = append(out, signatureEntry{signature: sigAny, id: id})
 	}
-	return last, lastID
+	return out
 }
 
 // resolveSigningCertificate returns the diagnosticData.UsedCertificates entry

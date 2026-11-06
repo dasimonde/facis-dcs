@@ -22,3 +22,9 @@ var ErrConflictOfInterest = errors.New("conflict of interest - cannot approve ow
 // contract, accepted the inbound offer, or proposed a redline on it. No task,
 // no engagement — and "no open tasks" would otherwise read as settlement.
 var ErrNegotiationNotSettled = errors.New("negotiation is not settled: this instance has not engaged with this round")
+
+// ErrNegotiationSyncPending refuses Accept or Submit while this instance still
+// has outbound Proposals/Decisions for the contract that the peer has not
+// acknowledged (delivered_at unset). The first Accept with an empty queue is
+// allowed; Reject is not gated by this check.
+var ErrNegotiationSyncPending = errors.New("negotiation messages are still waiting for peer acknowledgment")

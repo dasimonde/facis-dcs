@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 func testKey(t *testing.T) *ecdsa.PrivateKey {
@@ -30,8 +32,8 @@ func testJWK(t *testing.T, key *ecdsa.PrivateKey, certDER []byte) map[string]any
 	jwk := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-		"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+		"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+		"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 	}
 	if certDER != nil {
 		jwk["x5c"] = []string{base64.StdEncoding.EncodeToString(certDER)}
@@ -136,7 +138,7 @@ func TestMethodForResolvesRelativeAndEmbeddedEntries(t *testing.T) {
 			t.Fatalf("MethodFor(%q): %v", methodID, err)
 		}
 		key, err := method.ECPublicKey()
-		if err != nil || key.X.Cmp(referenced.X) != 0 {
+		if err != nil || !ecutil.Equal(ecutil.AsPublic(key), ecutil.AsPublic(referenced)) {
 			t.Fatalf("MethodFor(%q) resolved the wrong key: %v", methodID, err)
 		}
 	}

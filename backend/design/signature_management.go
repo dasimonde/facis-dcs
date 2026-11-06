@@ -91,9 +91,21 @@ var SMContractSignatureEnvelope = Type("SMContractSignatureEnvelope", func() {
 	Required("contract_did", "signer_did", "credential_type", "status")
 })
 
+var SMSignatureFieldStatus = Type("SMSignatureFieldStatus", func() {
+	Description("Signing status of one declared signature field (DCS-FR-SM-07, DCS-FR-SM-24)")
+	Attribute("field_name", String, "Declared signature field (dcs:signatoryName)")
+	Attribute("status", String, "SIGNED or UNSIGNED")
+	Attribute("remote", Boolean, "True when the field belongs to a counterparty that signs on its own instance")
+	Attribute("signer_did", String, "DID of the signer, when signed on this instance")
+	Attribute("signed_at", String, "ISO-8601 timestamp of the signature, when known")
+
+	Required("field_name", "status", "remote")
+})
+
 var SMContractRetrieveByIDResponse = Type("SMContractRetrieveByIDResponse", func() {
 	Attribute("contract", SMContractItem, "The contract")
-	Attribute("signature_envelope", SMContractSignatureEnvelope, "The latest signature envelope; absent for an APPROVED-unsigned contract that has no signature yet")
+	Attribute("signature_envelope", SMContractSignatureEnvelope, "The most recent signature record of any status; absent for an APPROVED-unsigned contract that has no signature yet")
+	Attribute("signature_fields", ArrayOf(SMSignatureFieldStatus), "Signing status of every signature field the contract declares")
 
 	Required("contract")
 })
@@ -242,8 +254,9 @@ var SMContractAuditRequest = Type("SMContractAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("justification", String, "Required audit justification", func() { Pattern(`\S`) })
 
-	Required("did")
+	Required("did", "justification")
 })
 
 var SMContractAuditResponse = Type("SMContractAuditResponse", func() {
@@ -319,8 +332,15 @@ var SMSignatureViewItem = Type("SMSignatureViewItem", func() {
 	Attribute("qualified", Boolean, "Whether DSS's qualification determination for this signature was QESIG (qualified certificate + QSCD, ADR-20) — the QES evidence distinct from credential_type alone")
 	Attribute("signer_cert_subject", String, "Subject of the signing certificate that produced this signature (ADR-20 sole-control evidence, DCS-FR-SM-26)")
 	Attribute("signer_cert_serial", String, "Serial number of the signing certificate that produced this signature (DCS-FR-SM-26)")
+	Attribute("poa_organization", String, "Organization the signatory was authorized to act for, from the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
+	Attribute("poa_roles", ArrayOf(String), "Roles asserted by the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
+	Attribute("summary_issuer", String, "Issuer DID of the verified ContractSigningSummaryCredential that binds this signature (DCS-FR-SM-26 credential chain)")
+	Attribute("credential_status", String, "Live status-list state of the Power of Attorney credential the signer presented, read at view time (DCS-FR-SM-18)", func() {
+		Enum("VALID", "REVOKED", "SUSPENDED", "UNKNOWN")
+	})
+	Attribute("credential_status_reason", String, "Why credential_status is UNKNOWN")
 
-	Required("signer_did", "credential_type", "status", "format")
+	Required("signer_did", "credential_type", "status", "format", "credential_status")
 })
 
 var SMSignatureViewResponse = Type("SMSignatureViewResponse", func() {
@@ -333,6 +353,65 @@ var SMSignatureViewResponse = Type("SMSignatureViewResponse", func() {
 	Attribute("dss", SMDSSReport, "EU DSS validation report for the contract's PDF signature; absent when DSS validation is not configured or the contract carries no signed PDF")
 
 	Required("did", "contract_state", "signatures", "integrity_findings")
+})
+
+var SMClauseReportRequest = Type("SMClauseReportRequest", func() {
+	Description("Clause-segmented compliance report request (DCS-FR-PACM-07)")
+	Token("token", String, "JWT token")
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Required("did")
+})
+
+var SMClauseReportFinding = Type("SMClauseReportFinding", func() {
+	Description("One content-policy / SHACL finding with optional conservative clause attribution")
+	Attribute("rule_id", String, "Stable rule identifier")
+	Attribute("severity", String, "Finding severity (error/warning/info)")
+	Attribute("message", String, "Human-readable finding message")
+	Attribute("path", String, "SHACL result path local name when present")
+	Attribute("field_iri", String, "Field IRI when present")
+	Attribute("focus_node", String, "Structured SHACL focus node IRI when present")
+	Attribute("source", String, "Audit source tag when present")
+	Attribute("clause_ids", ArrayOf(String), "Attributed clause @ids — empty or exactly one when mapping is reliable")
+	Required("severity", "message")
+})
+
+var SMClauseReportSection = Type("SMClauseReportSection", func() {
+	Description("One dcs:Clause component in the clause compliance report")
+	Attribute("clause_id", String, "dcs:Clause @id")
+	Attribute("title", String, "Clause title when authored")
+	Attribute("status", String, "not_assessed | undetermined | warnings_only | issues_identified | compliant — never compliant solely from empty findings")
+	Attribute("findings", ArrayOf(SMClauseReportFinding), "Non-conformance findings attributed to this clause (excludes satisfied checks)")
+	Attribute("assessment_run", String, "RFC3339 timestamp of this projection run (not proof each clause was individually assessed)")
+	Attribute("applicable_checks", String, "Display label: Not established | None | comma-separated check ids")
+	Attribute("applicable_checks_status", String, "not_established | none | established")
+	Attribute("verdict_note", String, "Short explanation when status is undetermined or not_assessed")
+	Required("clause_id", "status", "findings", "assessment_run", "applicable_checks", "applicable_checks_status")
+})
+
+var SMClauseReportCredential = Type("SMClauseReportCredential", func() {
+	Description("Credential metadata of one signature over the contract; every clause is covered by the same signatures (DCS-FR-PACM-07)")
+	Attribute("party", String, "Signature field (party DID) the signature covers")
+	Attribute("signer_did", String, "DID of the signer")
+	Attribute("signature_status", String, "SIGNED or REVOKED")
+	Attribute("signed_at", String, "When the signature was applied (RFC3339)")
+	Attribute("achieved_level", String, "Signature level the validated signature achieved")
+	Attribute("required_level", String, "Signature level the contract requires for this party")
+	Attribute("signer_cert_subject", String, "Subject of the signing certificate")
+	Attribute("signer_cert_serial", String, "Serial number of the signing certificate")
+	Attribute("cert_revoked_at", String, "When the CRL check found the signing certificate revoked (RFC3339)")
+	Attribute("poa_organization", String, "Organization the Power of Attorney authorizes")
+	Required("party", "signer_did", "signature_status", "achieved_level", "required_level")
+})
+
+var SMClauseReportResponse = Type("SMClauseReportResponse", func() {
+	Description("Clause-segmented compliance projection for the Compliance Viewer By Clauses tab (DCS-FR-PACM-07)")
+	Attribute("did", String, "Contract DID")
+	Attribute("assessment_run", String, "RFC3339 timestamp of this projection run")
+	Attribute("scope_note", String, "Human-readable scope / interpretation note")
+	Attribute("clauses", ArrayOf(SMClauseReportSection), "Clause sections from the contract document")
+	Attribute("unassigned_findings", ArrayOf(SMClauseReportFinding), "Findings that could not be attributed to exactly one clause")
+	Attribute("credentials", ArrayOf(SMClauseReportCredential), "Credential metadata of the signatures over the contract")
+	Required("did", "assessment_run", "clauses", "unassigned_findings", "credentials")
 })
 
 var SMSignatureRequestStartRequest = Type("SMSignatureRequestStartRequest", func() {
@@ -376,6 +455,10 @@ var SMSignatureRequestStatusResponse = Type("SMSignatureRequestStatusResponse", 
 	Attribute("status", String, "Ceremony lifecycle status: pending, verified, expired, failed")
 	Attribute("signer_did", String, "DID of the signer resolved from the presented PID, once verified")
 	Attribute("expires_at", String, "ISO-8601 timestamp when the ceremony expires")
+	Attribute("signed_at", String, "ISO-8601 timestamp when a signature submitted for this ceremony was accepted; absent until then")
+	Attribute("request_expires_at", String, "ISO-8601 timestamp when the published signing request expires; absent until a request is published")
+	Attribute("refusal_code", String, "Error code of the last refused wallet response for this ceremony")
+	Attribute("refusal", String, "Reason of the last refused wallet response for this ceremony")
 
 	Required("ceremony_id", "status")
 })
@@ -466,7 +549,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/retrieve/{did}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -494,7 +581,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/verify")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -521,7 +612,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/provenance/{did}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -543,14 +638,48 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
 		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
+		Error("not_found", ErrorResult, "Contract not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/prepare")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
 			Response("counterparty_not_settled", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("preparedDocument", func() {
+		Description("serve the to-be-signed PDF that prepareSignature pinned on a ceremony as application/pdf (DCS-IR-CI-02). Only the session that started the ceremony reads it.")
+		Meta("dcs:requirements", "DCS-IR-CI-02", "DCS-FR-SM-16")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Signer")
+		})
+
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("ceremony_id", String, "The ceremony prepareSignature pinned the document on")
+			Required("ceremony_id")
+		})
+
+		Error("forbidden", ErrorResult, "The caller did not start the ceremony")
+		Error("not_found", ErrorResult, "No prepared document for this ceremony")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/signature/prepare/{ceremony_id}/document")
+			SkipResponseBodyEncodeDecode()
+			Response(StatusOK, func() {
+				ContentType("application/pdf")
+			})
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -575,11 +704,15 @@ var _ = Service("SignatureManagement", func() {
 		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
 		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
 		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
+		Error("not_found", ErrorResult, "Contract not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/submit")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
 			Response("counterparty_not_settled", StatusBadRequest)
@@ -605,11 +738,15 @@ var _ = Service("SignatureManagement", func() {
 		Result(SMSignatureRequestStartResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
+		Error("not_found", ErrorResult, "Contract not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/request")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})
@@ -633,7 +770,9 @@ var _ = Service("SignatureManagement", func() {
 		Error("not_found", ErrorResult, "Ceremony not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
 			GET("/signature/request/{ceremony_id}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -657,11 +796,13 @@ var _ = Service("SignatureManagement", func() {
 		Error("not_found", ErrorResult, "Ceremony not found")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
 		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/request/{ceremony_id}/publish")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
 			Response("bad_request", StatusBadRequest)
 			Response("not_found", StatusNotFound)
 			Response("ceremony_required", StatusUnprocessableEntity)
@@ -799,12 +940,15 @@ var _ = Service("SignatureManagement", func() {
 		Meta("dcs:requirements", "DCS-IR-SM-04", "DCS-IR-SM-05")
 
 		// The signer closes the Secure Contract Viewer wizard on the signature
-		// they just applied; validation is a read-only check.
+		// they just applied; compliance users validate in the Signature
+		// Compliance Viewer. Validation is a read-only check.
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
 			Scope("Contract Signer")
 			Scope("Sys. Contract Signer")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 
 		Payload(SMContractValidateRequest)
@@ -813,7 +957,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/validate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -828,6 +976,8 @@ var _ = Service("SignatureManagement", func() {
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 
 		Payload(SMContractRevokeRequest)
@@ -836,7 +986,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/revoke")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -859,9 +1013,14 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/audit")
 			Param("did")
+			Param("justification")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -888,7 +1047,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/view")
 			Param("did")
 			Response(StatusOK)
@@ -898,12 +1061,14 @@ var _ = Service("SignatureManagement", func() {
 	})
 
 	Method("compliance", func() {
-		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: signature level SES/AES/QES, signature status, presence of active signed credentials) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
+		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: achieved against required signature level, signature status, certificate and Power of Attorney status, Power of Attorney organization and roles) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
 		Meta("dcs:requirements", "DCS-IR-SM-07")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 
 		Payload(SMContractComplianceRequest)
@@ -912,8 +1077,45 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/compliance")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("clause_report", func() {
+		Description("Compliance report by clauses.")
+		Meta("dcs:requirements", "DCS-FR-PACM-07")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Signer")
+			Scope("Sys. Contract Signer")
+			Scope("Contract Observer")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+
+		Payload(SMClauseReportRequest)
+		Result(SMClauseReportResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
+			GET("/signature/clause-report")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

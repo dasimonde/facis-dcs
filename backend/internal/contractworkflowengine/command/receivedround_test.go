@@ -20,7 +20,13 @@ import (
 // contract_version is whatever the sequence under test actually produced.
 type receivedContractRepoFake struct {
 	db.ContractRepo
-	row *db.Contract
+	row            *db.Contract
+	historyEntries int
+}
+
+func (r *receivedContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string, string) error {
+	r.historyEntries++
+	return nil
 }
 
 func (r *receivedContractRepoFake) ReadProcessDataByDIDOrNil(context.Context, *sqlx.Tx, string) (*db.ContractProcessData, error) {
@@ -52,6 +58,10 @@ func (r *receivedContractRepoFake) RemoteCreate(_ context.Context, _ *sqlx.Tx, d
 
 func (r *receivedContractRepoFake) RemoteUpdate(_ context.Context, _ *sqlx.Tx, data db.Contract) error {
 	copied := data
+	// Like the repository's partial update, an empty state keeps the stored one.
+	if copied.State == "" && r.row != nil {
+		copied.State = r.row.State
+	}
 	r.row = &copied
 	return nil
 }
@@ -69,8 +79,12 @@ func (r *receivedContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db
 	return nil
 }
 
-func (r *receivedContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _ string, state string) error {
+func (r *receivedContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _, _ string, state string) error {
 	r.row.State = state
+	return nil
+}
+
+func (r *receivedContractRepoFake) UpdatePDFState(context.Context, *sqlx.Tx, string, db.ContractPDFState) error {
 	return nil
 }
 
@@ -173,6 +187,8 @@ func TestATwiceReceivedOfferKeepsItsAcceptedTaskOnTheContractsCurrentRound(t *te
 	require.NoError(t, receiver.Handle(ctx, peerShipCmd()))
 
 	require.Equal(t, 2, contracts.row.ContractVersion)
+	require.Equal(t, 1, contracts.historyEntries,
+		"re-ship must snapshot the held version before bumping (ADR-0006)")
 	task := currentRoundTask(t, tasks, contracts)
 	require.NotNil(t, task, "the responder's Negotiations tab row is stranded on round %d while the contract is on round %d",
 		tasks.rows[0].ContractVersion, contracts.row.ContractVersion)
@@ -232,4 +248,30 @@ func TestAReshipRefreshesTheContentWithoutResettingLocalState(t *testing.T) {
 
 	require.Equal(t, contractstate.Negotiation.String(), contracts.row.State)
 	require.Equal(t, datatype.JSON(shippedContract()), *contracts.row.ContractData)
+}
+
+// peerSignedPDF is the shape CarriesPAdESSignature recognises: /Type /Sig with
+// a /ByteRange (same fixture shape as provenance.lifecycle_test).
+var peerSignedPDF = []byte("%PDF-1.7\n12 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite" +
+	" /SubFilter /ETSI.CAdES.detached /ByteRange [0 840 960 1200] /Contents <30820> >>\nendobj\n")
+
+func TestIsSignedArtifactReship(t *testing.T) {
+	require.False(t, isSignedArtifactReship(peerShipCmd()))
+	signed := peerShipCmd()
+	signed.Pdf = peerSignedPDF
+	require.True(t, isSignedArtifactReship(signed))
+	signed.AdoptRevoked = true
+	require.False(t, isSignedArtifactReship(signed))
+}
+
+func TestRollForwardKeepingStatePreservesAcceptedTask(t *testing.T) {
+	tasks := &negotiationTaskRepoFake{rows: []db.NegotiationTaskData{{
+		DID:             taskContractDID,
+		Negotiator:      localPeerDID,
+		ContractVersion: 1,
+		State:           negotiationtaskstate.Accepted.String(),
+	}}}
+	require.NoError(t, tasks.RollForwardKeepingState(context.Background(), nil, taskContractDID, 1, 2))
+	require.Equal(t, 2, tasks.rows[0].ContractVersion)
+	require.Equal(t, negotiationtaskstate.Accepted.String(), tasks.rows[0].State)
 }

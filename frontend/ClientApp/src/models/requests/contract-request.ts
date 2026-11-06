@@ -30,11 +30,19 @@ export interface ContractUpdateRequest {
   contract_data?: ContractData
 }
 
+/** block-level review annotation */
+export interface ContractBlockAnnotation {
+  block_id: string
+  comment: string
+}
+
 export interface ContractSubmitRequest {
   did: string
   updated_at: string
   forward_to?: ContractActionFlag
   comments?: string[]
+  /** Optional block-level review annotations */
+  annotations?: ContractBlockAnnotation[]
   /** Optional updated contract data to persist atomically before submit validation */
   contract_data?: ContractData
   reviewers?: string[]
@@ -42,9 +50,16 @@ export interface ContractSubmitRequest {
   negotiators?: string[]
 }
 
+export type ContractSortKey = 'created_at' | 'updated_at' | 'state' | 'name'
+
 export interface ContractRetrieveRequest {
   offset?: number
   limit?: number
+  parent_did?: string
+  /** Lifecycle states to keep; the server filters before it cuts the page. */
+  state?: ContractState[]
+  sort_by?: ContractSortKey
+  sort_order?: 'asc' | 'desc'
 }
 
 export interface ContractRetrieveByIdRequest {
@@ -56,13 +71,19 @@ export interface ContractReviewRequest {
 }
 
 export interface ContractSearchRequest {
+  semantic_filters?: string
   offset?: number
   limit?: number
   did?: string
   contract_version?: number
-  state?: ContractState
+  state?: ContractState[]
   name?: string
   description?: string
+  contract_data?: string
+  parent_did?: string
+  valid_until?: string
+  party?: string
+  template_did?: string
   filter?: string
 }
 
@@ -98,6 +119,7 @@ export interface ContractNegotiationRespondRequest {
 export interface ContractApproveRequest {
   did: string
   updated_at: string
+  decision_notes?: string[]
 }
 
 export interface ContractRejectRequest {
@@ -130,6 +152,7 @@ export interface ContractTerminateRequest {
 
 export interface ContractAuditRequest {
   did: string
+  justification: string
 }
 
 export interface ContractHistoryRetrieveRequest {

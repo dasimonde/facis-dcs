@@ -7,14 +7,16 @@ import (
 	"fmt"
 	"time"
 
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/event"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
+	templateevents "digital-contracting-service/internal/templaterepository/event"
 
 	"digital-contracting-service/internal/templaterepository/query"
 
-	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
@@ -23,11 +25,13 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	semanticmapper "digital-contracting-service/internal/semantic/mapper"
+	"digital-contracting-service/internal/semantichub"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	"digital-contracting-service/internal/templaterepository/query/contracttemplate"
 
@@ -48,13 +52,15 @@ type templateRepositorysrvc struct {
 	// registration (DCS-FR-TR-09, command/provenance.go).
 	VCSigner  provenance.VCSigner
 	IssuerDID string
+	// Credentials verifies the provenance credentials on /template/verify (DCS-FR-TR-09, DCS-FR-TR-20).
+	Credentials *provenance.CredentialVerifier
 	auth.JWTAuthenticator
 }
 
 // NewTemplateRepository returns the TemplateRepository service implementation.
 func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db.ContractTemplateRepo,
 	RTRepo db.ReviewTaskRepo, ATRepo db.ApprovalTaskRepo, fcClient *fcclient.FederatedCatalogueClient,
-	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string) templaterepository.Service {
+	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string, credentials *provenance.CredentialVerifier) templaterepository.Service {
 	return &templateRepositorysrvc{
 		DB:               db,
 		JWTAuthenticator: jwtAuth,
@@ -65,15 +71,19 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 		ATrailReader:     auditTrailReader,
 		VCSigner:         vcSigner,
 		IssuerDID:        issuerDID,
+		Credentials:      credentials,
 	}
 }
 
-// Create a new template.
-// mapTemplateCommandError maps a client-input document error (a Semantic Hub
-// ontology-prefix conflict, DCS-FR-TR-03) to bad_request; everything else
-// stays an internal error.
+// mapTemplateCommandError maps the errors a client causes (invalid input, a
+// state that does not allow the command, a failed policy audit, an unknown
+// template) to bad_request and a stale view to conflict; everything else
+// stays an internal error (DCS-IR-TR-04).
 func mapTemplateCommandError(err error) error {
-	if errors.Is(err, validation.ErrDocumentSchemaConflict) {
+	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) ||
+		errors.Is(err, templatestructure.ErrInvalid) || errors.Is(err, command.ErrTemplateNotCompliant) ||
+		errors.Is(err, db.ErrContractTemplateNotFound) || errors.Is(err, command.ErrInvalidRequest) ||
+		errors.Is(err, command.ErrTemplateInUse) {
 		return templaterepository.MakeBadRequest(err)
 	}
 	// Same optimistic-concurrency refusal the contract commands answer with a
@@ -90,14 +100,18 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	partyType, err := partytype.New(req.PartyType)
+	if err != nil {
+		return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+	}
 	templateType, err := contracttemplatetype.NewContractTemplateType(req.TemplateType)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	templateData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	did, err := base.GenerateID()
@@ -106,14 +120,17 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 	}
 
 	cmd := command.CreateCmd{
-		DID:          *did,
-		CreatedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:    middleware.GetHolderDID(ctx),
-		TemplateType: templateType,
-		Name:         req.Name,
-		Description:  req.Description,
-		TemplateData: &templateData,
-		UserRoles:    middleware.GetUserRoles(ctx),
+		DID:               *did,
+		CreatedBy:         middleware.GetParticipantID(ctx),
+		HolderDID:         middleware.GetHolderDID(ctx),
+		TemplateType:      templateType,
+		PartyType:         partyType.String(),
+		Name:              req.Name,
+		Description:       req.Description,
+		TemplateData:      &templateData,
+		TemplateLevel:     base.DerefString(req.TemplateLevel),
+		RequiredTemplates: req.RequiredTemplates,
+		UserRoles:         middleware.GetUserRoles(ctx),
 	}
 	createHandler := command.Creator{
 		DB:     s.DB,
@@ -170,14 +187,14 @@ func (s *templateRepositorysrvc) Submit(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	var actionFlag *actionflag.ActionFlag
 	if req.ForwardTo != nil {
 		flag, err := actionflag.NewActionFlag(*req.ForwardTo)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		actionFlag = &flag
 	}
@@ -215,33 +232,44 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	metaData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
+	var partyType partytype.PartyType
+	if req.PartyType != nil {
+		var err error
+		partyType, err = partytype.New(*req.PartyType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+	}
 	var templateType *contracttemplatetype.ContractTemplateType
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		templateType = &tType
 	}
 
 	cmd := command.UpdateCmd{
-		DID:          req.Did,
-		UpdatedAt:    updatedAt,
-		TemplateType: templateType,
-		Name:         req.Name,
-		Description:  req.Description,
-		TemplateData: &metaData,
-		UpdatedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:    middleware.GetHolderDID(ctx),
-		UserRoles:    middleware.GetUserRoles(ctx),
+		DID:               req.Did,
+		UpdatedAt:         updatedAt,
+		TemplateType:      templateType,
+		PartyType:         partyType.String(),
+		Name:              req.Name,
+		Description:       req.Description,
+		TemplateData:      &metaData,
+		TemplateLevel:     req.TemplateLevel,
+		RequiredTemplates: req.RequiredTemplates,
+		UpdatedBy:         middleware.GetParticipantID(ctx),
+		HolderDID:         middleware.GetHolderDID(ctx),
+		UserRoles:         middleware.GetUserRoles(ctx),
 	}
 	handler := command.Updater{
 		DB:     s.DB,
@@ -267,37 +295,50 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	metaData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
+	var partyType partytype.PartyType
+	if req.PartyType != nil {
+		var err error
+		partyType, err = partytype.New(*req.PartyType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+	}
 	var templateType *contracttemplatetype.ContractTemplateType
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		templateType = &tType
 	}
 
 	cmd := command.UpdateManageCmd{
-		DID:          req.Did,
-		UpdatedAt:    updatedAt,
-		TemplateType: templateType,
-		Name:         req.Name,
-		Description:  req.Description,
-		TemplateData: &metaData,
-		UpdatedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:    middleware.GetHolderDID(ctx),
-		UserRoles:    middleware.GetUserRoles(ctx),
+		DID:               req.Did,
+		UpdatedAt:         updatedAt,
+		TemplateType:      templateType,
+		PartyType:         partyType.String(),
+		Name:              req.Name,
+		Description:       req.Description,
+		TemplateData:      &metaData,
+		TemplateLevel:     req.TemplateLevel,
+		RequiredTemplates: req.RequiredTemplates,
+		UpdatedBy:         middleware.GetParticipantID(ctx),
+		HolderDID:         middleware.GetHolderDID(ctx),
+		UserRoles:         middleware.GetUserRoles(ctx),
 	}
 	handler := command.UpdateManager{
 		DB:     s.DB,
 		CTRepo: s.CTRepo,
+		RTRepo: s.RTRepo,
+		ATRepo: s.ATRepo,
 	}
 	err = handler.Handle(ctx, cmd)
 	if err != nil {
@@ -315,11 +356,27 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	var partyType partytype.PartyType
+	if req.PartyType != nil {
+		var err error
+		partyType, err = partytype.New(*req.PartyType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+	}
+	var templateType *contracttemplatetype.ContractTemplateType
+	if req.TemplateType != nil {
+		value, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+		templateType = &value
+	}
 	var state *contracttemplatestate.ContractTemplateState
 	if req.State != nil {
 		tState, err := contracttemplatestate.NewContractTemplateState(*req.State)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 
 		state = &tState
@@ -331,16 +388,23 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	}
 
 	qry := contracttemplate.GetAllMetadataByFilterQry{
-		RetrievedBy:  middleware.GetParticipantID(ctx),
-		HolderDID:    middleware.GetHolderDID(ctx),
-		UserRoles:    middleware.GetUserRoles(ctx),
-		DID:          base.DerefString(req.Did),
-		Version:      base.DerefInt(req.Version),
-		State:        state,
-		Name:         base.DerefString(req.Name),
-		Description:  base.DerefString(req.Description),
-		TemplateData: base.DerefString(req.TemplateData),
-		Pagination:   pagination,
+		SemanticFilters: base.DerefString(req.SemanticFilters),
+		RetrievedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:       middleware.GetHolderDID(ctx),
+		UserRoles:       middleware.GetUserRoles(ctx),
+		DID:             base.DerefString(req.Did),
+		Version:         base.DerefInt(req.Version),
+		State:           state,
+		TemplateType:    templateType,
+		PartyType:       partyType.String(),
+		Name:            base.DerefString(req.Name),
+		Description:     base.DerefString(req.Description),
+		TemplateData:    base.DerefString(req.TemplateData),
+		Pagination:      pagination,
+
+		CreatedBy:   base.DerefString(req.CreatedBy),
+		CreatedFrom: base.DerefString(req.CreatedFrom),
+		CreatedTo:   base.DerefString(req.CreatedTo),
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     s.DB,
@@ -348,20 +412,29 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	}
 	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
+		if errors.Is(err, semantichub.ErrInvalidSearchFilter) {
+			return nil, templaterepository.MakeBadRequest(err)
+		}
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
 	var contractTemplates []*templaterepository.ContractTemplateSearchResponse
 	for _, item := range result {
 		contractTemplates = append(contractTemplates, &templaterepository.ContractTemplateSearchResponse{
-			Did:          item.DID,
-			Version:      item.Version,
-			State:        item.State.String(),
-			TemplateType: item.TemplateType.String(),
-			Name:         item.Name,
-			Description:  item.Description,
-			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
+			Did:               item.DID,
+			Version:           item.Version,
+			State:             item.State.String(),
+			TemplateType:      item.TemplateType.String(),
+			PartyType:         item.PartyType,
+			Name:              item.Name,
+			Description:       item.Description,
+			CreatedBy:         item.CreatedBy,
+			UpdatedBy:         &item.UpdatedBy,
+			CreatedAt:         item.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:         item.UpdatedAt.Format(time.RFC3339),
+			ComplianceStatus:  &item.ComplianceStatus,
+			TemplateLevel:     &item.TemplateLevel,
+			RequiredTemplates: item.RequiredTemplates,
 		})
 	}
 
@@ -385,7 +458,7 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 	}
 	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, templaterepository.MakeInternalError(err)
 	}
 
 	var contractTemplates []*templaterepository.ContractTemplateHistoryRetrieveByIDResponse
@@ -398,10 +471,16 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 			Name:         item.Name,
 			Description:  item.Description,
 			CreatedBy:    item.CreatedBy,
+			UpdatedBy:    &item.UpdatedBy,
 			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
 			TemplateData: item.TemplateData,
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
+
+			ComplianceStatus:  &item.ComplianceStatus,
+			TemplateLevel:     &item.TemplateLevel,
+			RequiredTemplates: item.RequiredTemplates,
 		})
 	}
 
@@ -443,12 +522,18 @@ func (s *templateRepositorysrvc) Retrieve(ctx context.Context, req *templaterepo
 			Version:      item.Version,
 			State:        item.State.String(),
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
 			Name:         item.Name,
 			Description:  item.Description,
 			CreatedBy:    item.CreatedBy,
+			UpdatedBy:    &item.UpdatedBy,
 			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
 			LatestDid:    item.LatestDID,
+
+			ComplianceStatus:  &item.ComplianceStatus,
+			TemplateLevel:     &item.TemplateLevel,
+			RequiredTemplates: item.RequiredTemplates,
 		})
 	}
 
@@ -498,17 +583,31 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		CTRepo: s.CTRepo,
 	}
 	contractTemplate, err := queryHandler.Handle(ctx, qry)
+	if errors.Is(err, db.ErrContractTemplateNotFound) {
+		return nil, templaterepository.MakeNotFound(err)
+	}
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
+	}
+	var notes []*templaterepository.TemplateReviewNote
+	for _, note := range contractTemplate.ReviewNotes {
+		notes = append(notes, &templaterepository.TemplateReviewNote{
+			Kind:      note.Kind,
+			Text:      note.Text,
+			By:        &note.By,
+			CreatedAt: note.CreatedAt.UTC().Format(time.RFC3339),
+		})
 	}
 	templateJSONLD, err := semanticmapper.BuildTemplateJSONLD(db.ContractTemplate{
 		DID:          contractTemplate.DID,
 		Version:      contractTemplate.Version,
 		State:        contractTemplate.State.String(),
 		TemplateType: contractTemplate.TemplateType.String(),
+		PartyType:    contractTemplate.PartyType,
 		Name:         contractTemplate.Name,
 		Description:  contractTemplate.Description,
 		CreatedBy:    contractTemplate.CreatedBy,
+		UpdatedBy:    contractTemplate.UpdatedBy,
 		CreatedAt:    contractTemplate.CreatedAt,
 		UpdatedAt:    contractTemplate.UpdatedAt,
 		TemplateData: contractTemplate.TemplateData,
@@ -522,12 +621,19 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		Version:      contractTemplate.Version,
 		State:        contractTemplate.State.String(),
 		TemplateType: contractTemplate.TemplateType.String(),
+		PartyType:    contractTemplate.PartyType,
 		Name:         contractTemplate.Name,
 		Description:  contractTemplate.Description,
 		CreatedBy:    contractTemplate.CreatedBy,
+		UpdatedBy:    &contractTemplate.UpdatedBy,
 		CreatedAt:    contractTemplate.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    contractTemplate.UpdatedAt.Format(time.RFC3339),
 		TemplateData: templateJSONLD,
+
+		ComplianceStatus:  &contractTemplate.ComplianceStatus,
+		TemplateLevel:     &contractTemplate.TemplateLevel,
+		RequiredTemplates: contractTemplate.RequiredTemplates,
+		ReviewNotes:       notes,
 	}, nil
 }
 
@@ -545,20 +651,27 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 		ParticipantID: middleware.GetParticipantID(ctx),
 	}
 	handler := query.Verifier{
-		DB:       s.DB,
-		CTRepo:   s.CTRepo,
-		RTRepo:   s.RTRepo,
-		FCClient: s.FCClient,
+		DB:               s.DB,
+		CTRepo:           s.CTRepo,
+		RTRepo:           s.RTRepo,
+		FCClient:         s.FCClient,
+		VerifyCredential: s.Credentials.Verify,
 	}
 	result, err := handler.Handle(ctx, qry)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, mapTemplateCommandError(err)
 	}
 
 	return &templaterepository.ContractTemplateVerifyResponse{
 		Did:      req.Did,
 		Findings: result.Findings,
+		Warnings: result.Warnings,
 	}, nil
+}
+
+// VerifyByID serves GET /template/verify/{did} with the checks and audit of Verify (DCS-FR-TR-20).
+func (s *templateRepositorysrvc) VerifyByID(ctx context.Context, req *templaterepository.ContractTemplateVerifyRequest) (*templaterepository.ContractTemplateVerifyResponse, error) {
+	return s.Verify(ctx, req)
 }
 
 // mark template as approved, with optional decision notes.
@@ -569,7 +682,7 @@ func (s *templateRepositorysrvc) Approve(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.ApproveCmd{
@@ -603,7 +716,7 @@ func (s *templateRepositorysrvc) Reject(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.RejectCmd{
@@ -646,15 +759,13 @@ func (s *templateRepositorysrvc) Register(ctx context.Context, req *templaterepo
 	handler := command.Registrar{
 		DB:        s.DB,
 		CTRepo:    s.CTRepo,
-		RTRepo:    s.RTRepo,
-		ATRepo:    s.ATRepo,
 		FCClient:  s.FCClient,
 		VCSigner:  s.VCSigner,
 		IssuerDID: s.IssuerDID,
 	}
 	did, err := handler.Handle(ctx, cmd)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, mapTemplateCommandError(err)
 	}
 
 	return &templaterepository.ContractTemplateRegisterResponse{
@@ -679,6 +790,17 @@ func (s *templateRepositorysrvc) Provenance(ctx context.Context, req *templatere
 
 	rows, err := s.CTRepo.ReadProvenanceCredentials(ctx, tx, req.Did)
 	if err != nil {
+		return nil, templaterepository.MakeInternalError(err)
+	}
+	// DCS-FR-TR-21: a provenance read is logged like any other template read.
+	evt := templateevents.RetrieveProvenanceEvent{
+		DID:         req.Did,
+		RetrievedBy: middleware.GetParticipantID(ctx),
+		OccurredAt:  time.Now().UTC(),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		UserRoles:   middleware.GetUserRoles(ctx),
+	}
+	if err := event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo); err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -709,21 +831,23 @@ func (s *templateRepositorysrvc) Archive(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.ArchiveCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
-		ArchivedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
+		DID:           req.Did,
+		UpdatedAt:     updatedAt,
+		ArchivedBy:    middleware.GetParticipantID(ctx),
+		Justification: req.Justification,
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
 	}
 	handler := command.Archiver{
-		DB:     s.DB,
-		CTRepo: s.CTRepo,
-		RTRepo: s.RTRepo,
-		ATRepo: s.ATRepo,
+		DB:       s.DB,
+		CTRepo:   s.CTRepo,
+		RTRepo:   s.RTRepo,
+		ATRepo:   s.ATRepo,
+		FCClient: s.FCClient,
 	}
 	err = handler.Handle(ctx, cmd)
 	if err != nil {
@@ -742,11 +866,12 @@ func (s *templateRepositorysrvc) Audit(ctx context.Context, req *templatereposit
 	defer cancel()
 
 	qry := qry2.GetAuditLogByDIDQry{
-		Scope:     componenttype.ContractTemplateRepo,
-		DID:       req.Did,
-		AuditedBy: middleware.GetParticipantID(ctx),
-		HolderDID: middleware.GetHolderDID(ctx),
-		UserRoles: middleware.GetUserRoles(ctx),
+		Scope:         componenttype.ContractTemplateRepo,
+		DID:           req.Did,
+		AuditedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		Justification: req.Justification,
 	}
 	handler := qry2.AuditLogByDIDAuditor{
 		DB:           s.DB,
@@ -811,7 +936,7 @@ func (s *templateRepositorysrvc) Publish(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.PublishCmd{

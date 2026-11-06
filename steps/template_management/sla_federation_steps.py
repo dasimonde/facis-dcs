@@ -105,6 +105,7 @@ from steps.support.api_client import (
     template_verify_url,
 )
 from steps.support.services.auth_service import AuthService
+from steps.support.services.template_service import TemplateService
 
 
 @contextmanager
@@ -565,7 +566,7 @@ _PARTY_ORG = {
 # so here they are two — the negotiating participant's dedicated one and the
 # suite-shared one every other role token presents — and both are declared,
 # because a company that reads the contract is a company the creator declares.
-_READING_ORGANIZATIONS = [_PARTY_ORG["B"], AuthService.DEFAULT_ORGANIZATION]
+_READING_ORGANIZATIONS = [_PARTY_ORG["B"], _PARTY_ORG["A"], AuthService.DEFAULT_ORGANIZATION]
 
 
 def _base(context, label: str) -> str:
@@ -828,6 +829,7 @@ def step_given_sla_template_registered_on_a(context):
             template_create_url(context),
             {
                 "template_type": "CONTRACT_TEMPLATE",
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": name,
                 "description": description,
                 "template_data": fixture,
@@ -1270,13 +1272,115 @@ def step_then_odrl_intact(context, label):
 # ---------------------------------------------------------------------------
 
 
+def _peer_label(label: str) -> str:
+    label = label.strip().upper()
+    return "B" if label == "A" else "A"
+
+
+def _availability_in_document(document: dict):
+    return _literal_value(_field_by_fragment(document, "committed-availability").get("dcs:value"))
+
+
+def _wait_sla_negotiation_sync_clear(context, label: str, what: str):
+    """Submit refuses while outbound negotiation messages are undelivered."""
+    label = label.strip().upper()
+    deadline = time.monotonic() + 90
+    last_pending = None
+    while time.monotonic() < deadline:
+        body = _contract_body(context, label)
+        last_pending = body.get("pending_negotiation_sync")
+        if not last_pending:
+            return
+        time.sleep(2)
+    raise AssertionError(
+        f"negotiation outbound on instance {label} was still pending "
+        f"(pending_negotiation_sync={last_pending!r}) after 90s before {what}"
+    )
+
+
+def _settle_sla_availability_proposal(context, proposer: str, value: str):
+    """Propose-without-apply: formal availability only changes after the peer
+    Accepts and the proposer Submits the merge (same shape as peer_trust
+    redline Then). Idempotent when the formal document already carries value."""
+    proposer = proposer.strip().upper()
+    peer = _peer_label(proposer)
+    if str(_availability_in_document(_contract_data(context, proposer)) or "").strip() == value:
+        return
+
+    negotiation_id = None
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        body = _contract_body(context, peer)
+        for negotiation in body.get("negotiations") or []:
+            blob = json.dumps(negotiation.get("change_request") or {})
+            if value not in blob:
+                continue
+            negotiation_id = negotiation.get("id")
+            break
+        if negotiation_id:
+            break
+        time.sleep(3)
+    assert negotiation_id, (
+        f"expected instance {proposer}'s availability {value!r} proposal to sync to "
+        f"instance {peer} within a few seconds"
+    )
+
+    peer_h = _party_headers(context, peer)
+    resp = _post_with_fresh_updated_at(
+        context,
+        peer,
+        "/contract/respond",
+        {
+            "id": str(negotiation_id),
+            "did": _contract_did(context),
+            "action_flag": "ACCEPTING",
+            "rejected_by": "",
+            "rejection_reason": "",
+        },
+        peer_h,
+        "accept availability counter-offer",
+    )
+    assert resp.status_code == 200, (
+        f"instance {peer} accepting availability {value!r} failed: "
+        f"{resp.status_code} {resp.text}"
+    )
+
+    _wait_sla_negotiation_sync_clear(
+        context, peer, f"instance {proposer} merging availability {value!r}"
+    )
+
+    proposer_h = _party_headers(context, proposer)
+    for _ in range(6):
+        actual = str(_availability_in_document(_contract_data(context, proposer)) or "").strip()
+        if actual == value:
+            return
+        state = _contract_state(context, proposer)
+        if state == "SUBMITTED":
+            break
+        _wait_sla_negotiation_sync_clear(
+            context, proposer, f"submit merge of availability {value!r} on {proposer}"
+        )
+        resp = _post_with_fresh_updated_at(
+            context, proposer, "/contract/submit", {}, proposer_h, "submit merge of availability"
+        )
+        assert resp.status_code == 200, (
+            f"submit merge of availability {value!r} on instance {proposer} failed: "
+            f"{resp.status_code} {resp.text}"
+        )
+
+    actual = str(_availability_in_document(_contract_data(context, proposer)) or "").strip()
+    assert actual == value, (
+        f"expected instance {proposer} to merge committed availability {value!r} into its "
+        f"formal document after Accept+Submit, last observed: {actual!r}"
+    )
+
+
 @step('instance {label} counter-offers a committed availability of "{value}" on the SLA contract')
 def step_when_counter_offer_availability(context, label, value):
-    """A structured redline: the counter-offer replaces the contract document
-    with one differing in a single negotiated value, which negotiate.go applies
-    immediately and the regenerator re-ships to the peer as a fresh PDF
-    (ADR-13). The whole document has to travel, so it is read from the copy
-    being negotiated rather than assembled here."""
+    """A structured redline on the negotiation channel. Propose does not apply
+    it to formal contract_data or re-ship a PDF; Accept+Submit (driven by the
+    Then step) merges and ships. The whole proposed document travels in
+    change_request, read from the copy being negotiated."""
     label = label.strip().upper()
     document = _contract_data(context, label)
     field = _field_by_fragment(document, "committed-availability")
@@ -1298,15 +1402,21 @@ def step_when_counter_offer_availability(context, label, value):
         f"instance {label}'s counter-offer of committed availability {value} was refused: "
         f"{resp.status_code} {resp.text}"
     )
+    _sla(context)["last_availability_proposer"] = label
+    _sla(context)["last_availability_value"] = value
 
 
 @then('the SLA contract shows a committed availability of "{value}" on instance {label} within a few seconds')
 def step_then_availability_value_on_instance(context, label, value):
+    label = label.strip().upper()
+    proposer = (_sla(context).get("last_availability_proposer") or label).strip().upper()
+    if str(_sla(context).get("last_availability_value") or "").strip() == value:
+        _settle_sla_availability_proposal(context, proposer, value)
+
     deadline = time.monotonic() + 120
     actual = None
     while time.monotonic() < deadline:
-        document = _contract_data(context, label)
-        actual = _literal_value(_field_by_fragment(document, "committed-availability").get("dcs:value"))
+        actual = _availability_in_document(_contract_data(context, label))
         if actual is not None and str(actual).strip() == value:
             return
         time.sleep(3)
@@ -1326,6 +1436,7 @@ def step_when_drive_to_reviewed(context, label):
     """
     label = label.strip().upper()
     party_h = _party_headers(context, label)
+    _wait_sla_negotiation_sync_clear(context, label, f"settling the SLA contract on {label}")
     # OFFERED and NEGOTIATION both leave via /contract/submit; the first submit
     # from OFFERED opens the round, and each further one folds the round into a
     # new contract version until none is open (submit.go). Driving on the state
@@ -1335,6 +1446,7 @@ def step_when_drive_to_reviewed(context, label):
         state = _contract_state(context, label)
         if state not in ("OFFERED", "NEGOTIATION"):
             break
+        _wait_sla_negotiation_sync_clear(context, label, f"submit while settling on {label}")
         response = _post_with_fresh_updated_at(context, label, "/contract/submit", {}, party_h, "submit")
         assert response.status_code == 200, (
             f"settling the SLA contract on instance {label} (state {state}) failed: "
@@ -1480,6 +1592,7 @@ def step_given_single_instance_sla_contract(context, name):
         template_create_url(context),
         {
             "template_type": "CONTRACT_TEMPLATE",
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": f"{name} Template {int(time.time())}",
             "description": "Federated SLA demonstrator, single-instance operation",
             "template_data": _fixture(),

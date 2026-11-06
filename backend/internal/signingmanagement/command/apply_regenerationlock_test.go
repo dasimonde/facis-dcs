@@ -82,7 +82,7 @@ func TestEveryTransactionThatRecordsASignatureTakesTheRegenerationLock(t *testin
 // between the last read and the first write: after DSS has answered, before the
 // ceremony is consumed. This pins both edges.
 func TestSubmitSignatureTakesTheRegenerationLockBetweenValidationAndTheWrites(t *testing.T) {
-	body := functionBody(t, "apply.go", "SubmitSignature")
+	body := functionBody(t, "apply.go", "submitSignature")
 
 	lock := lastCallPos(body, "acquireRegenerationLock")
 	validate := lastCallPos(body, "ValidatePDF")
@@ -103,6 +103,93 @@ func TestSubmitSignatureTakesTheRegenerationLockBetweenValidationAndTheWrites(t 
 	if lock > consume || lock > finalize {
 		t.Error("the regeneration lock is taken after a write: the regenerator can read this transaction's pre-signature state and render over the signed PDF")
 	}
+}
+
+// The PAdES-B-LTA extension of a QES contract (ADR-40) is a DSS and TSA round
+// trip, so it belongs with the validation: after it, because only a
+// validated signature is extended, and before the regeneration lock, for the
+// reason the test above gives. finalize must store the extended PDF, not the
+// submitted one.
+func TestSubmitSignatureExtendsToLTAAfterValidationAndBeforeTheLock(t *testing.T) {
+	if !reaches(packageCallGraph(t), "archivePDF", "ExtendPDF") {
+		t.Fatal("archivePDF no longer calls ExtendPDF: this test no longer checks what it claims")
+	}
+	body := functionBody(t, "apply.go", "submitSignature")
+
+	extend := lastCallPos(body, "archivePDF")
+	validate := lastCallPos(body, "ValidatePDF")
+	lock := lastCallPos(body, "acquireRegenerationLock")
+	if extend == token.NoPos {
+		t.Fatal("SubmitSignature no longer calls archivePDF")
+	}
+	if extend < validate {
+		t.Error("the LTA extension runs before DSS validation of the submitted signature")
+	}
+	if extend > lock {
+		t.Error("the LTA extension runs under the regeneration lock")
+	}
+
+	stored := assignedFrom(body, "archivePDF")
+	finalized := finalizeInputField(body, "signedPDF")
+	if stored == "" || finalized != stored {
+		t.Errorf("finalize stores %q, want the PDF archivePDF returned (%q)", finalized, stored)
+	}
+}
+
+// assignedFrom returns the name of the first variable that body assigns the
+// result of a call to name to.
+func assignedFrom(body *ast.BlockStmt, name string) string {
+	found := ""
+	ast.Inspect(body, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok || found != "" || len(assign.Rhs) != 1 || len(assign.Lhs) == 0 {
+			return true
+		}
+		call, ok := assign.Rhs[0].(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == name {
+			if ident, ok := assign.Lhs[0].(*ast.Ident); ok {
+				found = ident.Name
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// finalizeInputField returns the expression body sets field to in its
+// finalizeInput literal, as source-like text.
+func finalizeInputField(body *ast.BlockStmt, field string) string {
+	found := ""
+	ast.Inspect(body, func(n ast.Node) bool {
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		if typ, ok := lit.Type.(*ast.Ident); !ok || typ.Name != "finalizeInput" {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == field {
+				switch value := kv.Value.(type) {
+				case *ast.Ident:
+					found = value.Name
+				case *ast.SelectorExpr:
+					if x, ok := value.X.(*ast.Ident); ok {
+						found = x.Name + "." + value.Sel.Name
+					}
+				}
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // functionBody parses one file of this package and returns the body of the

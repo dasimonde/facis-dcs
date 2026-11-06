@@ -17,6 +17,8 @@ func mountSwaggerUI(mux goahttp.Muxer) {
 		specURL := "./openapi3.json"
 		html := buildSwaggerHTML(specURL)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		_, err := w.Write([]byte(html))
 		if err != nil {
 			log.Println("Failed to write response:", err)

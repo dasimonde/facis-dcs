@@ -64,7 +64,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	jwk := hsm.ECPublicKeyJWK(pub)
+	jwk, err := hsm.ECPublicKeyJWK(pub)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: encode key: %v\n", err)
+		os.Exit(1)
+	}
 	jwk["kid"] = "dev-key-1"
 	jwk["alg"] = "ES256"
 	jwk["x5c"] = []string{base64.StdEncoding.EncodeToString(certDER)}
@@ -90,7 +94,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gendid: create vc certificate: %v\n", err)
 		os.Exit(1)
 	}
-	vcJWK := hsm.ECPublicKeyJWK(vcPub)
+	vcJWK, err := hsm.ECPublicKeyJWK(vcPub)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: encode vc key: %v\n", err)
+		os.Exit(1)
+	}
 	vcJWK["kid"] = vcLabel
 	vcJWK["alg"] = "ES256"
 	vcJWK["x5c"] = []string{base64.StdEncoding.EncodeToString(vcCertDER)}
@@ -155,7 +163,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gendid: marshal: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil { // #nosec G306 -- did.json is a public document
 		fmt.Fprintf(os.Stderr, "gendid: write %s: %v\n", *out, err)
 		os.Exit(1)
 	}

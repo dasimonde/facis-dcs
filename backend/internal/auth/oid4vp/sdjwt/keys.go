@@ -9,14 +9,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"strings"
+
+	"digital-contracting-service/internal/base/ecutil"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// minRSAKeyBits is the smallest RSA issuer key accepted from an x5c leaf.
-const minRSAKeyBits = 2048
+// MinRSAKeyBits is the smallest RSA key accepted from a party outside this
+// instance (BSI TR-02102-1: at least 3000 bits; DCS-NFR-SEC-02).
+const MinRSAKeyBits = 3000
 
 // JWK is an EC P-256 public key used for SD-JWT verification.
 type JWK struct {
@@ -341,8 +343,8 @@ func leafVerificationKey(leaf *x509.Certificate) (any, error) {
 		}
 		return nil, fmt.Errorf("x5c leaf certificate uses unsupported curve %q", pk.Curve.Params().Name)
 	case *rsa.PublicKey:
-		if pk.N.BitLen() < minRSAKeyBits {
-			return nil, fmt.Errorf("x5c leaf certificate rsa key is %d bits, below the %d-bit minimum", pk.N.BitLen(), minRSAKeyBits)
+		if pk.N.BitLen() < MinRSAKeyBits {
+			return nil, fmt.Errorf("x5c leaf certificate rsa key is %d bits, below the %d-bit minimum", pk.N.BitLen(), MinRSAKeyBits)
 		}
 		return pk, nil
 	default:
@@ -627,29 +629,7 @@ func stringValue(v any) string {
 }
 
 func ecPublicKey(xB64, yB64 string) (*ecdsa.PublicKey, error) {
-	x, err := decodeCoordinate(xB64)
-
-	if err != nil {
-		return nil, err
-	}
-
-	y, err := decodeCoordinate(yB64)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
-}
-
-func decodeCoordinate(value string) (*big.Int, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(value)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return new(big.Int).SetBytes(raw), nil
+	return ecutil.FromJWKCoords(xB64, yB64)
 }
 
 // issuerBinding is how a leaf certificate was tied to the issuer identifier it

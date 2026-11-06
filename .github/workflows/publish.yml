@@ -18,6 +18,7 @@ jobs:
       platforms: "linux/amd64"
       dockerfile: "deployment/docker/Dockerfile"
       harbor_config: "deployment/harbor.config"
+      build_args: "GIT_SHA=${{ github.sha }},BUILD_TIME=${{ github.event.release.published_at }}"
 
   # Publishes the Helm chart to Harbor's OCI registry (DCS-OE-03: chart must
   # be published to a Helm repo, not only exist in-tree). Uses the same

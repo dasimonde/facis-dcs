@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/identity"
 )
 
@@ -48,8 +49,8 @@ func testDIDDocument(t *testing.T) *identity.DIDDocument {
 				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
-					"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-					"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+					"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+					"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 					"x5c": []string{base64.StdEncoding.EncodeToString(certDER)},
 				},
 			},
@@ -94,7 +95,7 @@ func TestJAdESSignVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("payload mismatch after verification:\n got %s\nwant %s", got, payload)
 	}
 	pub := doc.PublicKey()
-	if leaf.X.Cmp(pub.X) != 0 || leaf.Y.Cmp(pub.Y) != 0 {
+	if !ecutil.Equal(ecutil.AsPublic(leaf), ecutil.AsPublic(pub)) {
 		t.Fatal("expected the x5c leaf key to equal the DID document key")
 	}
 

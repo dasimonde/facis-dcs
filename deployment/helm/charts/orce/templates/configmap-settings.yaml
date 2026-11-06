@@ -1,0 +1,10 @@
+# Node-RED settings, mounted over /data/settings.js (deployment.yaml). It is the
+# image's file with an httpNodeMiddleware that keeps the raw request body for
+# signature checks (see the header of settings.js).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-orce-settings
+data:
+  settings.js: |
+    {{- .Files.Get "settings.js" | nindent 4 }}

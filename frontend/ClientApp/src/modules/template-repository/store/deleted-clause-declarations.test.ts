@@ -27,6 +27,7 @@ function seedClauseWithPlaceholder() {
     '@id': FIELD,
     '@type': 'dcs:ContractField',
     'dcs:label': 'Monthly fee',
+    'dcs:datatype': 'xsd:decimal',
     'dcs:required': true,
   })
   const root = store.layout.find((node) => node['dcs:isRoot'])
@@ -105,6 +106,7 @@ describe('a deleted clause withdraws what it bound', () => {
       '@id': OTHER_FIELD,
       '@type': 'dcs:ContractField',
       'dcs:label': 'Term',
+      'dcs:datatype': 'xsd:duration',
       'dcs:required': true,
     })
 

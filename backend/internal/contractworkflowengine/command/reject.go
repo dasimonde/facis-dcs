@@ -101,7 +101,7 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 		return err
 	}
 
-	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Rejected.String())
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update current state: %w", err)
 	}

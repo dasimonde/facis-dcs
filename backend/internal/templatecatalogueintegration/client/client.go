@@ -3,7 +3,9 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -310,6 +312,55 @@ func (c *FederatedCatalogueClient) PutRaw(ctx context.Context, path string, quer
 // Get sends a GET request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, query url.Values) (*Response, error) {
 	return c.doRequest(ctx, http.MethodGet, path, query, JSONContentType, JSONContentType, nil)
+}
+
+// PublishAsset posts a JSON-LD asset and returns its asset hash. FC names an
+// asset by the SHA-256 of its content, so an asset that already exists
+// (conflict_error) counts as published under that hash.
+func (c *FederatedCatalogueClient) PublishAsset(ctx context.Context, payload map[string]any) (string, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal asset payload: %w", err)
+	}
+	resp, err := c.PostRaw(ctx, AssetsEndpointPath, nil, JSONLDContentType, body)
+	if err != nil {
+		return "", fmt.Errorf("publish asset: %w", err)
+	}
+	sum := sha256.Sum256(body)
+	assetHash := hex.EncodeToString(sum[:])
+	switch {
+	case resp.StatusCode == http.StatusCreated:
+		var created struct {
+			AssetHash string `json:"assetHash"`
+		}
+		if json.Unmarshal(resp.Body, &created) == nil && created.AssetHash != "" {
+			assetHash = created.AssetHash
+		}
+		return assetHash, nil
+	case resp.StatusCode == http.StatusConflict && c.ExtractErrorCode(resp.Body) == "conflict_error":
+		return assetHash, nil
+	}
+	if message := c.ExtractErrorMessage(resp.Body); message != "" {
+		return "", fmt.Errorf("publish asset failed: %s", message)
+	}
+	return "", fmt.Errorf("publish asset failed with status %d", resp.StatusCode)
+}
+
+// RevokeAsset revokes an asset, which removes its claims from the catalogue
+// graph. An asset that is already revoked or unknown counts as revoked.
+func (c *FederatedCatalogueClient) RevokeAsset(ctx context.Context, assetHash string) error {
+	resp, err := c.Post(ctx, AssetsEndpointPath+"/"+url.PathEscape(assetHash)+"/revoke", nil, nil)
+	if err != nil {
+		return fmt.Errorf("revoke asset %s: %w", assetHash, err)
+	}
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300, resp.StatusCode == http.StatusNotFound, resp.StatusCode == http.StatusConflict:
+		return nil
+	}
+	if message := c.ExtractErrorMessage(resp.Body); message != "" {
+		return fmt.Errorf("revoke asset %s failed: %s", assetHash, message)
+	}
+	return fmt.Errorf("revoke asset %s failed with status %d", assetHash, resp.StatusCode)
 }
 
 // Delete sends a DELETE request to Federated Catalogue.

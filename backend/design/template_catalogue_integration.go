@@ -2,6 +2,8 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
+
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
@@ -12,6 +14,7 @@ var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("schema_version", Int, "Schema version of the contract template")
 	Attribute("participant_id", String, "Participant id")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
@@ -45,6 +48,8 @@ var TemplateCatalogueSearchRequest = Type("TemplateCatalogueSearchRequest", func
 
 	Token("token", String, "JWT token")
 
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
+	Attribute("template_type", String, "Template type", func() { Enum("CONTRACT_TEMPLATE", "COMPONENT") })
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
@@ -73,7 +78,9 @@ var TemplateCatalogueRetrieveByIDResponse = Type("TemplateCatalogueRetrieveByIDR
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("schema_version", Int, "Schema version of the contract template")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)")
 	Attribute("template_data", Any, "The template data of the contract template")
 	// Optional participant summary
 	Attribute("participant_id", String, "Issuer participant DID")
@@ -175,6 +182,8 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 			Param("version")
 			Param("name")
 			Param("description")
+			Param("party_type")
+			Param("template_type")
 			Param("offset")
 			Param("limit")
 			Response(StatusOK)

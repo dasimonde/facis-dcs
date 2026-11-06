@@ -3,21 +3,22 @@ import { computed } from 'vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
-import { ContractState } from '@/types/contract-state'
+import { ContractState, isEditableContractState } from '@/types/contract-state'
 import type { Contract } from '@/models/contract/contract'
 
 const props = defineProps<{
   contract: Contract
 }>()
 
+// Bulk selection (DCS-FR-CWE-24); the checkbox shows only when the list binds it.
+const selected = defineModel<boolean | undefined>('selected', { default: undefined })
+
 const { isCreator } = useContractPermissions()
 
 const contractsStore = useContractsStore()
 
 const canEdit = computed(() => {
-  return (
-    (props.contract.state === ContractState.draft || props.contract.state === ContractState.rejected) && isCreator.value
-  )
+  return isEditableContractState(props.contract.state) && isCreator.value
 })
 
 const hasNegotiationTask = computed(() => contractsStore.hasNegotiationTask(props.contract))
@@ -133,47 +134,59 @@ function isTemplateVersionErrorVisible(contract: Contract) {
 
         <h2 class="card-title justify-between">
           <div class="flex min-w-0 flex-1 items-center gap-2">
+            <input
+              v-if="selected !== undefined"
+              v-model="selected"
+              type="checkbox"
+              class="checkbox checkbox-sm"
+              :aria-label="`Select ${contract.name ?? contract.did}`"
+              :data-testid="`select-${contract.did}`"
+            />
             <div class="truncate">Name: {{ contract.name }}</div>
           </div>
           <div class="ml-10 badge shrink-0 badge-secondary">{{ contract.state }}</div>
         </h2>
-        <div class="flex justify-start">
-          <div v-if="contract.contract_version">Version: {{ contract.contract_version }}</div>
-        </div>
-        <div class="flex min-w-0 justify-between">
-          <div>Creation date: {{ new Date(contract.created_at).toLocaleString() }}</div>
-          <div v-if="contract.description" class="hidden min-w-0 flex-1 truncate px-10 sm:block">
+        <div class="flex min-w-0 items-end justify-between gap-4">
+          <div class="flex min-w-0 flex-col gap-0.5 text-sm leading-snug">
+            <div v-if="contract.contract_version">Version: {{ contract.contract_version }}</div>
+            <div v-if="contract.responsible?.creator" class="min-w-0 break-all">
+              Responsible party: {{ contract.responsible.creator }}
+            </div>
+            <div v-if="contract.responsible?.counterparty" class="min-w-0 break-all">
+              Counterparty: {{ contract.responsible.counterparty }}
+            </div>
+            <div>Creation date: {{ new Date(contract.created_at).toLocaleString() }}</div>
+            <div v-if="contract.start_date">Start date: {{ new Date(contract.start_date).toLocaleString() }}</div>
+            <div v-if="contract.exp_date">Expiration date: {{ new Date(contract.exp_date).toLocaleString() }}</div>
+          </div>
+          <div v-if="contract.description" class="hidden min-w-0 flex-1 truncate px-4 sm:block">
             {{ contract.description }}
           </div>
-          <div class="card-actions justify-end">
-            <RouterLink
-              :to="{ name: resolveViewRouteName, params: { did: contract.did } }"
-              class="btn btn-sm btn-primary"
+          <div class="flex shrink-0 flex-col items-end gap-2">
+            <div
+              v-if="contract.exp_date && timeUntil(contract.exp_date).totalDays > 0"
+              :class="expirationBadgeClass(timeUntil(contract.exp_date), contract.exp_notice_period)"
             >
-              View
-            </RouterLink>
-            <RouterLink
-              v-if="canEdit"
-              :to="{
-                name: ROUTES.CONTRACTS.EDIT,
-                params: { did: contract.did },
-              }"
-              class="btn gap-2 btn-sm btn-primary"
-            >
-              Edit
-            </RouterLink>
-          </div>
-        </div>
-        <div v-if="contract?.start_date" class="flex justify-between">
-          <div>Start date: {{ new Date(contract?.start_date ?? '').toLocaleString() }}</div>
-        </div>
-        <div v-if="contract?.exp_date" class="flex justify-between">
-          <div>Expiration date: {{ new Date(contract?.exp_date ?? '').toLocaleString() }}</div>
-          <div
-            v-if="timeUntil(contract?.exp_date).totalDays > 0"
-            :class="expirationBadgeClass(timeUntil(contract?.exp_date), contract?.exp_notice_period)"
-          >
-            {{ expirationMessage(timeUntil(contract?.exp_date)) }}
+              {{ expirationMessage(timeUntil(contract.exp_date)) }}
+            </div>
+            <div class="card-actions justify-end">
+              <RouterLink
+                :to="{ name: resolveViewRouteName, params: { did: contract.did } }"
+                class="btn btn-sm btn-primary"
+              >
+                View
+              </RouterLink>
+              <RouterLink
+                v-if="canEdit"
+                :to="{
+                  name: ROUTES.CONTRACTS.EDIT,
+                  params: { did: contract.did },
+                }"
+                class="btn gap-2 btn-sm btn-primary"
+              >
+                Edit
+              </RouterLink>
+            </div>
           </div>
         </div>
       </div>

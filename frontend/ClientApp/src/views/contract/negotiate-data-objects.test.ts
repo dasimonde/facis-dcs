@@ -18,6 +18,7 @@ vi.mock(import('vue-router'), async (importOriginal) => ({
 
 vi.mock('@/services/did-service', () => ({
   getLocalDIDFile: () => Promise.resolve({ id: 'did:web:example.com' }),
+  resolveLocalInstanceDid: () => Promise.resolve('did:web:example.com'),
 }))
 
 const contractDocument = {

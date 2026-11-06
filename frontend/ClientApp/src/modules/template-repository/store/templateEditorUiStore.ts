@@ -10,6 +10,9 @@ import type {
   TemplateEditorUiState,
 } from '@template-repository/models/template-editor-ui-store'
 
+// The roles design/template_repository.go audit() accepts (DCS-IR-TR-07: Template Manager).
+export const templateAuditRoles: UserRole[] = ['AUDITOR', 'COMPLIANCE_OFFICER', 'TEMPLATE_MANAGER']
+
 const storeId = 'templateEditorUi'
 const defaultState: Readonly<TemplateEditorUiState> = {
   activeTab: 'details',
@@ -77,8 +80,7 @@ export const useTemplateEditorUiStore = defineStore(storeId, {
     },
     availableTabs(templateType: TemplateTypeValue) {
       const isAuditingAuthorized =
-        (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => useAuthStore().user?.roles?.includes(role)) ??
-        false
+        templateAuditRoles.some((role) => useAuthStore().user?.roles?.includes(role)) ?? false
       const tabs = this.tabs.filter((tab) => tab.id !== 'audit' || isAuditingAuthorized)
       if (templateType === TemplateType.component) return tabs
       return tabs.filter((tab) => tab.id !== 'clauses')

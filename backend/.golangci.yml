@@ -6,10 +6,18 @@ linters:
   default: none
   enable:
     - errcheck
+    - gosec
     - govet
     - ineffassign
     - staticcheck
     - unused
+  exclusions:
+    rules:
+      # gosec (DCS-NFR-SEC-15) checks the shipped code. Tests use fixture
+      # credentials, testdata paths and unbounded httptest handlers on purpose.
+      - path: _test\.go
+        linters:
+          - gosec
   settings:
     staticcheck:
       checks:

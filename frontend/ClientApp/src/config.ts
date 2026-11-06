@@ -4,9 +4,20 @@ export interface DCSConfig {
   API_BASE_URL: string
 }
 
+export interface DCSBuildRevision {
+  git_sha: string
+  built_at?: string
+}
+
+export interface DCSVersionInfo {
+  frontend: DCSBuildRevision
+  backend?: DCSBuildRevision
+}
+
 declare global {
   interface Window {
     DCS_CONFIG?: DCSConfig
+    __DCS_VERSION__?: DCSVersionInfo
   }
 }
 

@@ -1,0 +1,45 @@
+{{- $name := printf "%s-loki" .Release.Name }}
+# Log store (DCS-NFR-SEC-09). Single binary, filesystem storage, retention by
+# the compactor.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  loki.yaml: |
+    # Loopback only: the gateway in the pod (gateway-config.yaml) serves TLS and
+    # admits only pushes and queries.
+    auth_enabled: false
+    server:
+      http_listen_address: 127.0.0.1
+      http_listen_port: 3110
+      grpc_listen_address: 127.0.0.1
+      grpc_listen_port: 9095
+    common:
+      path_prefix: /var/loki
+      replication_factor: 1
+      instance_addr: 127.0.0.1
+      ring:
+        kvstore:
+          store: inmemory
+      storage:
+        filesystem:
+          chunks_directory: /var/loki/chunks
+          rules_directory: /var/loki/rules
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+    compactor:
+      working_directory: /var/loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem
+    limits_config:
+      retention_period: {{ .Values.retention }}
+    analytics:
+      reporting_enabled: false

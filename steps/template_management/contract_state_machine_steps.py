@@ -475,6 +475,7 @@ def step_given_draft_with_open_placeholder(context, name):
             "@type": "dcs:ContractField",
             "dcs:label": "Payment Amount",
             "dcs:datatype": "xsd:decimal",
+            "dcs:shape": {"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-amount"},
             "dcs:required": True,
         }
     ]
@@ -488,35 +489,50 @@ def step_given_draft_with_open_placeholder(context, name):
 @when('the initiator fills the required placeholder of contract "{name}" with "{value}"')
 def step_when_fill_required_placeholder(context, name, value):
     from steps.support.api_client import contract_update_url, put_json  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
 
     did, _ = ContractService._contract_data(context, name)
     headers = _seed_headers(context, name)
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=headers)
-    assert retrieve.status_code == 200, retrieve.text
-    body = retrieve.json()
-    contract_data = body.get("contract_data")
-    assert contract_data, f"contract '{name}' has no contract_data: {body}"
 
-    filled = 0
-    for field in contract_data.get("dcs:contractFields") or []:
-        if field.get("dcs:required") and not field.get("dcs:value"):
-            # A fill is a typed literal carrying the field's declared
-            # datatype — the lexical string keeps the exact agreed token.
-            field["dcs:value"] = {"@value": value, "@type": field.get("dcs:datatype", "xsd:string")}
-            filled += 1
-    assert filled, (
-        f"contract '{name}' has no unfilled required field to fill: "
-        f"{contract_data.get('dcs:contractFields')}"
-    )
+    # Offer (even when refused for closedness) and async PDF writers can bump
+    # updated_at between retrieve and Update — same lost-update flake as PACM
+    # resume / template submit. Re-fetch and retry on conflict.
+    resp = None
+    for _ in range(4):
+        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=headers)
+        assert retrieve.status_code == 200, retrieve.text
+        body = retrieve.json()
+        contract_data = body.get("contract_data")
+        assert contract_data, f"contract '{name}' has no contract_data: {body}"
 
-    resp = put_json(
-        context,
-        contract_update_url(context),
-        {"did": did, "updated_at": body.get("updated_at"), "contract_data": contract_data},
-        headers=headers,
-    )
-    assert resp.status_code == 200, (
-        f"Filling the required placeholder of '{name}' failed: {resp.status_code} {resp.text}"
+        filled = 0
+        for field in contract_data.get("dcs:contractFields") or []:
+            if field.get("dcs:required") and not field.get("dcs:value"):
+                # A fill is a typed literal carrying the field's declared
+                # datatype — the lexical string keeps the exact agreed token.
+                field["dcs:value"] = {"@value": value, "@type": field.get("dcs:datatype", "xsd:string")}
+                filled += 1
+        assert filled, (
+            f"contract '{name}' has no unfilled required field to fill: "
+            f"{contract_data.get('dcs:contractFields')}"
+        )
+
+        resp = put_json(
+            context,
+            contract_update_url(context),
+            {"did": did, "updated_at": body.get("updated_at"), "contract_data": contract_data},
+            headers=headers,
+        )
+        if resp.status_code == 200:
+            break
+        if resp.status_code != 409 and "updated elsewhere" not in resp.text.lower():
+            break
+        _time.sleep(0.5)
+
+    assert resp is not None and resp.status_code == 200, (
+        f"Filling the required placeholder of '{name}' failed: "
+        f"{resp.status_code if resp is not None else 'no request'} "
+        f"{resp.text if resp is not None else ''}"
     )
     ContractService._refresh_contract(context, name)
 
@@ -853,7 +869,7 @@ def step_then_contract_has_audit_event(context, name, event_type):
     event_types = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
         events = resp.json()
         assert isinstance(events, list), f"Expected audit response to be a list, got: {events}"
@@ -893,7 +909,7 @@ def step_then_create_event_has_effective_timestamp(context):
     events = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, (
             f"Audit query failed for created contract '{did}': "
             f"{resp.status_code} {resp.text}"
@@ -943,7 +959,7 @@ def step_then_terminate_event_records_payload(context, name, reason):
     record = None
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, (
             f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
         )
@@ -1002,7 +1018,7 @@ def step_then_submit_event_records_finding(context, name, finding):
     events = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, (
             f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
         )

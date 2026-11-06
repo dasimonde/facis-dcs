@@ -6,9 +6,11 @@ creation/evidence content is covered by
 exercises the archive endpoints themselves.
 """
 
+import base64
 import time
+from urllib.parse import quote
 
-from behave import given, then, when
+from behave import given, step, then, when
 
 from steps.support.api_client import (
     pac_audit_timeline,
@@ -114,16 +116,38 @@ def _archive_store_url(context) -> str:
     return f"{context.base_url}/archive/store"
 
 
-@when("the Archive Manager stores a contract in the archive")
-def step_when_archive_manager_stores(context):
+def _evidence_payload(did: str, name: str) -> dict:
+    return {
+        "kind": "evidence",
+        "did": did,
+        "name": name,
+        "media_type": "text/plain",
+        "content": base64.b64encode(b"BDD archive evidence").decode(),
+    }
+
+
+@when('the Archive Manager stores evidence "{evidence}" for the archived contract "{name}"')
+def step_when_archive_manager_stores_evidence(context, evidence, name):
+    did, _ = ContractService._contract_data(context, name)
     headers = AuthService.get_headers_for_roles(["Archive Manager"])
-    context.requests_response = post_json(context, _archive_store_url(context), {}, headers=headers)
+    context.requests_response = post_json(context, _archive_store_url(context), _evidence_payload(did, evidence), headers=headers)
 
 
-@when("I attempt to store a contract in the archive with my current role")
-def step_when_attempt_store_archive(context):
+@when('I attempt to store evidence for the archived contract "{name}" with my current role')
+def step_when_attempt_store_archive(context, name):
+    did, _ = ContractService._contract_data(context, name)
     headers = getattr(context, "headers", {})
-    context.requests_response = post_json(context, _archive_store_url(context), {}, headers=headers)
+    context.requests_response = post_json(context, _archive_store_url(context), _evidence_payload(did, "refused.txt"), headers=headers)
+
+
+@then('the archive evidence of contract "{name}" includes "{evidence}"')
+def step_then_archive_evidence_includes(context, name, evidence):
+    did, _ = ContractService._contract_data(context, name)
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    response = get_with_headers(context, f"{context.base_url}/archive/evidence?did={quote(did, safe='')}", headers=headers)
+    assert response.status_code == 200, f"/archive/evidence failed: {response.status_code} {response.text}"
+    names = [item.get("name") for item in response.json()]
+    assert evidence in names, f"Expected evidence {evidence!r} for {did}, got {names}"
 
 
 @when('the Archive Manager deletes the archived contract "{name}" with justification "{justification}"')
@@ -418,6 +442,15 @@ def step_given_contract_expires_soon(context, name, days):
     cursor.close()
 
 
+@step('the Contract Manager terminates contract "{name}" before the archive deletion')
+def step_terminate_before_archive_deletion(context, name):
+    """Only a contract that is no longer in force can be deleted from the
+    archive (contractstate.Erasable)."""
+    from steps.template_management.contract_state_machine_steps import _terminate_contract  # noqa: PLC0415
+
+    _terminate_contract(context, name)
+
+
 @when("the Archive Manager retrieves the archive statistics")
 def step_when_archive_manager_retrieves_statistics(context):
     headers = AuthService.get_headers_for_roles(["Archive Manager"])
@@ -441,9 +474,17 @@ def step_then_statistics_counts_archive(context):
 @then("the archive statistics report a compliant archive entry")
 def step_then_statistics_compliant(context):
     body = context.requests_response.json()
-    assert body.get("compliant_total", 0) >= 1, (
-        f"expected at least one compliant entry (snapshot + content hash + signature "
-        f"metadata + TSA receipt): {body}"
+    if body.get("compliant_total", 0) >= 1:
+        return
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    verdicts = get_with_headers(context, f"{context.base_url}/archive/compliance", headers=headers)
+    failed = [
+        {"did": item.get("did"), "failed": [c for c in item.get("checks", []) if not c.get("passed")]}
+        for item in (verdicts.json() if verdicts.status_code == 200 else [])
+    ][:3]
+    raise AssertionError(
+        f"expected at least one entry that passes every archive compliance rule: {body}; "
+        f"failed rules of the first entries: {failed or verdicts.text}"
     )
 
 
@@ -477,7 +518,11 @@ def step_then_statistics_recent_action(context, name):
     deadline = time.time() + 90
     actions = []
     while time.time() < deadline:
-        response = get_with_headers(context, archive_statistics_url(context), headers=headers)
+        # The actors are shown only to a request that gives a justification
+        # (DCS-FR-PACM-04).
+        response = get_with_headers(
+            context, archive_statistics_url(context) + "?justification=BDD+recent+archive+actions", headers=headers
+        )
         if response.status_code == 200:
             actions = response.json().get("recent_actions", [])
             matching = [action for action in actions if action.get("did") == did]

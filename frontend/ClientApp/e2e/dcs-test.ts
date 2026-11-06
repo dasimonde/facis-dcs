@@ -16,6 +16,7 @@ export type DcsRole =
   | 'Contract Approver'
   | 'Contract Manager'
   | 'Contract Signer'
+  | 'Contract Observer'
   | 'Auditor'
   | 'Archive Manager'
   | 'Sys. Administrator'
@@ -28,11 +29,19 @@ interface RoleSession {
   cookies: { name: string; value: string; domain: string; path: string }[]
 }
 
+export const E2E_ORG_A = 'Acme Corp'
+export const E2E_ORG_B = 'TechVendor Inc'
+
 /** Mints a FRESH OID4VP session for the role against the given instance's
  *  API base — Hydra rotates refresh tokens (single use), so sessions cannot
  *  be shared across tests. `apiBase` selects the instance (A or the DCS-to-DCS
- *  peer B); the status-list service is shared at the localhost origin. */
-export function mintSession(role: DcsRole, apiBase: string = E2E_API_BASE): RoleSession {
+ *  peer B); the status-list service is shared at the localhost origin.
+ *  `organization` is the participant identity carried as created_by. */
+export function mintSession(
+  role: DcsRole,
+  apiBase: string = E2E_API_BASE,
+  organization: string = E2E_ORG_A,
+): RoleSession {
   const repoRoot = path.resolve(here, '..', '..', '..')
   const python = process.env.E2E_BDD_PYTHON || path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
   const script = `
@@ -42,8 +51,8 @@ sys.path.insert(0, ${JSON.stringify(path.resolve(here, '..', '..', '..'))})
 from steps.support import localhost_resolver
 localhost_resolver.install()
 from steps.support.services.auth_service import AuthService
-role, api_base = sys.argv[1], sys.argv[2]
-credentials = AuthService.parse_auth_credentials([role], None)
+role, api_base, organization = sys.argv[1], sys.argv[2], sys.argv[3]
+credentials = AuthService.parse_auth_credentials([role], organization)
 session = requests.Session()
 session.headers.update({"User-Agent": "dcs-e2e-auth", "Accept": "application/json"})
 initiation = AuthService.initiate_login(session, api_base, timeout=60)
@@ -56,7 +65,7 @@ print(json.dumps({"token": access_token, "cookies": [
     {"name": c.name, "value": c.value, "domain": c.domain, "path": c.path or "/"} for c in session.cookies
 ]}))
 `
-  const stdout = execFileSync(python, ['-c', script, role, apiBase], {
+  const stdout = execFileSync(python, ['-c', script, role, apiBase, organization], {
     cwd: repoRoot,
     encoding: 'utf-8',
     timeout: 120_000,

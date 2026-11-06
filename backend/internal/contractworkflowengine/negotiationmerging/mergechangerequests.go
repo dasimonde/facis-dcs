@@ -66,9 +66,12 @@ func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo
 	}
 	for _, changeRequest := range changeRequests {
 
-		var change ChangeRequest
-		if err := json.Unmarshal(*changeRequest.ChangeRequest, &change); err != nil {
-			return nil, nil, fmt.Errorf("could not unmarshal change request: %w", err)
+		change, note, err := Decode(*changeRequest.ChangeRequest)
+		if err != nil {
+			return nil, nil, fmt.Errorf("negotiation %s: %w", changeRequest.ID, err)
+		}
+		if note {
+			continue
 		}
 
 		discarded.claim(changeRequest.ID, fieldsSetBy(change))
@@ -106,6 +109,18 @@ func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo
 		}
 
 		if change.ContractData != nil {
+			// Under the old Propose-applied-immediately path the formal
+			// document may already carry this redline. Skipping the replace
+			// keeps last-accepted-wins from treating an already-materialized
+			// document as a fresh winner that drops a later accepted request's
+			// content.
+			alreadyApplied, err := ContractDataAlreadyEquals(contractData, *change.ContractData)
+			if err != nil {
+				return nil, nil, err
+			}
+			if alreadyApplied {
+				continue
+			}
 			updatedContractData, err := mergeContractDataChange(contractData, *change.ContractData)
 			if err != nil {
 				return nil, nil, err
@@ -118,8 +133,17 @@ func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo
 			if err != nil {
 				return nil, nil, fmt.Errorf("contract data validation failed after merging change requests: %w", err)
 			}
+			// Redlines are whole documents from the editor; they omit the hub
+			// pin. Carry it from the round-start stored copy (same as Submit /
+			// Update), not from an earlier merge step that already dropped it.
+			normalizedContractData, err = validation.CarrySemanticBundle(contract.ContractData, normalizedContractData)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to carry semantic bundle after merging change requests: %w", err)
+			}
 			updateData.ContractData = normalizedContractData
-			contractData = updatedContractData
+			if err := json.Unmarshal(*normalizedContractData, &contractData); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal carried contract data: %w", err)
+			}
 		}
 	}
 

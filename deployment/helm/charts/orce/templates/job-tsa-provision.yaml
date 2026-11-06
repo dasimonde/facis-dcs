@@ -60,9 +60,20 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ .Release.Name }}-orce-tsa-provision
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
+        # The ORCE image carries curl, jq and openssl: nothing is installed at
+        # run time.
         - name: tsa-provision
-          image: alpine:3.19
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with (.Values.jobResources | default .Values.resources) }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -79,23 +90,6 @@ spec:
             - -c
             - |
               set -eu
-              # Installed at run time because no pinned image carries all three
-              # (the chart's other hooks use alpine/k8s, which has no openssl).
-              # A single attempt makes every deploy depend on a package mirror
-              # being reachable at that instant: one hiccup fails the pre-upgrade
-              # hook and the whole release with it. Retry, and let the last
-              # failure print rather than swallowing it into /dev/null.
-              for attempt in 1 2 3; do
-                if apk add --no-cache curl jq openssl > /dev/null 2>/tmp/apk.err; then
-                  break
-                fi
-                if [ "$attempt" = 3 ]; then
-                  echo "apk add failed after 3 attempts:" >&2
-                  cat /tmp/apk.err >&2
-                  exit 1
-                fi
-                sleep 3
-              done
 
               k8s_host="https://kubernetes.default.svc"
               ca_path="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -127,4 +121,10 @@ spec:
                 --data "$payload" "$create_url" > /dev/null
               echo "Created secret ${SECRET_NAME}."
               openssl x509 -in /tmp/tsa-cert.pem -noout -subject -enddate
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 {{- end }}

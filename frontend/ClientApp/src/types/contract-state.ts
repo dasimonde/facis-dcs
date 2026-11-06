@@ -20,3 +20,18 @@ export const ContractState = {
 } as const
 
 export const contractStates: ContractState[] = Object.values(ContractState)
+
+// A rejected contract is back in draft status (DCS-FR-CWE-15): its creator edits
+// and resubmits it like a draft.
+export const isEditableContractState = (state?: string): boolean =>
+  state === ContractState.draft || state === ContractState.rejected
+
+// A contract out of force (backend contractstate.Erasable): its archive entry
+// can be deleted and its keys shredded (DCS-FR-CSA-17). It cannot be terminated.
+export const erasableContractStates: string[] = [
+  ContractState.terminated,
+  ContractState.expired,
+  ContractState.revoked,
+  ContractState.rejected,
+  ContractState.withdrawn,
+]

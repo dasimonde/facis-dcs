@@ -47,7 +47,7 @@ func HashFiles(files map[string]string) (map[string]string, error) {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 		if err != nil {
 			return nil, fmt.Errorf("config file %q (%s) is not readable: %w", name, path, err)
 		}

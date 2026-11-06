@@ -217,17 +217,17 @@ func renderContentStream(page pageLayout) string {
 		if tag == "" {
 			tag = "/P"
 		}
-		builder.WriteString(fmt.Sprintf("%s <</MCID %d>> BDC\n", tag, line.MCID))
+		fmt.Fprintf(&builder, "%s <</MCID %d>> BDC\n", tag, line.MCID)
 		builder.WriteString("BT\n")
-		builder.WriteString(fmt.Sprintf("/F1 %.2f Tf\n", line.FontSize))
+		fmt.Fprintf(&builder, "/F1 %.2f Tf\n", line.FontSize)
 		builder.WriteString("0 g\n")
 		if lineUsesBoldTextMode(line.Kind) {
 			builder.WriteString("0 G\n0.35 w\n2 Tr\n")
 		} else {
 			builder.WriteString("0 Tr\n")
 		}
-		builder.WriteString(fmt.Sprintf("1 0 0 1 %.2f %.2f Tm\n", line.X, line.Y))
-		builder.WriteString(fmt.Sprintf("(%s) Tj\n", escapePDFString(line.Text)))
+		fmt.Fprintf(&builder, "1 0 0 1 %.2f %.2f Tm\n", line.X, line.Y)
+		fmt.Fprintf(&builder, "(%s) Tj\n", escapePDFString(line.Text))
 		builder.WriteString("ET\nEMC\n")
 	}
 	return builder.String()
@@ -663,12 +663,12 @@ func renderSigFieldAppearanceStream(sigField sigFieldWidget) string {
 	var builder strings.Builder
 	builder.WriteString("q\n")
 	builder.WriteString("0.95 0.95 0.95 rg\n")
-	builder.WriteString(fmt.Sprintf("0 0 %.2f %.2f re f\n", width, height))
+	fmt.Fprintf(&builder, "0 0 %.2f %.2f re f\n", width, height)
 	builder.WriteString("0 0 0 RG\n1 w\n")
-	builder.WriteString(fmt.Sprintf("0 0 %.2f %.2f re S\n", width, height))
+	fmt.Fprintf(&builder, "0 0 %.2f %.2f re S\n", width, height)
 	builder.WriteString("BT\n/F1 11 Tf\n0 g\n")
-	builder.WriteString(fmt.Sprintf("1 0 0 1 10 %.2f Tm\n", height-24))
-	builder.WriteString(fmt.Sprintf("(%s) Tj\n", escapePDFString(label)))
+	fmt.Fprintf(&builder, "1 0 0 1 10 %.2f Tm\n", height-24)
+	fmt.Fprintf(&builder, "(%s) Tj\n", escapePDFString(label))
 	builder.WriteString("ET\nQ\n")
 	return builder.String()
 }
@@ -804,21 +804,21 @@ func serializePDF(objects []pdfObject, rootID int, fileID string) []byte {
 	offsets := make([]int, maxID+1)
 	for _, object := range objects {
 		offsets[object.ID] = builder.Len()
-		builder.WriteString(fmt.Sprintf("%d 0 obj\n", object.ID))
+		fmt.Fprintf(&builder, "%d 0 obj\n", object.ID)
 		builder.Write(object.Data)
 		builder.WriteString("\nendobj\n")
 	}
 	startxref := builder.Len()
-	builder.WriteString(fmt.Sprintf("xref\n0 %d\n", maxID+1))
+	fmt.Fprintf(&builder, "xref\n0 %d\n", maxID+1)
 	builder.WriteString("0000000000 65535 f \n")
 	for id := 1; id <= maxID; id++ {
 		if offsets[id] == 0 {
 			builder.WriteString("0000000000 00000 f \n")
 			continue
 		}
-		builder.WriteString(fmt.Sprintf("%010d 00000 n \n", offsets[id]))
+		fmt.Fprintf(&builder, "%010d 00000 n \n", offsets[id])
 	}
-	builder.WriteString(fmt.Sprintf("trailer\n<< /Size %d /Root %d 0 R /ID [<%s> <%s>] >>\nstartxref\n%d\n%%%%EOF\n", maxID+1, rootID, fileID, fileID, startxref))
+	fmt.Fprintf(&builder, "trailer\n<< /Size %d /Root %d 0 R /ID [<%s> <%s>] >>\nstartxref\n%d\n%%%%EOF\n", maxID+1, rootID, fileID, fileID, startxref)
 	return builder.Bytes()
 }
 

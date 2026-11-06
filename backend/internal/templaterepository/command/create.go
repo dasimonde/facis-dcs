@@ -23,19 +23,24 @@ import (
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 )
 
 type CreateCmd struct {
+	PartyType    string
 	DID          string
 	CreatedBy    string
 	TemplateType contracttemplatetype.ContractTemplateType
 	Name         *string
 	Description  *string
 	TemplateData *datatype.JSON
-	HolderDID    string
-	UserRoles    userrole.UserRoles
+	// TemplateLevel defaults to AGREEMENT when empty.
+	TemplateLevel     string
+	RequiredTemplates []string
+	HolderDID         string
+	UserRoles         userrole.UserRoles
 }
 
 type Creator struct {
@@ -44,9 +49,12 @@ type Creator struct {
 }
 
 func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
+	if _, err := partytype.New(cmd.PartyType); err != nil {
+		return err
+	}
 	normalizedTemplateData, err := validation.NormalizeTemplateDataForPersistence(cmd.TemplateData, cmd.DID)
 	if err != nil {
-		return fmt.Errorf("template data validation failed: %w", err)
+		return fmt.Errorf("%w: template data validation failed: %w", ErrInvalidRequest, err)
 	}
 	cmd.TemplateData = normalizedTemplateData
 
@@ -61,13 +69,16 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	}(tx)
 
 	data := db.ContractTemplate{
-		DID:          cmd.DID,
-		CreatedBy:    cmd.CreatedBy,
-		State:        contracttemplatestate.Draft.String(),
-		TemplateType: cmd.TemplateType.String(),
-		Name:         cmd.Name,
-		Description:  cmd.Description,
-		TemplateData: cmd.TemplateData,
+		DID:                cmd.DID,
+		CreatedBy:          cmd.CreatedBy,
+		State:              contracttemplatestate.Draft.String(),
+		TemplateType:       cmd.TemplateType.String(),
+		PartyType:          cmd.PartyType,
+		Name:               cmd.Name,
+		Description:        cmd.Description,
+		TemplateData:       cmd.TemplateData,
+		SearchableMetadata: db.SearchableMetadata{},
+		Structure:          db.Structure{TemplateLevel: cmd.TemplateLevel, RequiredTemplates: cmd.RequiredTemplates},
 	}
 	createdAt, err := h.CTRepo.Create(ctx, tx, data)
 	if err != nil {

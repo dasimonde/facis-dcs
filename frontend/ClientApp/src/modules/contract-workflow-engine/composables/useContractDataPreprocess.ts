@@ -30,9 +30,13 @@ export function useContractDataPreprocess() {
     if (!isDcsDocumentData(cd)) return null
 
     const contractData = cd as DcsContractData
+    const rawLayout = contractData['dcs:documentStructure']?.['dcs:layout']
+    const layout = Array.isArray(rawLayout) ? rawLayout : rawLayout?.['@list']
+    if (!Array.isArray(layout)) return null
+
     return {
       blocks: contractData['dcs:documentStructure']['dcs:blocks']['@list'],
-      layout: contractData['dcs:documentStructure']['dcs:layout']['@list'],
+      layout,
       contractFields: contractData['dcs:contractFields'],
       contractData: contractData['dcs:contractData'],
       policies: flattenPolicySet(contractData['dcs:policies']),

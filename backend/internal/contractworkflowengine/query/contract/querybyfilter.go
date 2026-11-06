@@ -20,17 +20,22 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/expirationpolicy"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	"digital-contracting-service/internal/semantichub"
 )
 
 type GetAllMetadataByFilterQry struct {
+	SemanticFilters string
 	RetrievedBy     string
 	DID             string
 	ContractVersion int
-	State           *contractstate.ContractState
+	States          []string
 	Name            string
 	Description     string
 	ContractData    string
 	ParentDID       string
+	ValidUntil      *time.Time
+	Party           string
+	TemplateDID     string
 	HolderDID       string
 	Pagination      datatype.Pagination
 	UserRoles       userrole.UserRoles
@@ -69,19 +74,22 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		}
 	}(tx)
 
-	var state string
-	if query.State != nil {
-		state = query.State.String()
+	semanticFilters, err := semantichub.ResolveSearchFilters(ctx, tx, query.SemanticFilters)
+	if err != nil {
+		return nil, err
 	}
-
 	searchValues := db.SearchValues{
+		SemanticFilters: semanticFilters,
 		DID:             query.DID,
 		ContractVersion: query.ContractVersion,
-		State:           state,
+		States:          query.States,
 		Name:            query.Name,
 		Description:     query.Description,
 		ContractData:    query.ContractData,
 		ParentDID:       query.ParentDID,
+		ValidUntil:      query.ValidUntil,
+		Party:           query.Party,
+		TemplateDID:     query.TemplateDID,
 	}
 
 	contracts, err := h.CRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues, query.Pagination)

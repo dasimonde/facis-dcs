@@ -22,6 +22,9 @@ import type {
   ContractTemplateAuditResponse,
   ContractTemplateCopyResponse,
   ContractTemplateCreateResponse,
+  ContractTemplateHistoryResponse,
+  ContractTemplatePdfVerifyResponse,
+  ContractTemplateProvenanceResponse,
   ContractTemplatePublishResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
@@ -42,6 +45,7 @@ export interface ContractTemplateService {
   search: (request: ContractTemplateSearchRequest) => Promise<ContractTemplateSearchResponse>
   retrieve: (request?: ContractTemplateRetrieveRequest) => Promise<ContractTemplateRetrieveResponse>
   retrieveById: (request: ContractTemplateRetrieveByIdRequest) => Promise<ContractTemplate | null>
+  retrieveHistory: (did: string) => Promise<ContractTemplateHistoryResponse>
   approve: (request: ContractTemplateApproveRequest) => Promise<ContractTemplateApproveResponse>
   reject: (request: ContractTemplateRejectRequest) => Promise<ContractTemplateRejectResponse>
   verify: (request: ContractTemplateVerifyRequest) => Promise<ContractTemplateVerifyResponse>
@@ -50,7 +54,7 @@ export interface ContractTemplateService {
   audit: (request: ContractTemplateAuditRequest) => Promise<ContractTemplateAuditResponse>
   publish: (request: ContractTemplatePublishRequest) => Promise<ContractTemplatePublishResponse>
   exportPdf: (did: string) => Promise<Blob>
-  verifyPdf: (
-    did: string,
-  ) => Promise<{ match: boolean; jsonld_hash: string; base_pdf_hash: string; stored_base_pdf_hash: string }>
+  verifyPdf: (did: string) => Promise<ContractTemplatePdfVerifyResponse>
+  provenance: (did: string) => Promise<ContractTemplateProvenanceResponse>
+  exportBundle: (did: string) => Promise<Blob>
 }

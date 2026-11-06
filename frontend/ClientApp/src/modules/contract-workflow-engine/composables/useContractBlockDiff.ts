@@ -115,7 +115,7 @@ function tokenizeWords(text: string): string[] {
   return text.match(TOKEN_RE) ?? []
 }
 
-function buildWordDiffSegments(
+export function buildWordDiffSegments(
   leftText: string,
   rightText: string,
 ): { leftSegments?: TextDiffSegment[]; rightSegments?: TextDiffSegment[] } {

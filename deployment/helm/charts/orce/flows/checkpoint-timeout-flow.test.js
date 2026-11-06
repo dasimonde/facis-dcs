@@ -176,3 +176,58 @@ test("checkpoint reset uses the internal timeout budget", async () => {
   );
   assert.equal(result.statusCode, 204);
 });
+
+test("overlapping publisher runs post each checkpoint once", async () => {
+  const calls = [];
+  const responses = new Map([
+    ["http://hydra/token", { status: 200, body: { access_token: "token" } }],
+    ["http://dcs/pac/audit/checkpoint/head", { status: 200, body: { seq: 1, root: "root-1" } }],
+    [
+      "http://dcs/pac/audit/checkpoint/1",
+      {
+        status: 200,
+        body: { seq: 1, root: "root-1", prev_root: null, leaf_count: 3, created_at: "2026-07-29T00:00:00Z" },
+      },
+    ],
+    ["https://sink.example/checkpoints", { status: 204 }],
+  ]);
+  const http = transport(responses, calls);
+  const files = memoryFS({
+    "/data/checkpoint-sink-confirmed.json": JSON.stringify({
+      confirmed_seq: 0,
+      confirmed_root: null,
+      last_confirmation_status: null,
+    }),
+    "/data/checkpoint-sink-records.json": "[]",
+  });
+  const globals = new Map();
+  const publish = new AsyncFunction(
+    "msg",
+    "env",
+    "global",
+    "node",
+    "fs",
+    "http",
+    "https",
+    "url",
+    flowFunction("audit-checkpoint-anchor-flow.json", "audit-anchor-run"),
+  );
+  const env = environment({
+    CHECKPOINT_SINK_ENABLED: "true",
+    CHECKPOINT_SINK_URL: "https://sink.example/checkpoints",
+    CHECKPOINT_SINK_BEARER_TOKEN: "sink-token",
+    DCS_URL: "http://dcs",
+    HYDRA_TOKEN_URL: "http://hydra/token",
+    ORCE_NOTARY_CLIENT_ID: "notary",
+    ORCE_NOTARY_CLIENT_SECRET: "secret",
+  });
+  const globalContext = { get: (key) => globals.get(key), set: (key, value) => globals.set(key, value) };
+  const runOnce = () => publish({}, env, globalContext, { error() {} }, files, http, http, { URL });
+
+  // The 15-minute timer and a manual run start at the same moment.
+  await Promise.all([runOnce(), runOnce()]);
+
+  const posts = calls.filter((call) => call.url === "https://sink.example/checkpoints");
+  assert.equal(posts.length, 1);
+  assert.equal(files.json("/data/checkpoint-sink-confirmed.json").confirmed_seq, 1);
+});

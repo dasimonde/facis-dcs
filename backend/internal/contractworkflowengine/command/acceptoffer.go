@@ -38,6 +38,7 @@ type OfferAcceptor struct {
 	DB          *sqlx.DB
 	CRepo       db.ContractRepo
 	NTRepo      db.NegotiationTaskRepo
+	NORepo      db.NegotiationOutboundRepo
 	DIDDocument identity.DIDDocument
 }
 
@@ -112,9 +113,19 @@ func (h *OfferAcceptor) Handle(ctx context.Context, cmd AcceptOfferCmd) error {
 		if err := contractstate.ValidateOutcome(currentState, contractstate.EventNegotiate, contractstate.Negotiation); err != nil {
 			return err
 		}
-		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Negotiation.String()); err != nil {
+		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Negotiation.String()); err != nil {
 			return fmt.Errorf("could not persist negotiation state: %w", err)
 		}
+	}
+
+	// Tell the origin the round is open so its copy can leave OFFERED and
+	// become editable / submittable. Without this, only a later Change Proposal
+	// moved the offeror.
+	err = enqueueNegotiationOutbound(ctx, tx, h.CRepo, h.NORepo, localPeer,
+		db.NegotiationMessageOfferAccepted, db.OfferAcceptedSentinelNegotiationID, nil,
+		cmd.DID, processData.ContractVersion)
+	if err != nil {
+		return err
 	}
 
 	evt := contractevents.AcceptOfferEvent{

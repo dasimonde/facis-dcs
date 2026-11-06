@@ -486,9 +486,12 @@ def step_real_signing_evidence(context):
     metadata = row[0]
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
+    signatures = metadata.get("signatures") or []
+    assert signatures, f"No signature in the archive entry: {metadata!r}"
     required = ("signer", "credential_type", "ceremony_id", "field", "signed_at", "pdf_cid", "pdf_hash")
-    missing = [key for key in required if not metadata.get(key)]
-    assert not missing, f"Missing real signing evidence {missing}: {metadata!r}"
+    for signature in signatures:
+        missing = [key for key in required if not signature.get(key)]
+        assert not missing, f"Missing real signing evidence {missing}: {metadata!r}"
     assert metadata.get("status") == "SIGNED", metadata
 
 
@@ -779,7 +782,7 @@ def _access_log_row(context, method: str, require_auth_success: bool | None) -> 
     cursor = context.db.cursor()
     cursor.execute(
         f"""
-        SELECT attempt_by, roles, attempted_at, scope, did, justification
+        SELECT attempt_by, roles, attempted_at, scope, did, justification, outcome, success
         FROM access_attempts
         WHERE service = 'ProcessAuditAndCompliance'
           AND method = %s
@@ -802,10 +805,12 @@ def _access_log_row(context, method: str, require_auth_success: bool | None) -> 
 
 
 def _assert_access_metadata(context, method: str, require_auth_success: bool | None):
-    actor, roles, attempted_at, scope, did, justification = _access_log_row(
+    actor, roles, attempted_at, scope, did, justification, outcome, success = _access_log_row(
         context, method, require_auth_success
     )
     assert actor and roles and attempted_at and scope and justification
+    assert success is True, "A role denial must not become a credential failure"
+    assert outcome == ("SUCCESS" if require_auth_success else "DENIED"), outcome
     assert scope == context.last_access_request["scope"]
     assert justification == context.last_access_request["justification"]
     assert did == context.last_access_request.get("did")

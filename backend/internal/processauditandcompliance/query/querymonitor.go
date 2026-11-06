@@ -53,6 +53,12 @@ const RiskTypeUnderperformance = "CONTRACT_UNDERPERFORMANCE"
 // existed the only trace was a line in the process log.
 const RiskTypeDeploymentFailed = "CONTRACT_DEPLOYMENT_FAILED"
 
+// RiskTypeDeadlineMissed flags an obligation of a contract in force whose
+// contractual deadline (an odrl:dateTime constraint on the duty) has passed
+// while the target system sent no report on that rule (DCS-FR-CWE-09, ADR-33).
+// The target's verdict stays authoritative: the DCS flags only the silence.
+const RiskTypeDeadlineMissed = "OBLIGATION_DEADLINE_MISSED"
+
 // SystemMonitorPrincipal attributes an unattended sweep (cmd/pacmonitor) in the
 // audit trail. Such a run carries no user roles on purpose: no operator
 // authorised it, the schedule did, and stamping a human role onto it would let
@@ -242,6 +248,17 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 		return nil, err
 	}
 	risks = append(risks, dispatchRisks...)
+
+	deadlineRisks, err := h.missedDeadlineRisks(ctx, tx, checkedAt)
+	if err != nil {
+		return nil, err
+	}
+	risks = append(risks, deadlineRisks...)
+	sigRisks, err := signatureRisks(ctx, tx, checkedAt)
+	if err != nil {
+		return nil, err
+	}
+	risks = append(risks, sigRisks...)
 
 	denialQuery := `
         SELECT COALESCE(did, '') AS did,

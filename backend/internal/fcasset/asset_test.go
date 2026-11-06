@@ -16,13 +16,16 @@ func TestPayloadStaysTypedSoItsClaimsSurviveExpansion(t *testing.T) {
 		Issuer:             "did:web:dev.example",
 		SubjectIRI:         "https://dev.example/templates/1",
 		ValidFrom:          time.Now().UTC(),
-		Subject:            CatalogueSubject{ID: "1", Name: "Lease"},
+		Subject:            CatalogueSubject{ID: "1", Name: "Lease", PartyType: "MULTI_PARTY"},
 		TemplateDataString: "{}",
 	})
 	if err != nil {
 		t.Fatalf("BuildPayload: %v", err)
 	}
 
+	if payload["credentialSubject"].(map[string]any)["dcs:partyType"] != "MULTI_PARTY" {
+		t.Fatal("party type lost")
+	}
 	types, ok := payload["type"].([]string)
 	if !ok {
 		t.Fatalf("type is %T, want []string", payload["type"])

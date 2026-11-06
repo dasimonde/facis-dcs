@@ -13,13 +13,15 @@ import (
 // backend stores claims as RDF-star reified triples
 // (<<(?s ?p ?o)>> credentialSubjectIRI ?s), not plain triples — see
 // eu.xfsc.fc.graphdb.service.SparqlGraphStore in the upstream FC source.
-const credentialSubjectIRI = "https://www.w3.org/2018/credentials#credentialSubject"
+const credentialSubjectIRI = "https://www.w3.org/2018/credentials#credentialSubject" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 var (
 	dcsTemplateUUIDIRI       = fcasset.DCSContextURL + "templateUuid"
 	dcsStateIRI              = fcasset.DCSContextURL + "state"
+	dcsPartyTypeIRI          = fcasset.DCSContextURL + "partyType"
 	dcsTemplateTypeIRI       = fcasset.DCSContextURL + "templateType"
 	dcsTemplateDataStringIRI = fcasset.DCSContextURL + "templateDataString"
+	dcsTemplateLevelIRI      = fcasset.DCSContextURL + "templateLevel"
 	schemaNameIRI            = fcasset.SchemaContextURL + "name"
 	schemaDescriptionIRI     = fcasset.SchemaContextURL + "description"
 	schemaVersionIRI         = fcasset.SchemaContextURL + "version"
@@ -37,6 +39,8 @@ func fieldTriple(predicateIRI, varName string) string {
 
 // coreFieldTriples is the shared basic graph pattern for a template's
 // searchable/listable fields, joined on the one subject variable ?s (== DID).
+// Every catalogue read uses it, so every read consumes only approved
+// (registered or published) templates (DCS-NFR-BR-09).
 func coreFieldTriples() string {
 	var b strings.Builder
 	b.WriteString(fieldTriple(dcsTemplateUUIDIRI, "template_uuid"))
@@ -44,8 +48,13 @@ func coreFieldTriples() string {
 	b.WriteString(fieldTriple(schemaDescriptionIRI, "description"))
 	b.WriteString(fieldTriple(schemaVersionIRI, "version"))
 	b.WriteString(fieldTriple(dcsStateIRI, "state"))
+	b.WriteString(fieldTriple(dcsTemplateTypeIRI, "template_type"))
+	b.WriteString(fieldTriple(dcsPartyTypeIRI, "party_type"))
+	b.WriteString(approvedStateFilter)
 	return b.String()
 }
+
+const approvedStateFilter = `  FILTER(?state IN ("registered", "published"))` + "\n"
 
 // sparqlEscapeString escapes a string for safe embedding as a SPARQL string
 // literal (query text is built by string interpolation — FC's SPARQL backend

@@ -22,6 +22,7 @@ It is designed for integration with the **European Digital Identity Wallet (EUDI
 | `frontend/ClientApp/` | Vue 3 + Vite + Pinia frontend (:5173 in dev) |
 | `pdf-core/` | PDF assembly service (PAdES envelope, C2PA embedding, :8080 in dev) |
 | `deployment/` | Docker build and Helm chart — [deployment/README.md](./deployment/README.md) |
+| `docs/` | Manuals, decision records, requirements traceability — [docs/README.md](./docs/README.md) |
 | `tests/bdd/`, `features/`, `steps/` | Python/behave BDD suite (runs on kind in CI) |
 | `testWallet/` | Dev wallet used for OpenID4VP presentation flows in dev and tests |
 | `scripts/` | Provisioning helpers (SoftHSM2 token, C2PA/PAdES cert chains, CRL) |
@@ -38,7 +39,7 @@ npm install
 ### Prerequisites
 
 - A local Kubernetes with `kubectl` and `helm` (Rancher Desktop with Kubernetes enabled works)
-- Go 1.25+ and [air](https://github.com/air-verse/air) (backend hot reload)
+- Go 1.26.10+ and [air](https://github.com/air-verse/air) (backend hot reload)
 - Node 22+
 - SoftHSM2 (`libsofthsm2.so`, e.g. `apt install softhsm2`) — dev private keys live in a PKCS#11 token, not in files
 - `make`, `curl`, OpenSSL
@@ -53,7 +54,7 @@ bash dev-stack.sh
 
 The script is idempotent (`helm upgrade --install`) and, in order:
 
-1. Deploys the Helm dependency stack to your current Kubernetes context (PostgreSQL, Keycloak, Hydra, NATS, Neo4j, ORCE, Federated Catalogue, IPFS + document manager, statuslist-service, Traefik, kube-prometheus-stack) and waits for the slow pods.
+1. Deploys the Helm dependency stack to your current Kubernetes context (PostgreSQL, Keycloak, Hydra, NATS, Neo4j, ORCE, Federated Catalogue, IPFS + document manager, Traefik, kube-prometheus-stack) and waits for the slow pods.
 2. Installs testWallet dependencies and initializes the dev status list.
 3. Copies `backend/.env.dev1` → `backend/.env`, provisions the SoftHSM2 token (`~/.dcs/softhsm-8991`) and regenerates the instance DID document from the token key.
 4. Issues the C2PA and PAdES certificate chains for pdf-core and publishes the dev CA's initial CRL.

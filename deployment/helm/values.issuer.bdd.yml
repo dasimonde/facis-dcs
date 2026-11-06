@@ -19,6 +19,11 @@
 # grants did:web:localhost%3A18080:issuer login and peer, resolved from the
 # certificate chain it signs with — though the suite's own credentials are still
 # minted by testWallet rather than claimed from it.
+# The data volume is a hostPath (tests/bdd/scripts/ensure_orce_persistence.sh),
+# owned by root.
+volumePermissions:
+  enabled: true
+
 ingress:
   enabled: true
   className: traefik

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"math/big"
 	"net/http"
@@ -89,5 +90,41 @@ func TestVerify_PeerCompiledPDFReproduces(t *testing.T) {
 	// so a refusal here would also have read as "no credential in the PDF".
 	if result.VCPresent {
 		t.Error("a freshly compiled base carries no lifecycle credential yet")
+	}
+}
+
+// /verify reports each manifest's x5chain, leaf first, so the caller can anchor
+// the signer to its trust anchors and to a party of the contract rather than
+// take the leaf the manifest carries on its own say-so.
+func TestVerify_SignersCarryTheirChain(t *testing.T) {
+	pdf, err := compiler.CompilePDF(peerRenderContext(t), []byte(minimalPayload), compiler.CanonicalCompiledAt)
+	if err != nil {
+		t.Fatalf("peer CompilePDF: %v", err)
+	}
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(pdf), "application/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Signers []struct {
+			Chain []string `json:"chain"`
+		} `json:"signers"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if len(body.Signers) != 1 || len(body.Signers[0].Chain) != 1 {
+		t.Fatalf("signers = %+v, want one manifest with its one-certificate chain", body.Signers)
+	}
+	der, err := base64.StdEncoding.DecodeString(body.Signers[0].Chain[0])
+	if err != nil {
+		t.Fatalf("decode chain: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+	if leaf.Subject.CommonName != "peer c2pa signer" {
+		t.Fatalf("chain leaf = %q, want the peer's signing leaf", leaf.Subject.CommonName)
 	}
 }

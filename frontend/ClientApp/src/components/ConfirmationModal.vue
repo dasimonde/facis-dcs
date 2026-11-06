@@ -4,10 +4,14 @@ import { computed, type Ref, ref, useId, useTemplateRef, watch } from 'vue'
 
 interface Editor {
   requiredText: boolean
+  label?: string
   placeholder?: string
+  initialValue?: string
 }
 
 interface ModalData {
+  title?: string
+  confirmLabel?: string
   message: string
   editor?: Editor
   /** Warning the user must tick a checkbox to acknowledge before confirming. */
@@ -49,7 +53,7 @@ onReveal((data) => {
 
 watch(isRevealed, (value) => {
   if (value) {
-    inputText.value = ''
+    inputText.value = modalData.value.editor?.initialValue ?? ''
     acknowledged.value = false
     actionModal.value?.showModal()
     focusFirstControl()
@@ -98,13 +102,15 @@ defineExpose<ModalExpose>({ reveal: reveal })
       aria-modal="true"
       :aria-labelledby="dialogTitleId"
       :aria-describedby="dialogDescriptionId"
-      @close="cancel"
+      @cancel.prevent="cancel"
     >
       <div class="modal-box">
-        <h3 :id="dialogTitleId" class="text-lg font-bold">Confirmation</h3>
+        <h3 :id="dialogTitleId" class="text-lg font-bold">{{ modalData.title ?? 'Confirmation' }}</h3>
         <p :id="dialogDescriptionId" class="text-md py-4">{{ modalData.message }}</p>
         <div v-if="modalData.editor" class="mx-auto flex w-full max-w-4xl flex-col gap-2 py-3">
-          <label :id="editorLabelId" class="sr-only" :for="inputTextId">Comment</label>
+          <label :id="editorLabelId" class="sr-only" :for="inputTextId">
+            {{ modalData.editor.label ?? 'Comment' }}
+          </label>
           <textarea
             :id="inputTextId"
             v-model="inputText"
@@ -142,7 +148,7 @@ defineExpose<ModalExpose>({ reveal: reveal })
             data-testid="confirmation-confirm"
             @click="handleConfirm"
           >
-            {{ hasEditor ? 'Submit' : 'Confirm' }}
+            {{ modalData.confirmLabel ?? (hasEditor ? 'Submit' : 'Confirm') }}
           </button>
           <button type="button" class="btn btn-outline btn-sm" @click="cancel">Cancel</button>
         </div>

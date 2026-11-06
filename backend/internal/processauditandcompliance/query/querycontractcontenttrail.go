@@ -125,7 +125,7 @@ func (h *ContractContentTrailAuditor) readAuditableContracts(ctx context.Context
 			dids = []string{did}
 		}
 	} else {
-		metadata, err := h.CRepo.ReadAllMetaData(ctx, tx, datatype.Pagination{})
+		metadata, err := h.CRepo.ReadAllMetaData(ctx, tx, datatype.Pagination{}, db.ListOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("could not read all metadata: %w", err)
 		}

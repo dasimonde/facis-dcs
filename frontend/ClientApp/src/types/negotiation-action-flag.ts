@@ -1,1 +1,1 @@
-export type NegotiationActionFlag = 'ACCEPTING' | 'REJECTING'
+export type NegotiationActionFlag = 'ACCEPTING' | 'REJECTING' | 'WITHDRAWING'

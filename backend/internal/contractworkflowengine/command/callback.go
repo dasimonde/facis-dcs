@@ -14,8 +14,11 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 )
 
 // ErrDeploymentCallbackUnauthorized is returned when the caller is not the
@@ -185,10 +188,22 @@ func (h *DeploymentCallbackHandler) applyAcknowledgement(ctx context.Context, tx
 	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventDeploy); err != nil {
 		return err
 	}
-	if err := h.CRepo.UpdateState(ctx, tx, deployment.DID, contractstate.Active.String()); err != nil {
+	if err := h.CRepo.UpdateState(ctx, tx, deployment.DID, processData.State, contractstate.Active.String()); err != nil {
 		return fmt.Errorf("could not activate contract %s: %w", deployment.DID, err)
 	}
 
+	evt := contractevents.ActivateEvent{
+		DID:             deployment.DID,
+		ContractVersion: processData.ContractVersion,
+		CorrelationID:   cmd.CorrelationID,
+		ActivatedBy:     cmd.CallerClientID,
+		PreviousState:   processData.State,
+		NewState:        contractstate.Active.String(),
+		OccurredAt:      activatedAt,
+	}
+	if err := event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine); err != nil {
+		return fmt.Errorf("could not create event: %w", err)
+	}
 	return nil
 }
 
@@ -197,6 +212,14 @@ func (h *DeploymentCallbackHandler) applyAcknowledgement(ctx context.Context, tx
 // holds them, the target holds the events. A report that carries no verdict is
 // stored as not_evaluated.
 func (h *DeploymentCallbackHandler) applyKPIReport(ctx context.Context, tx *sqlx.Tx, deployment *db.ContractDeployment, cmd DeploymentCallbackCmd) error {
+	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, deployment.DID)
+	if err != nil {
+		return fmt.Errorf("could not read contract %s: %w", deployment.DID, err)
+	}
+	if processData.State == contractstate.Terminated.String() {
+		return fmt.Errorf("%w: %s", ErrKPIContractTerminated, deployment.DID)
+	}
+
 	verdict, err := reportedVerdict(cmd.KPIVerdict)
 	if err != nil {
 		return err
@@ -272,6 +295,9 @@ var (
 	// ErrKPIRuleUnknown is returned for a rule @id that is not among the rules
 	// this contract deployed to the target.
 	ErrKPIRuleUnknown = errors.New("KPI verdict names a rule this contract does not carry")
+	// ErrKPIContractTerminated is returned for a report on a terminated
+	// contract: a terminated contract is not monitored (DCS-FR-CWE-23).
+	ErrKPIContractTerminated = errors.New("KPI report for a terminated contract")
 )
 
 func reportedVerdict(reported string) (string, error) {

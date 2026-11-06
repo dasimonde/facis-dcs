@@ -1,0 +1,6 @@
+[
+  {"id":"jurisdiction","label":"Jurisdiction","field_iri":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"},
+  {"id":"contract-type","label":"Contract type","field_iri":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-type"},
+  {"id":"industry","label":"Industry","field_iri":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-industry"},
+  {"id":"regulatory-compliance-status","label":"Regulatory compliance status","field_iri":"https://w3id.org/facis/dcs/taxonomy/v1#field-contract-regulatoryComplianceStatus"}
+]

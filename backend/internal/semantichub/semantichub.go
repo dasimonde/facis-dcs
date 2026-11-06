@@ -36,6 +36,9 @@ var genesisClauseCatalog []byte
 //go:embed assets/facis-sla-ontology.ttl
 var genesisSLAOntology []byte
 
+//go:embed assets/search-filters.json
+var genesisSearchFilters []byte
+
 //go:embed assets/dcs-odrl-profile.ttl
 var genesisODRLProfile []byte
 
@@ -239,6 +242,11 @@ func (Repo) Activate(ctx context.Context, tx *sqlx.Tx, name, kind string, versio
 	return activateVersion(ctx, tx, name, kind, version)
 }
 
+// ActivationChannel is the Postgres notification channel an activation
+// signals on when its transaction commits. Every replica listens on it and
+// re-anchors validation to the new active versions.
+const ActivationChannel = "semantic_hub_activated"
+
 func activateVersion(ctx context.Context, tx *sqlx.Tx, name, kind string, version int) error {
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE semantic_schemas SET active = FALSE WHERE name = $1 AND kind = $2 AND active`, name, kind); err != nil {
@@ -247,6 +255,9 @@ func activateVersion(ctx context.Context, tx *sqlx.Tx, name, kind string, versio
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE semantic_schemas SET active = TRUE WHERE name = $1 AND kind = $2 AND version = $3`, name, kind, version); err != nil {
 		return fmt.Errorf("semantic hub: activate %s/%s v%d: %w", name, kind, version, err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_notify($1, '')`, ActivationChannel); err != nil {
+		return fmt.Errorf("semantic hub: signal activation of %s/%s v%d: %w", name, kind, version, err)
 	}
 	return nil
 }
@@ -331,6 +342,10 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Replicas that start together seed one after the other.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('dcs-hub-seed'))`); err != nil {
+		return err
+	}
 
 	genesis := []struct {
 		name, kind, mediaType string
@@ -362,6 +377,24 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 		if _, err := (Repo{}).Register(ctx, tx, g.name, g.kind, g.mediaType, string(g.content), "system:genesis", 0, true); err != nil {
 			return err
 		}
+	}
+	ontology, err := (Repo{}).Get(ctx, tx, SLAOntologyName, "ontology", 0)
+	if err != nil {
+		return err
+	}
+	var filters []SearchFilter
+	if err := json.Unmarshal(genesisSearchFilters, &filters); err != nil {
+		return err
+	}
+	for i := range filters {
+		filters[i].Source = SearchFilterSource{Name: ontology.Name, Kind: ontology.Kind, Version: ontology.Version}
+	}
+	raw, err := json.Marshal(filters)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO semantic_search_filter_config (singleton, revision, filters) VALUES (TRUE, 1, $1) ON CONFLICT (singleton) DO NOTHING`, string(raw)); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

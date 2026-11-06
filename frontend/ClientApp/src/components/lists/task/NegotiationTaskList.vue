@@ -3,7 +3,6 @@ import { computed, onUnmounted, type Ref, ref } from 'vue'
 import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useNegotiationTaskStateFilterStore } from '@/stores/state-filter-store'
-import { ContractState } from '@/types/contract-state'
 import { NegotiationTaskState, negotiationTaskStates } from '@/types/negotiation-task-state'
 import { compareValues } from '@/utils/comparison'
 import TaskListSearch from './TaskListSearch.vue'
@@ -65,34 +64,29 @@ const applySearchResult = (searchResult: ContractNegotiationTask[] | null) => {
   }
 }
 
-const resolveViewRouteName = (task: ContractNegotiationTask) => {
-  const currentState = contractsStore.findContractByDid(task.did)?.state
-  if (currentState === ContractState.negotiation) {
-    return ROUTES.CONTRACTS.NEGOTIATE
-  }
-  return ROUTES.CONTRACTS.VIEW
-}
-
 onUnmounted(() => stateFilterStore.reset())
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
-      <li class="flex w-full flex-col justify-end px-4 tracking-wide sm:flex-row">
+      <li class="px-4 py-2 tracking-wide [&>.join]:m-0">
         <TaskListSearch
-          class="flex-1"
+          class="w-full min-w-0"
           :tasks="tasks"
           placeholder="Search contracts"
           @search-result="applySearchResult"
-        />
-        <ListStateFilter
-          label="Negotiation Task"
-          :filters="negotiationTaskStates"
-          store-type="negotiationTasks"
-          :disabled="!hasTasks"
-        />
-        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+        >
+          <template #actions>
+            <ListStateFilter
+              label="Negotiation Task"
+              :filters="negotiationTaskStates"
+              store-type="negotiationTasks"
+              :disabled="!hasTasks"
+            />
+            <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+          </template>
+        </TaskListSearch>
       </li>
       <template v-if="filteredTasks.length > 0">
         <li v-for="task in filteredTasks" :key="task.did" class="list-row">
@@ -110,7 +104,7 @@ onUnmounted(() => stateFilterStore.reset())
                 <div>Creation date: {{ new Date(task.created_at).toLocaleDateString() }}</div>
                 <div class="card-actions justify-end">
                   <RouterLink
-                    :to="{ name: resolveViewRouteName(task), params: { did: task.did } }"
+                    :to="{ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: task.did } }"
                     class="btn btn-sm btn-primary"
                   >
                     View

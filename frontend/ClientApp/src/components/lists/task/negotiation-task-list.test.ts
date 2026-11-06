@@ -1,9 +1,19 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { defineComponent, h } from 'vue'
+import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
 import NegotiationTaskList from './NegotiationTaskList.vue'
 import type { ContractNegotiationTask } from '@/models/contract/contract-negotiation-task'
+
+const RouterLinkStub = defineComponent({
+  name: 'RouterLink',
+  props: { to: { type: [String, Object], required: true } },
+  setup(_props, { slots }) {
+    return () => h('a', { 'data-testid': 'task-view-link' }, slots.default?.())
+  },
+})
 
 /**
  * The tab is task-driven, and a task now exists only because this instance
@@ -30,7 +40,10 @@ function mountList(tasks: ContractNegotiationTask[], contractState = 'NEGOTIATIO
     name: `Contract ${entry.did}`,
     state: contractState,
   })) as never
-  return mount(NegotiationTaskList, { props: { tasks }, global: { plugins: [pinia] } })
+  return mount(NegotiationTaskList, {
+    props: { tasks },
+    global: { plugins: [pinia], stubs: { RouterLink: RouterLinkStub } },
+  })
 }
 
 describe('NegotiationTaskList default view', () => {
@@ -61,5 +74,15 @@ describe('NegotiationTaskList default view', () => {
 
     expect(wrapper.findAll('.list-row')).toHaveLength(0)
     expect(wrapper.text()).toContain('No negotiation tasks found.')
+  })
+
+  // Task tab is the entry to act on a round — always the negotiate page, even
+  // when the contract is still OFFERED. Contracts list keeps its own routing.
+  it('opens every listed task on the negotiate route', () => {
+    const wrapper = mountList([task('did:web:example:offered', 'OPEN')], 'OFFERED')
+    expect(wrapper.findComponent(RouterLinkStub).props('to')).toEqual({
+      name: ROUTES.CONTRACTS.NEGOTIATE,
+      params: { did: 'did:web:example:offered' },
+    })
   })
 })

@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestTemplateSearchMetadataIsNeverCreatedInMigrations(t *testing.T) {
+	obsolete := regexp.MustCompile(`(?i)\b(jurisdiction|industry)\b`)
+	for name, sql := range migrationSQL(t) {
+		if obsolete.MatchString(sql) {
+			t.Errorf("%s references obsolete template search metadata", name)
+		}
+	}
+}
+
 // "A field can never be signed twice" (DCS-FR-SM-07/-17) is a rule two
 // concurrent submits can only be held to by the database: each reads the other's
 // row before it exists, so whichever check the application runs, the constraint
@@ -105,4 +114,26 @@ func migrationSQL(t *testing.T) map[string]string {
 		contents[entry.Name()] = string(body)
 	}
 	return contents
+}
+
+// The renewal-deadline notice fires once per (contract, expiry date)
+// (DCS-FR-CWE-22). With several backend replicas only the database can hold
+// that: ClaimRenewalNotice inserts ON CONFLICT DO NOTHING, which needs the
+// pair as the key.
+func TestRenewalNoticesAreKeyedByContractAndExpiryDate(t *testing.T) {
+	table := regexp.MustCompile(`(?is)CREATE\s+TABLE[^;]*?contract_renewal_notices\s*\(([^;]*)\);`)
+	for _, sql := range migrationSQL(t) {
+		m := table.FindStringSubmatch(sql)
+		if m == nil {
+			continue
+		}
+		if !regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\(\s*did\s*,\s*exp_date\s*\)`).MatchString(m[1]) {
+			t.Fatalf("contract_renewal_notices is not keyed by (did, exp_date), so a notice can fire twice: %s", m[1])
+		}
+		if !regexp.MustCompile(`(?i)REFERENCES\s+contracts\s*\(\s*did\s*\)\s+ON\s+DELETE\s+CASCADE`).MatchString(m[1]) {
+			t.Errorf("contract_renewal_notices.did does not cascade from contracts, so the @clean_db teardown trips its FK: %s", m[1])
+		}
+		return
+	}
+	t.Fatal("no migration creates contract_renewal_notices: the renewal-deadline notice has no once-only ledger")
 }

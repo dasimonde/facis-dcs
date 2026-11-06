@@ -157,6 +157,18 @@
                             },
                             {
                                 "l": {
+                                    "en-US": "contract.expired"
+                                },
+                                "v": "contract.expired"
+                            },
+                            {
+                                "l": {
+                                    "en-US": "contract.renewal_due"
+                                },
+                                "v": "contract.renewal_due"
+                            },
+                            {
+                                "l": {
                                     "en-US": "template.created"
                                 },
                                 "v": "template.created"
@@ -184,24 +196,6 @@
                         "types": [
                             "str",
                             "env"
-                        ]
-                    }
-                }
-            },
-            {
-                "name": "WEBHOOK_SECRET",
-                "type": "str",
-                "value": "",
-                "ui": {
-                    "label": {
-                        "en-US": "Shared webhook secret"
-                    },
-                    "type": "input",
-                    "opts": {
-                        "types": [
-                            "str",
-                            "env",
-                            "cred"
                         ]
                     }
                 }
@@ -376,7 +370,7 @@
         "type": "function",
         "z": "sf-dcs-subscribe",
         "name": "Build subscribe req",
-        "func": "var DCS_URL      = env.get('DCS_URL')      || 'http://host.docker.internal:8991';\nvar EVENT        = env.get('EVENT')        || 'template.created';\nvar CALLBACK_URL = env.get('CALLBACK_URL') || 'http://dcs-orce:1880/dcs-dispatch';\nvar SECRET       = env.get('WEBHOOK_SECRET') || '';\nif (!msg.payload || !msg.payload.access_token) {\n    return [null, {payload:{ok:false,error:'token_failed',body:msg.payload}}];\n}\nflow.set('dcs_token', msg.payload.access_token);\nflow.set('dcs_url', DCS_URL);\nmsg.url    = DCS_URL + '/orce/webhooks';\nmsg.method = 'POST';\nmsg.headers = {\n    'Authorization': 'Bearer ' + 'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0IiwiaXNzIjoiaHR0cDovL2xvY2FsaG9zdDozMDA4MC9yZWFsbXMvZ2FpYS14IiwiYXpwIjoiZGNzLWNsaWVudCIsInJlc291cmNlX2FjY2VzcyI6eyJkY3MtY2xpZW50Ijp7InJvbGVzIjoiVGVtcGxhdGUgUmV2aWV3ZXIifX0sImV4cCI6IjE3ODA2MDA4MjYifQ.', //msg.payload.access_token,\n    'Content-Type':  'application/json'\n};\nmsg.payload = {\n    event:        EVENT,\n    callback_url: CALLBACK_URL,\n    secret:       SECRET\n};\nreturn [msg, null];",
+        "func": "var DCS_URL      = env.get('DCS_URL')      || 'http://host.docker.internal:8991';\nvar EVENT        = env.get('EVENT')        || 'template.created';\nvar CALLBACK_URL = env.get('CALLBACK_URL') || 'http://dcs-orce:1880/dcs-dispatch';\nif (!msg.payload || !msg.payload.access_token) {\n    return [null, {payload:{ok:false,error:'token_failed',body:msg.payload}}];\n}\n// DCS_TOKEN is an Integration Manager bearer token of the subscribing\n// organization; webhook management refuses other roles.\nvar token = env.get('DCS_TOKEN') || msg.payload.access_token;\nflow.set('dcs_token', token);\nflow.set('dcs_url', DCS_URL);\nmsg.url    = DCS_URL + '/orce/webhooks';\nmsg.method = 'POST';\nmsg.headers = {\n    'Authorization': 'Bearer ' + token,\n    'Content-Type':  'application/json'\n};\nmsg.payload = {\n    event:        EVENT,\n    callback_url: CALLBACK_URL\n};\nreturn [msg, null];",
         "outputs": 2,
         "timeout": "",
         "noerr": 0,
@@ -423,7 +417,7 @@
         "type": "function",
         "z": "sf-dcs-subscribe",
         "name": "Format result",
-        "func": "if (msg.payload && msg.payload.ok === false) { return [null, msg]; }\nif (msg.statusCode === 201) {\n    var s = flow.get('dcs_subscriptions') || {};\n    s[msg.payload.event] = msg.payload.id;\n    flow.set('dcs_subscriptions', s);\n    return [{payload:{ok:true, id:msg.payload.id, event:msg.payload.event}}, null];\n}\nreturn [null, {payload:{ok:false, status:msg.statusCode, body:msg.payload}}];",
+        "func": "if (msg.payload && msg.payload.ok === false) { return [null, msg]; }\nif (msg.statusCode === 201) {\n    var s = flow.get('dcs_subscriptions') || {};\n    s[msg.payload.event] = msg.payload.id;\n    flow.set('dcs_subscriptions', s);\n    // DCS returns the signing secret only in this response. It goes to the\n    // debug output once and the flow keeps no copy: the operator stores it\n    // as WEBHOOK_SECRET (a Kubernetes Secret) for the /dcs-dispatch check.\n    return [{payload:{ok:true, id:msg.payload.id, event:msg.payload.event, secret:msg.payload.secret}}, null];\n}\nreturn [null, {payload:{ok:false, status:msg.statusCode, body:msg.payload}}];",
         "outputs": 2,
         "timeout": "",
         "noerr": 0,
@@ -549,7 +543,7 @@
         "type": "function",
         "z": "tab-dcs-test",
         "name": "GET /orce/webhooks",
-        "func": "var t = flow.get('dcs_token');\nvar u = env.get('DCS_URL') || 'http://host.docker.internal:8991';\nmsg.url    = u + '/orce/webhooks';\nt = 'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0IiwiaXNzIjoiaHR0cDovL2xvY2FsaG9zdDozMDA4MC9yZWFsbXMvZ2FpYS14IiwiYXpwIjoiZGNzLWNsaWVudCIsInJlc291cmNlX2FjY2VzcyI6eyJkY3MtY2xpZW50Ijp7InJvbGVzIjoiVGVtcGxhdGUgUmV2aWV3ZXIifX0sImV4cCI6IjE3ODA2MDA4MjYifQ.';\nmsg.method = 'GET';\nmsg.headers = t ? {'Authorization':'Bearer '+t} : {};\nreturn msg;",
+        "func": "var t = env.get('DCS_TOKEN') || flow.get('dcs_token');\nvar u = env.get('DCS_URL') || 'http://host.docker.internal:8991';\nmsg.url    = u + '/orce/webhooks';\nmsg.method = 'GET';\nmsg.headers = t ? {'Authorization':'Bearer '+t} : {};\nreturn msg;",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -627,13 +621,18 @@
         "type": "function",
         "z": "tab-dcs-test",
         "name": "Verify + Auto-Callback",
-        "func": "var secret = env.get('WEBHOOK_SECRET') || '';\nvar auth   = (msg.req.headers['authorization'] || '').replace('Bearer ','');\nif (secret && auth !== secret) {\n    node.send([{payload:{error:'unauthorized'},statusCode:401,res:msg.res}, null, null]);\n    return null;\n}\nvar d = msg.payload;\n\n// Out 1: HTTP 200 to caller\nvar resp = {payload:{status:'received'}, statusCode:200, res:msg.res};\n\n// Out 2: callback to DCS\nvar token  = flow.get('dcs_token') || flow.get('mock_token');\nvar dcsURL = flow.get('dcs_url') || env.get('DCS_URL') || 'http://host.docker.internal:8991';\nvar cb = token ? {\n    url:    dcsURL + '/orce/callbacks',\n    method: 'POST',\n    headers: {'Authorization':'Bearer '+token,'Content-Type':'application/json'},\n    payload: {event_id:d.event_id, status:'completed', result:{event:d.event, did:d.did}}\n} : null;\n\n// Out 3: debug\nnode.send([resp, cb, {payload:d}]);\nreturn null;",
+        "func": "// Standard Webhooks v1 verification (https://www.standardwebhooks.com/).\n// WEBHOOK_SECRET holds the whsec_ values that DCS returned once in the\n// POST /webhooks responses, separated by spaces or commas (one per\n// subscription); the operator stores them in a Kubernetes Secret.\nvar secrets = (env.get('WEBHOOK_SECRET') || '').split(/[\\s,]+/).filter(Boolean);\nvar h = msg.req.headers;\n// A webhook-id is accepted once. Ids are kept for twice the timestamp window.\nvar seen = flow.get('webhook_ids') || {};\nvar now = Date.now() / 1000;\nObject.keys(seen).forEach(function (id) {\n    if (now - seen[id] > 600) {\n        delete seen[id];\n    }\n});\nfunction verified() {\n    var id = h['webhook-id'] || '';\n    var ts = h['webhook-timestamp'] || '';\n    if (!id || !/^[0-9]+$/.test(ts) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) {\n        return false;\n    }\n    // The exact received bytes, kept by the httpNodeMiddleware of the chart's\n    // settings.js. A parsed and re-serialized body can differ from them.\n    var body = msg.req.rawBody;\n    if (!Buffer.isBuffer(body)) {\n        return false;\n    }\n    if (Object.prototype.hasOwnProperty.call(seen, id)) {\n        return false;\n    }\n    var entries = (h['webhook-signature'] || '').split(' ');\n    return secrets.some(function (secret) {\n        var key = Buffer.from(secret.replace(/^whsec_/, ''), 'base64');\n        var expected = Buffer.from(crypto.createHmac('sha256', key)\n            .update(id + '.' + ts + '.').update(body).digest('base64'));\n        return entries.some(function (entry) {\n            if (entry.indexOf('v1,') !== 0) {\n                return false;\n            }\n            var given = Buffer.from(entry.slice(3));\n            return given.length === expected.length && crypto.timingSafeEqual(given, expected);\n        });\n    });\n}\n// Without a secret the flow refuses every delivery.\nif (secrets.length === 0 || !verified()) {\n    node.send([{payload:{error:'unauthorized'},statusCode:401,res:msg.res}, null, null]);\n    return null;\n}\nseen[h['webhook-id']] = now;\nflow.set('webhook_ids', seen);\nvar d = msg.payload;\n\n// Out 1: HTTP 200 to caller\nvar resp = {payload:{status:'received'}, statusCode:200, res:msg.res};\n\n// Out 2: callback to DCS\nvar token  = flow.get('dcs_token') || flow.get('mock_token');\nvar dcsURL = flow.get('dcs_url') || env.get('DCS_URL') || 'http://host.docker.internal:8991';\nvar cb = token ? {\n    url:    dcsURL + '/orce/callbacks',\n    method: 'POST',\n    headers: {'Authorization':'Bearer '+token,'Content-Type':'application/json'},\n    payload: {event_id:d.event_id, status:'completed', result:{event:d.event, did:d.did}}\n} : null;\n\n// Out 3: debug\nnode.send([resp, cb, {payload:d}]);\nreturn null;",
         "outputs": 3,
         "timeout": "",
         "noerr": 0,
         "initialize": "",
         "finalize": "",
-        "libs": [],
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
         "x": 630,
         "y": 800,
         "wires": [

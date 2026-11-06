@@ -39,6 +39,31 @@ dcs:ContractMetadataShape
     sh:minCount 1 ;
     sh:maxCount 1 ;
     sh:message "A canonical contract requires a title in dcs:metadata." ;
+  ] ;
+  sh:property [
+    sh:path dcs:description ;
+    sh:datatype xsd:string ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:startDate ;
+    sh:datatype xsd:dateTime ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:expirationDate ;
+    sh:datatype xsd:dateTime ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:expirationNoticePeriod ;
+    sh:datatype xsd:integer ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs:expirationPolicy ;
+    sh:datatype xsd:string ;
+    sh:maxCount 1 ;
   ] .
 
 # Every machine-readable ODRL rule must be backed by human-audited prose:

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/datatype"
@@ -17,7 +18,7 @@ import (
 type PostgresNegotiationRepo struct {
 }
 
-func (r PostgresNegotiationRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.NegotiationCreateData, negotiators []string) (*time.Time, error) {
+func (r PostgresNegotiationRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.NegotiationCreateData, negotiators []string) (string, *time.Time, error) {
 	statement := `
         INSERT INTO contract_negotiations (
             did, contract_version, change_request, created_by
@@ -32,7 +33,7 @@ func (r PostgresNegotiationRepo) Create(ctx context.Context, tx *sqlx.Tx, data d
 	err := tx.GetContext(ctx, &result, statement,
 		data.DID, data.ContractVersion, data.ChangeRequest, data.CreatedBy)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	for _, negotiator := range negotiators {
@@ -43,11 +44,68 @@ func (r PostgresNegotiationRepo) Create(ctx context.Context, tx *sqlx.Tx, data d
         `
 		_, err = tx.ExecContext(ctx, decisionStatement, result.ID, negotiator)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 	}
 
-	return &result.CreatedAt, nil
+	return result.ID, &result.CreatedAt, nil
+}
+
+func (r PostgresNegotiationRepo) ReadDecisionID(ctx context.Context, tx *sqlx.Tx, negotiationID, negotiator string) (string, error) {
+	query := `
+        SELECT id FROM contract_negotiation_decisions
+        WHERE negotiation_id = $1 AND negotiator = $2
+    `
+	var id string
+	err := tx.GetContext(ctx, &id, query, negotiationID, negotiator)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", db.ErrNoMatchingDecision
+	}
+
+	return id, err
+}
+
+func (r PostgresNegotiationRepo) ReadNegotiationByID(ctx context.Context, tx *sqlx.Tx, id string) (*db.NegotiationData, error) {
+	query := `
+        SELECT id, did, contract_version, change_request, created_by, created_at, superseded_by
+        FROM contract_negotiations
+        WHERE id = $1
+    `
+
+	var row db.NegotiationData
+	err := tx.GetContext(ctx, &row, query, id)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &row, nil
+}
+
+func (r PostgresNegotiationRepo) ReadDecisionByID(ctx context.Context, tx *sqlx.Tx, id string) (*db.NegotiationDecisionData, error) {
+	query := `
+        SELECT id, negotiation_id, negotiator, decision, rejection_reason
+        FROM contract_negotiation_decisions
+        WHERE id = $1
+    `
+
+	var row db.NegotiationDecisionData
+	err := tx.GetContext(ctx, &row, query, id)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &row, nil
 }
 
 func (r PostgresNegotiationRepo) UpsertDraft(ctx context.Context, tx *sqlx.Tx, contractDID string, savedBy string, changeRequest *datatype.JSON) error {
@@ -148,6 +206,45 @@ func (r PostgresNegotiationRepo) Reject(ctx context.Context, tx *sqlx.Tx, id str
 	return nil
 }
 
+func (r PostgresNegotiationRepo) DeleteByID(ctx context.Context, tx *sqlx.Tx, id string) error {
+	statement := `DELETE FROM contract_negotiations WHERE id = $1`
+	_, err := tx.ExecContext(ctx, statement, id)
+
+	return err
+}
+
+func (r PostgresNegotiationRepo) HasAcceptedDecision(ctx context.Context, tx *sqlx.Tx, negotiationID string) (bool, error) {
+	query := `
+        SELECT EXISTS (
+            SELECT 1 FROM contract_negotiation_decisions
+            WHERE negotiation_id = $1 AND decision = 'ACCEPTED'
+        )
+    `
+	var exists bool
+	err := tx.GetContext(ctx, &exists, query, negotiationID)
+
+	return exists, err
+}
+
+func (r PostgresNegotiationRepo) RecordWithdrawn(ctx context.Context, tx *sqlx.Tx, negotiationID, did string) error {
+	statement := `
+        INSERT INTO contract_negotiation_withdrawn (negotiation_id, did)
+        VALUES ($1, $2)
+        ON CONFLICT (negotiation_id) DO NOTHING
+    `
+	_, err := tx.ExecContext(ctx, statement, negotiationID, did)
+
+	return err
+}
+
+func (r PostgresNegotiationRepo) IsWithdrawn(ctx context.Context, tx *sqlx.Tx, negotiationID string) (bool, error) {
+	query := `SELECT EXISTS (SELECT 1 FROM contract_negotiation_withdrawn WHERE negotiation_id = $1)`
+	var exists bool
+	err := tx.GetContext(ctx, &exists, query, negotiationID)
+
+	return exists, err
+}
+
 // ReadCreatedByByNegotiationID returns the created_by of the
 // contract_negotiations row identified by id — the individual/organization
 // identity that authored the change_request, used by the conflict-of-
@@ -167,11 +264,14 @@ func (r PostgresNegotiationRepo) ReadCreatedByByNegotiationID(ctx context.Contex
 }
 
 func (r PostgresNegotiationRepo) ReadAllByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.NegotiationData, error) {
+	// Include negotiations even when no local decision row exists yet, so a
+	// peer-received Proposal is still returned (otherwise retrieve omitted it
+	// and the Proposals tab looked like the peer was missing data).
 	query := `
-        SELECT cn.id, did, contract_version, change_request, negotiator, decision,
-               rejection_reason, created_by, created_at, superseded_by
+        SELECT cn.id, cn.did, cn.contract_version, cn.change_request, cnd.negotiator, cnd.decision,
+               cnd.rejection_reason, cn.created_by, cn.created_at, cn.superseded_by
         FROM contract_negotiations cn
-            JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
+            LEFT JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
             WHERE cn.did = $1
     `
 	var negotiations []db.NegotiationData
@@ -189,6 +289,8 @@ func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx cont
 	// (created_at, id) is a total order: CURRENT_TIMESTAMP is the transaction
 	// clock, so requests proposed in one transaction share a created_at and
 	// the primary key separates them.
+	// Author instance rows stay NULL (FR-CWE-07 refuses self-accept). Require at
+	// least one ACCEPTED and no REJECTED so a peer Accept still folds on Submit.
 	query := `
         SELECT cn.id, cn.change_request, cn.created_at
 		FROM contract_negotiations cn
@@ -196,7 +298,8 @@ func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx cont
 		WHERE cn.did = $1
 		  AND cn.contract_version = $2
 		GROUP BY cn.id, cn.change_request, cn.created_at
-		HAVING COUNT(*) = COUNT(CASE WHEN cnd.decision = 'ACCEPTED' THEN 1 END)
+		HAVING COUNT(*) FILTER (WHERE cnd.decision = 'REJECTED') = 0
+		   AND COUNT(*) FILTER (WHERE cnd.decision = 'ACCEPTED') > 0
 		ORDER BY cn.created_at, cn.id
     `
 	var negotiations []db.NegotiationChangeData
@@ -208,20 +311,24 @@ func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx cont
 }
 
 func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int, negotiator string, caller string) (bool, error) {
-	// A decision the caller authored is unresolvable BY THE CALLER: FR-CWE-07
-	// refuses an accept by the change request's own author, so counting it here
-	// would block that identity's submit with a decision nobody it can act as
-	// may ever clear. It still blocks any other identity holding the same slot.
+	// Submit needs every proposal handled. Count unresolved nulls:
+	//  - we still owe Accept/Reject on someone else's proposal, or
+	//  - our proposal still waits on a counterparty decision.
+	// Author "Not required" nulls stay out: FR-CWE-07 refuses self-accept, so
+	// (created_by = caller AND negotiator = us) and the mirrored author slot on
+	// the peer (created_by ≠ caller AND negotiator ≠ us) must not block Submit.
 	query := `
         SELECT EXISTS (
             SELECT 1
             FROM contract_negotiations cn
             JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
             WHERE cn.did = $1
-              AND contract_version = $2
+              AND cn.contract_version = $2
               AND cnd.decision IS NULL
-              AND cnd.negotiator = $3
-              AND ($4 = '' OR cn.created_by IS DISTINCT FROM $4)
+              AND (
+                    (cn.created_by IS DISTINCT FROM $4 AND cnd.negotiator = $3)
+                 OR (cn.created_by = $4 AND cnd.negotiator IS DISTINCT FROM $3)
+              )
         )
     `
 	var exists bool
@@ -338,4 +445,21 @@ func (r PostgresNegotiationRepo) RemoteCreateOrUpdateNegotiationDecision(ctx con
 	_, err := tx.ExecContext(ctx, statement,
 		data.ID, data.NegotiationID, data.Negotiator, data.Decision, data.RejectionReason)
 	return err
+}
+
+func (r PostgresNegotiationRepo) EnsureOpenDecision(ctx context.Context, tx *sqlx.Tx, negotiationID, negotiator string) error {
+	_, err := r.ReadDecisionID(ctx, tx, negotiationID, negotiator)
+	if err == nil {
+		return nil
+	}
+
+	if !errors.Is(err, db.ErrNoMatchingDecision) {
+		return err
+	}
+
+	return r.RemoteCreateOrUpdateNegotiationDecision(ctx, tx, db.NegotiationDecisionData{
+		ID:            uuid.NewString(),
+		NegotiationID: negotiationID,
+		Negotiator:    negotiator,
+	})
 }

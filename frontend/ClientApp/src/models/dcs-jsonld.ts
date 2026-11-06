@@ -22,6 +22,10 @@ export interface DcsContractMetadata {
   '@type': 'dcs:ContractMetadata'
   'dcs:title'?: string
   'dcs:description'?: string
+  'dcs:startDate'?: JsonLdTypedValue
+  'dcs:expirationDate'?: JsonLdTypedValue
+  'dcs:expirationNoticePeriod'?: number
+  'dcs:expirationPolicy'?: string
   'dcs:customMetaData'?: unknown[]
 }
 
@@ -129,9 +133,7 @@ export function typedFieldFill(value: string | number | boolean, datatype: strin
 
 /** Reads a fill back to the editor's scalar, accepting the typed-literal
  *  serialization and bare scalars alike. Returns undefined for an absent
- *  fill. A typed fill converts per the declared datatype — a decimal field's
- *  editor holds a NUMBER — so write and read stay symmetric and draft
- *  dirty-checks never see a phantom change. */
+ *  fill. Numeric typed literals retain their lexical precision. */
 export function fieldFillScalar(
   fill: DcsContractField['dcs:value'],
   datatype?: XsdDatatype,
@@ -140,9 +142,6 @@ export function fieldFillScalar(
   if (typeof fill !== 'object') return fill
   const lexical = fill['@value']
   switch (datatype ?? fill['@type']) {
-    case 'xsd:decimal':
-    case 'xsd:integer':
-      return Number(lexical)
     case 'xsd:boolean':
       return lexical === 'true'
     default:
@@ -348,6 +347,8 @@ export interface DcsContractData extends DcsDocumentData {
   'dcs:parties'?: unknown[]
   'dcs:signatureFields'?: unknown[]
   'sh:shapesGraph'?: unknown
+  /** The signing deadline (xsd:dateTime) the signing workflow enforces (DCS-FR-SM-13). */
+  'dcs:signingDeadline'?: unknown
 }
 
 /** The source-template node: a prov:wasDerivedFrom edge plus version assertion. */

@@ -15,7 +15,7 @@ import (
 func proofedEvidence(proofMethod, proofPurpose string) json.RawMessage {
 	return attachment(`{
 	  "type": ["VerifiableCredential", "ContractSigningSummaryCredential"],
-	  "credentialSubject": {"id": "`+testSignedSignatory+`", "field_name": "`+testSignedParty+`", "contract_id": "`+testContract+`"},
+	  "credentialSubject": {"id": "`+testSignedSignatory+`", "poa_subject_did": "`+testPoAHolder+`", "field_name": "`+testSignedParty+`", "contract_id": "`+testContract+`"},
 	  "proof": {"type": "DataIntegrityProof", "verificationMethod": "`+proofMethod+`", "proofPurpose": "`+proofPurpose+`"}
 	}`, "p")
 }
@@ -101,5 +101,5 @@ func TestVerifiedSigningEvidenceIsAccepted(t *testing.T) {
 	require.NoError(t, gate.Check(testSignedParty, testLocalParty, testContract, verifier(),
 		[]json.RawMessage{proofedEvidence(testSignedParty+"#dcs-vc", "assertionMethod")}))
 	require.Len(t, seen, 1)
-	assert.Equal(t, testSignedSignatory, seen[0].SignatoryDID)
+	assert.Equal(t, testPoAHolder, seen[0].PoASubjectDID)
 }

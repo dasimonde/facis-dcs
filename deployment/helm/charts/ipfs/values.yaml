@@ -5,9 +5,26 @@ image:
   # version tag rolled the node back eleven minor releases and broke every
   # scenario that stores a PDF. Pin to sha256:8907cb0cc1ad5798f6bb1bb1341a8009
   # 90c268e021cedfa317e8aa1a33864214 (the digest running on the demo instances)
-  # once the chart supports a digest reference.
+  # through digest below, per environment.
   tag: "latest"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
   pullPolicy: IfNotPresent
+
+# 1000:100 is the ipfs user of the Kubo image. Kubo writes only to its repo
+# volume /data/ipfs (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 100
+  fsGroup: 100
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 # Node tuning, applied by the config init container. Both default OFF: they
 # trade durability and network reachability for write latency, which is the
@@ -38,6 +55,13 @@ service:
   swarmNodePort: null
 
 api:
+  # Kubo API.Authorizations (DCS-NFR-SF-02): every RPC call must carry the
+  # bearer token of the Secret <release>-ipfs-api (key token), which the chart
+  # generates on install and keeps on upgrade. The parent chart gives it to the
+  # backend as IPFS_API_TOKEN. The ipfs CLI in the pod needs
+  # --api-auth "bearer:$IPFS_API_TOKEN".
+  auth:
+    enabled: false
   cors:
     enabled: false
     allowOrigins: []

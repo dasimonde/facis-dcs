@@ -21,11 +21,11 @@ type CounterpartyPoA struct {
 
 // CounterpartyPoAExpectation is what the receiving instance already knows about
 // the signature the credential is supposed to authorize, read from the contract
-// the peer shipped: the party that signed, and the signatory recorded for it.
+// the peer shipped: the party that signed, and the PoA holder recorded for it.
 // The credential has to match both, or it authorizes some other signature.
 type CounterpartyPoAExpectation struct {
-	Organization string
-	SignatoryDID string
+	Organization  string
+	PoASubjectDID string
 }
 
 // VerifyCounterpartyPoA verifies a Power of Attorney a counterparty presented
@@ -36,24 +36,28 @@ type CounterpartyPoAExpectation struct {
 // request, with a nonce and an audience issued by the verifier that asked. This
 // instance never asked, so it re-derives nothing from that segment — the holder
 // binding it checks is the credential's own (sub against cnf.jwk) plus the
-// requirement that this holder is the signatory the shipped contract records.
+// holder identifier attested by the shipped signing summary.
 //
 // What that establishes is an attestation: an issuer this instance trusts for
 // `peer`, entitled to speak for that organization, says the holder may act for
 // it, and the credential is not revoked. It does not establish who the human
 // is — the PID does that, on the instance where the ceremony ran.
+//
+// A delegated Power of Attorney is accepted when its delegation chain verifies
+// to an issuer trusted for `peer`, link by link (verifyPoAChain), and no link
+// is revoked (DCS-FR-SM-04).
 func VerifyCounterpartyPoA(presentation string, trust *TrustConfig, expected CounterpartyPoAExpectation) (*CounterpartyPoA, error) {
 	if trust == nil {
 		return nil, fmt.Errorf("trust config is not configured")
 	}
 
 	organization := strings.TrimSpace(expected.Organization)
-	signatory := strings.TrimSpace(expected.SignatoryDID)
+	poaSubject := strings.TrimSpace(expected.PoASubjectDID)
 	if organization == "" {
 		return nil, fmt.Errorf("no party to verify the Power of Attorney against")
 	}
-	if signatory == "" {
-		return nil, fmt.Errorf("party %q records no signatory to bind the Power of Attorney to", organization)
+	if poaSubject == "" {
+		return nil, fmt.Errorf("party %q records no Power of Attorney holder subject", organization)
 	}
 
 	parsed, err := sdjwt.ParsePresentation(strings.TrimSpace(presentation))
@@ -61,21 +65,21 @@ func VerifyCounterpartyPoA(presentation string, trust *TrustConfig, expected Cou
 		return nil, err
 	}
 
-	document, err := verifyCredentialDocument(parsed.IssuerJWT, parsed.Disclosures, trust, PurposePeer)
+	chain, err := verifyPoAChain(parsed.IssuerJWT, parsed.Disclosures, trust, PurposePeer)
 	if err != nil {
 		return nil, err
 	}
-
-	if err := checkStatusList(document.RawClaims); err != nil {
+	if err := checkChainStatus(chain); err != nil {
 		return nil, err
 	}
+	document := chain[0].document
 
 	if document.Organization != organization {
 		return nil, fmt.Errorf("power of attorney authorizes %q, not the signing party %q", document.Organization, organization)
 	}
-	if document.SubjectDID != signatory {
-		return nil, fmt.Errorf("power of attorney is held by %q, not by %q, the signatory recorded for party %q",
-			document.SubjectDID, signatory, organization)
+	if document.SubjectDID != poaSubject {
+		return nil, fmt.Errorf("power of attorney is held by %q, not by the recorded holder %q for party %q",
+			document.SubjectDID, poaSubject, organization)
 	}
 
 	return &CounterpartyPoA{

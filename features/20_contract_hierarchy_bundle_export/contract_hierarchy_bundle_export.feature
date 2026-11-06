@@ -142,12 +142,20 @@ Feature: Contract hierarchy invariant and ZIP bundle export
     Then the contract bundle export for "Incomplete Bundle Contract" is refused with a findings list
 
   @DCS-FR-TR-24 @DCS-FR-TR-09
-  Scenario: Template bundle export returns a ZIP with flat template artifacts only
+  Scenario: Template bundle export returns a ZIP with the template artifacts
     Given an approved template "Bundle Export Template" is available for bundle export
     When I request the template bundle export for "Bundle Export Template"
     Then get http 200:Success code
     And the response has Content-Type "application/zip"
+    And the template bundle ZIP for "Bundle Export Template" contains entries: template.jsonld, template.pdf, bundle-manifest.json
     And the template bundle ZIP for "Bundle Export Template" contains no frame/parent chain directory
+
+  @DCS-FR-TR-24 @DCS-FR-TR-23 @DCS-FR-TR-09
+  Scenario: Template bundle export assembles the required templates with their provenance credentials
+    Given a registered frame template "Bundle Frame Template" and an approved template "Bundle Sub Template" that requires it are available for bundle export
+    When I request the template bundle export for "Bundle Sub Template"
+    Then get http 200:Success code
+    And the template bundle ZIP for "Bundle Sub Template" contains the required template "Bundle Frame Template" with its provenance credential
 
   @DCS-FR-CSA-18
   Scenario: Contract bundle export honors RBAC like retrieval

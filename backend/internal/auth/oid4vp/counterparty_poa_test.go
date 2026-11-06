@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 const (
@@ -95,8 +96,8 @@ func publicJWK(key *ecdsa.PrivateKey) sdjwt.JWK {
 	return sdjwt.JWK{
 		Kty: "EC",
 		Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-		Y:   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+		X:   ecutil.MustJWKX(ecutil.AsPublic(key)),
+		Y:   ecutil.MustJWKY(ecutil.AsPublic(key)),
 	}
 }
 
@@ -170,8 +171,8 @@ func TestVerifyCounterpartyPoA_Valid(t *testing.T) {
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	verified, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, testPoAIssuer, verified.IssuerID)
@@ -189,8 +190,8 @@ func TestVerifyCounterpartyPoA_UnknownIssuerIsRefused(t *testing.T) {
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
 	// An unlisted issuer is refused for a specific reason now: it had no entry,
@@ -207,8 +208,8 @@ func TestVerifyCounterpartyPoA_IssuerWithoutPeerPurposeIsRefused(t *testing.T) {
 	trust := peerTrust(t, issuerKey, []Purpose{PurposeLogin}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not trusted")
@@ -223,8 +224,8 @@ func TestVerifyCounterpartyPoA_OrganizationOutsideIssuerEntitlementIsRefused(t *
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{"did:web:someone-else.example"}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not entitled to attest")
@@ -239,25 +240,24 @@ func TestVerifyCounterpartyPoA_CredentialForAnotherPartyIsRefused(t *testing.T) 
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{OrganizationsAny}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not the signing party")
 }
 
-// Holder binding: the credential has to be held by the signatory the shipped
-// contract records, or a peer could authorize its signature with somebody
-// else's Power of Attorney.
-func TestVerifyCounterpartyPoA_HolderIsNotTheRecordedSignatoryIsRefused(t *testing.T) {
+// Holder binding: the credential has to match the PoA subject attested by the
+// shipped signing summary.
+func TestVerifyCounterpartyPoA_HolderDoesNotMatchRecordedPoASubject(t *testing.T) {
 	list := newXFSCStatusList(t, 16, testPoAIssuer)
 	issuerKey, holderKey := newECKey(t), newECKey(t)
 	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: "did:jwk:somebody-else",
+		Organization:  testPoAParty,
+		PoASubjectDID: "did:jwk:somebody-else",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is held by")
@@ -272,8 +272,8 @@ func TestVerifyCounterpartyPoA_RevokedCredentialIsRefused(t *testing.T) {
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	expectation := CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	}
 
 	// The same credential against the same list is accepted before the
@@ -298,8 +298,8 @@ func TestVerifyCounterpartyPoA_ExpiredCredentialIsRefused(t *testing.T) {
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "expired")
@@ -313,8 +313,8 @@ func TestVerifyCounterpartyPoA_WithoutTrustConfigOrExpectationIsRefused(t *testi
 	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
 
 	_, err := VerifyCounterpartyPoA(poa.Presentation, nil, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
 
@@ -322,11 +322,11 @@ func TestVerifyCounterpartyPoA_WithoutTrustConfigOrExpectationIsRefused(t *testi
 		Organization: testPoAParty,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "records no signatory")
+	assert.Contains(t, err.Error(), "records no Power of Attorney holder")
 
 	_, err = VerifyCounterpartyPoA("", trust, CounterpartyPoAExpectation{
-		Organization: testPoAParty,
-		SignatoryDID: poa.SignatoryDID,
+		Organization:  testPoAParty,
+		PoASubjectDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
 }

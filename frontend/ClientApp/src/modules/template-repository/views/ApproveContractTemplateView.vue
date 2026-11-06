@@ -6,6 +6,8 @@ import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { templateStory, toBannerActions } from '@core/workflow-story'
 import CopyTemplateButton from '@template-repository/components/CopyTemplateButton.vue'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
+import TemplateReviewNotes from '@template-repository/components/TemplateReviewNotes.vue'
+import TemplateVerificationPanel from '@template-repository/components/TemplateVerificationPanel.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -60,9 +62,14 @@ watch(
           name: template.name ?? '',
           description: template.description ?? '',
           templateType: template.template_type,
+          partyType: template.party_type,
+          templateLevel: template.template_level,
+          requiredTemplates: template.required_templates,
           state: template.state,
           version: template.version ?? null,
+          created_at: template.created_at ?? null,
           updated_at: template.updated_at ?? null,
+          created_by: template.created_by,
         })
       })
       .catch((error: unknown) => {
@@ -114,14 +121,15 @@ async function resubmit() {
     return
   }
   try {
+    // DCS-IR-TR-05: a resubmission states its reason.
     const decisionNoteResult = await decisionNoteDialog.value?.reveal({
-      message: 'Add decision note?',
-      editor: { requiredText: false, placeholder: 'Decision Note' },
+      message: 'Why does the template go back to review?',
+      editor: { requiredText: true, label: 'Reason', placeholder: 'Reason for the resubmission' },
     })
     if (decisionNoteResult?.isCanceled) {
       return
     } else if (decisionNoteResult?.data) {
-      decisionNote.value = decisionNoteResult.data
+      decisionNote.value = decisionNoteResult.data.trim()
     }
     isSubmitting.value = true
     await contractTemplateService.submit({
@@ -193,6 +201,8 @@ const exportPDF = async () => {
           :narrative="story.narrative"
           :actions="toBannerActions(story.actionHints)"
         />
+        <TemplateReviewNotes :notes="contractTemplate?.review_notes" />
+        <TemplateVerificationPanel v-if="contractTemplate" :key="contractTemplate.did" :did="contractTemplate.did" />
       </template>
     </TemplateEditors>
 
@@ -204,19 +214,15 @@ const exportPDF = async () => {
         <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
         <CopyTemplateButton :disabled="!isCreator && !isManager" class="btn flex-1 btn-primary" />
-        <button :disabled="isSubmitting || (!isApprover && !isManager)" class="btn flex-1 btn-primary" @click="reject">
+        <button :disabled="isSubmitting || !isApprover" class="btn flex-1 btn-primary" @click="reject">
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
         </button>
-        <button
-          :disabled="isSubmitting || (!isApprover && !isManager)"
-          class="btn flex-1 btn-primary"
-          @click="resubmit"
-        >
+        <button :disabled="isSubmitting || !isApprover" class="btn flex-1 btn-primary" @click="resubmit">
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Resubmit
         </button>
-        <button :disabled="isSubmitting || (!isApprover && !isManager)" class="btn flex-1 btn-primary" @click="approve">
+        <button :disabled="isSubmitting || !isApprover" class="btn flex-1 btn-primary" @click="approve">
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Approve
         </button>

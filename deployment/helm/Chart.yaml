@@ -56,6 +56,10 @@ dependencies:
     repository: "file://charts/statuslist-service"
     condition: statuslistService.enabled
     alias: statuslistService
+  - name: logging
+    version: "0.1.0"
+    repository: "file://charts/logging"
+    condition: logging.enabled
   - name: kube-prometheus-stack
     version: "85.2.0"
     repository: "https://prometheus-community.github.io/helm-charts"

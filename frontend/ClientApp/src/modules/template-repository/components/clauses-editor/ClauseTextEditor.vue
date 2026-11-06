@@ -219,6 +219,8 @@ function onEditorClick(e: MouseEvent) {
       // update cursor position when clicking on an existing placeholder
       if (span.dataset.conditionId != null && span.dataset.parameterName != null) {
         e.preventDefault()
+        // DCS-FR-TR-04: the clicked prose placeholder shows its field in the rule panel.
+        setHighlight({ conditionId: span.dataset.conditionId, parameterName: span.dataset.parameterName })
         void nextTick(() => {
           el.focus()
           setCursorAfter(node!)
@@ -424,6 +426,7 @@ onBeforeUnmount(() => {
         :is-param-used-in-text="isParamUsedInText"
         :is-param-required-and-unused="isParamRequiredAndUnused"
         :highlight-rule-title="true"
+        :highlight="clausePlaceholderHighlight"
         @highlight-rule="(id) => setHighlight({ conditionId: id })"
         @highlight-param="(id, name) => setHighlight({ conditionId: id, parameterName: name })"
         @clear-highlight="clearHighlight"
@@ -434,6 +437,7 @@ onBeforeUnmount(() => {
         empty-message="All requirements used or none defined."
         :conditions="unusedConditions"
         :is-condition-used-in-other-clauses="isConditionUsedInOtherClauses"
+        :highlight="clausePlaceholderHighlight"
         @highlight-rule="(id) => setHighlight({ conditionId: id })"
         @highlight-param="(id, name) => setHighlight({ conditionId: id, parameterName: name })"
         @clear-highlight="clearHighlight"

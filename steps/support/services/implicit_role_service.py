@@ -30,7 +30,7 @@ class ImplicitRoleService:
         base["@context"]["odrl"] = "http://www.w3.org/ns/odrl/2/"
         base["@context"]["xsd"] = "http://www.w3.org/2001/XMLSchema#"
         field_id = "urn:uuid:field-company-location-country"
-        base["dcs:contractFields"] = [
+        base["dcs:contractFields"].append(
             {
                 "@id": field_id,
                 "@type": "dcs:ContractField",
@@ -39,9 +39,10 @@ class ImplicitRoleService:
                 "dcs:shape": {
                     "@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-country"
                 },
+                "dcs:valueConstraint": {"format": "iso-3166-1-alpha-3"},
                 "dcs:required": True,
             }
-        ]
+        )
 
         def party_iri(role: str) -> str:
             # The contractual role is itself an IRI, so it must be encoded

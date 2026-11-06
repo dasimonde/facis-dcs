@@ -57,9 +57,7 @@ test.describe('contract management dashboard backed by contracts in two lifecycl
       // popover for a metadata search.
       await page.locator('#list-btn-search').click()
       await page.locator('#list-popover-search').getByText('Name', { exact: true }).click()
-      const searched = page.waitForResponse((r) => r.url().includes('/contract/search') && r.ok())
       await page.getByLabel('Search contracts').fill(draft.contractTemplateName)
-      await searched
       await page.getByRole('button', { name: 'Search', exact: true }).click()
       await expect(rows).toHaveCount(1)
       await expect(rows.first()).toContainText(draft.contractTemplateName)
@@ -68,9 +66,7 @@ test.describe('contract management dashboard backed by contracts in two lifecycl
 
     await test.step('a DID search narrows the list to the APPROVED contract', async () => {
       await page.goto('/ui/contracts')
-      const searched = page.waitForResponse((r) => r.url().includes('/contract/search') && r.ok())
       await page.getByLabel('Search contracts').fill(approvedDid)
-      await searched
       await page.getByRole('button', { name: 'Search', exact: true }).click()
       await expect(rows).toHaveCount(1)
       await expect(rows.first()).toContainText('APPROVED')
@@ -113,7 +109,8 @@ test.describe('contract management dashboard backed by contracts in two lifecycl
     // The confirmation modal demands a reason before Submit enables.
     const dialog = page.getByRole('dialog').filter({ hasText: 'Confirmation' })
     await expect(dialog.getByText('Proceed with terminating?')).toBeVisible()
-    await dialog.getByPlaceholder('Reason').fill('Service agreement superseded by a renegotiated successor.')
+    const reason = `Service agreement superseded by a renegotiated successor ${Date.now()}.`
+    await dialog.getByPlaceholder('Reason').fill(reason)
     const terminated = page.waitForResponse(
       (r) => r.url().includes('/contract/terminate') && r.request().method() === 'POST',
     )
@@ -125,5 +122,14 @@ test.describe('contract management dashboard backed by contracts in two lifecycl
 
     await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${approvedDid}`)
     await expect(page.getByText('TERMINATED', { exact: true }).locator('visible=true').first()).toBeVisible()
+
+    // The audit trail of the contract holds the recorded reason.
+    await page.getByRole('tab', { name: 'Audit History' }).click()
+    await page.getByLabel('Audit justification').fill('e2e check of the termination reason')
+    const audit = page.waitForResponse(
+      (r) => r.url().includes('/contract/audit') && r.request().method() === 'POST' && r.ok(),
+    )
+    await page.getByRole('button', { name: 'Load audit trail', exact: true }).click()
+    expect(JSON.stringify(await (await audit).json())).toContain(reason)
   })
 })

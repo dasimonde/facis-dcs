@@ -52,8 +52,20 @@ export interface SignatureContract {
 
 export interface SignatureContractDetail {
   contract: SignatureContract
-  // Absent for an APPROVED-unsigned contract with no signature yet (ADR-12).
+  // The most recent signature record of any status; absent for an
+  // APPROVED-unsigned contract with no signature yet (ADR-12).
   signature_envelope?: SignatureEnvelope
+  // Signing status of every declared signature field (DCS-FR-SM-07/-24).
+  signature_fields?: SignatureFieldStatus[]
+}
+
+export interface SignatureFieldStatus {
+  field_name: string
+  status: 'SIGNED' | 'UNSIGNED'
+  // A counterparty signs this field on its own instance.
+  remote: boolean
+  signer_did?: string
+  signed_at?: string
 }
 
 export interface SignatureEnvelope {
@@ -132,6 +144,12 @@ export interface SignatureViewItem {
   qualified?: boolean
   signer_cert_subject?: string
   signer_cert_serial?: string
+  poa_organization?: string
+  poa_roles?: string[]
+  summary_issuer?: string
+  // Live status-list state of the presented Power of Attorney credential.
+  credential_status?: 'VALID' | 'REVOKED' | 'SUSPENDED' | 'UNKNOWN'
+  credential_status_reason?: string
 }
 
 export interface SignatureViewResult {
@@ -152,6 +170,39 @@ export interface SignatureAuditEntry {
   res_log_pred_cid?: string
 }
 
+export interface SignatureClauseReportFinding {
+  rule_id?: string
+  severity: string
+  message: string
+  path?: string
+  field_iri?: string
+  focus_node?: string
+  source?: string
+  clause_ids?: string[]
+}
+
+export interface SignatureClauseReportSection {
+  clause_id: string
+  title?: string
+  /** not_assessed | undetermined | warnings_only | issues_identified | compliant */
+  status: string
+  findings: SignatureClauseReportFinding[]
+  assessment_run: string
+  /** Display: Not established | None | check ids */
+  applicable_checks: string
+  /** not_established | none | established */
+  applicable_checks_status: string
+  verdict_note?: string
+}
+
+export interface SignatureClauseReportResult {
+  did: string
+  assessment_run: string
+  scope_note?: string
+  clauses: SignatureClauseReportSection[]
+  unassigned_findings: SignatureClauseReportFinding[]
+}
+
 export type CeremonyStatus = 'pending' | 'verified' | 'expired' | 'failed'
 
 export interface CeremonyStartResult {
@@ -168,6 +219,20 @@ export interface CeremonyStatusResult {
   status: CeremonyStatus
   signer_did?: string
   expires_at?: string
+  // Set once a signature submitted for this ceremony was accepted.
+  signed_at?: string
+  // Set once a signing request is published for this ceremony.
+  request_expires_at?: string
+  // The last wallet response the DCS refused for this ceremony.
+  refusal_code?: string
+  refusal?: string
+}
+
+export interface SignatureRequestPublishResult {
+  ceremony_id: string
+  wallet_uri: string
+  request_uri: string
+  expires_at: string
 }
 
 export const signatureManagementService = {
@@ -192,6 +257,16 @@ export const signatureManagementService = {
 
   async getCeremonyStatus(ceremonyId: string): Promise<CeremonyStatusResult> {
     return http.get<CeremonyStatusResult>(`/signature/request/${ceremonyId}`).then((res) => res.data)
+  },
+
+  // Wallet signing (ADR-12, DCS-FR-SM-06/-23): prepares the to-be-signed
+  // document for a verified ceremony and returns the OID4VP Document-Retrieval
+  // deep link. The wallet signs the document and posts it back to the DCS; the
+  // level defaults to the contract's own requirement for the field.
+  async publishSignatureRequest(ceremonyId: string): Promise<SignatureRequestPublishResult> {
+    return http
+      .post<SignatureRequestPublishResult>(`/signature/request/${encodeURIComponent(ceremonyId)}/publish`, {})
+      .then((res) => res.data)
   },
 
   // The DCS holds no signing key (ADR-12). Signing is two steps: prepare the
@@ -281,7 +356,16 @@ export const signatureManagementService = {
     await http.post('/signature/revoke', { did, signer_did: signerDid, reason })
   },
 
-  async getAudit(did: string): Promise<SignatureAuditEntry[]> {
-    return http.get<SignatureAuditEntry[]>('/signature/audit', { params: { did } }).then((res) => res.data ?? [])
+  async getAudit(did: string, justification: string): Promise<SignatureAuditEntry[]> {
+    return http
+      .get<SignatureAuditEntry[]>('/signature/audit', { params: { did, justification } })
+      .then((res) => res.data ?? [])
+  },
+
+  /** PACM-07 clause projection: live SHACL findings mapped conservatively to clause @ids. */
+  async getClauseReport(did: string): Promise<SignatureClauseReportResult> {
+    return http
+      .get<SignatureClauseReportResult>('/signature/clause-report', { params: { did } })
+      .then((res) => res.data)
   },
 }

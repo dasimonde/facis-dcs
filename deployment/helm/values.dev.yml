@@ -54,7 +54,7 @@ postgresql:
     username: dcs
     password: dcs
     database: dcs
-  additionalDatabases: ["fc", "statuslist", "hydra"]
+  additionalDatabases: ["fc", "hydra"]
   persistence:
     # The dependency stack is upgraded in place by dev-stack.sh. Keeping the
     # databases on emptyDir loses Hydra clients, status lists and DCS data as
@@ -171,32 +171,6 @@ oid4vp:
       poa: /app/config/oid4vp/x5c-trust-anchors.dev.pem
       pid: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
-# XFSC Status List Service (DCS-OR-C2PA-005)
-statuslistService:
-  enabled: true
-  service:
-    type: NodePort
-    port: 8080
-    nodePort: 30821
-  keycloak:
-    hostname: "localhost:30080"
-    issuerScheme: "http"
-  oauth:
-    clientID: "dcs-fc-client"
-  # Allow POSTing self-descriptions without signature verification in dev
-  verificationVpSignature: false
-  verificationVcSignature: false
-  database:
-    enabled: true
-    host: "dcs-postgresql"
-    port: "5432"
-    name: "statuslist"
-    user: "dcs"
-    password: "dcs"
-    sslMode: "disable"
-  nats:
-    url: "nats://dcs-nats:4222"
-
 orce:
   enabled: true
   persistence:
@@ -211,12 +185,19 @@ archiveNotary:
 
 global:
   archiveAuditToken: "dev-archive-audit-token"
+  # In-cluster TLS off: the backend runs on the host (replicaCount 0) and
+  # reaches PostgreSQL, NATS, IPFS and ORCE through their NodePorts.
+  internalTLS:
+    enabled: false
 
 ipfs:
   enabled: true
   persistence:
     enabled: true
   api:
+    # The backend runs on the host and calls the NodePort without a token.
+    auth:
+      enabled: false
     cors:
       enabled: true
       allowOrigins:
@@ -248,3 +229,8 @@ extraEnv:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
+
+# The backend runs on the host and reaches PostgreSQL, NATS, IPFS and Hydra
+# through NodePorts, which the NetworkPolicies would refuse.
+networkPolicy:
+  enabled: false

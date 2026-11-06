@@ -85,7 +85,7 @@ func TestCleanContractFieldUpdateMatchesFreshCompile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("base compile: %v", err)
 	}
-	amended := strings.Replace(cleanContractFieldPayload, "15000", "12000", -1)
+	amended := strings.ReplaceAll(cleanContractFieldPayload, "15000", "12000")
 	updated, err := UpdatePDF(WithSigner(ctx, NewCapturingSigner()), base, []byte(amended), CanonicalCompiledAt)
 	if err != nil {
 		t.Fatalf("updatePDF: %v", err)
@@ -158,7 +158,7 @@ func TestCleanContractFieldRecompileMatchesPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("base compile: %v", err)
 	}
-	amended := strings.Replace(cleanContractFieldVerifyBase, "15000", "12000", -1)
+	amended := strings.ReplaceAll(cleanContractFieldVerifyBase, "15000", "12000")
 	updated, err := UpdatePDF(testSigningContext(), base, []byte(amended), time.Now())
 	if err != nil {
 		t.Fatalf("updatePDF: %v", err)

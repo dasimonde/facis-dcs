@@ -3,14 +3,14 @@ package status
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/url"
 	"strings"
+
+	"digital-contracting-service/internal/base/ecutil"
 )
 
 // TrustConfig maps issuer identifiers to trusted public keys (JWKS).
@@ -174,15 +174,7 @@ func jwkToECDSAPublicKey(jwk map[string]any) (*ecdsa.PublicKey, error) {
 	}
 	xRaw, _ := jwk["x"].(string)
 	yRaw, _ := jwk["y"].(string)
-	x, err := decodeBase64URLInt(xRaw)
-	if err != nil {
-		return nil, err
-	}
-	y, err := decodeBase64URLInt(yRaw)
-	if err != nil {
-		return nil, err
-	}
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+	return ecutil.FromJWKCoords(strings.TrimSpace(xRaw), strings.TrimSpace(yRaw))
 }
 
 func jwkToEd25519PublicKey(jwk map[string]any) (ed25519.PublicKey, error) {
@@ -202,12 +194,4 @@ func jwkToEd25519PublicKey(jwk map[string]any) (ed25519.PublicKey, error) {
 	pub := make(ed25519.PublicKey, ed25519.PublicKeySize)
 	copy(pub, raw)
 	return pub, nil
-}
-
-func decodeBase64URLInt(s string) (*big.Int, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(s))
-	if err != nil {
-		return nil, err
-	}
-	return new(big.Int).SetBytes(raw), nil
 }

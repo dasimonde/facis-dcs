@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestValidatePDFParsesIndication(t *testing.T) {
@@ -137,6 +138,48 @@ func TestValidatePDFAttributesTheLastSignatureOnAMultiSignedDocument(t *testing.
 	}
 	if report.SubjectGivenName() != "Instance B Signatory" || report.SubjectSurname() != "BDD-Testperson" {
 		t.Fatalf("expected the LAST signature's own certificate identity (Instance B Signatory/BDD-Testperson), got %+v", report)
+	}
+}
+
+// The verifier checks every signature of a document, not only the last one:
+// ValidatePDFSignatures returns one report per Signature entry, in document
+// order, each with its own certificate, and skips timestamp entries.
+func TestValidatePDFSignaturesReportsEverySignature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"simpleReport": {
+				"signatureOrTimestampOrEvidenceRecord": [
+					{"Signature": {"Id": "S-A", "Indication": "TOTAL-FAILED", "SubIndication": "HASH_FAILURE", "SignedBy": "A"}},
+					{"Timestamp": {"Id": "T-1", "Indication": "PASSED", "SignedBy": "Dev TSA"}},
+					{"Signature": {"Id": "S-B", "Indication": "TOTAL-PASSED", "SignedBy": "B"}}
+				]
+			},
+			"diagnosticData": {
+				"Signatures": {"Signature": [
+					{"Id": "S-A", "SigningCertificate": {"Certificate": "C-A"}},
+					{"Id": "S-B", "SigningCertificate": {"Certificate": "C-B"}}
+				]},
+				"UsedCertificates": {"Certificate": [
+					{"Id": "C-A", "CommonName": "Signatory A"},
+					{"Id": "C-B", "CommonName": "Signatory B"}
+				]}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	reports, err := New(srv.URL).ValidatePDFSignatures(context.Background(), []byte("%PDF fake"))
+	if err != nil {
+		t.Fatalf("ValidatePDFSignatures: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("got %d reports, want one per signature (2)", len(reports))
+	}
+	if reports[0].Indication != "TOTAL-FAILED" || reports[0].CommonName != "Signatory A" {
+		t.Fatalf("first report = %+v, want signature A failed", reports[0])
+	}
+	if reports[1].Indication != "TOTAL-PASSED" || reports[1].CommonName != "Signatory B" {
+		t.Fatalf("second report = %+v, want signature B passed", reports[1])
 	}
 }
 
@@ -293,5 +336,89 @@ func TestValidatePDFRejectsReportWithoutIndication(t *testing.T) {
 	defer srv.Close()
 	if _, err := New(srv.URL).ValidatePDF(context.Background(), []byte("x"), "x.pdf"); err == nil {
 		t.Fatal("expected an error for a response without an Indication")
+	}
+}
+
+func TestExtendPDFReturnsTheExtendedDocument(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/services/rest/signature/one-document/extendDocument" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		var body struct {
+			ToExtendDocument struct {
+				Bytes []byte `json:"bytes"`
+				Name  string `json:"name"`
+			} `json:"toExtendDocument"`
+			Parameters map[string]string `json:"parameters"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if string(body.ToExtendDocument.Bytes) != "%PDF signed" || body.ToExtendDocument.Name != "contract.pdf" {
+			t.Fatalf("expected the signed document in the request, got %+v", body.ToExtendDocument)
+		}
+		if body.Parameters["signatureLevel"] != "PAdES_BASELINE_LTA" || body.Parameters["signaturePackaging"] != "ENVELOPED" ||
+			body.Parameters["digestAlgorithm"] != "SHA256" {
+			t.Fatalf("unexpected parameters %v", body.Parameters)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"bytes": []byte("%PDF signed extended"), "name": "contract.pdf"})
+	}))
+	defer srv.Close()
+
+	extended, err := New(srv.URL).ExtendPDF(context.Background(), []byte("%PDF signed"), "PAdES_BASELINE_LTA")
+	if err != nil {
+		t.Fatalf("ExtendPDF: %v", err)
+	}
+	if string(extended) != "%PDF signed extended" {
+		t.Fatalf("extended document = %q", extended)
+	}
+}
+
+func TestExtendPDFFailsWithoutAnExtendedDocument(t *testing.T) {
+	for name, handler := range map[string]http.HandlerFunc{
+		"HTTP 500": func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "no TSP source", http.StatusInternalServerError)
+		},
+		"empty document": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"bytes": null, "name": "contract.pdf"}`))
+		},
+		"no JSON": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`<html>`))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(handler)
+			defer srv.Close()
+			if _, err := New(srv.URL).ExtendPDF(context.Background(), []byte("%PDF"), "PAdES_BASELINE_LTA"); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+func TestExtendPDFFailsWhenUnreachable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := New("http://127.0.0.1:1").ExtendPDF(ctx, []byte("%PDF"), "PAdES_BASELINE_LTA"); err == nil {
+		t.Fatal("expected an error for an unreachable DSS")
+	}
+}
+
+func TestAssertQualifiedSignatures(t *testing.T) {
+	qes := &Report{Indication: "TOTAL-PASSED", SignedBy: "CN=A", Qualification: "QESig"}
+	aes := &Report{Indication: "INDETERMINATE", SubIndication: "NO_CERTIFICATE_CHAIN_FOUND", SignedBy: "CN=B"}
+	expired := &Report{Indication: "INDETERMINATE", SubIndication: "OUT_OF_BOUNDS_NO_POE", SignedBy: "CN=A", Qualification: "QESig"}
+
+	if err := AssertQualifiedSignatures([]*Report{aes, qes}, 1); err != nil {
+		t.Fatalf("one QES among two signatures: %v", err)
+	}
+	if err := AssertQualifiedSignatures([]*Report{aes}, 0); err != nil {
+		t.Fatalf("no QES recorded: %v", err)
+	}
+	if err := AssertQualifiedSignatures([]*Report{aes, qes}, 2); err == nil {
+		t.Fatal("two QES recorded, one validates: expected an error")
+	}
+	if err := AssertQualifiedSignatures([]*Report{expired}, 1); err == nil {
+		t.Fatal("a QES whose certificate expired without long-term validation data: expected an error")
 	}
 }

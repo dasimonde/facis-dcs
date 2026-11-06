@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -157,13 +158,29 @@ type SignatureRecord struct {
 	// join key back to the ceremony's recorded signer certificate subject for
 	// the cross-ceremony consistency check (ADR-20).
 	CeremonyID *string `db:"ceremony_id"`
+	// IpfsCID and PDFHash name the signed PDF this signature produced.
+	IpfsCID *string `db:"ipfs_cid"`
+	PDFHash *string `db:"pdf_hash"`
+}
+
+// QualifiedCount returns how many SIGNED signatures in records are QES.
+func QualifiedCount(records []SignatureRecord) int {
+	count := 0
+	for _, rec := range records {
+		if rec.Status == "SIGNED" && strings.EqualFold(rec.CredentialType, "QES") {
+			count++
+		}
+	}
+	return count
 }
 
 type ContractRepo interface {
 	ReadDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*Contract, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
 	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractMetadata, error)
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	// UpdateState moves the contract from state from to state to (see
+	// contractworkflowengine/db/pg.UpdateContractState).
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error
 	UpdateContractData(ctx context.Context, tx *sqlx.Tx, did string, contractData datatype.JSON) error
 
 	CreateSignature(ctx context.Context, tx *sqlx.Tx, signature ContractSignature) error
@@ -182,4 +199,17 @@ type ContractRepo interface {
 	CollectValidationFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
 	LoadSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]SignatureRecord, error)
 	CollectComplianceFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadPeerSignatureEvidence returns the peer signatures recorded when the
+	// contract's signed PDF arrived from a peer (contract_sync_signatures
+	// poa_evidence), or nil when none were recorded.
+	ReadPeerSignatureEvidence(ctx context.Context, tx *sqlx.Tx, did string) (json.RawMessage, error)
+	// ReadPeerSigners returns the peers whose verified cross-instance
+	// signature this instance holds for the contract, with its receipt time.
+	ReadPeerSigners(ctx context.Context, tx *sqlx.Tx, did string) ([]PeerSigner, error)
+}
+
+// PeerSigner is a peer whose cross-instance signature this instance holds.
+type PeerSigner struct {
+	PeerDID    string    `db:"from_peer_did"`
+	ReceivedAt time.Time `db:"received_at"`
 }

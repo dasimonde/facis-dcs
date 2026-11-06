@@ -1,6 +1,6 @@
-import { mount, RouterLinkStub } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ROUTES } from '@/router/router'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
@@ -12,9 +12,15 @@ import ReviewTaskList from './ReviewTaskList.vue'
 import type { ContractReviewTask } from '@/models/contract/contract-review-task'
 import type { ContractTemplateReviewTask } from '@/models/contract-template/contract-template-review-task'
 
+const search = vi.hoisted(() => vi.fn().mockResolvedValue([]))
+vi.mock('@/services/contract-workflow-service', () => ({ contractWorkflowService: { search } }))
+
 type ReviewTask = ContractTemplateReviewTask | ContractReviewTask
 
-const templateTask = (did: string, state = ReviewTaskState.open): ContractTemplateReviewTask => ({
+const templateTask = (
+  did: string,
+  state: ContractTemplateReviewTask['state'] = ReviewTaskState.open,
+): ContractTemplateReviewTask => ({
   type: 'template',
   did,
   version: 1,
@@ -23,7 +29,7 @@ const templateTask = (did: string, state = ReviewTaskState.open): ContractTempla
   created_at: '2026-08-03T00:00:00Z',
 })
 
-const contractTask = (did: string, state = ReviewTaskState.open): ContractReviewTask => ({
+const contractTask = (did: string, state: ContractReviewTask['state'] = ReviewTaskState.open): ContractReviewTask => ({
   type: 'contract',
   did,
   contract_version: '1',
@@ -180,4 +186,20 @@ describe('ReviewTaskList readiness filter', () => {
 
     expect(viewTargets(openWrapper)).toEqual([ROUTES.TEMPLATES.VIEW, ROUTES.CONTRACTS.VIEW])
   })
+})
+
+it('searches submitted contracts and preserves the wrapping toolbar', async () => {
+  const wrapper = mountList([contractTask('did:test:review')], {}, { 'did:test:review': ContractState.submitted })
+  const input = wrapper.get('input[placeholder="Search contracts"]')
+  await input.setValue('agreement')
+  await flushPromises()
+  expect(search).toHaveBeenLastCalledWith({ did: 'agreement', state: [ContractState.submitted] })
+  const toolbar = wrapper
+    .findAll('div')
+    .find((node) => node.classes().includes('flex-wrap') && node.classes().includes('items-center'))
+  expect(toolbar).toBeTruthy()
+  const controls = wrapper.get('div.ml-auto')
+  expect(controls.classes()).toEqual(expect.arrayContaining(['flex', 'shrink-0']))
+  expect(controls.findAll('button').length).toBeGreaterThanOrEqual(2)
+  wrapper.unmount()
 })

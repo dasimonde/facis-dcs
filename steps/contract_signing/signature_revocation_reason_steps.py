@@ -124,7 +124,7 @@ def step_then_revoke_audit_records_exact_reason(
     while time.monotonic() < deadline:
         response = requests.get(
             signature_audit_url(context),
-            params={"did": did},
+            params={"did": did, "justification": "BDD signature audit"},
             headers=auditor_headers,
             timeout=context.http_timeout_seconds,
         )

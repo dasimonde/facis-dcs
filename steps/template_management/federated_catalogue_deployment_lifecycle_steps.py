@@ -7,6 +7,7 @@ Legacy upgrades extract and install the last Neo4j-based chart from Git history.
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -154,6 +155,29 @@ def _deploy_current_chart(context, values_paths):
     )
 
 
+def _bdd_system_clients():
+    """The client_credentials clients of hydra.clients in values.bdd.yml. A
+    list in a later values file replaces the list, so an override of
+    hydra.clients repeats them: the ORCE pod reads their secrets from the
+    Secret <release>-hydra-clients and does not start without them."""
+    text = (CHART_DIR / "values.bdd.yml").read_text(encoding="utf-8")
+    pairs = re.findall(r"^\s*- client_id: (\S+)\n\s*client_secret: (\S+)$", text, re.MULTILINE)
+    clients = [
+        {
+            "client_id": client_id,
+            "client_secret": secret,
+            "grant_types": ["client_credentials"],
+            "response_types": [],
+            "scope": "",
+            "token_endpoint_auth_method": "client_secret_post",
+        }
+        for client_id, secret in pairs
+        if client_id != "dcs-client"
+    ]
+    assert clients, "values.bdd.yml declares no system clients under hydra.clients"
+    return clients
+
+
 def _current_bdd_values(context, override_env_name):
     configured = os.environ.get(override_env_name, "").strip()
     if configured:
@@ -207,15 +231,9 @@ def _current_bdd_values(context, override_env_name):
                     "post_logout_redirect_uris": [f"{api_base}/auth/logout-complete"],
                     "token_endpoint_auth_method": "client_secret_post",
                     "skip_consent": True,
-                }
+                },
+                *_bdd_system_clients(),
             ],
-        },
-        "statuslistService": {
-            "ingress": {
-                "hosts": [
-                    {"host": host, "paths": [{"path": "/statuslist", "pathType": "Prefix"}]}
-                ]
-            }
         },
         "statusListLocalhostProxy": {"ingressHost": host},
         "orce": {"ingress": {"hosts": [{"host": host, "path": "/contract-target"}]}},
@@ -867,6 +885,15 @@ if [[ "$args" == *"logs deployment/dcs-digital-contracting-service"* ]]; then
   else
     echo "federated catalogue readiness gate failed: terminal functional verification"
   fi
+  exit 0
+fi
+# The NetworkPolicy probes of run_bdd_helm.sh answer as on an enforcing cluster.
+if [[ "$args" == *"logs pod/np-probe-"* ]]; then
+  printf 'backend=404\nbackend_exit=0\nipfs_exit=28\n'
+  exit 0
+fi
+if [[ "$args" == *"logs pod/np-outsider-"* ]]; then
+  printf 'backend=000\nbackend_exit=28\nipfs_exit=28\n'
   exit 0
 fi
 if [[ "$args" == *"get pod"* && "$args" == *"orce"* ]]; then

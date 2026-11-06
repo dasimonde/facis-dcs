@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"digital-contracting-service/internal/base/datatype"
 )
 
 // SHACLEvidence runs the Semantic Hub SHACL validation pass for a document
@@ -54,6 +56,33 @@ func RequireHubConformance(ctx context.Context, contractDocument any) error {
 	}
 	sort.Strings(violations)
 	return fmt.Errorf("document violates Semantic Hub shapes (version %d): %s", version, strings.Join(violations, "; "))
+}
+
+// AuditTemplateShapes validates template JSON-LD against the Semantic Hub
+// shapes graphs it declares and returns the findings (DCS-IR-TR-03,
+// DCS-FR-TR-20).
+func AuditTemplateShapes(ctx context.Context, raw *datatype.JSON) ([]PolicyFinding, error) {
+	if raw == nil {
+		return nil, fmt.Errorf("template data is missing")
+	}
+	template, err := normalizeObject([]byte(*raw))
+	if err != nil {
+		return nil, err
+	}
+	findings, _, err := validateAgainstHubShapes(ctx, template)
+	// A negotiable leaf references a declared contract field that the
+	// contract fills. Its cardinality is checked on the contract, so the
+	// missing value does not refuse the template.
+	leaves := unfilledFieldLeaves(template)
+	kept := findings[:0]
+	for _, finding := range findings {
+		if finding.Operator == "MinCountConstraintComponent" && leaves.has(finding.FocusNode, finding.Path) {
+			continue
+		}
+		finding.Source = SourceHubShapes
+		kept = append(kept, finding)
+	}
+	return kept, err
 }
 
 // ValidationReportHash computes a stable SHA-256 hash (hex) of a set of

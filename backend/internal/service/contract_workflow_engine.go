@@ -21,21 +21,28 @@ import (
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
+	autheventtype "digital-contracting-service/internal/auth/datatype/eventtype"
 	"digital-contracting-service/internal/auth/machineidentity"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
+	"digital-contracting-service/internal/contractworkflowengine/changefeed"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/expirationpolicy"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationactionflag"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"digital-contracting-service/internal/contractworkflowengine/negotiationmerging"
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
 	"digital-contracting-service/internal/middleware"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
@@ -53,6 +60,7 @@ type contractWorkflowEnginesrvc struct {
 	ATRepo               db.ApprovalTaskRepo
 	NTRepo               db.NegotiationTaskRepo
 	NRepo                db.NegotiationRepo
+	NORepo               db.NegotiationOutboundRepo
 	SRepo                db2.SyncRepository
 	CTRepo               db.ContractTemplateRepo
 	DeploymentRepo       db.DeploymentRepo
@@ -72,12 +80,15 @@ type contractWorkflowEnginesrvc struct {
 	MachineIdentities    machineidentity.Repo
 	HydraAdmin           MachineCredentialIssuer
 	HydraPublicIssuerURL string
+	// Changes feeds the live contract event stream (DCS-FR-CWE-24).
+	Changes *changefeed.Feed
 	auth.JWTAuthenticator
 }
 
 func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	cRepo db.ContractRepo, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo,
-	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo,
+	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, noRepo db.NegotiationOutboundRepo,
+	ctRepo db.ContractTemplateRepo,
 	sRepo db2.SyncRepository, trustPool *identity.EUTrustPool,
 	fcClient *fcclient.FederatedCatalogueClient, auditTrailReader base.AuditTrailReader, didDocument identity.DIDDocument,
 	archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
@@ -85,7 +96,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	targetClient command.ContractTargetClient,
 	workflowGate *workflowgate.Coordinator,
 	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
-	hydraPublicIssuerURL string) contractworkflowengine.Service {
+	hydraPublicIssuerURL string, changes *changefeed.Feed) contractworkflowengine.Service {
 
 	service := &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
@@ -95,6 +106,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		ATRepo:           atRepo,
 		NTRepo:           ntRepo,
 		NRepo:            nRepo,
+		NORepo:           noRepo,
 		SRepo:            sRepo,
 		CTRepo:           ctRepo,
 		DeploymentRepo:   deploymentRepo,
@@ -111,6 +123,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		MachineIdentities:    machineIdentities,
 		HydraAdmin:           hydraAdmin,
 		HydraPublicIssuerURL: hydraPublicIssuerURL,
+		Changes:              changes,
 	}
 	if workflowGate != nil {
 		for _, gate := range []string{"submission", "offer", "approval", "deployment"} {
@@ -139,23 +152,38 @@ func (s *contractWorkflowEnginesrvc) runWorkflowGate(ctx context.Context, gate, 
 }
 
 func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Context, run workflowgate.Run) error {
+	err := s.resumeReviewedWorkflowGateOnce(ctx, run)
+	if err == nil || !errors.Is(err, base.ErrUpdatedElsewhere) {
+		return err
+	}
+
+	// Async PDF/audit can bump updated_at between refreshReviewedRun and the
+	// resumed command (same lost-update class as client 409 conflicts). One
+	// re-read + retry closes that window without ignoring real content races.
+	processData, readErr := s.CRepo.ReadProcessDataByDID(ctx, nil, run.ContractDID)
+	if readErr != nil {
+		return err
+	}
+
+	run.ContractUpdatedAt = processData.UpdatedAt
+
+	return s.resumeReviewedWorkflowGateOnce(ctx, run)
+}
+
+func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGateOnce(ctx context.Context, run workflowgate.Run) error {
 	stringValue := func(name string) string {
 		value, _ := run.Continuation[name].(string)
 		return value
 	}
 	roles := userrole.UserRoles{}
-	if values, ok := run.Continuation["user_roles"].([]any); ok {
-		for _, value := range values {
-			if role, ok := value.(string); ok {
-				roles = append(roles, userrole.UserRole(role))
-			}
-		}
+	for _, role := range continuationStrings(run.Continuation["user_roles"]) {
+		roles = append(roles, userrole.UserRole(role))
 	}
 	switch run.Gate {
 	case "submission":
 		handler := command.Submitter{
 			DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo,
-			NRepo: s.NRepo, NTRepo: s.NTRepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
+			NRepo: s.NRepo, NTRepo: s.NTRepo, NORepo: s.NORepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
 		}
 		return handler.Handle(ctx, command.SubmitCmd{
 			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
@@ -171,15 +199,12 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Cont
 	case "approval":
 		return (&command.Approver{
 			DB: s.DB, CRepo: s.CRepo, ATRepo: s.ATRepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
-		}).Handle(ctx, command.ApproveCmd{
-			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
-			ApprovedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
-			UserRoles: roles, CauserDID: stringValue("causer_did"),
-		})
+		}).Handle(ctx, approveCmd(run.ContractDID, run.ContractUpdatedAt, run.Continuation))
 	case "deployment":
 		_, err := (&command.Deployer{
 			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
 			TargetRepo: s.TargetRepo, Target: s.TargetClient, PeerSigs: s.SRepo,
+			Artifacts: s.ATrailReader.Artifacts,
 		}).Handle(ctx, command.DeployCmd{
 			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
 			RequestedBy: stringValue("requested_by"), LocalPeer: stringValue("causer_did"),
@@ -189,6 +214,55 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Cont
 	default:
 		return fmt.Errorf("reviewed continuation is not available for gate %q", run.Gate)
 	}
+}
+
+// approvalContinuation is what an approval resumes with when the approval
+// gate holds it for review.
+func approvalContinuation(ctx context.Context, localPeer string, decisionNotes []string) map[string]any {
+	return map[string]any{
+		"requested_by":   middleware.GetParticipantID(ctx),
+		"holder_did":     middleware.GetHolderDID(ctx),
+		"user_roles":     workflowRoles(ctx),
+		"causer_did":     localPeer,
+		"decision_notes": decisionNotes,
+	}
+}
+
+// approveCmd builds an approval from its gate continuation, so a direct and a
+// resumed (reviewed) approval record the same approver and decision notes
+// (DCS-FR-CWE-15).
+func approveCmd(did string, updatedAt time.Time, continuation map[string]any) command.ApproveCmd {
+	text := func(name string) string {
+		value, _ := continuation[name].(string)
+		return value
+	}
+	roles := userrole.UserRoles{}
+	for _, role := range continuationStrings(continuation["user_roles"]) {
+		roles = append(roles, userrole.UserRole(role))
+	}
+	return command.ApproveCmd{
+		DID: did, UpdatedAt: updatedAt,
+		ApprovedBy: text("requested_by"), DecisionNotes: continuationStrings(continuation["decision_notes"]),
+		HolderDID: text("holder_did"), UserRoles: roles, CauserDID: text("causer_did"),
+	}
+}
+
+// continuationStrings reads a string list from a continuation: []string as
+// built, []any after the stored JSON round trip.
+func continuationStrings(value any) []string {
+	switch values := value.(type) {
+	case []string:
+		return values
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, item := range values {
+			if text, ok := item.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // mapContractCommandError classifies a contract command handler error for
@@ -207,15 +281,26 @@ func mapContractCommandError(err error) error {
 	if errors.Is(err, base.ErrUpdatedElsewhere) {
 		return goa.NewServiceError(err, "conflict", false, true, false)
 	}
+	if errors.Is(err, command.ErrNotCreator) {
+		return contractworkflowengine.MakeForbidden(err)
+	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
 		errors.Is(err, validation.ErrContractHierarchyInvalid) ||
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
 		errors.Is(err, command.ErrInvalidOriginatorRole) ||
+		errors.Is(err, command.ErrTemplateNotCompliant) ||
+		errors.Is(err, db.ErrTemplateNotUsable) ||
+		errors.Is(err, templatestructure.ErrInvalid) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
 		errors.Is(err, command.ErrKPIVerdictUnknown) ||
 		errors.Is(err, command.ErrKPIRuleMissing) ||
 		errors.Is(err, command.ErrKPIRuleUnknown) ||
+		errors.Is(err, command.ErrKPIContractTerminated) ||
+		errors.Is(err, command.ErrMissingRequiredMetadata) ||
+		errors.Is(err, command.ErrTerminationReasonRequired) ||
+		errors.Is(err, command.ErrNotPublishable) ||
+		errors.Is(err, fcclient.ErrFederatedCatalogueNotConfigured) ||
 		// Deployment refusals are the operator's to fix — no target designated,
 		// one that is not registered, one that is disabled. Returning 500 made
 		// each read as an outage rather than as the answer to what was asked.
@@ -224,13 +309,22 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrTargetDisabled) ||
 		errors.Is(err, command.ErrSigningIncomplete) ||
 		errors.Is(err, command.ErrContractNotRenewable) ||
+		errors.Is(err, command.ErrInvalidRenewalTerm) ||
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
+		errors.Is(err, command.ErrNotProposalAuthor) ||
+		errors.Is(err, command.ErrProposalAlreadyAccepted) ||
 		errors.Is(err, command.ErrAgreementSettled) ||
 		errors.Is(err, command.ErrOwnAgreementSettled) ||
+		errors.Is(err, command.ErrCounterpartiesNotSettled) ||
 		errors.Is(err, command.ErrNegotiationNotSettled) ||
-		errors.Is(err, db.ErrNoMatchingDecision) {
+		errors.Is(err, command.ErrNegotiationSyncPending) ||
+		errors.Is(err, db.ErrNoMatchingDecision) ||
+		errors.Is(err, negotiationmerging.ErrInvalidChangeRequest) {
 		return contractworkflowengine.MakeBadRequest(err)
+	}
+	if errors.Is(err, command.ErrRenewalExists) {
+		return goa.NewServiceError(err, "conflict", false, false, false)
 	}
 	// A contract whose own ODRL policies are not satisfied is a rejected
 	// request, not a server fault: the caller asked to approve a contract whose
@@ -299,6 +393,14 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractworkflowengine.ContractUpdateRequest) (res *contractworkflowengine.ContractUpdateResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -307,11 +409,6 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
-
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
 
 	contractData, err := datatype.NewJSON(req.ContractData)
 	if err != nil {
@@ -322,7 +419,7 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 	if req.StartDate != nil {
 		startD, err := time.Parse(time.RFC3339, *req.StartDate)
 		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
+			return nil, contractworkflowengine.MakeBadRequest(err)
 		}
 		startDate = &startD
 	}
@@ -331,7 +428,7 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 	if req.ExpDate != nil {
 		expD, err := time.Parse(time.RFC3339, *req.ExpDate)
 		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
+			return nil, contractworkflowengine.MakeBadRequest(err)
 		}
 		expDate = &expD
 	}
@@ -340,7 +437,7 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 	if req.ExpPolicy != nil {
 		policy, err := expirationpolicy.NewExpirationPolicy(*req.ExpPolicy)
 		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
+			return nil, contractworkflowengine.MakeBadRequest(err)
 		}
 		expPolicy = &policy
 	}
@@ -386,6 +483,9 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractworkflowengine.ContractSubmitRequest) (res *contractworkflowengine.ContractSubmitResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -397,7 +497,7 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	var actionFlag *actionflag.ActionFlag
@@ -443,6 +543,18 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		}
 	}
 
+	annotations := make([]contractevents.BlockAnnotation, 0, len(req.Annotations))
+	for _, a := range req.Annotations {
+		if a == nil {
+			continue
+		}
+
+		annotations = append(annotations, contractevents.BlockAnnotation{
+			BlockID: a.BlockID,
+			Comment: a.Comment,
+		})
+	}
+
 	cmd := command.SubmitCmd{
 		DID:          req.Did,
 		UpdatedAt:    updatedAt,
@@ -451,6 +563,7 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		UserRoles:    middleware.GetUserRoles(ctx),
 		ActionFlag:   actionFlag,
 		Comments:     req.Comments,
+		Annotations:  annotations,
 		ContractData: contractData,
 		CauserDID:    localPeer,
 	}
@@ -461,6 +574,7 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		ATRepo:      s.ATRepo,
 		NRepo:       s.NRepo,
 		NTRepo:      s.NTRepo,
+		NORepo:      s.NORepo,
 		SRepo:       s.SRepo,
 		DIDDocument: s.DIDDocument,
 	}
@@ -490,6 +604,10 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contractworkflowengine.ContractRetrieveRequest) (res *contractworkflowengine.ContractRetrieveResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -499,11 +617,19 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 		Limit:  base.DerefInt(req.Limit),
 	}
 
+	states, err := parseContractStates(req.State)
+	if err != nil {
+		return nil, err
+	}
+
 	qry := contract.GetAllMetadataQry{
 		RetrievedBy: middleware.GetParticipantID(ctx),
 		HolderDID:   middleware.GetHolderDID(ctx),
 		UserRoles:   middleware.GetUserRoles(ctx),
 		ParentDID:   base.DerefString(req.ParentDid),
+		States:      states,
+		SortBy:      base.DerefString(req.SortBy),
+		Ascending:   base.DerefString(req.SortOrder) == "asc",
 		Pagination:  pagination,
 		DIDDocument: s.DIDDocument,
 	}
@@ -567,6 +693,7 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 			LatestTemplateDid:    item.LatestTemplateDID,
 			TemplateIsDeprecated: item.TemplateIsDeprecated,
 			ParentContractDid:    item.ParentContractDID,
+			RenewsContractDid:    item.RenewsContractDID,
 			TargetID:             item.TargetID,
 			TargetName:           item.TargetName,
 		})
@@ -679,10 +806,16 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 				ContractVersion: item.ContractVersion,
 				ChangeRequest:   item.ChangeRequest,
 				CreatedBy:       item.CreatedBy,
-				CreatedAt:       item.CreatedAt.String(),
+				CreatedAt:       item.CreatedAt.Format(time.RFC3339),
 				Superseded:      superseded,
 			}
 			negotiations[item.ID] = negotiation
+		}
+
+		// A proposal with no decision rows yet has an empty negotiator; skip
+		// inventing a blank decision slot for those proposals.
+		if item.Negotiator == "" {
+			continue
 		}
 
 		negotiation.NegotiationDecisions = append(negotiation.NegotiationDecisions, &contractworkflowengine.ContractNegotiationDecisionItem{
@@ -740,28 +873,74 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String(), evidence))
+
+	pendingSync := false
+	if s.NORepo != nil {
+		syncTx, err := s.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		undelivered, err := s.NORepo.GetUndeliveredForDID(ctx, syncTx, localPeer, req.Did)
+		_ = syncTx.Rollback()
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		pendingSync = len(undelivered) > 0
+	}
+
+	settlementReady := true
+	var settlementReadyDetail *string
+	if s.SRepo != nil {
+		settleTx, err := s.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+
+		var declared []string
+		if contractResult.ContractData != nil && contractResult.ContractData.IsNotNullValue() {
+			declared = validation.RequiredSignatureFields([]byte(*contractResult.ContractData))
+		}
+
+		ready, detail, settleErr := command.SettlementReady(
+			ctx, settleTx, s.SRepo, req.Did, localPeer, contractResult.Responsible, declared)
+		_ = settleTx.Rollback()
+
+		if settleErr != nil {
+			return nil, contractworkflowengine.MakeInternalError(settleErr)
+		}
+
+		settlementReady = ready
+
+		if detail != "" {
+			settlementReadyDetail = &detail
+		}
+	}
+
 	return &contractworkflowengine.ContractRetrieveByIDResponse{
-		Did:                contractResult.DID,
-		ContractVersion:    contractResult.ContractVersion,
-		State:              contractResult.State.String(),
-		ExtrinsicLifecycle: &extrinsic,
-		Name:               contractResult.Name,
-		Description:        contractResult.Description,
-		CreatedBy:          contractResult.CreatedBy,
-		CreatedAt:          contractResult.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:          contractResult.UpdatedAt.Format(time.RFC3339),
-		ContractData:       contractResult.ContractData,
-		TemplateDid:        contractResult.TemplateDID,
-		TemplateVersion:    contractResult.TemplateVersion,
-		Negotiations:       negotiationList,
-		StartDate:          startDate,
-		ExpDate:            expDate,
-		ExpPolicy:          expPolicy,
-		ExpNoticePeriod:    contractResult.ExpNoticePeriod,
-		Responsible:        contractResult.Responsible,
-		Kpis:               kpis,
-		TargetID:           contractResult.TargetID,
-		TargetName:         targetName,
+		Did:                    contractResult.DID,
+		ContractVersion:        contractResult.ContractVersion,
+		State:                  contractResult.State.String(),
+		ExtrinsicLifecycle:     &extrinsic,
+		Name:                   contractResult.Name,
+		Description:            contractResult.Description,
+		CreatedBy:              contractResult.CreatedBy,
+		CreatedAt:              contractResult.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:              contractResult.UpdatedAt.Format(time.RFC3339),
+		ContractData:           contractResult.ContractData,
+		TemplateDid:            contractResult.TemplateDID,
+		TemplateVersion:        contractResult.TemplateVersion,
+		Negotiations:           negotiationList,
+		PendingNegotiationSync: &pendingSync,
+		SettlementReady:        &settlementReady,
+		SettlementReadyDetail:  settlementReadyDetail,
+		StartDate:              startDate,
+		ExpDate:                expDate,
+		ExpPolicy:              expPolicy,
+		ExpNoticePeriod:        contractResult.ExpNoticePeriod,
+		Responsible:            contractResult.Responsible,
+		Kpis:                   kpis,
+		TargetID:               contractResult.TargetID,
+		TargetName:             targetName,
 	}, nil
 }
 
@@ -811,6 +990,10 @@ func (s *contractWorkflowEnginesrvc) signatureEvidence(ctx context.Context, did,
 // context, each naming the observed metric, value, time, violation
 // verdict, and the contract it observes (DCS-FR-CWE-09/-31).
 func (s *contractWorkflowEnginesrvc) KpiObservations(ctx context.Context, req *contractworkflowengine.ContractRetrieveByIDRequest) (any, error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -895,6 +1078,9 @@ func (s *contractWorkflowEnginesrvc) retrieveKPIs(ctx context.Context, did strin
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, req *contractworkflowengine.ContractHistoryRetrieveByIDRequest) (res []*contractworkflowengine.ContractHistoryRetrieveByIDResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -936,7 +1122,14 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 			expPolicy = &s
 		}
 
+		var modifiedAt *string
+		if item.ModifiedAt != nil {
+			s := item.ModifiedAt.Format(time.RFC3339)
+			modifiedAt = &s
+		}
+
 		contracts = append(contracts, &contractworkflowengine.ContractHistoryRetrieveByIDResponse{
+			ID:              &item.ID,
 			Did:             item.DID,
 			ContractVersion: item.ContractVersion,
 			State:           item.State.String(),
@@ -953,6 +1146,8 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 			ExpNoticePeriod: item.ExpNoticePeriod,
 			Responsible:     item.Responsible,
 			ContractData:    item.ContractData,
+			ModifiedBy:      item.ModifiedBy,
+			ModifiedAt:      modifiedAt,
 		})
 	}
 
@@ -960,6 +1155,9 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 }
 
 func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contractworkflowengine.ContractNegotiationRequest) (res *contractworkflowengine.ContractNegotiationResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -971,7 +1169,7 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	changeRequest, err := datatype.NewJSON(req.ChangeRequest)
@@ -999,6 +1197,7 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 		NRepo:       s.NRepo,
 		RTRepo:      s.RTRepo,
 		NTRepo:      s.NTRepo,
+		NORepo:      s.NORepo,
 		SRepo:       s.SRepo,
 		DIDDocument: s.DIDDocument,
 	}
@@ -1016,6 +1215,9 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 // confused with Respond(action_flag=ACCEPTING), which decides one already
 // proposed change request.
 func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contractworkflowengine.ContractOfferAcceptRequest) (res *contractworkflowengine.ContractOfferAcceptResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1027,7 +1229,7 @@ func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contr
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	localPeer, err := s.DIDDocument.GetID()
@@ -1039,6 +1241,7 @@ func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contr
 		DB:          s.DB,
 		CRepo:       s.CRepo,
 		NTRepo:      s.NTRepo,
+		NORepo:      s.NORepo,
 		DIDDocument: s.DIDDocument,
 	}
 	err = handler.Handle(ctx, command.AcceptOfferCmd{
@@ -1059,6 +1262,9 @@ func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contr
 }
 
 func (s *contractWorkflowEnginesrvc) SaveNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftSaveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1092,6 +1298,9 @@ func (s *contractWorkflowEnginesrvc) SaveNegotiationDraft(ctx context.Context, r
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftRetrieveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1125,6 +1334,9 @@ func (s *contractWorkflowEnginesrvc) RetrieveNegotiationDraft(ctx context.Contex
 }
 
 func (s *contractWorkflowEnginesrvc) DeleteNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftRetrieveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1148,6 +1360,9 @@ func (s *contractWorkflowEnginesrvc) DeleteNegotiationDraft(ctx context.Context,
 }
 
 func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractworkflowengine.ContractNegotiationRespondRequest) (res *contractworkflowengine.ContractNegotiationRespondResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1159,7 +1374,7 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 
 	actionFlag, err := negotiationactionflag.NewNegotiationActionFlag(req.ActionFlag)
 	if err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("unknown action flag: %s (expected ACCEPTING | REJECTING)", req.ActionFlag))
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("unknown action flag: %s (expected ACCEPTING | REJECTING | WITHDRAWING)", req.ActionFlag))
 	}
 
 	localPeer, err := s.DIDDocument.GetID()
@@ -1181,6 +1396,7 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 			CRepo:       s.CRepo,
 			NRepo:       s.NRepo,
 			NTRepo:      s.NTRepo,
+			NORepo:      s.NORepo,
 			DIDDocument: s.DIDDocument,
 		}
 		err = handler.Handle(ctx, cmd)
@@ -1201,6 +1417,29 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 			CRepo:       s.CRepo,
 			NRepo:       s.NRepo,
 			NTRepo:      s.NTRepo,
+			NORepo:      s.NORepo,
+			SRepo:       s.SRepo,
+			DIDDocument: s.DIDDocument,
+		}
+		err = handler.Handle(ctx, cmd)
+		if err != nil {
+			return nil, mapContractCommandError(err)
+		}
+	case negotiationactionflag.Withdrawing:
+		cmd := command.WithdrawNegotiationCmd{
+			ID:          req.ID,
+			DID:         req.Did,
+			WithdrawnBy: middleware.GetParticipantID(ctx),
+			HolderDID:   middleware.GetHolderDID(ctx),
+			UserRoles:   middleware.GetUserRoles(ctx),
+			CauserDID:   localPeer,
+		}
+		handler := command.NegotiationWithdrawer{
+			DB:          s.DB,
+			CRepo:       s.CRepo,
+			NRepo:       s.NRepo,
+			NTRepo:      s.NTRepo,
+			NORepo:      s.NORepo,
 			SRepo:       s.SRepo,
 			DIDDocument: s.DIDDocument,
 		}
@@ -1216,6 +1455,9 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 }
 
 func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractworkflowengine.ContractReviewRequest) (res *contractworkflowengine.ContractReviewResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1240,19 +1482,37 @@ func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractwo
 	}, nil
 }
 
+// parseContractStates checks each requested state filter value and returns
+// them in their stored form.
+func parseContractStates(values []string) ([]string, error) {
+	states := make([]string, 0, len(values))
+	for _, value := range values {
+		state, err := contractstate.NewContractState(value)
+		if err != nil {
+			return nil, contractworkflowengine.MakeBadRequest(err)
+		}
+		states = append(states, state.String())
+	}
+	return states, nil
+}
+
 func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractworkflowengine.ContractSearchRequest) (res []*contractworkflowengine.ContractSearchResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	var state *contractstate.ContractState
-	if req.State != nil {
-		tState, err := contractstate.NewContractState(*req.State)
-		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
-		}
+	states, err := parseContractStates(req.State)
+	if err != nil {
+		return nil, err
+	}
 
-		state = &tState
+	validUntil, err := parseSearchTime("valid_until", req.ValidUntil)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	pagination := datatype.Pagination{
@@ -1261,9 +1521,10 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 	}
 
 	qry := contract.GetAllMetadataByFilterQry{
+		SemanticFilters: base.DerefString(req.SemanticFilters),
 		DID:             base.DerefString(req.Did),
 		ContractVersion: base.DerefInt(req.ContractVersion),
-		State:           state,
+		States:          states,
 		RetrievedBy:     middleware.GetParticipantID(ctx),
 		HolderDID:       middleware.GetHolderDID(ctx),
 		UserRoles:       middleware.GetUserRoles(ctx),
@@ -1271,6 +1532,9 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 		Description:     base.DerefString(req.Description),
 		ContractData:    base.DerefString(req.ContractData),
 		ParentDID:       base.DerefString(req.ParentDid),
+		ValidUntil:      validUntil,
+		Party:           base.DerefString(req.Party),
+		TemplateDID:     base.DerefString(req.TemplateDid),
 		Pagination:      pagination,
 	}
 	qryHandler := contract.GetAllMetaDataByFilterHandler{
@@ -1279,11 +1543,20 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 	}
 	result, err := qryHandler.Handle(ctx, qry)
 	if err != nil {
+		if errors.Is(err, semantichub.ErrInvalidSearchFilter) {
+			return nil, contractworkflowengine.MakeBadRequest(err)
+		}
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
 	var contracts []*contractworkflowengine.ContractSearchResponse
 	for _, item := range result {
+
+		var startDate *string
+		if item.StartDate != nil {
+			s := item.StartDate.Format(time.RFC3339)
+			startDate = &s
+		}
 
 		var expDate *string
 		if item.ExpDate != nil {
@@ -1305,6 +1578,7 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 			Description:     item.Description,
 			CreatedAt:       item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:       item.UpdatedAt.Format(time.RFC3339),
+			StartDate:       startDate,
 			ExpDate:         expDate,
 			ExpPolicy:       expPolicy,
 			ExpNoticePeriod: item.ExpNoticePeriod,
@@ -1316,6 +1590,14 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractworkflowengine.ContractApproveRequest) (res *contractworkflowengine.ContractApproveResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1325,33 +1607,17 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
 	localPeer, err := s.DIDDocument.GetID()
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	updatedAt, _, err = s.runWorkflowGate(ctx, "approval", req.Did, updatedAt, map[string]any{
-		"requested_by": middleware.GetParticipantID(ctx),
-		"holder_did":   middleware.GetHolderDID(ctx),
-		"user_roles":   workflowRoles(ctx),
-		"causer_did":   localPeer,
-	})
+	continuation := approvalContinuation(ctx, localPeer, req.DecisionNotes)
+	updatedAt, _, err = s.runWorkflowGate(ctx, "approval", req.Did, updatedAt, continuation)
 	if err != nil {
 		return nil, err
 	}
 
-	cmd := command.ApproveCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
-		ApprovedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
-		CauserDID:  localPeer,
-	}
+	cmd := approveCmd(req.Did, updatedAt, continuation)
 	handler := command.Approver{
 		DB:          s.DB,
 		CRepo:       s.CRepo,
@@ -1369,7 +1635,36 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	}, nil
 }
 
+// PublishCatalogue registers an approved, signed or active contract in the
+// Federated Catalogue (DCS-IR-CWE-10).
+func (s *contractWorkflowEnginesrvc) PublishCatalogue(ctx context.Context, req *contractworkflowengine.ContractCataloguePublishRequest) (*contractworkflowengine.ContractCataloguePublishResponse, error) {
+	if err := authorizeContractOwner(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	instanceDID, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	assetHash, err := (&command.CataloguePublisher{DB: s.DB, CRepo: s.CRepo, FCClient: s.FCClient}).Handle(ctx, command.CataloguePublishCmd{
+		DID:         req.Did,
+		PublishedBy: middleware.GetParticipantID(ctx),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		InstanceDID: instanceDID,
+		UserRoles:   middleware.GetUserRoles(ctx),
+	})
+	if err != nil {
+		return nil, mapContractCommandError(err)
+	}
+	return &contractworkflowengine.ContractCataloguePublishResponse{Did: req.Did, AssetHash: assetHash}, nil
+}
+
 func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractworkflowengine.ContractRejectRequest) (res *contractworkflowengine.ContractRejectResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1381,7 +1676,7 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	localPeer, err := s.DIDDocument.GetID()
@@ -1416,44 +1711,15 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 	}, nil
 }
 
-func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractworkflowengine.ContractStoreRequest) (res *contractworkflowengine.ContractStoreResponse, err error) {
-
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
+func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contractworkflowengine.ContractTerminateRequest) (res *contractworkflowengine.ContractTerminateResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	cmd := command.RecordEvidenceCmd{
-		DID:        req.Did,
-		RecordedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
-		UpdatedAt:  updatedAt,
-		CauserDID:  localPeer,
-	}
-	handler := command.EvidenceRecorder{
-		DB:    s.DB,
-		CRepo: s.CRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	return &contractworkflowengine.ContractStoreResponse{
-		Did: req.Did,
-	}, nil
-}
-
-func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contractworkflowengine.ContractTerminateRequest) (res *contractworkflowengine.ContractTerminateResponse, err error) {
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1462,11 +1728,6 @@ func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contrac
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
-
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
 
 	localPeer, err := s.DIDDocument.GetID()
 	if err != nil {
@@ -1503,6 +1764,9 @@ func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contrac
 }
 
 func (s *contractWorkflowEnginesrvc) Renew(ctx context.Context, req *contractworkflowengine.ContractRenewRequest) (res *contractworkflowengine.ContractRenewResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1514,7 +1778,7 @@ func (s *contractWorkflowEnginesrvc) Renew(ctx context.Context, req *contractwor
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	did, err := base.GenerateID()
@@ -1571,6 +1835,9 @@ func (s *contractWorkflowEnginesrvc) Renew(ctx context.Context, req *contractwor
 }
 
 func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractworkflowengine.ContractOfferRequest) (res *contractworkflowengine.ContractOfferResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1582,7 +1849,7 @@ func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractwor
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	localPeer, err := s.DIDDocument.GetID()
@@ -1623,6 +1890,9 @@ func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractwor
 }
 
 func (s *contractWorkflowEnginesrvc) Withdraw(ctx context.Context, req *contractworkflowengine.ContractWithdrawRequest) (res *contractworkflowengine.ContractWithdrawResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1634,7 +1904,7 @@ func (s *contractWorkflowEnginesrvc) Withdraw(ctx context.Context, req *contract
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	localPeer, err := s.DIDDocument.GetID()
@@ -1670,12 +1940,17 @@ func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractwor
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	qry := qry2.GetAuditLogByDIDQry{
-		DID:       req.Did,
-		Scope:     componenttype.ContractWorkflowEngine,
-		AuditedBy: middleware.GetParticipantID(ctx),
-		HolderDID: middleware.GetHolderDID(ctx),
-		UserRoles: middleware.GetUserRoles(ctx),
+		DID:           req.Did,
+		Scope:         componenttype.ContractWorkflowEngine,
+		AuditedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		Justification: req.Justification,
 	}
 	handler := qry2.AuditLogByDIDAuditor{
 		DB:           s.DB,
@@ -1732,6 +2007,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveTemplates(ctx context.Context, req 
 			Version:      item.Version,
 			State:        item.State.String(),
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
 			Name:         item.Name,
 			Description:  item.Description,
 			CreatedBy:    item.CreatedBy,
@@ -1745,13 +2021,16 @@ func (s *contractWorkflowEnginesrvc) RetrieveTemplates(ctx context.Context, req 
 }
 
 func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractworkflowengine.ContractDeployRequest) (res *contractworkflowengine.ContractDeployResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 	targetID := ""
 	if req.TargetID != nil {
@@ -1760,6 +2039,20 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 	localPeer, err := s.DIDDocument.GetID()
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	handler := command.Deployer{
+		DB:             s.DB,
+		CRepo:          s.CRepo,
+		DeploymentRepo: s.DeploymentRepo,
+		TargetRepo:     s.TargetRepo,
+		Target:         s.TargetClient,
+		PeerSigs:       s.SRepo,
+		Artifacts:      s.ATrailReader.Artifacts,
+	}
+	// A contract that may not deploy (not SIGNED, or a signature field still
+	// unsigned) is refused before the deployment workflow gate is dispatched.
+	if err := handler.Deployable(ctx, req.Did, localPeer); err != nil {
+		return nil, mapContractCommandError(err)
 	}
 	updatedAt, _, err = s.runWorkflowGate(ctx, "deployment", req.Did, updatedAt, map[string]any{
 		"requested_by": middleware.GetParticipantID(ctx),
@@ -1770,14 +2063,6 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		return nil, err
 	}
 
-	handler := command.Deployer{
-		DB:             s.DB,
-		CRepo:          s.CRepo,
-		DeploymentRepo: s.DeploymentRepo,
-		TargetRepo:     s.TargetRepo,
-		Target:         s.TargetClient,
-		PeerSigs:       s.SRepo,
-	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
 		DID:              req.Did,
 		UpdatedAt:        updatedAt,
@@ -1940,6 +2225,9 @@ func (s *contractWorkflowEnginesrvc) CreateContractTarget(ctx context.Context, r
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.URL) == "" {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("a target system needs a name and a URL"))
 	}
+	if err := command.ValidateTargetURL(req.URL); err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -1961,10 +2249,32 @@ func (s *contractWorkflowEnginesrvc) CreateContractTarget(ctx context.Context, r
 	if err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
+	if err := auditContractTarget(ctx, tx, cweeventtype.CreateContractTarget, created.ID, nil, created); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 	return contractTargetView(created), nil
+}
+
+// auditContractTarget writes an administrator's change to a contract target
+// system to the audit trail in tx (FR-UC-09-2).
+func auditContractTarget(ctx context.Context, tx *sqlx.Tx, change cweeventtype.EventType, targetID string, before, after *db.ContractTarget) error {
+	err := baseevent.Create(ctx, tx, contractevents.ContractTargetChangedEvent{
+		Change:              change,
+		TargetID:            targetID,
+		Before:              contractevents.NewContractTargetSettings(before),
+		After:               contractevents.NewContractTargetSettings(after),
+		ActorDID:            middleware.GetHolderDID(ctx),
+		ActorParticipantDID: middleware.GetParticipantID(ctx),
+		UserRoles:           middleware.GetUserRoles(ctx),
+		OccurredAt:          time.Now().UTC(),
+	}, componenttype.System)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(fmt.Errorf("could not audit the target system change: %w", err))
+	}
+	return nil
 }
 
 func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetUpdateRequest) (res *contractworkflowengine.ContractTarget, err error) {
@@ -1973,6 +2283,9 @@ func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, r
 
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.URL) == "" {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("a target system needs a name and a URL"))
+	}
+	if err := command.ValidateTargetURL(req.URL); err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
@@ -1984,6 +2297,10 @@ func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, r
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
+	}
+	before, err := s.TargetRepo.ReadTarget(ctx, tx, req.ID)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 	updated, err := s.TargetRepo.UpdateTarget(ctx, tx, db.ContractTarget{
 		ID:          req.ID,
@@ -1997,6 +2314,9 @@ func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, r
 	}
 	if updated == nil {
 		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no target system %s is registered", req.ID))
+	}
+	if err := auditContractTarget(ctx, tx, cweeventtype.UpdateContractTarget, updated.ID, before, updated); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
@@ -2040,8 +2360,17 @@ func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, r
 	if err := s.TargetRepo.DeleteTarget(ctx, tx, req.ID); err != nil {
 		return contractworkflowengine.MakeInternalError(err)
 	}
+	if target != nil {
+		if err := auditContractTarget(ctx, tx, cweeventtype.DeleteContractTarget, target.ID, target, nil); err != nil {
+			return err
+		}
+	}
 	if target != nil && target.OAuthClientID != nil && strings.TrimSpace(*target.OAuthClientID) != "" {
-		if err := s.MachineIdentities.DeleteByClientIDTx(ctx, tx, strings.TrimSpace(*target.OAuthClientID)); err != nil {
+		clientID := strings.TrimSpace(*target.OAuthClientID)
+		if err := s.MachineIdentities.DeleteByClientIDTx(ctx, tx, clientID); err != nil {
+			return contractworkflowengine.MakeInternalError(err)
+		}
+		if err := auditMachineIdentity(ctx, tx, autheventtype.MachineIdentityDeleted, &machineidentity.Identity{OAuthClientID: clientID, Name: clientID}); err != nil {
 			return contractworkflowengine.MakeInternalError(err)
 		}
 	}
@@ -2052,6 +2381,9 @@ func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, r
 }
 
 func (s *contractWorkflowEnginesrvc) DesignateContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetDesignateRequest) (res *contractworkflowengine.ContractRetrieveByIDResponse, err error) {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 

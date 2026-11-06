@@ -135,6 +135,7 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
       | pdf    |
 
   @REQ-audit-ui-archive-orce-AC7 @DCS-FR-CSA-18 @DCS-FR-CSA-24 @DCS-FR-PACM-04 @DCS-FR-UC-07-2
+  @REQ-denied-access-audit-AC1 @REQ-denied-access-audit-AC4 @DCS-FR-CSA-02
   Scenario: Audit and export access records the actor and mandatory purpose
     When a Contract Manager runs scope "contracts" with justification "unauthorized audit BDD-4721"
     Then the request is denied with an authorization error

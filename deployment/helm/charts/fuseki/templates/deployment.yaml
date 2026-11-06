@@ -19,11 +19,17 @@ spec:
         app.kubernetes.io/name: fc-fuseki
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- with .Values.podSecurityContext }}
       securityContext:
-        fsGroup: 1000
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: init-tdb-dir
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["sh", "-c", "mkdir -p /fuseki/databases/{{ .Values.dataset }}"]
           {{- with .Values.resources }}
           # A pod's effective limit is max(sum of containers, max of init
@@ -39,6 +45,10 @@ spec:
         - name: fuseki
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 3030
@@ -53,9 +63,17 @@ spec:
           volumeMounts:
             - name: fuseki-data
               mountPath: /fuseki/databases
+            - name: run
+              mountPath: /fuseki/run
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: fuseki-data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

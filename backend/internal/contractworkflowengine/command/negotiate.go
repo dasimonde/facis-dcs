@@ -46,11 +46,19 @@ type Negotiator struct {
 	RTRepo      db.ReviewTaskRepo
 	NRepo       db.NegotiationRepo
 	NTRepo      db.NegotiationTaskRepo
+	NORepo      db.NegotiationOutboundRepo
 	SRepo       db2.SyncRepository
 	DIDDocument identity.DIDDocument
 }
 
 func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
+	var change negotiationmerging.ChangeRequest
+	if cmd.ChangeRequest != nil {
+		var err error
+		if change, _, err = negotiationmerging.Decode(*cmd.ChangeRequest); err != nil {
+			return err
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -127,27 +135,27 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 		ChangeRequest:   cmd.ChangeRequest,
 		CreatedBy:       cmd.NegotiatedBy,
 	}
-	_, err = h.NRepo.Create(ctx, tx, data, negotiators)
+	negotiationID, _, err := h.NRepo.Create(ctx, tx, data, negotiators)
 	if err != nil {
 		return fmt.Errorf("could not create negotiation: %w", err)
 	}
 
-	// Ship-proposal-as-PDF-exchange (Arne 2026-07-20): a counter-offer applies its
-	// redline to contract_data immediately, so the negotiated PDF re-renders with
-	// the proposed value and re-ships to the peer over the PDF exchange (ADR-13) —
-	// the peer reviews the redline in the received document and agrees at settle.
-	// Changing the content is what makes the background regenerator produce and
-	// ship a new PDF, growing the C2PA chain on both parties. The change request is
-	// still recorded above for the negotiation audit trail (DCS-IR-CWE-03).
-	// A change request is either free-text (a comment / redline note kept only
-	// for the negotiation audit trail — stored raw above) or a structured
-	// ChangeRequest carrying a contract_data redline. Only a structured redline
-	// is applied immediately and re-shipped as a PDF; a free-text note (which
-	// does not decode into the struct) has nothing to apply, so it is skipped.
-	roundVersion := processData.ContractVersion
+	// Ship-proposal-as-PDF-exchange (Arne 2026-07-20): a counter-offer used to
+	// apply its redline to contract_data immediately, so the negotiated PDF
+	// re-rendered with the proposed value and re-shipped to the peer over the
+	// PDF exchange (ADR-13) — the peer reviewed the redline in the received
+	// document and agreed at settle. Changing the content is what made the
+	// background regenerator produce and ship a new PDF, growing the C2PA chain
+	// on both parties. That immediate apply is withdrawn: the change request is
+	// still recorded above for the negotiation audit trail (DCS-IR-CWE-03)
+	// against the current formal version, and accepted changes become formal
+	// only when Submit merges them (submit.go). A change request is either
+	// free-text (a comment / redline note kept only for the negotiation audit
+	// trail — stored raw above) or a structured ChangeRequest carrying a
+	// contract_data redline. Only a structured redline is validated here; a
+	// free-text note has nothing to validate, so it is skipped.
 	if cmd.ChangeRequest != nil {
-		var change negotiationmerging.ChangeRequest
-		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
+		if change.ContractData != nil {
 			// A redline on a settled agreement is the wedge: the document changes
 			// but the artifact is the peer's signed PDF and cannot be re-rendered,
 			// so the proposal would ship the OLD signed bytes while this copy's own
@@ -168,57 +176,26 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 			if err != nil {
 				return fmt.Errorf("could not read contract data: %w", err)
 			}
-			// The redline replaces the document with the one the proposing client
-			// assembled, so the bundle this copy is pinned to travels from the
-			// stored document (CarrySemanticBundle).
-			normalized, err = validation.CarrySemanticBundle(stored.ContractData, normalized)
+			// The redline is the document the proposing client assembled, so the
+			// bundle this copy is pinned to travels from the stored document
+			// (CarrySemanticBundle). Validated here; persisted only on Submit.
+			_, err = validation.CarrySemanticBundle(stored.ContractData, normalized)
 			if err != nil {
 				return fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
 			}
-			// The redline replaces the document, and the negotiation row recorded
-			// above keys on the version it replaces. Snapshot that version to
-			// contract_history first, exactly as the merge on accept does
-			// (submit.go), so the superseded document stays retrievable: it is the
-			// "from" side a reviewer is asked to change, and without it the
-			// proposal comparison has the proposed document on both sides.
-			if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID); err != nil {
-				return fmt.Errorf("could not snapshot the superseded contract version: %w", err)
-			}
-			if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
-				DID:             cmd.DID,
-				ContractData:    normalized,
-				ContractVersion: processData.ContractVersion + 1,
-			}); err != nil {
-				return fmt.Errorf("could not apply proposed change to contract data: %w", err)
-			}
-			roundVersion = processData.ContractVersion + 1
 		}
 	}
 
-	// A redline replaces the document and bumps the version, which starts a new
-	// round; the tasks key on the round, so they move with it (and reopen). With
-	// no redline the round is unchanged and reopening is all that is owed.
-	if roundVersion != processData.ContractVersion {
-		err = h.NTRepo.RollForward(ctx, tx, cmd.DID, processData.ContractVersion, roundVersion)
-	} else {
-		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID, roundVersion)
-	}
+	// Propose does not replace the document or bump the version, so the round
+	// is unchanged and reopening is all that is owed.
+	err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID, processData.ContractVersion)
 	if err != nil {
 		return fmt.Errorf("could not reopen negotiation: %w", err)
 	}
 
-	// Negotiation is where the participating DCS instances are finalized, so it
-	// is where the contract's signable structure is materialized: one party node
-	// per instance and one dcs:SignatureField naming it, the AcroForm field the
-	// wallet-driven signing ceremony signs (ADR-12). Without a pre-placed field
-	// the deterministic two-call remote signing has nothing to sign, and without
-	// the party node behind it the signature it applies is attributed to nobody.
-	//
-	// A redline applied just above replaced the document with the one the
-	// proposing client assembled, which is where the party nodes go missing, so
-	// this runs on the result — and on every negotiation, redline or free-text
-	// note, since an earlier round may have dropped them.
-	if err := reseedPartiesAndSignatureFields(ctx, tx, h.CRepo, cmd.DID); err != nil {
+	err = enqueueNegotiationOutbound(ctx, tx, h.CRepo, h.NORepo, localPeer,
+		db.NegotiationMessageProposal, negotiationID, nil, cmd.DID, processData.ContractVersion)
+	if err != nil {
 		return err
 	}
 
@@ -231,7 +208,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 		if err := contractstate.ValidateOutcome(currentState, contractstate.EventNegotiate, contractstate.Negotiation); err != nil {
 			return err
 		}
-		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Negotiation.String()); err != nil {
+		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Negotiation.String()); err != nil {
 			return fmt.Errorf("could not persist negotiation state: %w", err)
 		}
 	}

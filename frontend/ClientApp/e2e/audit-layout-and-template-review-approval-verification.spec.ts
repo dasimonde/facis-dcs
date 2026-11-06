@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 const templateDid = 'did:web:example.test:templates:review-layout'
 const odrlProfileFixture = `
@@ -29,6 +30,7 @@ async function authenticate(page: Page, role: string): Promise<void> {
   await page.route('**/auth/refresh', (route) => json(route, { token_type: 'Bearer', access_token: accessToken }))
   await page.route('**/semantic/schema/list', (route) => json(route, []))
   await page.route('**/semantic/ontology/dcs-odrl-profile', (route) => json(route, { content: odrlProfileFixture }))
+  await withholdUnsignedToken(page)
   await page.addInitScript(
     ([accessToken]) => {
       localStorage.setItem('token_type', 'Bearer')
@@ -50,6 +52,7 @@ async function mockTemplateReview(page: Page): Promise<void> {
       version: 1,
       state: 'SUBMITTED',
       template_type: 'COMPONENT',
+      party_type: 'MULTI_PARTY',
       name: 'Approval verification fixture',
       description: 'A submitted template awaiting review.',
       created_by: 'template-creator',
@@ -91,7 +94,7 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
   test('AC1/AC2 Audit has no page overflow and keeps JSON/CSV/PDF export in one visible row', async ({ page }) => {
     await authenticate(page, 'Auditor')
     await page.goto('/ui/audit')
-    await expect(page.getByRole('heading', { name: 'Audit' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Audit', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible()
 
     const metrics = await page.evaluate(() => ({
@@ -125,7 +128,8 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
     })
     await page.goto('/ui/audit')
     await page.getByLabel('Audit justification').fill('Focused verification')
-    await expect(page.getByText('Failed Checks')).toHaveCount(0)
+    await expect(page.getByTestId('audit-counters')).toContainText('Failed Checks')
+    await expect(page.getByTestId('audit-counters')).toContainText('—')
     const exports = page.getByRole('button', { name: /^(JSON|CSV|PDF)$/ })
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()
 
@@ -134,7 +138,8 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
     // exactly one live region — the view renders it in place and drops the
     // interceptor's toast rather than announcing it twice.
     await expect(page.getByRole('alert')).toContainText(/executor unavailable/i)
-    await expect(page.getByText('Failed Checks')).toHaveCount(0)
+    await expect(page.getByTestId('audit-counters')).toContainText('Failed Checks')
+    await expect(page.getByTestId('audit-counters')).toContainText('—')
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()
 
     failAudit = false
@@ -157,7 +162,8 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
     // click by role.
     await page.locator('summary').filter({ hasText: 'Component' }).click()
     await page.getByRole('button', { name: 'None' }).click()
-    await expect(page.getByText('Select a row to inspect the corresponding audit evidence.')).toBeVisible()
+    await expect(details).toHaveCount(0)
+    await expect(page.getByText('No findings match the selected filters.', { exact: true })).toBeVisible()
 
     await page.getByLabel('DID (optional)').fill('did:web:example.test:other')
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()

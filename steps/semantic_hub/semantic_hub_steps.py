@@ -289,6 +289,7 @@ def step_when_create_conflicting_template(context, prefix, iri):
         template_create_url(context),
         {
             "template_type": TemplateService.template_type_for_category("legal"),
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": "BDD Conflicting Ontology Template",
             "description": "must be rejected",
             "template_data": doc,
@@ -302,6 +303,7 @@ def _external_context_template_payload(iri: str) -> dict:
     doc["@context"] = [doc["@context"], iri]
     return {
         "template_type": TemplateService.template_type_for_category("legal"),
+        "party_type": TemplateService.MULTI_PARTY_TYPE,
         "name": "BDD External Context Template",
         "description": "references an externally anchored context",
         "template_data": doc,

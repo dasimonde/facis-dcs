@@ -2,7 +2,10 @@ package validation
 
 import (
 	"encoding/json"
+	"math"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // RequiredSignatureFields returns the contract's declared signature-field
@@ -83,4 +86,89 @@ func RequiredCredentialType(contractData []byte, field string) string {
 		return level
 	}
 	return defaultLevel
+}
+
+// SignatureLevelSatisfies reports whether an achieved signature level (SES,
+// AES, QES) meets a required level.
+func SignatureLevelSatisfies(achieved, required string) bool {
+	return signatureLevelSatisfies(achieved, required)
+}
+
+// SigningOrder returns the position (dcs:signingOrder, a positive integer) of
+// each declared signature field that states one (DCS-FR-SM-13). A field with
+// a lower position signs first. A field without a position has no place in
+// the order: it neither waits for nor blocks another field.
+func SigningOrder(contractData []byte) map[string]int {
+	var doc map[string]any
+	if err := json.Unmarshal(contractData, &doc); err != nil {
+		return nil
+	}
+	raw, ok := doc["dcs:signatureFields"].([]any)
+	if !ok {
+		raw, _ = doc["signatureFields"].([]any)
+	}
+	order := map[string]int{}
+	for _, item := range raw {
+		node, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := node["dcs:signatoryName"].(string)
+		if name == "" {
+			name, _ = node["signatoryName"].(string)
+		}
+		position, ok := node["dcs:signingOrder"]
+		if !ok {
+			position = node["signingOrder"]
+		}
+		if typed, ok := position.(map[string]any); ok {
+			position = typed["@value"]
+		}
+		var n float64
+		switch v := position.(type) {
+		case float64:
+			n = v
+		case string:
+			parsed, err := strconv.Atoi(strings.TrimSpace(v))
+			if err != nil {
+				continue
+			}
+			n = float64(parsed)
+		default:
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name == "" || n < 1 || n != math.Trunc(n) {
+			continue
+		}
+		order[name] = int(n)
+	}
+	return order
+}
+
+// SigningDeadline returns the contract's signing deadline
+// (dcs:signingDeadline, an xsd:dateTime or xsd:date at the top level of the
+// contract document), after which no signature is accepted (DCS-FR-SM-13).
+// A date without a time includes the whole day in UTC.
+func SigningDeadline(contractData []byte) (time.Time, bool) {
+	var doc map[string]any
+	if err := json.Unmarshal(contractData, &doc); err != nil {
+		return time.Time{}, false
+	}
+	value, ok := doc["dcs:signingDeadline"]
+	if !ok {
+		value = doc["signingDeadline"]
+	}
+	if typed, ok := value.(map[string]any); ok {
+		value = typed["@value"]
+	}
+	text, _ := value.(string)
+	text = strings.TrimSpace(text)
+	if deadline, err := time.Parse(time.RFC3339, text); err == nil {
+		return deadline.UTC(), true
+	}
+	if day, err := time.Parse("2006-01-02", text); err == nil {
+		return day.Add(24*time.Hour - time.Nanosecond), true
+	}
+	return time.Time{}, false
 }

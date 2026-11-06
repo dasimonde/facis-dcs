@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from '@/stores/auth-store'
@@ -6,6 +6,7 @@ import ContractManagerActions from './ContractManagerActions.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractState } from '@/types/contract-state'
 import type { UserRole } from '@/types/user-role'
+import type { Stubs } from '@vue/test-utils'
 
 /**
  * The off-ramps a contract has from the list and detail pages. WITHDRAW and
@@ -13,16 +14,29 @@ import type { UserRole } from '@/types/user-role'
  * EventWithdraw, command/renew.go renewableStates) that no control reached.
  */
 
+const routeName = vi.hoisted(() => ({ value: 'contracts.view' }))
+const push = vi.hoisted(() => vi.fn())
+
 vi.mock(import('vue-router'), async (importOriginal) => ({
   ...(await importOriginal()),
-  useRouter: () => ({ push: vi.fn(), go: vi.fn(), back: vi.fn() }) as never,
+  useRouter: () => ({ push, go: vi.fn(), back: vi.fn() }) as never,
+  useRoute: () => ({ name: routeName.value }) as never,
 }))
 
+const service = vi.hoisted(() => ({
+  publishCatalogue: vi.fn(),
+  renew: vi.fn(() => Promise.resolve({ did: 'did:web:example.com:renewal' })),
+}))
 vi.mock('@/services/contract-workflow-service', () => ({
-  contractWorkflowService: {},
+  contractWorkflowService: service,
 }))
 
-function mountActions(roles: UserRole[], state: ContractState, contractData?: Contract['contract_data']) {
+function mountActions(
+  roles: UserRole[],
+  state: ContractState,
+  contractData?: Contract['contract_data'],
+  stubs?: Stubs,
+) {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles }
@@ -32,7 +46,10 @@ function mountActions(roles: UserRole[], state: ContractState, contractData?: Co
     updated_at: '2026-07-31T00:00:00Z',
     ...(contractData ? { contract_data: contractData } : {}),
   } as Contract
-  return mount(ContractManagerActions, { props: { contract }, global: { plugins: [pinia] } })
+  return mount(ContractManagerActions, {
+    props: { contract },
+    global: { plugins: [pinia], ...(stubs ? { stubs } : {}) },
+  })
 }
 
 const FEE_FIELD = 'urn:uuid:contract#field-monthly-fee'
@@ -97,10 +114,34 @@ describe('contract off-ramps', () => {
     expect(labels(mountActions(['CONTRACT_MANAGER'], 'NEGOTIATION'))).not.toContain('Renew')
   })
 
+  it('opens the renewal draft in the contract view', async () => {
+    push.mockClear()
+    service.renew.mockClear()
+    const wrapper = mountActions(['CONTRACT_MANAGER'], 'EXPIRED', undefined, {
+      ConfirmationModal: {
+        template: '<div />',
+        methods: { reveal: () => Promise.resolve({ isCanceled: false }) },
+      },
+    })
+    await wrapper.get('[data-testid="renew-contract"]').trigger('click')
+    await flushPromises()
+    expect(service.renew).toHaveBeenCalled()
+    expect(push).toHaveBeenCalledWith({
+      name: 'contracts.view',
+      params: { did: 'did:web:example.com:renewal' },
+    })
+  })
+
   // The responder instance drives its inbound contracts as Contract Manager,
   // and this button is the only route into the negotiate view from OFFERED.
   it('lets a manager open a received offer', () => {
+    routeName.value = 'contracts.view'
     expect(labels(mountActions(['CONTRACT_MANAGER'], 'OFFERED'))).toContain('Review offer')
+  })
+
+  it('hides Negotiate when already on the negotiate page', () => {
+    routeName.value = 'contracts.negotiate'
+    expect(labels(mountActions(['CONTRACT_MANAGER'], 'NEGOTIATION'))).not.toContain('Negotiate')
   })
 })
 
@@ -120,5 +161,35 @@ describe('the offer gate', () => {
   it('does not block on a declaration the document no longer references', () => {
     const button = offerButton(mountActions(['CONTRACT_CREATOR'], 'DRAFT', contractWithUnfilledField(false)))
     expect(button?.attributes('disabled')).toBeUndefined()
+  })
+})
+
+// DCS-IR-CWE-10: an approved contract reaches the catalogue only by the explicit
+// action of an approver or manager, after a confirmation that names what is
+// published.
+describe('catalogue registration', () => {
+  it.each([
+    [['CONTRACT_APPROVER'], 'APPROVED', true],
+    [['CONTRACT_MANAGER'], 'SIGNED', true],
+    [['CONTRACT_APPROVER'], 'REVIEWED', false],
+    [['CONTRACT_CREATOR'], 'APPROVED', false],
+  ] as [UserRole[], ContractState, boolean][])('%s on %s offers it: %s', (roles, state, offered) => {
+    expect(labels(mountActions(roles, state)).includes('Register in catalogue')).toBe(offered)
+  })
+
+  it('registers the contract after confirmation', async () => {
+    service.publishCatalogue.mockResolvedValue({ did: 'did:web:example.com:contract', asset_hash: 'h' })
+    HTMLDialogElement.prototype.showModal = vi.fn()
+    HTMLDialogElement.prototype.close = vi.fn()
+    const wrapper = mountActions(['CONTRACT_APPROVER'], 'APPROVED')
+    await wrapper.get('[data-testid="publish-catalogue"]').trigger('click')
+    await flushPromises()
+    expect(service.publishCatalogue).not.toHaveBeenCalled()
+    // Earlier tests leave their teleported modals in the body; this one is last.
+    const confirms = document.querySelectorAll<HTMLButtonElement>('[data-testid="confirmation-confirm"]')
+    confirms[confirms.length - 1]!.click()
+    await flushPromises()
+    expect(service.publishCatalogue).toHaveBeenCalledWith('did:web:example.com:contract')
+    wrapper.unmount()
   })
 })

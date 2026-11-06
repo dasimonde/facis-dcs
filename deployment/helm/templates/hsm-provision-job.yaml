@@ -72,18 +72,30 @@ spec:
       serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
       {{- end }}
       restartPolicy: OnFailure
+      {{- with .Values.affinity }}
+      # The Job mounts the token volume of the backend pods, so it takes their
+      # affinity (values.acceptance.yml pins them to one node).
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The user of the backend pod, so the backend owns the token files the
+      # job writes.
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: hsm-provision
-          image: "{{ .Values.pkcs11.provisioning.image.repository | default .Values.image.repository }}:{{ .Values.pkcs11.provisioning.image.tag | default .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.pkcs11.provisioning.image.repository | default .Values.image.repository }}:{{ .Values.pkcs11.provisioning.image.tag | default .Values.image.tag | default .Chart.AppVersion }}{{ with (.Values.pkcs11.provisioning.image.digest | default .Values.image.digest) }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.pkcs11.provisioning.image.pullPolicy | default .Values.image.pullPolicy }}
-          # Runs as root to write into the freshly-provisioned volume; the token
-          # dir is chmod'd afterwards so the non-root backend can open it.
+          {{- with .Values.securityContext }}
           securityContext:
-            runAsUser: 0
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.pkcs11.provisioning.resources }}
           # Without a block here the job inherits the namespace LimitRange
           # default (commonly 1 CPU). On a namespace whose limits.cpu quota is
@@ -111,7 +123,7 @@ spec:
               TOKEN_DIR={{ .Values.pkcs11.provisioning.tokenDir | quote }}
               LABEL={{ .Values.pkcs11.tokenLabel | quote }}
               MODULE={{ .Values.pkcs11.modulePath | quote }}
-              SO_PIN={{ .Values.pkcs11.provisioning.soPin | quote }}
+              SO_PIN={{ .Values.pkcs11.provisioning.soPin | default (randAlphaNum 32) | quote }}
               IDENTITY_SECRET_NAME={{ include "digital-contracting-service.identitySecretName" . | quote }}
               DID_HOSTNAME={{ include "digital-contracting-service.didHostname" . | quote }}
               CRL_URL={{ printf "http://%s:%v%s/crl/dcs-c2pa.crl" (include "digital-contracting-service.fullname" .) .Values.service.port (include "digital-contracting-service.apiPath" .) | quote }}
@@ -164,9 +176,6 @@ spec:
               PKCS11_TOKEN_LABEL="$LABEL" \
               PKCS11_PIN="$PKCS11_PIN" \
                 /app/gendid -out "$TOKEN_DIR/did.json" -did "$DID_ID" -endpoint "$ENDPOINT_URL"
-
-              # Let the non-root backend container read/write the token.
-              chmod -R a+rwX "$TOKEN_DIR"
 
               {{- if not .Values.pkcs11.provisioning.publishSecrets }}
               # publishSecrets=false: every artifact above already lives on the
@@ -222,8 +231,13 @@ spec:
           volumeMounts:
             - name: hsm-token
               mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
+            # mktemp and the here-documents of bash.
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: hsm-token
           persistentVolumeClaim:
             claimName: {{ include "digital-contracting-service.fullname" . }}-hsm-token
+        - name: tmp
+          emptyDir: {}
 {{- end }}

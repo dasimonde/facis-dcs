@@ -29,3 +29,14 @@ func TestAuditorAndSystemAuditorAreDistinct(t *testing.T) {
 		t.Fatal("Auditor became a system role")
 	}
 }
+
+// A machine identity holds system roles only, so the webhook management role
+// for integrations must be one (DCS-NFR-SQ-08).
+func TestSystemIntegrationManagerIsASystemRole(t *testing.T) {
+	if !SystemIntegrationManager.IsValid() || !SystemIntegrationManager.IsSystemRole() || SystemIntegrationManager.IsHumanRole() {
+		t.Fatal("Sys. Integration Manager is not a valid system role")
+	}
+	if r, err := NewUserRole("Sys. Integration Manager"); err != nil || r != SystemIntegrationManager {
+		t.Fatalf("NewUserRole = %q, %v", r, err)
+	}
+}

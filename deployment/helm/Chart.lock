@@ -32,11 +32,14 @@ dependencies:
 - name: statuslist-service
   repository: file://charts/statuslist-service
   version: 0.1.0
+- name: logging
+  repository: file://charts/logging
+  version: 0.1.0
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 85.2.0
 - name: traefik
   repository: https://traefik.github.io/charts
   version: 41.0.0
-digest: sha256:1cf1079201379a9e7e52502644ae856473bf0c4b390efb82e28e496623bb1337
-generated: "2026-08-06T20:59:46.446548581+02:00"
+digest: sha256:81e463582ebe611b7b871a24c723b4cb0637c19aad48e7cb7d487cb07dabd062
+generated: "2026-10-31T00:53:24.550164876+01:00"

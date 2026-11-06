@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -64,22 +63,6 @@ func contractFieldValue(raw json.RawMessage) string {
 		}
 	}
 	return ""
-}
-
-// scalarText renders a JSON scalar to its deterministic display text.
-func scalarText(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return t
-	case bool:
-		return strconv.FormatBool(t)
-	case json.Number:
-		return t.String()
-	default:
-		return fmt.Sprint(t)
-	}
 }
 
 func parseCanonicalSegment(item ContentItem, fields map[string]string) clauseSegment {

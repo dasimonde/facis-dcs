@@ -1,11 +1,9 @@
 # Signature retrieve/validate/audit/compliance (DCS-FR-SM-15, DCS-FR-SM-18,
 # DCS-FR-SM-19, DCS-FR-SM-21, UC-04): GET /signature/retrieve/{did},
 # POST /signature/validate, GET /signature/audit,
-# POST /signature/compliance (backend/design/signature_management.go). All
-# three are already implemented; only /signature/verify (contract integrity &
-# envelope check, used as a setup step by other packs) and /signature/apply
-# (the signing ceremony itself, covered by 22_real_signing_vertical) had
-# scenario coverage before this file.
+# POST /signature/compliance (backend/design/signature_management.go). The
+# signing ceremony itself (POST /signature/prepare, POST /signature/submit and
+# the OID4VP request routes) is covered by features/22_real_signing_vertical.
 
 @UC-04 @DCS-FR-SM-18 @DCS-FR-SM-19 @DCS-FR-SM-21 @DCS-FR-UC-04-2
 Feature: Signature validation, audit, and compliance
@@ -95,20 +93,12 @@ Feature: Signature validation, audit, and compliance
     Then the exported PDF for contract "PDFA Signed Contract" declares PDF/A-3 conformance in its XMP metadata
     And the exported PDF for contract "PDFA Signed Contract" embeds the canonical JSON-LD payload as an associated file
 
-  # DECISION-ANCHORED SKIP (not a test limitation): the EU distributes the
-  # DSS demonstration webapp as a ZIP/WAR with NO official container image,
-  # so deployment/helm/charts/dss wraps a pinned community image and stays
-  # DISABLED by default — enabling an unofficial third-party image in the
-  # hermetic CI deployment is not defensible. The integration itself is
-  # implemented and unit-tested (backend/internal/signingmanagement/dss:
-  # report parsing, and the hard-fail when a CONFIGURED DSS is unreachable —
-  # a configured external validator is never silently skipped); flipping
-  # dss.enabled plus the backend's DSS_URL env activates this scenario's
-  # behavior without code changes.
-  @skip @DCS-FR-SM-18 @DCS-IR-SI-10 @DCS-IR-CI-08
+  # The BDD stack deploys the EU DSS (deployment/helm/values.bdd.yml, dss.enabled)
+  # and points the backend's DSS_URL at it, so /signature/validate submits the
+  # signed PDF to DSS and returns its report (signingmanagement/query/validate.go).
+  @clean_db @DCS-FR-SM-18 @DCS-IR-SI-10 @DCS-IR-CI-08
   Scenario: Signature validation reports the EU DSS indication when a DSS instance is deployed
     Given contract "DSS Validated Contract" has reached contract state "SIGNED"
-    And an EU DSS instance is deployed and configured via DSS_URL
     When the contract manager validates the signature for contract "DSS Validated Contract"
     Then get http 200:Success code
     And the signature validation findings include an EU DSS validation report indication

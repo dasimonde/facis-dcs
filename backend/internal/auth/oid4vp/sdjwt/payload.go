@@ -31,7 +31,26 @@ func VerifyCredential(token string, disclosures []string, cfg TrustConfig) (jwt.
 	if cfg == nil {
 		return nil, fmt.Errorf("issuer trust is not configured")
 	}
+	return verifyCredential(token, disclosures, cfg, func(t *jwt.Token) (any, error) {
+		return ResolveIssuerVerificationKey(cfg, t)
+	})
+}
 
+// VerifyDelegatedCredential validates a credential that a holder issued with
+// the key its own credential binds (delegatorKey, the cnf.jwk of that
+// credential), and returns the disclosed claims like VerifyCredential. The
+// vct must be one cfg allows. Whether the delegator may issue it at all is
+// for the caller to decide.
+func VerifyDelegatedCredential(token string, disclosures []string, delegatorKey JWK, cfg TrustConfig) (jwt.MapClaims, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("issuer trust is not configured")
+	}
+	return verifyCredential(token, disclosures, cfg, func(*jwt.Token) (any, error) {
+		return ecPublicKey(delegatorKey.X, delegatorKey.Y)
+	})
+}
+
+func verifyCredential(token string, disclosures []string, cfg TrustConfig, keyFunc jwt.Keyfunc) (jwt.MapClaims, error) {
 	parsed, err := jwt.NewParser(
 		// A credential with no exp never expires. Requiring the claim is what
 		// keeps a presentation bounded in time, so an issuer that omits it is a
@@ -40,9 +59,7 @@ func VerifyCredential(token string, disclosures []string, cfg TrustConfig) (jwt.
 		jwt.WithIssuedAt(),
 		jwt.WithLeeway(clockSkewLeeway),
 		jwt.WithValidMethods(credentialSigningAlgs),
-	).Parse(token, func(t *jwt.Token) (any, error) {
-		return ResolveIssuerVerificationKey(cfg, t)
-	})
+	).Parse(token, keyFunc)
 
 	if err != nil {
 		return nil, fmt.Errorf("credential jwt: %w", err)

@@ -6,6 +6,8 @@
 # Environment
 # DOCKER_REGISTRY - Optional Docker registry URL
 # DOCKER_REPO - Optional Docker repository name
+# GIT_SHA - Optional commit SHA. Defaults to git rev-parse HEAD at the repo root.
+# BUILD_TIME - Optional RFC3339 build timestamp. Defaults to UTC now when unset.
 
 set -euo pipefail
 
@@ -26,8 +28,17 @@ echo "Building $IMAGE_NAME..."
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 DOCKERFILE="$(dirname "$0")/Dockerfile"
 
+GIT_SHA="${GIT_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)}"
+GIT_SHA="${GIT_SHA:-unknown}"
+BUILD_TIME="${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)}"
+
 # Build context is the repo root to include both backend and frontend
-docker build -f "$DOCKERFILE" -t "$IMAGE_NAME" "$REPO_ROOT"
+docker build \
+  -f "$DOCKERFILE" \
+  --build-arg "GIT_SHA=$GIT_SHA" \
+  --build-arg "BUILD_TIME=$BUILD_TIME" \
+  -t "$IMAGE_NAME" \
+  "$REPO_ROOT"
 
 if [[ -n "$REGISTRY" && -n "$REPO" ]]; then
   echo "Tagging as latest..."

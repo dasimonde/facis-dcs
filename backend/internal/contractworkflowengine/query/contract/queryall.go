@@ -31,6 +31,9 @@ type GetAllMetadataQry struct {
 	RetrievedBy string
 	HolderDID   string
 	ParentDID   string
+	States      []string
+	SortBy      string
+	Ascending   bool
 	Pagination  datatype.Pagination
 	UserRoles   userrole.UserRoles
 	DIDDocument identity.DIDDocument
@@ -97,23 +100,15 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 
 	var contractsMetadata []db.ContractMetadata
 	if query.Pagination.Limit >= 0 {
-		contractsMetadata, err = h.CRepo.ReadAllMetaData(ctx, tx, query.Pagination)
+		contractsMetadata, err = h.CRepo.ReadAllMetaData(ctx, tx, query.Pagination, db.ListOptions{
+			States:    query.States,
+			ParentDID: query.ParentDID,
+			SortBy:    query.SortBy,
+			Ascending: query.Ascending,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("could not read all contracts: %w", err)
 		}
-	}
-
-	// Full-scope hierarchy filter: keep only children whose
-	// dcs:parentContract references the requested parent DID. ReadAllMetaData
-	// already extracts parent_contract_did, so this is an in-memory narrowing.
-	if query.ParentDID != "" {
-		filtered := contractsMetadata[:0]
-		for _, c := range contractsMetadata {
-			if c.ParentContractDID != nil && *c.ParentContractDID == query.ParentDID {
-				filtered = append(filtered, c)
-			}
-		}
-		contractsMetadata = filtered
 	}
 
 	negotiationTasks, err := h.NTRepo.ReadAllByNegotiator(ctx, tx, did)
@@ -147,11 +142,6 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		return nil, fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	didToVersion := make(map[string]int, len(contractsMetadata))
-	for _, c := range contractsMetadata {
-		didToVersion[c.DID] = c.ContractVersion
-	}
-
 	var reviewTaskItems []ReviewTaskItem
 	for _, data := range reviewerTasks {
 		state, err := reviewtaskstate.NewReviewTaskState(data.State)
@@ -161,7 +151,7 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		reviewTaskItems = append(reviewTaskItems, ReviewTaskItem{
 			DID:             data.DID,
 			State:           state,
-			ContractVersion: didToVersion[data.DID],
+			ContractVersion: data.ContractVersion,
 			Reviewer:        data.Reviewer,
 			CreatedAt:       data.CreatedAt,
 		})
@@ -193,7 +183,7 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		}
 		approvalTasksItems = append(approvalTasksItems, ApprovalTaskItem{
 			DID:             data.DID,
-			ContractVersion: didToVersion[data.DID],
+			ContractVersion: data.ContractVersion,
 			State:           state,
 			Approver:        data.Approver,
 			CreatedAt:       data.CreatedAt,

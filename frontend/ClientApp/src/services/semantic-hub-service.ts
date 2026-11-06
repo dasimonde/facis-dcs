@@ -1,5 +1,25 @@
 import http from '@/api/http'
 
+export interface SearchFilter {
+  id: string
+  label: string
+  field_iri: string
+  source: { name: string; kind: string; version: number }
+}
+
+export interface SearchFilterConfig {
+  revision: number
+  filters: SearchFilter[]
+}
+
+export async function getSearchFilters(): Promise<SearchFilterConfig> {
+  return http.get('/semantic/search-filters').then((res) => res.data)
+}
+
+export async function saveSearchFilters(config: SearchFilterConfig): Promise<SearchFilterConfig> {
+  return http.put('/semantic/search-filters', config).then((res) => res.data)
+}
+
 /**
  * Semantic Hub clause catalog: the palette listing of typed clause
  * NodeShapes plus the raw SHACL Turtle they live in — forms are generated

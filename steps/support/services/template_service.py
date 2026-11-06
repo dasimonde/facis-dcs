@@ -1,7 +1,5 @@
 import re
 
-from docutils.nodes import description
-from requests import get
 
 from steps.support.api_client import get_with_headers, post_json, template_approve_url, template_create_url, template_retrieve_by_id_url, template_retrieve_url, template_submit_url, template_verify_url
 from steps.support.services.auth_service import AuthService
@@ -12,6 +10,7 @@ class TemplateService:
 
     CONTRACT_TEMPLATE_TYPE = "CONTRACT_TEMPLATE"
     COMPONENT_TEMPLATE_TYPE = "COMPONENT"
+    MULTI_PARTY_TYPE = "MULTI_PARTY"
 
     @staticmethod
     def template_env_key(name: str) -> str:
@@ -50,7 +49,7 @@ class TemplateService:
                         {
                             "@id": "urn:uuid:block-clause-1",
                             "@type": "dcs:Clause",
-                            "dcs:content": {"@list": [clause_text]},
+                            "dcs:content": {"@list": [clause_text, {"@id": "urn:uuid:field-service-description"}]},
                         }
                     ]
                 },
@@ -63,14 +62,29 @@ class TemplateService:
                     }
                 ],
             },
+            # The clause binds a filled contract field, so the template policy
+            # audit (FACIS-TPL-CLAUSE-001) finds no error and the template is COMPLIANT.
+            "dcs:contractFields": [
+                {
+                    "@id": "urn:uuid:field-service-description",
+                    "@type": "dcs:ContractField",
+                    "dcs:label": "Service description",
+                    "dcs:datatype": "xsd:string",
+                    "dcs:shape": {"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-service-description"},
+                    "dcs:required": True,
+                    "dcs:value": "BDD fixture service",
+                }
+            ],
+            "dcs:policies": [],
         }
 
     @staticmethod
-    def create_fresh_template(context, name="Standard Template", description="BDD auto-created template", title="BDD Standard NDA") -> tuple:
+    def create_fresh_template(context, name="Standard Template", description="BDD auto-created template", title="BDD Standard NDA", *, party_type=MULTI_PARTY_TYPE, template_type=CONTRACT_TEMPLATE_TYPE) -> tuple:
         """Create a Draft template as Template Creator; return (did, updated_at)."""
         headers = AuthService.get_headers_for_roles(["Template Creator"])
         payload = {
-            "template_type": TemplateService.template_type_for_category("legal"),
+            "template_type": template_type,
+            "party_type": party_type,
             "name": name,
             "description": description,
             "template_data": TemplateService.canonical_document_data(title),

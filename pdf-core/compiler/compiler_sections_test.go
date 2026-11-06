@@ -28,12 +28,12 @@ func mustExtractFromPayload(t *testing.T, payload []byte) documentModel {
 // sectionDoc builds a documentModel with sections for testing.
 func sectionDoc(sections []sectionData) documentModel {
 	return documentModel{
-		Title:         "Section Test",
-		Sections:      sections,
+		Title:           "Section Test",
+		Sections:        sections,
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
-		NamespaceMap:  map[string]string{},
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
+		NamespaceMap:    map[string]string{},
 	}
 }
 
@@ -426,7 +426,6 @@ func TestExtractDocumentModelIgnoresUnknownNamespaceSections(t *testing.T) {
 	}
 }
 
-
 // TestH1TagInContentStream verifies that section headings are tagged /H1 in the
 // PDF content stream rather than /P.
 func TestH1TagInContentStream(t *testing.T) {
@@ -580,9 +579,9 @@ func docWithGlossaryTerms(sections []sectionData) documentModel {
 			{Term: "prov:Activity", TermURI: "http://www.w3.org/ns/prov#Activity", Definition: "Something that occurs over a period of time and acts upon entities."},
 		},
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
-		NamespaceMap:  map[string]string{},
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
+		NamespaceMap:    map[string]string{},
 	}
 }
 
@@ -667,9 +666,9 @@ func TestAnnotationRectsMatchLineY(t *testing.T) {
 			{Term: "prov:Entity", TermURI: "http://www.w3.org/ns/prov#Entity"},
 		},
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
-		NamespaceMap:  map[string]string{},
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
+		NamespaceMap:    map[string]string{},
 	}
 	pages := layoutDocumentPages(doc)
 
@@ -780,11 +779,11 @@ func TestAnnotationXUsesHelveticaMetrics(t *testing.T) {
 				},
 			}},
 		}},
-		Glossary:      []glossaryTerm{{Term: "prov:Entity", TermURI: "http://www.w3.org/ns/prov#Entity"}},
+		Glossary:        []glossaryTerm{{Term: "prov:Entity", TermURI: "http://www.w3.org/ns/prov#Entity"}},
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
-		NamespaceMap:  map[string]string{},
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
+		NamespaceMap:    map[string]string{},
 	}
 	pages := layoutDocumentPages(doc)
 
@@ -834,9 +833,9 @@ func TestGlossaryLinkAnnotationUsesExplicitDestination(t *testing.T) {
 			{Term: "prov:Entity", TermURI: "http://www.w3.org/ns/prov#Entity", Definition: "An entity."},
 		},
 		EmbeddedPayload: []byte(`{}`),
-		PayloadHash:   strings.Repeat("0", 64),
-		FileID:        strings.Repeat("0", 64),
-		NamespaceMap:  map[string]string{},
+		PayloadHash:     strings.Repeat("0", 64),
+		FileID:          strings.Repeat("0", 64),
+		NamespaceMap:    map[string]string{},
 	}
 	pdf, err := renderPDF(testSigningContext(), doc)
 	if err != nil {

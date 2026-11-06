@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base/jades"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
-	"digital-contracting-service/internal/pdfgeneration/provenance"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -88,7 +89,7 @@ func requireUnsettledAgreement(
 	if err != nil {
 		return fmt.Errorf("could not read the stored artifact's lifecycle state for %s: %w", did, err)
 	}
-	if provenance.ArtifactCarriesSignature(pdfState.C2PAState) {
+	if pdfState.Signed {
 		return ErrAgreementSettled
 	}
 
@@ -183,4 +184,88 @@ func withdrawOwnSettlement(ctx context.Context, tx *sqlx.Tx, settlements OwnSett
 		return fmt.Errorf("could not withdraw this instance's settlement of %s: %w", did, err)
 	}
 	return nil
+}
+
+// ErrCounterpartiesNotSettled refuses Approve (and surfaces on retrieve) when
+// this instance does not yet hold matching settlement artifacts for every remote
+// party signature slot — the same bilateral precondition signing enforces
+// (signingmanagement/command/apply.go assertCounterpartiesSettled).
+var ErrCounterpartiesNotSettled = errors.New("counterparties have not settled matching document digests")
+
+// AssertCounterpartiesSettled refuses until this instance holds its own
+// settlement and a settlement from each remote party naming the same document
+// digest. Contracts with no remote party signature fields pass (single-instance
+// multi-signer). Digests bind the agreement, not per-instance contract_version.
+func AssertCounterpartiesSettled(
+	ctx context.Context, tx *sqlx.Tx, settlements OwnSettlements,
+	did, localPeer string, resp *db.Responsible, declaredFields []string,
+) error {
+	remote := remotePartyFields(resp, localPeer, declaredFields)
+	if len(remote) == 0 {
+		return nil
+	}
+
+	if settlements == nil {
+		return fmt.Errorf("could not check the counterparty settlement of %s: no settlement store is configured", did)
+	}
+
+	own, err := settlements.GetSettlement(ctx, tx, did, localPeer)
+	if err != nil {
+		return fmt.Errorf("could not read this instance's settlement of %s: %w", did, err)
+	}
+
+	if own == nil {
+		return fmt.Errorf("%w: this instance has not settled %s as %s, so it holds no agreed version to hold %s to",
+			ErrCounterpartiesNotSettled, did, localPeer, strings.Join(remote, ", "))
+	}
+
+	for _, party := range remote {
+		settlement, err := settlements.GetSettlement(ctx, tx, did, party)
+		if err != nil {
+			return fmt.Errorf("could not read the settlement of %s by %s: %w", did, party, err)
+		}
+
+		if settlement == nil {
+			return fmt.Errorf("%w: no settlement from %s is held", ErrCounterpartiesNotSettled, party)
+		}
+
+		if settlement.DocumentDigest != own.DocumentDigest {
+			return fmt.Errorf("%w: %s settled document %s, this instance settled %s",
+				ErrCounterpartiesNotSettled, party, settlement.DocumentDigest, own.DocumentDigest)
+		}
+	}
+
+	return nil
+}
+
+// SettlementReady reports whether AssertCounterpartiesSettled would pass, plus
+// a short detail for UI when it would not.
+func SettlementReady(
+	ctx context.Context, tx *sqlx.Tx, settlements OwnSettlements,
+	did, localPeer string, resp *db.Responsible, declaredFields []string,
+) (ready bool, detail string, err error) {
+	if err := AssertCounterpartiesSettled(ctx, tx, settlements, did, localPeer, resp, declaredFields); err != nil {
+		if errors.Is(err, ErrCounterpartiesNotSettled) {
+			return false, err.Error(), nil
+		}
+		return false, "", err
+	}
+
+	return true, "", nil
+}
+
+func remotePartyFields(resp *db.Responsible, localPeer string, declaredFields []string) []string {
+	var parties []string
+	if resp != nil {
+		parties = []string{resp.Creator, resp.Counterparty}
+	}
+
+	var remote []string
+	for _, field := range declaredFields {
+		if contractstate.IsRemotePartyField(parties, localPeer, field) {
+			remote = append(remote, field)
+		}
+	}
+
+	return remote
 }

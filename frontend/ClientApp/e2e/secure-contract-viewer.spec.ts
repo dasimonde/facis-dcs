@@ -35,6 +35,13 @@ test('secure contract viewer shows the real contract content and guides the sign
     await expect(page.getByText(/provider invoices the agreed payment amount/i)).toBeVisible()
   })
 
+  await test.step('the signer cannot edit the contract values', async () => {
+    const amount = page.getByRole('textbox', { name: 'Payment Amount', exact: true })
+    await expect(amount).toBeVisible()
+    await expect(amount).toBeDisabled()
+    await expect(amount).not.toBeEditable()
+  })
+
   await test.step('the guided steps gate signing until the contract is verified', async () => {
     const downloadToSign = page.getByRole('button', { name: /download document to sign/ })
     // Step 3 (verify identity & download) is blocked until step 2 (verify) passes.

@@ -29,7 +29,7 @@ already-produced documents stay pinned via their `@context` URL,
 
 A document is a `dcs:ContractTemplate` or `dcs:Contract` carrying:
 
-- `dcs:metadata` — title, description, template type.
+- `dcs:metadata` — title, description, template type, start date, expiration date, expiration notice period, expiration policy.
 - `dcs:documentStructure` — ordered `dcs:blocks` (`dcs:Section`,
   `dcs:TextBlock`, `dcs:Clause` — a clause's `dcs:content` list mixes prose
   strings and bare `{"@id":"…"}` references to contract fields) and a

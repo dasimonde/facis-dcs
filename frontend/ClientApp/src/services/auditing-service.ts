@@ -1,6 +1,12 @@
 import http from '@/api/http'
-import type { AuditReportRequest, AuditRequest } from '@/models/requests/auditing-request'
-import type { AuditFinding, AuditResponse, PACAuditExecutorResponse } from '@/models/responses/auditing-response'
+import type { AccessAttemptsRequest, AuditReportRequest, AuditRequest } from '@/models/requests/auditing-request'
+import type {
+  AccessAttemptsResponse,
+  AuditFinding,
+  AuditResponse,
+  CheckpointProof,
+  PACAuditExecutorResponse,
+} from '@/models/responses/auditing-response'
 import type { AuditingService } from '@/models/services/auditing-service'
 
 const normalizeAuditResponse = (data: PACAuditExecutorResponse): AuditResponse => {
@@ -49,6 +55,10 @@ function categoryFromResult(result: PACAuditExecutorResponse['findings'][number]
 }
 
 export const auditingService: AuditingService = {
+  async accessAttempts(request: AccessAttemptsRequest) {
+    return http.get<AccessAttemptsResponse>('/pac/access-attempts', { params: request }).then((res) => res.data)
+  },
+
   async audit(request: AuditRequest) {
     return http.post<PACAuditExecutorResponse>('/pac/audit', request).then((res) => normalizeAuditResponse(res.data))
   },
@@ -56,8 +66,15 @@ export const auditingService: AuditingService = {
   async report(request: AuditReportRequest) {
     return http.get<ArrayBuffer>('/pac/report', { params: request, responseType: 'arraybuffer' }).then((res) => ({
       bytes: res.data,
-      contentType: res.headers['content-type'] ?? 'application/octet-stream',
+      contentType:
+        typeof res.headers['content-type'] === 'string' ? res.headers['content-type'] : 'application/octet-stream',
       filename: `audit-report-${request.scope}.${request.format ?? 'json'}`,
     }))
+  },
+
+  async checkpointProof(entryCid: string) {
+    return http
+      .get<CheckpointProof>(`/pac/audit/checkpoint/proof/${encodeURIComponent(entryCid)}`)
+      .then((res) => res.data)
   },
 }

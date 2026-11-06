@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 const contractDid = 'did:web:example.test:contracts:integrated-review'
 const fieldDid = `${contractDid}#field-service-code`
@@ -96,6 +97,7 @@ async function mockContractReview(page: Page, options: ContractFixtureOptions = 
   await page.route('**/semantic/schema/list', (route) => json(route, []))
   await page.route('**/semantic/ontology/dcs-odrl-profile', (route) => json(route, { content: odrlProfileFixture }))
   await page.route('**/contract/retrieve/**', (route) => json(route, contractFixture(options)))
+  await withholdUnsignedToken(page)
   await page.addInitScript(
     ([token]) => {
       localStorage.setItem('token_type', 'Bearer')
@@ -193,6 +195,7 @@ test.describe('integrated Contract Review verification', () => {
       updated_at: updatedAt,
       forward_to: 'APPROVAL',
       comments: ['Ready for approval.'],
+      annotations: [],
     })
     await page.waitForTimeout(250)
     expect(submissions).toHaveLength(1)

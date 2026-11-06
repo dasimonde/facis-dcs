@@ -2,8 +2,9 @@
 import { storeToRefs } from 'pinia'
 import { TemplateType } from '@template-repository/models/contract-template'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { partyTypes } from '@/types/party-type'
 
-const { templateType, name, description, version } = storeToRefs(useDcsDraftStore())
+const { templateType, partyType, name, description, version } = storeToRefs(useDcsDraftStore())
 </script>
 
 <template>
@@ -12,6 +13,10 @@ const { templateType, name, description, version } = storeToRefs(useDcsDraftStor
       <h3 class="card-title text-sm">Details</h3>
 
       <div class="grid grid-cols-1 gap-4">
+        <div>
+          <span class="font-semibold">Party type:</span>
+          {{ partyTypes.find((option) => option.value === partyType)?.label ?? '—' }}
+        </div>
         <fieldset class="fieldset border-none p-0">
           <legend class="fieldset-legend">Version</legend>
           <input :value="version ?? '—'" class="input-bordered input w-full" type="text" disabled readonly />

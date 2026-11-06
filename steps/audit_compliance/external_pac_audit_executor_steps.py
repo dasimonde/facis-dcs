@@ -6,15 +6,21 @@ they do not replace it with an in-process HTTP mock.
 
 from __future__ import annotations
 
+import csv
+import json
+from datetime import datetime
+from urllib.parse import urlencode
+
 import hashlib
 import io
 import os
+import time
 import uuid
 
 import requests
 from behave import given, then, when
 
-from steps.support.api_client import origin_url, pac_audit_url, pac_report_url
+from steps.support.api_client import get_with_headers, origin_url, pac_audit_url, pac_report_url
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
 
@@ -183,6 +189,32 @@ def step_reference_contract(context):
 def step_reference_executor_identity(context, executor_id):
     body = _json(context.requests_response)
     assert (body.get("executor") or {}).get("id") == executor_id, body
+
+
+@given('the archive storage of contract "{name}" is anchored in the audit trail')
+def step_archive_storage_anchored(context, name):
+    """Audit evidence reads only anchored entries, and the outbox anchors
+    STORE_ARCHIVED_CONTRACT asynchronously after signing. The executor may
+    observe exactly one request, so the scenario waits before it audits."""
+    did = _contract_did(context, name)
+    deadline = time.monotonic() + 90
+    while True:
+        cursor = context.db.cursor()
+        cursor.execute(
+            """
+            SELECT bool_and(processed)
+            FROM outbox_events
+            WHERE event_type = 'STORE_ARCHIVED_CONTRACT' AND did = %s
+            """,
+            (did,),
+        )
+        anchored = cursor.fetchone()[0]
+        cursor.close()
+        context.db.rollback()
+        if anchored:
+            return
+        assert time.monotonic() < deadline, f"STORE_ARCHIVED_CONTRACT of {did} was not anchored"
+        time.sleep(1)
 
 
 @when('the Auditor requests an executor-backed "{scope}" audit without a resource DID')
@@ -358,7 +390,7 @@ def step_result_metadata(context):
 
 
 @then(
-    "the PAC audit run stores audit and correlation IDs, executor provenance, receipt, "
+    "the PAC audit run stores audit and correlation IDs, executor provenance, an encrypted snapshot, "
     "and request and response hashes"
 )
 def step_persisted_run(context):
@@ -367,8 +399,8 @@ def step_persisted_run(context):
     cursor.execute(
         """
         SELECT correlation_id::text, contract_version, scope, resource_did,
-               request_hash, response_hash, response_bytes, executor_id, executor_version,
-               executed_at, receipt, response_json
+               request_hash, response_hash, snapshot_bytes, executor_id, executor_version,
+               executed_at
         FROM pac_audit_runs
         WHERE audit_id = %s::uuid
         """,
@@ -384,12 +416,10 @@ def step_persisted_run(context):
         resource_did,
         request_hash,
         response_hash,
-        response_bytes,
+        snapshot_bytes,
         executor_id,
         executor_version,
         executed_at,
-        receipt,
-        response_json,
     ) = row
     assert correlation_id == expected["correlation_id"], row
     assert contract_version == expected["contract_version"], row
@@ -398,18 +428,23 @@ def step_persisted_run(context):
     assert executor_id == expected["executor"]["id"], row
     assert executor_version == expected["executor"]["version"], row
     assert executed_at is not None, row
-    assert receipt == expected["receipt"], row
-    assert response_json.get("audit_id") == expected["audit_id"], response_json
     for value in (request_hash, response_hash):
         assert isinstance(value, str) and value.startswith("sha256:") and len(value) == 71, row
         int(value[7:], 16)
-    assert isinstance(response_bytes, (bytes, bytearray, memoryview)), (
-        f"Expected persisted raw executor response bytes, got {type(response_bytes).__name__}"
+    assert isinstance(snapshot_bytes, (bytes, bytearray, memoryview)) and snapshot_bytes, (
+        "Expected a non-empty encrypted PAC snapshot"
     )
-    raw_response = bytes(response_bytes)
-    assert response_hash == "sha256:" + hashlib.sha256(raw_response).hexdigest(), (
-        "Persisted response_hash does not cover the exact persisted executor response bytes"
-    )
+    snapshot = bytes(snapshot_bytes)
+    try:
+        plaintext = json.loads(snapshot)
+    except (ValueError, UnicodeDecodeError):
+        pass
+    else:
+        raise AssertionError(f"PAC snapshot exposes plaintext JSON: {type(plaintext).__name__}")
+    assert expected["audit_id"].encode() not in snapshot, "Snapshot exposes the audit envelope"
+    context.persisted_audit_response = {
+        key: value for key, value in expected.items() if key != "timeline"
+    }
     context.persisted_request_hash = request_hash
     context.persisted_response_hash = response_hash
 
@@ -464,31 +499,20 @@ def step_run_append_only(context):
 
 @when('the Auditor reads the persisted "{scope}" report for contract "{name}"')
 def step_read_report(context, scope, name):
-    context.requests_response = requests.get(
-        pac_report_url(context),
-        params={
-            "scope": scope,
-            "did": _resource_did(context, scope, name),
-            "format": "json",
-            "justification": "persisted executor report BDD",
-        },
-        headers=AuthService.get_headers_for_roles(["Auditor"]),
-        timeout=context.http_timeout_seconds,
-    )
+    step_read_report_format(context, scope, name, "json")
 
 
 @when('the Auditor exports format "{fmt}" from the persisted "{scope}" run for contract "{name}"')
 def step_read_report_format(context, scope, name, fmt):
-    context.requests_response = requests.get(
-        pac_report_url(context),
-        params={
-            "scope": scope,
-            "did": _resource_did(context, scope, name),
-            "format": fmt,
-            "justification": "persisted executor report BDD",
-        },
+    params = urlencode({
+        "scope": scope,
+        "did": _resource_did(context, scope, name),
+        "format": fmt,
+        "justification": "persisted executor report BDD",
+    })
+    context.requests_response = get_with_headers(
+        context, f"{pac_report_url(context)}?{params}",
         headers=AuthService.get_headers_for_roles(["Auditor"]),
-        timeout=context.http_timeout_seconds,
     )
     context.external_report_bytes = context.requests_response.content
     context.external_report_format = fmt
@@ -498,11 +522,27 @@ def step_read_report_format(context, scope, name, fmt):
 def step_report_same_run(context):
     assert context.requests_response.status_code == 200, context.requests_response.text
     report = _json(context.requests_response)
-    expected = context.accepted_external_audit
-    assert report.get("audit_id") == expected.get("audit_id"), report
+    expected = context.persisted_audit_response
+    assert report.get("reportId") == expected["audit_id"], report
+    assert report.get("contractVersion") == expected["contract_version"], report
+    assert report.get("correlationId") == expected["correlation_id"], report
+    assert report.get("executedAt") == expected["executed_at"], report
+    assert report.get("scope") == expected["scope"], report
+    assert report.get("did") == (expected.get("resource") or {}).get("did"), report
     assert report.get("executor") == expected.get("executor"), report
-    assert report.get("findings") == expected.get("findings"), report
     assert report.get("receipt") == expected.get("receipt"), report
+    assert report.get("requestHash") == context.persisted_request_hash, report
+    assert report.get("responseHash") == context.persisted_response_hash, report
+    assert report.get("generatedAt") and report.get("generatedBy"), report
+    assert report.get("format") == "json", report
+    findings = report.get("findings")
+    assert isinstance(findings, list) and len(findings) == len(expected["findings"]), report
+    for actual, original in zip(findings, expected["findings"]):
+        assert actual.get("ruleId") == original["rule_id"], actual
+        assert actual.get("result") == original["result"], actual
+        assert actual.get("message") == original["reason"], actual
+        assert actual.get("severity") == (original.get("severity") or original["result"]), actual
+        assert (actual.get("evidenceRefs") or []) == (original.get("evidence_refs") or []), actual
 
 
 @then('the "{fmt}" report represents the same persisted executor run')
@@ -513,11 +553,7 @@ def step_report_projection(context, fmt):
     expected = context.accepted_external_audit
     expected_rule = expected["findings"][0]["rule_id"]
     if fmt == "json":
-        report = _json(response)
-        assert report.get("audit_id") == expected["audit_id"], report
-        assert report.get("executor") == expected["executor"], report
-        assert report.get("findings") == expected["findings"], report
-        assert report.get("receipt") == expected["receipt"], report
+        step_report_same_run(context)
         return
     if fmt == "csv":
         text = response.content.decode("utf-8")
@@ -582,3 +618,100 @@ def step_no_fallback(context):
     assert not (isinstance(body, dict) and body.get("findings")), (
         f"Executor failure returned local fallback findings: {body!r}"
     )
+
+
+@then("the observed executor request contains the lifecycle evidence expected in the persisted report")
+def step_persisted_lifecycle_evidence(context):
+    request = context.observed_external_audit
+    entries = [
+        entry
+        for resource in request["evidence"][request["scope"]]
+        for entry in resource.get("audit_trail", [])
+        if entry.get("kind") == "TIMELINE"
+    ]
+    assert entries, "The workflow fixture must provide real persisted lifecycle events"
+    accepted = [
+        entry for entry in context.accepted_external_audit.get("timeline", [])
+        if entry.get("kind") == "TIMELINE"
+    ]
+    assert {entry["id"] for entry in entries} == {entry["id"] for entry in accepted}
+    assert any((entry.get("event_data") or {}).get("stored_by") for entry in entries), (
+        "The archive workflow must supply an identifiable stored_by actor"
+    )
+    context.persisted_lifecycle_entries = sorted(
+        entries, key=lambda entry: (datetime.fromisoformat(entry["created_at"].replace("Z", "+00:00")), entry["id"])
+    )
+
+
+@then('the "{fmt}" report has media type "{media_type}"')
+def step_report_media_type(context, fmt, media_type):
+    assert context.external_report_format == fmt
+    actual = context.requests_response.headers.get("Content-Type", "").split(";", 1)[0].strip()
+    assert actual == media_type, f"Expected {media_type}, got {actual}"
+
+
+@then('the "{fmt}" report contains the chronological persisted lifecycle timeline')
+def step_report_lifecycle(context, fmt):
+    response = context.requests_response
+    assert response.status_code == 200, response.text
+    expected = context.persisted_lifecycle_entries
+    if fmt == "json":
+        report = response.json()
+        events = report.get("events")
+        assert isinstance(events, list) and len(events) == len(expected), report
+        assert report["summary"]["totalEvents"] == len(expected), report
+        for actual, entry in zip(events, expected):
+            assert actual["id"] == entry["id"], actual
+            actor = (entry.get("event_data") or {}).get("stored_by")
+            if actor:
+                assert actual.get("actor") == actor, actual
+            assert actual["eventType"] == entry["event_type"], actual
+            assert actual["component"] == entry["component"], actual
+            assert actual.get("did") == entry.get("did"), actual
+            assert datetime.fromisoformat(actual["timestamp"].replace("Z", "+00:00")) == datetime.fromisoformat(entry["created_at"].replace("Z", "+00:00")), actual
+            assert (actual.get("details") or {}) == (entry.get("event_data") or {}), actual
+        return
+    if fmt == "csv":
+        rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8"))))
+        events = [row for row in rows if row["section"] == "event"]
+        assert len(events) == len(expected), events
+        for actual, entry in zip(events, expected):
+            actor = (entry.get("event_data") or {}).get("stored_by")
+            if actor:
+                assert actual.get("actor") == actor, actual
+            assert actual["eventType"] == entry["event_type"], actual
+            assert actual["component"] == entry["component"], actual
+            assert actual["did"] == (entry.get("did") or ""), actual
+            assert datetime.fromisoformat(actual["timestamp"].replace("Z", "+00:00")) == datetime.fromisoformat(entry["created_at"].replace("Z", "+00:00")), actual
+        return
+    if fmt == "pdf":
+        from pypdf import PdfReader  # noqa: PLC0415
+
+        text = "".join("".join((page.extract_text() or "").split()) for page in PdfReader(io.BytesIO(response.content)).pages)
+        assert "LifecycleEvents" in text, text
+        timeline = text.split("LifecycleEvents", 1)[1]
+        offset = 0
+        for entry in expected:
+            actor = (entry.get("event_data") or {}).get("stored_by")
+            marker = "".join((entry["event_type"] + (entry.get("did") or "")).split())
+            if actor:
+                marker = "".join(("actor=" + actor).split()) + marker
+            position = timeline.find(marker, offset)
+            assert position >= offset, f"Missing or out-of-order lifecycle event {entry!r}"
+            segment = timeline[offset:position]
+            timestamp = datetime.fromisoformat(entry["created_at"].replace("Z", "+00:00"))
+            assert timestamp.strftime("%Y-%m-%dT%H:%M:%S") in segment, entry
+            offset = position + len(marker)
+        assert "Nolifecycleevents." not in timeline, timeline
+        return
+    raise AssertionError(f"Unsupported report format: {fmt}")
+
+
+@then("the persisted report is unavailable after resource key shredding")
+def step_report_unavailable_after_shredding(context):
+    response = context.requests_response
+    assert response.status_code == 404, (
+        f"Expected erased run to be unavailable, got {response.status_code}: {response.text}"
+    )
+    body = response.json()
+    assert body.get("name") == "not_found", body

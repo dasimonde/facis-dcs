@@ -55,10 +55,27 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
 
     // The DSS report (ETSI EN 319 102-1) — signer identity, signature level,
     // timestamp — is exactly the metadata FR-SM-26 requires.
-    await expect(page.getByText('EU DSS Validation (ETSI EN 319 102-1)')).toBeVisible()
-    await expect(page.getByText('Signer identity:')).toBeVisible()
-    await expect(page.getByText('Signature level:')).toBeVisible()
-    await expect(page.getByText('Timestamp:')).toBeVisible()
+    // DSS also surfaces IR-SM-05 trust-anchor / timestamp validation via
+    // indication / signing_time (no separate API booleans).
+    const dss = page.getByTestId('dss-validation')
+    await expect(dss.getByText('EU DSS Validation — PDF Signature')).toBeVisible()
+    await expect(dss.getByRole('heading', { name: 'Certificate & Signature Details' })).toBeVisible()
+    await expect(dss.getByText('Sub-indication')).toBeVisible()
+    await expect(dss.getByText('Signer identity')).toBeVisible()
+    await expect(dss.getByText('Signature format')).toBeVisible()
+    await expect(dss.getByText('Signing time')).toBeVisible()
+
+    const chain = page.getByTestId('credential-chain')
+    await expect(
+      chain.getByRole('heading', { name: 'Signing Credentials & Authorization — Local Signature Record' }),
+    ).toBeVisible()
+    await expect(chain.getByText('Signer & Authorization')).toBeVisible()
+    await expect(chain.getByText('Signer', { exact: true })).toBeVisible()
+    await expect(chain.getByText('Organization')).toBeVisible()
+    await expect(chain.getByText('Authorized Roles')).toBeVisible()
+    await expect(chain.getByText('Signed at', { exact: true })).toBeVisible()
+    await expect(chain.getByTestId('credential-chain-timestamp')).toBeVisible()
+    await expect(chain.getByText('Summary credential issuer')).toBeVisible()
 
     // The cryptographic-integrity findings section renders with pass/fail rows.
     await expect(page.getByRole('heading', { name: 'Cryptographic Integrity' })).toBeVisible()
@@ -80,9 +97,30 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     await page.getByRole('button', { name: 'Run Compliance', exact: true }).click()
     await checked
 
-    // FR-SM-21: signature level (AES) and credential status (ACTIVE) per signature.
+    // PACM-07 partial: party/clause segmented report panel.
+    const reportPanel = page.getByTestId('compliance-report-panel')
+    await expect(reportPanel.getByRole('heading', { name: 'Compliance Report' })).toBeVisible()
+    await expect(reportPanel.getByTestId('report-tab-party')).toBeVisible()
+    await expect(reportPanel.getByTestId('report-tab-clauses')).toBeVisible()
+    const partySection = reportPanel.getByTestId('party-compliance-section').first()
+    await expect(partySection).toBeVisible()
+    await expect(partySection.getByText('Signature status', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Signer', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Signing level', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Authorized role', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Signed at', { exact: true })).toBeVisible()
+    await expect(partySection.getByText('Non-conformance', { exact: true })).toBeVisible()
+    await reportPanel.getByTestId('report-tab-clauses').click()
+    await expect(reportPanel.getByTestId('clause-compliance-report')).toBeVisible()
+    // Wait for live clause-report projection (PACM-07 coverage-aware statuses).
+    await expect(reportPanel.getByText('Assessment run').first()).toBeVisible({ timeout: 15_000 })
+    await expect(reportPanel.getByText('Applicable checks').first()).toBeVisible()
+    await expect(reportPanel.getByText('Status').first()).toBeVisible()
+    await reportPanel.getByTestId('report-tab-party').click()
+
+    // FR-SM-21: signature level (AES) and the live status of the presented credential per signature.
     await expect(page.locator('.badge').filter({ hasText: 'AES' }).first()).toBeVisible()
-    await expect(page.locator('.badge').filter({ hasText: 'ACTIVE' }).first()).toBeVisible()
+    await expect(page.getByRole('cell', { name: 'VALID', exact: true }).first()).toBeVisible()
   })
 
   await test.step('compliance table surfaces the level-aware fields ADR-20 added (SM-01/SM-26)', async () => {
@@ -120,9 +158,17 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     const report = JSON.parse(readFileSync(jsonPath, 'utf-8')) as {
       contract_did: string
       signatures: unknown[]
+      parties?: unknown[]
+      report_scope?: string
+      contract_findings?: unknown[]
     }
     expect(report.contract_did).toBe(contractDid)
     expect(report.signatures.length).toBeGreaterThan(0)
+    expect(report.report_scope).toMatch(/current DCS instance/i)
+    expect(Array.isArray(report.parties)).toBe(true)
+    expect(report.parties!.length).toBeGreaterThan(0)
+    expect(Array.isArray(report.contract_findings)).toBe(true)
+    expect(report).toHaveProperty('clauses')
 
     // PDF export opens a print window (dependency-free, browser "Save as PDF").
     const popup = page.waitForEvent('popup')
@@ -140,6 +186,9 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
       { timeout: 90_000 },
     )
     await page.getByRole('button', { name: 'Load Audit Report', exact: true }).click()
+    const confirmation = page.getByRole('dialog', { name: 'Confirmation' })
+    await confirmation.getByPlaceholder('Audit justification').fill('Signature compliance review')
+    await confirmation.getByRole('button', { name: 'Submit' }).click()
     const resp = await audited
     // The audit trail lives only in IPFS and intermittently loses a just-written
     // entry ("DataIdentifier not found") — tolerate that one infra flake, stay

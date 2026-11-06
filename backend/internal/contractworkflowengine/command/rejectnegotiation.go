@@ -38,6 +38,7 @@ type NegotiationRejector struct {
 	CRepo       db.ContractRepo
 	NRepo       db.NegotiationRepo
 	NTRepo      db.NegotiationTaskRepo
+	NORepo      db.NegotiationOutboundRepo
 	SRepo       db2.SyncRepository
 	DIDDocument identity.DIDDocument
 }
@@ -75,6 +76,23 @@ func (h *NegotiationRejector) Handle(ctx context.Context, cmd RejectNegotiationC
 	err = h.NRepo.Reject(ctx, tx, cmd.ID, cmd.CauserDID, cmd.RejectionReason)
 	if err != nil {
 		return fmt.Errorf("could not reject negotiation %w", err)
+	}
+
+	localPeer, err := h.DIDDocument.GetID()
+	if err != nil {
+		return err
+	}
+
+	decisionID, err := h.NRepo.ReadDecisionID(ctx, tx, cmd.ID, cmd.CauserDID)
+
+	if err != nil {
+		return fmt.Errorf("could not read rejected decision: %w", err)
+	}
+
+	err = enqueueNegotiationOutbound(ctx, tx, h.CRepo, h.NORepo, localPeer,
+		db.NegotiationMessageReject, cmd.ID, &decisionID, cmd.DID, processData.ContractVersion)
+	if err != nil {
+		return err
 	}
 
 	evt := contractevents.RejectNegotiationEvent{

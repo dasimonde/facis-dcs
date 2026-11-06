@@ -20,15 +20,17 @@ import (
 )
 
 type SearchQry struct {
-	DID         string
-	Version     int
-	Name        string
-	Description string
-	Offset      int
-	Limit       int
-	RetrievedBy string
-	HolderDID   string
-	UserRoles   userrole.UserRoles
+	PartyType    string
+	TemplateType string
+	DID          string
+	Version      int
+	Name         string
+	Description  string
+	Offset       int
+	Limit        int
+	RetrievedBy  string
+	HolderDID    string
+	UserRoles    userrole.UserRoles
 }
 
 type SearchHandler struct {
@@ -42,7 +44,7 @@ SELECT (COUNT(DISTINCT ?template_uuid) AS ?total) WHERE {
 `
 
 const searchTemplatesStatementTemplate = `
-SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type WHERE {
 %s%s}
 ORDER BY ?s
 OFFSET %d
@@ -144,5 +146,11 @@ func buildSearchFilters(qry SearchQry) string {
 		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?description), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 
+	if qry.PartyType != "" {
+		fmt.Fprintf(&b, "  FILTER(?party_type = \"%s\")\n", sparqlEscapeString(qry.PartyType))
+	}
+	if qry.TemplateType != "" {
+		fmt.Fprintf(&b, "  FILTER(?template_type = \"%s\")\n", sparqlEscapeString(qry.TemplateType))
+	}
 	return b.String()
 }

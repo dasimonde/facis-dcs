@@ -167,6 +167,6 @@ test('audit view renders scoped audits for the auditor role', async ({ page, log
 
   await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible()
   // The scoped-audit workstation the /pac endpoints back.
-  await expect(page.getByText('Execute Audit').first()).toBeVisible()
-  await expect(page.getByText('Scope', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Execute Audit' })).toBeVisible()
+  await expect(page.locator('#select-scope')).toBeVisible()
 })

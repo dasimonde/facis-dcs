@@ -18,9 +18,9 @@ import (
 // Evidence that is present and does not verify refuses the exchange, like any
 // other trust-gate denial. Evidence that is ABSENT does not: a peer whose PDF
 // carries none still federates, and a party that signed without a Power of
-// Attorney is raised by the compliance viewer from the contract itself
-// (signingmanagement/command/compliance.go), which is where that finding has
-// always come from.
+// Attorney is raised by the compliance viewer
+// (signingmanagement/command/compliance.go), from the contract document or from
+// the PeerSignatures recorded at receipt.
 type CounterpartyPoAGate struct {
 	Trust *oid4vp.TrustConfig
 	// Verify is the credential check, defaulting to oid4vp.VerifyCounterpartyPoA.
@@ -124,6 +124,9 @@ func (g *CounterpartyPoAGate) Check(peerDID, localDID, contractIRI string, signe
 		if subject.Signatory == "" {
 			return deny(fmt.Errorf("counterparty Power of Attorney: the signing summary embedded for %q names no signatory", organization))
 		}
+		if subject.PoASubjectDID == "" {
+			return deny(fmt.Errorf("counterparty Power of Attorney: the signing summary embedded for %q names no Power of Attorney holder", organization))
+		}
 		if identity.SameDIDWeb(organization, strings.TrimSpace(localDID)) {
 			continue
 		}
@@ -131,14 +134,46 @@ func (g *CounterpartyPoAGate) Check(peerDID, localDID, contractIRI string, signe
 			continue
 		}
 		if _, err := g.verify()(attachment.PoAPresentation, g.Trust, oid4vp.CounterpartyPoAExpectation{
-			Organization: organization,
-			SignatoryDID: subject.Signatory,
+			Organization:  organization,
+			PoASubjectDID: subject.PoASubjectDID,
 		}); err != nil {
 			return deny(fmt.Errorf("counterparty Power of Attorney for party %q: %w", organization, err))
 		}
 	}
 
 	return nil
+}
+
+// PeerSignature is one signature a peer owns in a shipped PDF.
+// PoAOrganization is empty when the signatory presented no Power of Attorney.
+type PeerSignature struct {
+	Party           string `json:"party"`
+	Signatory       string `json:"signatory"`
+	PoAOrganization string `json:"poa_organization,omitempty"`
+}
+
+// PeerSignatures lists the signatures in evidence that a peer owns. Call it only
+// after Check accepted the same evidence: Check verified every present Power of
+// Attorney against exactly the field it is listed for. A countersignature
+// applied to an already signed PDF never reaches this instance's contract
+// document, so this list is the only record of it here.
+func PeerSignatures(localDID string, evidence []json.RawMessage) ([]PeerSignature, error) {
+	var signatures []PeerSignature
+	for _, raw := range evidence {
+		attachment, subject, err := provenance.ReadSigningEvidence(raw)
+		if err != nil {
+			return nil, err
+		}
+		if identity.SameDIDWeb(subject.FieldName, strings.TrimSpace(localDID)) {
+			continue
+		}
+		signature := PeerSignature{Party: subject.FieldName, Signatory: subject.Signatory}
+		if attachment.PoAPresentation != "" {
+			signature.PoAOrganization = subject.FieldName
+		}
+		signatures = append(signatures, signature)
+	}
+	return signatures, nil
 }
 
 // verifySummary checks one summary credential before anything it says is used.

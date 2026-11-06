@@ -39,25 +39,31 @@ spec:
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           containers:
             - name: pac-monitor
-              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
               # args, not command: the image entrypoint sets up the custom CA
               # bundle a TLS database connection may need, then execs this.
               args:
                 - /app/pacmonitor
                 - -timeout={{ .Values.complianceMonitor.timeout }}
               env:
-                - name: DATABASE_URL
-                  {{- if .Values.database.secretRef.name }}
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.database.secretRef.name | quote }}
-                      key: {{ .Values.database.secretRef.key | quote }}
-                  {{- else }}
-                  value: {{ include "digital-contracting-service.databaseURL" . | quote }}
-                  {{- end }}
+                {{- include "digital-contracting-service.databaseEnv" . | nindent 16 }}
               resources:
                 {{- toYaml .Values.complianceMonitor.resources | nindent 16 }}
+              {{- if .Values.global.internalTLS.enabled }}
+              volumeMounts:
+                {{- include "digital-contracting-service.internalCAVolumeMount" . | nindent 16 }}
+          volumes:
+            {{- include "digital-contracting-service.internalCAVolume" . | nindent 12 }}
+              {{- end }}
 {{- end }}

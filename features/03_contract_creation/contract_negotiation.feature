@@ -98,6 +98,16 @@ Feature: Contract Negotiation
     Then the comment is added to the negotiation log
     And the comment is attributed to my identity
 
+  # The contract names "Acme Corp" and "TechVendor Inc" as parties. An
+  # organization that the contract does not name is refused before the
+  # negotiation handler runs (read policy, service Negotiate).
+  @clean_db @DCS-FR-CWE-01 @DCS-FR-CWE-07
+  Scenario: An organization that is not a party cannot negotiate terms
+    Given contract "Service Agreement" is open for negotiation
+    When an organization that is not a party proposes a change to contract "Service Agreement"
+    Then the request is denied with an authorization error
+    And the contract "Service Agreement" has no recorded negotiation change requests
+
   @clean_db
   Scenario: Contract Creator and assigned Reviewers can negotiate
     Given I am authenticated with roles: "Contract Creator"

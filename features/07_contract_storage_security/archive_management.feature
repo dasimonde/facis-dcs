@@ -35,21 +35,22 @@ Feature: Contract storage and archive retrieval
     Then get http 200:Success code
     And the archive audit log is a non-empty list
 
-  # DCS-IR-CSA-02: the dashboard's store-into-archive surface. The
-  # /archive/store implementation is currently a stub (it logs and returns a
-  # placeholder — backend/internal/service/contract_storage_archive.go; the
-  # real archive entry is written automatically at SIGNED), so the assertable
-  # contract here is the endpoint's RBAC gate: Archive Manager scope gets a
-  # 200, any role outside the archive scope is refused.
-  @UC-07-01 @DCS-IR-CSA-02
-  Scenario: Archive Manager can invoke the archive store endpoint
-    When the Archive Manager stores a contract in the archive
+  # DCS-IR-CSA-02: the Archive Manager stores evidence for an archived
+  # contract. The content is encrypted under the contract's key in IPFS; the
+  # archiving of a contract itself and the validation rules are unit tested
+  # in backend/internal/service/contract_storage_archive_pg_test.go.
+  @UC-07-01 @DCS-IR-CSA-02 @DCS-FR-CSA-25
+  Scenario: Archive Manager stores evidence for an archived contract
+    Given contract "Archive Evidence Contract" has reached contract state "SIGNED"
+    When the Archive Manager stores evidence "delivery-note.txt" for the archived contract "Archive Evidence Contract"
     Then get http 200:Success code
+    And the archive evidence of contract "Archive Evidence Contract" includes "delivery-note.txt"
 
   @UC-07-02 @DCS-IR-CSA-02 @DCS-FR-CSA-02
   Scenario: A role outside the archive scope cannot store into the archive
-    Given I am authenticated with roles: "Template Creator"
-    When I attempt to store a contract in the archive with my current role
+    Given contract "Unauthorized Archive Evidence Contract" has reached contract state "SIGNED"
+    And I am authenticated with roles: "Template Creator"
+    When I attempt to store evidence for the archived contract "Unauthorized Archive Evidence Contract" with my current role
     Then the request is denied with a client error
 
   # DCS-NFR-SEC-13 (secure data disposal): a successful delete also removes
@@ -58,9 +59,13 @@ Feature: Contract storage and archive retrieval
   # snapshot-CID selection and the hard-fail removal semantics are unit
   # tested in backend/internal/service/contract_storage_archive_delete_test.go
   # (no existing BDD step pattern reads raw IPFS CIDs).
+  # Only a contract that is no longer in force (TERMINATED, EXPIRED, REVOKED,
+  # REJECTED, WITHDRAWN) can be deleted from the archive, so the signed
+  # contract is terminated first.
   @UC-07-03 @DCS-FR-CSA-17 @DCS-FR-CSA-02 @DCS-IR-CSA-03 @DCS-NFR-SEC-13
   Scenario: Archive Manager deletes an archived contract with a logged justification
     Given contract "Archive Deletion Contract" has reached contract state "SIGNED"
+    And the Contract Manager terminates contract "Archive Deletion Contract" before the archive deletion
     When the Archive Manager deletes the archived contract "Archive Deletion Contract" with justification "no longer needed for compliance retention"
     Then get http 200:Success code
     And the archive deletion of contract "Archive Deletion Contract" is recorded in the archive audit log
@@ -157,9 +162,12 @@ Feature: Contract storage and archive retrieval
   Scenario: Archive Manager annotates an archived contract with a manual summary and tags
     Given contract "Annotated Archive Contract" has reached contract state "SIGNED"
     When the Archive Manager annotates the archived contract "Annotated Archive Contract" with summary "Pilot supply agreement archived for the BDD suite" and tags "pilot-agreement,bdd-supply"
-    Then get http 200:Success code
+    Then the response status is 200
     And the archive entry for contract "Annotated Archive Contract" carries summary "Pilot supply agreement archived for the BDD suite" and tags "pilot-agreement,bdd-supply"
     And the archive annotation of contract "Annotated Archive Contract" is recorded in the archive audit log
+    When the Archive Manager annotates the archived contract "Annotated Archive Contract" with tags "revised-bdd" and no summary
+    Then the response status is 200
+    And the archive entry for contract "Annotated Archive Contract" carries summary "Pilot supply agreement archived for the BDD suite" and tags "revised-bdd"
 
   @UC-07-01 @DCS-FR-CSA-11
   Scenario: Searching the archive by tag returns only contracts carrying that tag
@@ -188,9 +196,15 @@ Feature: Contract storage and archive retrieval
     When I attempt to annotate the archived contract "Unauthorized Annotation Contract" with my current role
     Then the request is denied with a client error
 
+  # The dashboard counts an entry as compliant only when it passes every rule
+  # of GET /archive/compliance (DCS-FR-CSA-19), metadata completeness included:
+  # both parties and a validity period. The shared SIGNED fixture is a
+  # one-party contract without dates, so the seams below complete it.
   @UC-07-01 @DCS-FR-CSA-21 @DCS-FR-CWE-10 @DCS-FR-UC-07-3
   Scenario: Archive dashboard statistics reflect the archive and flag expiring contracts
     Given contract "Archive Statistics Contract" has reached contract state "SIGNED"
+    And contract "Archive Statistics Contract" has counterparty "did:web:archive-statistics-bdd.example" set directly in the database (party-search test seam)
+    And contract "Archive Statistics Contract" has validity period "2026-01-01T00:00:00Z" to "2027-01-01T00:00:00Z" set directly in the database (validity-search test seam)
     And contract "Archive Statistics Contract" is set to expire in 7 days directly in the database (expiry-window test seam)
     When the Archive Manager retrieves the archive statistics
     Then get http 200:Success code

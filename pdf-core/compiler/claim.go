@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -57,26 +58,43 @@ func findEmbeddedJSONLDStreamRange(pdf []byte) (start, length int, err error) {
 	return streamStart, streamEnd - streamStart, nil
 }
 
-// MatchPageContent verifies that the page content streams of candidate match
-// those of reference byte-for-byte.  Both PDFs must have been produced by the
-// dcs-pdf-core compiler.  Returns nil when all pages match, or an error
+// MatchPageContent verifies that every page of candidate renders what the same
+// page of reference renders: the page dictionaries and every object they reach
+// compare equal (see pagegraph.go). Signature widgets are left out, so the
+// revision a PAdES signer appends passes; every other annotation, resource and
+// content stream counts. Returns nil when all pages match, or an error
 // describing the first mismatch.
 func MatchPageContent(candidate, reference []byte) error {
-	candStreams, err := extractPageContentStreams(candidate)
+	return matchPageGraphs(candidate, reference, true)
+}
+
+// MatchPageContentExact is MatchPageContent with the signature widgets
+// compared too: for a copy that must show exactly what the reference shows,
+// signatures and their appearances included.
+func MatchPageContentExact(candidate, reference []byte) error {
+	return matchPageGraphs(candidate, reference, false)
+}
+
+func matchPageGraphs(candidate, reference []byte, signatureLayer bool) error {
+	candPages, err := parseCurrentPagesKids(candidate)
 	if err != nil {
-		return fmt.Errorf("extract candidate page content: %w", err)
+		return fmt.Errorf("extract candidate pages: %w", err)
 	}
-	refStreams, err := extractPageContentStreams(reference)
+	refPages, err := parseCurrentPagesKids(reference)
 	if err != nil {
-		return fmt.Errorf("extract reference page content: %w", err)
+		return fmt.Errorf("extract reference pages: %w", err)
 	}
-	if len(candStreams) != len(refStreams) {
+	if len(candPages) != len(refPages) {
 		return fmt.Errorf("page count mismatch: submitted PDF has %d pages, compiled PDF has %d",
-			len(candStreams), len(refStreams))
+			len(candPages), len(refPages))
 	}
-	for i := range refStreams {
-		if !bytes.Equal(candStreams[i], refStreams[i]) {
-			return fmt.Errorf("page %d content does not match compiled output %s", i+1, firstDiffSnippet(candStreams[i], refStreams[i]))
+	g := &pageGraphComparison{candidate: candidate, reference: reference, signatureLayer: signatureLayer, visited: map[[2]int]bool{}}
+	for i := range refPages {
+		if err := g.object(candPages[i], refPages[i]); err != nil {
+			if mismatch, ok := errors.AsType[*contentMismatch](err); ok {
+				return fmt.Errorf("page %d %w", i+1, mismatch)
+			}
+			return fmt.Errorf("page %d: %w", i+1, err)
 		}
 	}
 	return nil

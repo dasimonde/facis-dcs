@@ -105,7 +105,7 @@ def step_then_contract_unique_id(context):
 # ---------------------------------------------------------------------------
 
 _ENDPOINT_PAYLOADS = {
-    "template_create":        {"template_type": TemplateService.CONTRACT_TEMPLATE_TYPE, "name": "bdd-test", "description": "test", "template_data": {}},
+    "template_create":        {"template_type": TemplateService.CONTRACT_TEMPLATE_TYPE, "party_type": TemplateService.MULTI_PARTY_TYPE, "name": "bdd-test", "description": "test", "template_data": {}},
     "template_submit":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
     "template_update":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
     "template_update_manage": {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
@@ -113,7 +113,7 @@ _ENDPOINT_PAYLOADS = {
     "template_approve":       {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
     "template_reject":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z", "reason": "test"},
     "template_register":      {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
-    "template_archive":       {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
+    "template_archive":       {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z", "justification": "test"},
     "contract_create":        {"template_did": "did:example:template:1"},
     "contract_update":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},
     "contract_submit":        {"did": "did:example:1", "updated_at": "2024-01-01T00:00:00Z"},

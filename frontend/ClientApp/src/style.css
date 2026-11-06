@@ -6,26 +6,27 @@
 
   color-scheme: light;
 
-  /* Theme Colors */
-  --color-primary: #005fff;
+  /* Theme Colors: each colour reaches 4.5:1 (WCAG 2.1 AA) with its content
+     colour. */
+  --color-primary: #0052dd;
   --color-primary-content: #ffffff;
 
-  --color-secondary: #6b7280;
+  --color-secondary: #5b6270;
   --color-secondary-content: #ffffff;
 
-  --color-accent: #8b5cf6;
+  --color-accent: #6d28d9;
   --color-accent-content: #ffffff;
 
-  --color-info: #3b82f6;
+  --color-info: #1d4ed8;
   --color-info-content: #ffffff;
 
-  --color-success: #10b981;
+  --color-success: #046c4e;
   --color-success-content: #ffffff;
 
   --color-warning: #f59e0b;
-  --color-warning-content: #ffffff;
+  --color-warning-content: #1a202c;
 
-  --color-error: #ef4444;
+  --color-error: #b91c1c;
   --color-error-content: #ffffff;
 
   --color-neutral: #1f2937;
@@ -70,6 +71,17 @@
 }
 
 @source inline('alert-{error,info}');
+
+/* WCAG 2.1 AA (1.4.3): daisyUI draws inactive tabs at 50 % and labels at 60 %
+   of the text colour, below 4.5:1 on the facis base colours. */
+@layer daisyui.l1.l2.l3 {
+  .tab {
+    color: color-mix(in oklab, var(--color-base-content) 75%, transparent);
+  }
+  .label {
+    color: color-mix(in oklab, currentcolor 75%, transparent);
+  }
+}
 
 @layer utilities {
   /* Padding */

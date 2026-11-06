@@ -24,6 +24,7 @@ def _create_legacy_template(context, register=False):
         {
             "document_number": "LEGACY-123",
             "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": "BDD Legacy Number Template",
             "description": "Document number removal regression",
             "template_data": TemplateService.canonical_document_data("BDD Legacy Number Template"),

@@ -179,11 +179,21 @@ func (h *IETFToken) validateTimeClaims(claims map[string]any) error {
 	if h.Now != nil {
 		now = h.Now()
 	}
-	if exp, ok := envelope.ExpFromClaims(claims); ok && now.Unix() >= exp {
+
+	if exp, present, err := envelope.ExpFromClaims(claims); err != nil {
+		return fmt.Errorf("status list token exp claim invalid: %w", err)
+	} else if present && now.Unix() >= exp {
 		return fmt.Errorf("status list token expired")
 	}
-	if nbf, ok := envelope.NbfFromClaims(claims); ok && now.Unix() < nbf {
+
+	if nbf, present, err := envelope.NbfFromClaims(claims); err != nil {
+		return fmt.Errorf("status list token nbf claim invalid: %w", err)
+	} else if present && now.Unix() < nbf {
 		return fmt.Errorf("status list token not yet valid")
+	}
+
+	if _, _, err := envelope.IatFromClaims(claims); err != nil {
+		return fmt.Errorf("status list token iat claim invalid: %w", err)
 	}
 	return nil
 }

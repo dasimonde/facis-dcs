@@ -313,3 +313,18 @@ Feature: PAdES signature lifecycle
     And the C2PA signature box in the final PDF is a valid COSE_Sign1 structure
     And the C2PA content hash in the final PDF validates against the amended document
     And the active manifest claim references c2pa.hash.data in the final PDF
+
+  # A state reached after signing (suspended, terminated, expired) is appended
+  # to the signed PDF as a provenance-only incremental update with its lifecycle
+  # credential, after the re-anchor (ADR-26). The signature keeps verifying, the
+  # whole file is bound by the last manifest, and the chain ends with the state.
+  Scenario: A lifecycle manifest appended after signing keeps the PAdES signature valid
+    Given I compile the payload through /download
+    When I apply a PAdES signature to the compiled PDF at field "SignerOne"
+    And I re-anchor the "signed" PDF through /render/reanchor
+    And I append a "suspended" lifecycle credential to the "re-anchored" PDF through /render/amendment
+    Then the "lifecycle" PDF preserves the "signed" PDF bytes as a prefix
+    And the PAdES signature of the "lifecycle" PDF is intact and valid
+    And the active manifest c2pa.hash.data hash matches the "lifecycle" PDF bytes
+    And the C2PA chain of the "lifecycle" PDF ends with lifecycle status "suspended"
+    And the "lifecycle" PDF verifies through /verify with match true

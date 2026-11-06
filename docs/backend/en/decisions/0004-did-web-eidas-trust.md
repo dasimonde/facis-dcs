@@ -12,7 +12,7 @@ DCS instances run by different, mutually independent operators must synchronize 
 Every DCS instance owns its own `did:web` document (RSA key pair), retrievable via the standard `/.well-known/did.json` path. Trust between two peers is established through three independent layers:
 
 1. **eIDAS certificate chain:** the x5c chain in the DID document is validated against an EU trust pool (member-state LOTL/TSL), including hostname match and QcCompliance statement.
-2. **Per-request challenge-response signature:** instead of a token, the requesting peer signs a random value (`rand.Text()`) with its private key; the receiver resolves the public key via `did:web` and verifies the signature (proof of possession, no replayable token in circulation).
+2. **Per-request challenge signature:** instead of a token, the requesting peer signs a `dcs-peer-v1` challenge that names the operation, the contract, the sender, the receiving instance, the signing time, a nonce and the digest of the request body; the receiver resolves the public key via `did:web`, verifies the signature and every bound field, and accepts each nonce once (see [ADR-13](../../../adr-13-pdf-exchange-federation.md), "Peer request authentication").
 3. **Local trusted-peer allowlist:** in addition to cryptographic validity, the peer must be explicitly listed in a local `trusted_peers` table — a valid eIDAS chain alone is not sufficient.
 
 ## Alternatives Considered

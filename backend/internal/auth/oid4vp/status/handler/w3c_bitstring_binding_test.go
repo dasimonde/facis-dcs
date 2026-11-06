@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +14,7 @@ import (
 	"digital-contracting-service/internal/auth/oid4vp/status/envelope"
 	"digital-contracting-service/internal/auth/oid4vp/status/fetch"
 	"digital-contracting-service/internal/auth/oid4vp/status/handler"
+	"digital-contracting-service/internal/base/ecutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,8 +34,8 @@ func bindingJWK(pub *ecdsa.PublicKey) map[string]any {
 	return map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(pub.X.FillBytes(make([]byte, 32))),
-		"y":   base64.RawURLEncoding.EncodeToString(pub.Y.FillBytes(make([]byte, 32))),
+		"x":   ecutil.MustJWKX(ecutil.AsPublic(pub)),
+		"y":   ecutil.MustJWKY(ecutil.AsPublic(pub)),
 	}
 }
 

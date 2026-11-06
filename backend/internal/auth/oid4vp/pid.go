@@ -21,11 +21,40 @@ const PIDVCT = "urn:eudi:pid:de:1"
 // not an EUDI type: it describes a person nobody verified.
 const DemoPIDVCT = "urn:dcs:pid:demo:v1"
 
-const PIDCredentialQueryID = "eudi_pid_credential"
+const PIDCredentialQueryID = "eudi_pid_credential" // #nosec G101 -- identifier or vocabulary IRI, not a credential
+
+// PIDClaimPaths are the PID claims the DCS requests and keeps (DCS-NFR-SEC-18,
+// DCS-NFR-SQ-04): the given and family name, which the signature check
+// compares with the signing certificate, and the claims the regulatory
+// workflow gate looks for in the contract content
+// (processauditandcompliance/workflowgate/regulatory.go). Every other claim of
+// a PID is neither requested nor stored.
+var PIDClaimPaths = [][]string{
+	{"given_name"}, {"family_name"},
+	{"birth_family_name"}, {"birth_date"}, {"birthdate"}, {"birth_place"},
+	{"personal_administrative_number"}, {"email"}, {"phone_number"},
+	{"street_address"}, {"address", "street_address"},
+}
+
+// pidClaimSets are the combinations of PIDClaimPaths a wallet may disclose,
+// most complete first. DCQL has no optional claims, so a wallet returns the
+// first set its PID holds; the last one is the names alone.
+var pidClaimSets = [][]string{
+	{"given_name", "family_name", "birth_family_name", "birth_date", "birth_place", "personal_administrative_number", "email", "phone_number", "address_street_address"},
+	{"given_name", "family_name", "birth_date", "birth_place", "address_street_address"},
+	{"given_name", "family_name", "birthdate", "street_address"},
+	{"given_name", "family_name", "birth_date"},
+	{"given_name", "family_name", "birthdate"},
+	{"given_name", "family_name"},
+}
+
+func pidClaimID(path []string) string {
+	return strings.Join(path, "_")
+}
 
 // PIDLegacyCredentialQueryID asks for the same PID under the SD-JWT VC format
 // identifier that predates dc+sd-jwt.
-const PIDLegacyCredentialQueryID = "eudi_pid_credential_vc_sd_jwt"
+const PIDLegacyCredentialQueryID = "eudi_pid_credential_vc_sd_jwt" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 // DefaultPIDDCQLQuery requests an SD-JWT VC PID credential for identity
 // presentation, under either format identifier — a wallet matches a credential
@@ -60,7 +89,59 @@ func pidCredentialQuery(id, format string) map[string]any {
 			"vct_values": []string{DemoPIDVCT},
 		},
 		"require_cryptographic_holder_binding": true,
+		"claims":                               pidClaimsQuery(),
+		"claim_sets":                           pidClaimSets,
 	}
+}
+
+func pidClaimsQuery() []any {
+	claims := make([]any, 0, len(PIDClaimPaths))
+	for _, path := range PIDClaimPaths {
+		claims = append(claims, map[string]any{"id": pidClaimID(path), "path": path})
+	}
+	return claims
+}
+
+// minimisePIDClaims keeps only the PIDClaimPaths of verified PID claims, so a
+// wallet that discloses more than was requested has the rest dropped before
+// anything is stored.
+func minimisePIDClaims(raw json.RawMessage) (json.RawMessage, error) {
+	var all map[string]any
+	if err := json.Unmarshal(raw, &all); err != nil {
+		return nil, fmt.Errorf("pid claims: %w", err)
+	}
+	kept := map[string]any{}
+	for _, path := range PIDClaimPaths {
+		value, ok := claimAt(all, path)
+		if !ok {
+			continue
+		}
+		into := kept
+		for _, name := range path[:len(path)-1] {
+			next, ok := into[name].(map[string]any)
+			if !ok {
+				next = map[string]any{}
+				into[name] = next
+			}
+			into = next
+		}
+		into[path[len(path)-1]] = value
+	}
+	return json.Marshal(kept)
+}
+
+func claimAt(claims map[string]any, path []string) (any, bool) {
+	var value any = claims
+	for _, name := range path {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if value, ok = object[name]; !ok {
+			return nil, false
+		}
+	}
+	return value, true
 }
 
 func LoadPIDDCQLQuery(raw string) (any, error) {

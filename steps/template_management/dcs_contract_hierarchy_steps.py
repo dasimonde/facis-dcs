@@ -349,6 +349,7 @@ def step_when_ac5_setup(context):
             {
                 "template_did": t_did,
                 "counterparty": context.peer_did_b,
+                **ContractService._reading_parties(context),
             },
             headers=creator_h,
         )
@@ -359,13 +360,17 @@ def step_when_ac5_setup(context):
         retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, child_b_did), headers=creator_h)
         assert retrieve.status_code == 200, retrieve.text
         updated_at = retrieve.json().get("updated_at")
+        # Keep the reading organizations: instance B reads its copy only through them.
+        parties = (retrieve.json().get("contract_data") or {}).get("dcs:parties")
         link_resp = put_json(
             context,
             contract_update_url(context),
             {
                 "did": child_b_did,
                 "updated_at": updated_at,
-                "contract_data": _minimal_canonical_contract_data({"dcs:parentContract": {"@id": frame_did}}),
+                "contract_data": _minimal_canonical_contract_data(
+                    {"dcs:parentContract": {"@id": frame_did}, "dcs:parties": parties}
+                ),
             },
             headers=creator_h,
         )

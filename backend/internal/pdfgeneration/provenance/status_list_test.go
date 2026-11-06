@@ -13,8 +13,8 @@ import (
 // forms the CWE emits (DCS-OR-C2PA-005 Gap 1) — revokes the contract's entry.
 func TestTerminalStatesSetTheBit(t *testing.T) {
 	for _, state := range []string{
-		"terminated", "expired", "replaced", "suspended",
-		"TERMINATED", "EXPIRED", "REPLACED", "SUSPENDED",
+		"terminated", "expired", "replaced",
+		"TERMINATED", "EXPIRED", "REPLACED",
 	} {
 		t.Run(state, func(t *testing.T) {
 			p, revocations := newTestPublisher()
@@ -24,6 +24,36 @@ func TestTerminalStatesSetTheBit(t *testing.T) {
 				"state %q must set the contract's bit", state)
 		})
 	}
+}
+
+// DCS-OR-C2PA-005: a suspension (a revoked signature) is a status of its own. It
+// does not revoke the entry, it ends when the contract is active again, and it
+// never clears a revocation.
+func TestASuspensionIsDistinctFromARevocationAndEnds(t *testing.T) {
+	p, revocations := newTestPublisher()
+	const contract = "did:example:contract-suspended"
+	suspended := func() []uint32 {
+		got, err := revocations.SuspendedIndices(context.Background(), DefaultListID)
+		require.NoError(t, err)
+		return got
+	}
+
+	ref, err := p.PublishStatus(context.Background(), contract, "suspended", "", time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, []uint32{ref.Index}, suspended(), "a suspension must suspend the entry")
+	assert.Empty(t, revocations.indices(DefaultListID), "a suspension must not revoke the entry")
+
+	_, err = p.PublishStatus(context.Background(), contract, "active", "", time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, suspended(), "signing the contract again must end the suspension")
+
+	_, err = p.PublishStatus(context.Background(), contract, "terminated", "", time.Now())
+	require.NoError(t, err)
+	_, err = p.PublishStatus(context.Background(), contract, "suspended", "", time.Now())
+	require.NoError(t, err)
+	_, err = p.PublishStatus(context.Background(), contract, "active", "", time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, []uint32{ref.Index}, revocations.indices(DefaultListID), "nothing ends a revocation")
 }
 
 // TestNonTerminalStatesLeaveTheBitClear: a contract still in force is not

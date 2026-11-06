@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, normalizeClass, ref, useAttrs, useTemplateRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { type DcsContractField, fieldFillScalar } from '@/models/dcs-jsonld'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
@@ -34,8 +35,10 @@ const props = defineProps<{
 
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
+const route = useRoute()
 const router = useRouter()
-const { isCreator, isManager, isNegotiator } = useContractPermissions()
+const { isApprover, isCreator, isManager, isNegotiator } = useContractPermissions()
+const errorStore = useErrorStore()
 
 // SRS DCS-IR-CWE-01 / §1.2 offer→acceptance lifecycle: only a Contract Creator
 // may transmit a DRAFT to the counterparty (EventOffer is allowed solely from
@@ -58,6 +61,8 @@ const canOffer = computed(() => {
 // on a pure responder instance no Creator or Negotiator role is granted, and
 // this button is that instance's only way into a received offer.
 const canNegotiate = computed(() => {
+  // Already on the negotiate page — the button only re-opens this route.
+  if (route.name === ROUTES.CONTRACTS.NEGOTIATE) return false
   const state = props.contract.state
   return (
     (isNegotiator.value || isCreator.value || isManager.value) &&
@@ -245,6 +250,34 @@ const renew = async () => {
   }
 }
 
+// DCS-IR-CWE-10: the approver or manager decides catalogue availability with
+// this explicit action. design publish_catalogue accepts these states.
+const catalogueStates: ContractState[] = [ContractState.approved, ContractState.signed, ContractState.active]
+
+const canPublishCatalogue = computed(
+  () => (isApprover.value || isManager.value) && catalogueStates.includes(props.contract.state),
+)
+
+const publishing = ref(false)
+
+const publishCatalogue = async () => {
+  if (!canPublishCatalogue.value || !confirmationModal.value) return
+  const { isCanceled } = await confirmationModal.value.reveal({
+    message:
+      'Register this contract in the Federated Catalogue? The entry shows its name, state, version, template and validity period. The contract content and the parties are not published.',
+  })
+  if (isCanceled) return
+  publishing.value = true
+  try {
+    await contractWorkflowService.publishCatalogue(props.contract.did)
+    errorStore.add('Contract registered in the Federated Catalogue.', 'info')
+  } catch (err) {
+    reportActionError(err, 'Register in catalogue')
+  } finally {
+    publishing.value = false
+  }
+}
+
 const terminate = async () => {
   try {
     if (!confirmationModal.value) return
@@ -307,6 +340,15 @@ const terminate = async () => {
     @click="renew"
   >
     {{ renewing ? 'Renewing…' : 'Renew' }}
+  </button>
+  <button
+    v-if="canPublishCatalogue"
+    data-testid="publish-catalogue"
+    :class="[filteredClass, 'btn-primary']"
+    :disabled="publishing"
+    @click="publishCatalogue"
+  >
+    {{ publishing ? 'Registering…' : 'Register in catalogue' }}
   </button>
   <button
     v-if="canWithdraw"

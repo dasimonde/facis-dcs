@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -89,12 +91,15 @@ func (r *PostgresApprovalTaskRepo) ReadAllByDID(ctx context.Context, tx *sqlx.Tx
 
 func (r *PostgresApprovalTaskRepo) ReadAllByApprover(ctx context.Context, tx *sqlx.Tx, approver string) ([]db.ApprovalTaskData, error) {
 	query := `
-        SELECT id, did, state, approver,
+        SELECT (SELECT contract_version FROM contracts_effective WHERE contracts_effective.did = contract_approval_task.did) AS contract_version, id, did, state, approver,
                created_by, created_at
         FROM contract_approval_task WHERE approver = $1
     `
+	params := []any{approver}
+	query += " AND " + contractreadpolicy.SQL(ctx, "contract_approval_task.did", &params)
+
 	var approvalTasks []db.ApprovalTaskData
-	err := tx.SelectContext(ctx, &approvalTasks, query, approver)
+	err := tx.SelectContext(ctx, &approvalTasks, query, params...)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
 	"digital-contracting-service/internal/templaterepository/db"
@@ -21,17 +22,22 @@ import (
 )
 
 type GetAllMetadataByFilterQry struct {
-	RetrievedBy  string
-	DID          string
-	Version      int
-	State        *contracttemplatestate.ContractTemplateState
-	TemplateType *contracttemplatetype.ContractTemplateType
-	Name         string
-	Description  string
-	TemplateData string
-	HolderDID    string
-	Pagination   datatype.Pagination
-	UserRoles    userrole.UserRoles
+	SemanticFilters string
+	RetrievedBy     string
+	DID             string
+	Version         int
+	State           *contracttemplatestate.ContractTemplateState
+	TemplateType    *contracttemplatetype.ContractTemplateType
+	PartyType       string
+	Name            string
+	Description     string
+	TemplateData    string
+	CreatedBy       string
+	CreatedFrom     string
+	CreatedTo       string
+	HolderDID       string
+	Pagination      datatype.Pagination
+	UserRoles       userrole.UserRoles
 }
 
 type GetAllMetadataByFilterResult struct {
@@ -39,11 +45,16 @@ type GetAllMetadataByFilterResult struct {
 	Version      int
 	State        contracttemplatestate.ContractTemplateState
 	TemplateType contracttemplatetype.ContractTemplateType
+	PartyType    string
 	Name         *string
 	Description  *string
+	CreatedBy    string
+	UpdatedBy    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	MetaData     datatype.JSON
+	db.SearchableMetadata
+	db.Structure
 }
 
 type GetAllMetaDataByFilterHandler struct {
@@ -73,14 +84,24 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		templateType = query.TemplateType.String()
 	}
 
+	semanticFilters, err := semantichub.ResolveSearchFilters(ctx, tx, query.SemanticFilters)
+	if err != nil {
+		return nil, err
+	}
 	searchValues := db.SearchValues{
-		DID:          query.DID,
-		Version:      query.Version,
-		State:        state,
-		TemplateType: templateType,
-		Name:         query.Name,
-		Description:  query.Description,
-		TemplateData: query.TemplateData,
+		SemanticFilters: semanticFilters,
+		DID:             query.DID,
+		Version:         query.Version,
+		State:           state,
+		TemplateType:    templateType,
+		PartyType:       query.PartyType,
+		Name:            query.Name,
+		Description:     query.Description,
+		TemplateData:    query.TemplateData,
+
+		CreatedBy:   query.CreatedBy,
+		CreatedFrom: query.CreatedFrom,
+		CreatedTo:   query.CreatedTo,
 	}
 
 	contractTemplates, err := h.CTRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues, query.Pagination)
@@ -122,10 +143,16 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 			Version:      data.Version,
 			State:        ctState,
 			TemplateType: ctType,
+			PartyType:    data.PartyType,
 			Name:         data.Name,
 			Description:  data.Description,
+			CreatedBy:    data.CreatedBy,
+			UpdatedBy:    data.UpdatedBy,
 			CreatedAt:    data.CreatedAt,
 			UpdatedAt:    data.UpdatedAt,
+
+			SearchableMetadata: data.SearchableMetadata,
+			Structure:          data.Structure,
 		}
 	}
 

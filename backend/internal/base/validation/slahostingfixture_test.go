@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"digital-contracting-service/internal/base/datatype"
 )
 
 // The Managed Kubernetes Hosting SLA is the SECOND domain carried on the
@@ -219,6 +221,25 @@ func TestSLAHostingContractAuditsClean(t *testing.T) {
 		mapPolicy(true, false), ContractContentAuditMetadata{})
 	require.NoError(t, err)
 	require.Empty(t, errorFindings(findings), fmt.Sprintf("expected a clean audit, got: %+v", errorFindings(findings)))
+}
+
+// DCS-FR-TR-07: the template policy audit at approval knows the fields of the
+// registered hub ontologies and of the shapes libraries the template declares,
+// and reads logical constraints and constraints on a duty, so the authored SLA
+// template is COMPLIANT and can be used for contract creation.
+func TestSLAHostingTemplatePassesTheTemplatePolicyAudit(t *testing.T) {
+	defer slaHostingShapeSource(t)()
+	ResetDomainOntologyCache()
+	defer ResetDomainOntologyCache()
+
+	raw, err := json.Marshal(slaHostingTemplate(t))
+	require.NoError(t, err)
+	data := datatype.JSON(raw)
+	findings, err := AuditTemplatePolicies(&data, TemplatePolicyAuditMetadata{
+		DID: "did:web:example:template:sla-hosting", TemplateType: "CONTRACT_TEMPLATE", State: "APPROVED",
+	})
+	require.NoError(t, err)
+	require.Empty(t, errorFindings(findings), fmt.Sprintf("%+v", errorFindings(findings)))
 }
 
 // The imported library is what makes the domain enforceable: a node count

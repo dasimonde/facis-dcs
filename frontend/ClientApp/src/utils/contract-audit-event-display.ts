@@ -1,28 +1,36 @@
+import { auditEventActor } from './audit-event-actor'
 import { toProperCase } from './string'
 
 const contractEventLabels: Record<string, string> = {
-  CREATE_CONTRACT: 'Created contract',
-  UPDATE_CONTRACT: 'Updated contract',
-  NEGOTIATE_CONTRACT: 'Proposed contract changes',
-  ACCEPT_RESPOND_CONTRACT: 'Accepted negotiation response',
-  REJECT_RESPOND_CONTRACT: 'Rejected negotiation response',
+  CREATE_CONTRACT: 'Contract created',
+  UPDATE_CONTRACT: 'Contract updated',
+  OFFER_CONTRACT: 'Contract offered',
+  WITHDRAW_CONTRACT: 'Contract withdrawn',
+  NEGOTIATE_CONTRACT: 'Contract changes proposed',
+  ACCEPT_OFFER_CONTRACT: 'Offer accepted',
+  ACCEPT_RESPOND_CONTRACT: 'Negotiation response accepted',
+  REJECT_RESPOND_CONTRACT: 'Negotiation response rejected',
   NEGOTIATION_CHANGE_SUPERSEDED: 'Accepted change request superseded',
-  INCREASE_CONTRACT_VERSION: 'Increased contract version',
-  APPROVE_CONTRACT: 'Approved contract',
-  REJECT_CONTRACT: 'Rejected contract',
-  VERIFY_CONTRACT: 'Verified contract',
-  REVIEW_CONTRACT: 'Reviewed contract',
-  AUDIT_CONTRACT: 'Audited contract',
-  TERMINATE_CONTRACT: 'Terminated contract',
-  RECORD_EVIDENCE: 'Recorded evidence',
+  INCREASE_CONTRACT_VERSION: 'Contract version increased',
+  APPROVE_CONTRACT: 'Contract approved',
+  REJECT_CONTRACT: 'Contract rejected',
+  VERIFY_CONTRACT: 'Contract verified',
+  REVIEW_CONTRACT: 'Contract reviewed',
+  AUDIT_CONTRACT: 'Contract audited',
+  TERMINATE_CONTRACT: 'Contract terminated',
+  RENEW_CONTRACT: 'Contract renewed',
+  RECORD_EVIDENCE: 'Evidence recorded',
   CONTRACT_EXPIRED: 'Contract expired',
-  RETRIEVE_ALL_CONTRACTS: 'Retrieved contracts',
-  RETRIEVE_CONTRACT_BY_ID: 'Retrieved contract',
-  RETRIEVE_CONTRACT_HISTORY_BY_DID: 'Retrieved contract history',
-  SEARCH_CONTRACT: 'Searched contracts',
-  STORE_ARCHIVED_CONTRACT: 'Stored contract in archive',
+  APPLIED_SIGNATURE: 'Contract signed',
+  REVOKE_SIGNATURE: 'Signature revoked',
+  RETRIEVE_ALL_CONTRACTS: 'Contracts retrieved',
+  RETRIEVE_CONTRACT_BY_ID: 'Contract retrieved',
+  RETRIEVE_CONTRACT_HISTORY_BY_DID: 'Contract history retrieved',
+  SEARCH_CONTRACT: 'Contracts searched',
+  STORE_ARCHIVED_CONTRACT: 'Contract stored in archive',
   ARCHIVE_ENTRY_AUDIT_SUMMARY: 'Archive entry audit summary',
   ARCHIVE_INTEGRITY_AUDIT_CHECK: 'Archive integrity audit check',
+  PEER_EXCHANGE_REFUSED: 'Termination notice refused by the counterparty instance',
 }
 
 const submitTransitionLabels: Record<string, string> = {
@@ -47,6 +55,23 @@ export function contractAuditEventDisplayText(eventType?: string, eventData?: un
   return contractEventLabels[normalizedEventType] ?? toProperCase(normalizedEventType)
 }
 
+/** Participant DID attributed on the event, if any. */
+export function contractAuditEventActor(eventData?: unknown): string | undefined {
+  return auditEventActor(eventData)
+}
+
+export function contractAuditEventOccurredAt(eventData?: unknown, fallback?: string): string | undefined {
+  return stringField(eventData, 'occurred_at') ?? (fallback?.trim() ? fallback : undefined)
+}
+
+export function contractAuditEventTransition(eventData?: unknown): string | undefined {
+  const previousState = stringField(eventData, 'previous_state') ?? stringField(eventData, 'old_state')
+  const newState = stringField(eventData, 'new_state')
+  if (!previousState || !newState) return undefined
+  if (previousState.toUpperCase() === newState.toUpperCase()) return undefined
+  return `${toProperCase(previousState)} → ${toProperCase(newState)}`
+}
+
 function submitContractDisplayText(eventData: unknown): string {
   const previousState = stringField(eventData, 'previous_state') ?? stringField(eventData, 'old_state')
   const newState = stringField(eventData, 'new_state')
@@ -60,7 +85,7 @@ function submitContractDisplayText(eventData: unknown): string {
     return `State changed from ${toProperCase(previousState)} to ${toProperCase(newState)}`
   }
 
-  return 'Submitted contract'
+  return 'Contract submitted'
 }
 
 function stringField(value: unknown, key: string): string | undefined {

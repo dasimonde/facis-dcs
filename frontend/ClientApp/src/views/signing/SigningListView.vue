@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ROUTES } from '@/router/router'
 import {
   type SignatureContract,
+  type SignatureFieldStatus,
   signatureManagementService,
   type SignatureViewResult,
 } from '@/services/signature-management-service'
+import { useAuthStore } from '@/stores/auth-store'
 import {
   dssIndicator,
   findingIndicator,
@@ -29,6 +31,11 @@ const expandedDid = ref<string | null>(null)
 const detail = ref<SignatureViewResult | null>(null)
 const detailLoading = ref(false)
 const detailError = ref<string | null>(null)
+// Per-field signing progress of the expanded contract (DCS-FR-SM-24).
+const fields = ref<SignatureFieldStatus[]>([])
+
+const authStore = useAuthStore()
+const isSigner = computed(() => authStore.user?.roles?.includes('CONTRACT_SIGNER') ?? false)
 
 const SIGNING_STATES = ['APPROVED', 'SIGNED', 'ACTIVE', 'REVOKED']
 
@@ -40,7 +47,10 @@ interface Indicator {
 function signingStatus(state: string): Indicator {
   switch (state) {
     case 'APPROVED':
-      return { label: 'PENDING', cls: 'badge-warning' }
+      // Pending is the signer's own action; other readers track the signatures.
+      return isSigner.value
+        ? { label: 'PENDING', cls: 'badge-warning' }
+        : { label: 'AWAITING SIGNATURES', cls: 'badge-info' }
     case 'SIGNED':
     case 'ACTIVE':
       return { label: 'SIGNED', cls: 'badge-success' }
@@ -66,12 +76,19 @@ async function toggleDetails(did: string) {
   }
   expandedDid.value = did
   detail.value = null
+  fields.value = []
   detailError.value = null
   detailLoading.value = true
   try {
-    const result = await signatureManagementService.getSignatureView(did)
+    const [result, byId] = await Promise.all([
+      signatureManagementService.getSignatureView(did),
+      signatureManagementService.retrieveById(did).catch(() => null),
+    ])
     // Ignore a late response after the user switched/closed the expansion.
-    if (expandedDid.value === did) detail.value = result
+    if (expandedDid.value === did) {
+      detail.value = result
+      fields.value = byId?.signature_fields ?? []
+    }
   } catch {
     if (expandedDid.value === did) detailError.value = 'Failed to load signature details.'
   } finally {
@@ -151,6 +168,29 @@ onMounted(async () => {
                 </div>
                 <div v-else-if="detailError" class="alert alert-error" role="alert">{{ detailError }}</div>
                 <template v-else-if="detail">
+                  <div v-if="fields.length" class="mb-2" data-testid="signing-progress">
+                    <p class="text-xs font-semibold">
+                      Signing progress: {{ fields.filter((f) => f.status === 'SIGNED').length }} of
+                      {{ fields.length }} signature fields signed
+                    </p>
+                    <div
+                      v-for="field in fields"
+                      :key="field.field_name"
+                      class="flex flex-wrap items-center gap-x-4 gap-y-1 py-0.5 text-xs"
+                      data-testid="signing-field"
+                    >
+                      <span
+                        class="badge badge-sm"
+                        :class="field.status === 'SIGNED' ? 'badge-success' : 'badge-warning'"
+                      >
+                        {{ field.status === 'SIGNED' ? 'SIGNED' : 'PENDING' }}
+                      </span>
+                      <span class="max-w-xs truncate font-mono">{{ field.field_name }}</span>
+                      <span v-if="field.remote" class="text-base-content/70">signed by the counterparty</span>
+                      <span v-if="field.signer_did" class="max-w-xs truncate font-mono">{{ field.signer_did }}</span>
+                      <span v-if="field.signed_at">Signed at: {{ field.signed_at }}</span>
+                    </div>
+                  </div>
                   <div v-if="detail.signatures.length === 0" class="text-base-content/70">
                     No signature has been applied yet.
                   </div>

@@ -13,13 +13,15 @@ import (
 type NegotiationActionFlag string
 
 const (
-	Accepting NegotiationActionFlag = "ACCEPTING"
-	Rejecting NegotiationActionFlag = "REJECTING"
+	Accepting   NegotiationActionFlag = "ACCEPTING"
+	Rejecting   NegotiationActionFlag = "REJECTING"
+	Withdrawing NegotiationActionFlag = "WITHDRAWING"
 )
 
 var validFlag = map[NegotiationActionFlag]bool{
-	Accepting: true,
-	Rejecting: true,
+	Accepting:   true,
+	Rejecting:   true,
+	Withdrawing: true,
 }
 
 func NewNegotiationActionFlag(s string) (NegotiationActionFlag, error) {

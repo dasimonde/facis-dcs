@@ -10,6 +10,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/jades"
+	"digital-contracting-service/internal/dcstodcs"
 	db "digital-contracting-service/internal/signingmanagement/db"
 )
 
@@ -243,4 +244,41 @@ func TestComplianceJudgesASignatureTheFrozenDocumentCannotRecord(t *testing.T) {
 	judged, err = appliedSignatureFindings(context.Background(), nil, authorities, signatures, attributed)
 	require.NoError(t, err)
 	require.Len(t, judged, 1, "the document's own verdict on a party it records is the only one")
+}
+
+// A peer's countersignature reaches neither this instance's document nor its
+// ceremonies. The gate records it at receipt (dcstodcs.PeerSignatures), and the
+// compliance viewer judges it from that record: a countersignature made under
+// no Power of Attorney must not pass as compliant (FR-SM-03/-04).
+func TestComplianceJudgesAPeerCountersignatureFromTheRecordMadeAtReceipt(t *testing.T) {
+	responsible := &db.Responsible{Creator: instanceA, Counterparty: instanceB}
+	document, _, err := contractDocumentForSignature(genesisContractDocument(t, instanceB), responsible, signerA, instanceA, instanceA, false)
+	require.NoError(t, err)
+	_, attributed := poaComplianceFindings(document)
+	require.False(t, attributed[instanceB])
+
+	recorded := func(signatures ...dcstodcs.PeerSignature) json.RawMessage {
+		raw, err := json.Marshal(signatures)
+		require.NoError(t, err)
+		return raw
+	}
+
+	judged, err := peerSignatureFindings(recorded(dcstodcs.PeerSignature{Party: instanceB, Signatory: signerB, PoAOrganization: instanceB}), map[string]bool{})
+	require.NoError(t, err)
+	require.Empty(t, judged, "a countersignature under a Power of Attorney for its own party is compliant")
+
+	judged, err = peerSignatureFindings(recorded(dcstodcs.PeerSignature{Party: instanceB, Signatory: signerB}), attributed)
+	require.NoError(t, err)
+	require.Len(t, judged, 1)
+	require.Contains(t, judged[0], "no Power of Attorney")
+	require.Contains(t, judged[0], instanceB)
+	require.Contains(t, judged[0], signerB)
+
+	judged, err = peerSignatureFindings(recorded(dcstodcs.PeerSignature{Party: instanceA, Signatory: signerA}), map[string]bool{instanceA: true})
+	require.NoError(t, err)
+	require.Empty(t, judged, "a party the document records is judged from the document only")
+
+	judged, err = peerSignatureFindings(nil, map[string]bool{})
+	require.NoError(t, err)
+	require.Empty(t, judged)
 }

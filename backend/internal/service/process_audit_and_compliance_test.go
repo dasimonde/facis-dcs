@@ -2,11 +2,19 @@ package service
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
+	goa "goa.design/goa/v3/pkg"
+
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
+	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
@@ -31,15 +39,21 @@ func TestAuditReportUsesPersistedRunWithoutExecutorAndHashesExactBytes(t *testin
 		`  "findings":[{"rule_id":"RULE-1","result":"FAILED","reason":"failed","severity":"error","evidence_refs":["contracts/0"]}]` + "\n" +
 		"}\n")
 	executor := &countingAuditExecutor{}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var recordedHash, recordedFormat, recordedJustification string
 	var recordedSummary auditReportSummary
 	service := &processAuditAndCompliancesrvc{
 		AuditExecutor: executor,
-		auditRunReader: func(_ context.Context, scope, did string) ([]byte, error) {
+		ATrailReader:  base.AuditTrailReader{Artifacts: artifactstore.New(&reportObjects{blobs: map[string][]byte{}}, &reportKeys{}, reportAgreement{key}, "did:example:instance", "did:example:instance#agreement", &key.PublicKey)},
+		auditRunReader: func(_ context.Context, scope, did string) (persistedAuditRun, error) {
 			if scope != "contracts" || did != "did:example:contract" {
 				t.Fatalf("unexpected persisted-run lookup: scope=%q did=%q", scope, did)
 			}
-			return raw, nil
+			request := []byte(`{"contract_version":"facis-pac-audit-executor/v1","audit_id":"00000000-0000-4000-8000-000000000001","correlation_id":"00000000-0000-4000-8000-000000000001","scope":"contracts","resource":{"did":"did:example:contract"},"evidence":{"contracts":[{"did":"did:example:contract","component":"contract-workflow-engine","audit_trail":[{"id":1,"kind":"TIMELINE","event_type":"CREATED","created_at":"2026-07-28T10:00:00Z","event_data":{"created_by":"alice"}}]}]}}`)
+			return persistedAuditRun{RequestBytes: request, ResponseBytes: raw, RequestHash: hashBytes(request), ResponseHash: hashBytes(raw)}, nil
 		},
 		reportEventPersister: func(_ context.Context, report auditReport, format, contentHash, _, justification string) error {
 			recordedHash = contentHash
@@ -50,19 +64,26 @@ func TestAuditReportUsesPersistedRunWithoutExecutorAndHashesExactBytes(t *testin
 		},
 	}
 	scope, format, did := "contracts", "json", "did:example:contract"
-	content, err := service.AuditReport(context.Background(), &processauditandcompliance.AuditReportPayload{
+	content, err := service.AuditReport(middleware.InjectAuthContext(context.Background(), []string{"Auditor"}, "holder", "did:example:instance"), &processauditandcompliance.AuditReportPayload{
 		Scope: &scope, Format: &format, Did: &did, Justification: "report unit test",
 	})
 	if err != nil {
 		t.Fatalf("AuditReport returned error: %v", err)
 	}
-	if string(content) != string(raw) {
-		t.Fatalf("JSON report bytes changed:\n got %q\nwant %q", content, raw)
+	var report auditReport
+	if err := json.Unmarshal(content, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.ResponseHash != hashBytes(raw) || len(report.Events) != 1 || report.Events[0].Actor != "alice" || len(report.Findings) != 1 {
+		t.Fatalf("incomplete JSON report: %+v", report)
+	}
+	if string(content) == string(raw) {
+		t.Fatal("report did not include snapshot evidence")
 	}
 	if executor.calls != 0 {
 		t.Fatalf("report invoked executor %d times", executor.calls)
 	}
-	if recordedHash != hashBytes(raw) || recordedFormat != "json" || recordedJustification != "report unit test" {
+	if recordedHash != hashBytes(content) || recordedFormat != "json" || recordedJustification != "report unit test" {
 		t.Fatalf("unexpected report event: hash=%q format=%q justification=%q", recordedHash, recordedFormat, recordedJustification)
 	}
 	if recordedSummary.TotalChecks != 1 || recordedSummary.Failed != 1 {
@@ -319,5 +340,31 @@ func TestValidateAuditScopeDependencies(t *testing.T) {
 	}
 	if err := service.validateAuditScopeDependencies(auditScopeConfig{component: componenttype.SignatureManagement}); err != nil {
 		t.Fatalf("validateAuditScopeDependencies returned error for scope without dependency requirement: %v", err)
+	}
+}
+
+func TestAuditReportShreddedSnapshotIsNotFoundAndDoesNotEmitReport(t *testing.T) {
+	service := &processAuditAndCompliancesrvc{
+		auditRunReader: func(context.Context, string, string) (persistedAuditRun, error) {
+			return persistedAuditRun{}, &artifactstore.ShreddedError{Scope: artifactstore.ContractScope("did:example:erased")}
+		},
+		reportEventPersister: func(context.Context, auditReport, string, string, string, string) error {
+			t.Fatal("report event emitted for unreadable run")
+			return nil
+		},
+	}
+	_, err := service.AuditReport(context.Background(), nil)
+	var serviceError *goa.ServiceError
+	if !errors.As(err, &serviceError) || serviceError.Name != "not_found" {
+		t.Fatalf("expected not_found, got %v", err)
+	}
+}
+
+func TestAuditReportUnsupportedFormatIsBadRequest(t *testing.T) {
+	format := "unsupported"
+	_, err := (&processAuditAndCompliancesrvc{}).AuditReport(context.Background(), &processauditandcompliance.AuditReportPayload{Format: &format})
+	var serviceError *goa.ServiceError
+	if !errors.As(err, &serviceError) || serviceError.Name != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
 	}
 }

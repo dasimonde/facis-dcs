@@ -89,11 +89,37 @@ func (h *Offerer) Handle(ctx context.Context, cmd OfferCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not read contract data: %w", err)
 	}
+
+	// Ensure Shared Contract Details on the contracts row are in dcs:metadata
+	// before the Offer PDF is rendered and shipped.
+	stamped, stampedChanged, err := stampSharedDetailsIntoContractData(contract.ContractData, sharedContractDetails{
+		Name:            contract.Name,
+		Description:     contract.Description,
+		StartDate:       contract.StartDate,
+		ExpDate:         contract.ExpDate,
+		ExpPolicy:       contract.ExpPolicy,
+		ExpNoticePeriod: contract.ExpNoticePeriod,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if stampedChanged {
+		if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
+			DID:          cmd.DID,
+			ContractData: stamped,
+		}); err != nil {
+			return fmt.Errorf("could not stamp shared contract details before offer: %w", err)
+		}
+		contract.ContractData = stamped
+	}
+
 	if err := validateOfferReady(ctx, contract.ContractData); err != nil {
 		return err
 	}
 
-	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Offered.String())
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Offered.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}

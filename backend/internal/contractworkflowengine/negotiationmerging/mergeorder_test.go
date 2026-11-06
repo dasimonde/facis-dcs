@@ -89,6 +89,32 @@ func mergeRound(t *testing.T, accepted []db.NegotiationChangeData) *db.ContractU
 	return updated
 }
 
+// TestMergeChangeRequestsCarriesSemanticBundle pins the merge to the same
+// CarrySemanticBundle rule Submit/Update use: an accepted redline is a whole
+// editor document without dcs:effectiveShapes, and without the carry the
+// workflow gate would block every later transition.
+func TestMergeChangeRequestsCarriesSemanticBundle(t *testing.T) {
+	stored := canonicalContractData(t, "Clause as the round started.")
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(stored, &doc))
+	doc["dcs:effectiveShapes"] = []any{map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"}}
+	doc["sh:shapesGraph"] = map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"}
+	doc["dcterms:conformsTo"] = map[string]any{"@id": "https://dcs.test/semantic/profiles/dcs?version=1"}
+	pinned, err := datatype.NewJSON(doc)
+	require.NoError(t, err)
+
+	proposed := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	redline := acceptedChangeRequest(t, "negotiation-a", proposed, "Pinned redline", "Clause as the negotiator worded it.")
+	cRepo := &mergeOrderContractRepoFake{stored: &db.Contract{DID: mergeOrderDID, ContractData: &pinned}}
+	nRepo := &mergeOrderNegotiationRepoFake{accepted: []db.NegotiationChangeData{redline}}
+
+	updated, _, err := MergeChangeRequests(context.Background(), nil, cRepo, nRepo, mergeOrderDID, 1)
+	require.NoError(t, err)
+	require.Contains(t, string(*updated.ContractData), `"dcs:effectiveShapes"`)
+	require.Contains(t, string(*updated.ContractData), "facis-dcs?version=4")
+	require.Contains(t, string(*updated.ContractData), "as the negotiator worded it")
+}
+
 // acceptedChangeRequest builds one contract_negotiations row: a redline that
 // renames the contract and rewords its only clause.
 func acceptedChangeRequest(t *testing.T, id string, createdAt time.Time, name string, clause string) db.NegotiationChangeData {

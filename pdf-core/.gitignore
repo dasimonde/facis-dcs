@@ -28,3 +28,5 @@ __pycache__/
 Thumbs.db
 
 .venv
+# Local build output of `make build`
+/pdf-core

@@ -29,8 +29,8 @@ type swaggerParam struct {
 }
 
 type swaggerReqBody struct {
-	Required bool                      `yaml:"required"`
-	Content  map[string]*swaggerMedia  `yaml:"content"`
+	Required bool                     `yaml:"required"`
+	Content  map[string]*swaggerMedia `yaml:"content"`
 }
 
 type swaggerMedia struct {

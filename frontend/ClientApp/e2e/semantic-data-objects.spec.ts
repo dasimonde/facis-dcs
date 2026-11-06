@@ -86,6 +86,7 @@ test('a LegalPerson data object is clicked into a template and filled in the con
   await test.step('a LegalPerson with a nested Address is clicked into a contract template', async () => {
     await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
     await page.getByRole('button', { name: /parent for other contracts/ }).click()
+    await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(templateName)
     await page
       .getByRole('group')

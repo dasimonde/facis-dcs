@@ -41,13 +41,16 @@ kept as a second, parallel signal.
 - A full C2PA-native PDF embedding profile, if/when one is ratified, is a
   drop-in replacement for the embedded transport without touching the
   remote-manifest fallback.
-- Every C2PA-affecting mutation (embedded or remote) must land **before**
-  PAdES signing, never after — see ADR-3's ordering rule, which this
-  transport inherits.
-  **(Amended by [ADR-26](adr-26-provenance-reanchored-after-signing.md)
-  (2026-07-27): "never after" no longer holds. The lifecycle manifest still
-  lands before signing, but a provenance-only C2PA update manifest is
-  appended after it, re-anchoring the hard binding over the signed bytes via
-  a PDF incremental update that does not touch the signature's
-  `/ByteRange`. ADR-26 carries the DSS validation measured before and after
-  the re-anchor. See ADR-3's corresponding amendment.)**
+- A C2PA update after PAdES signing is appended as a PDF incremental update
+  that does not touch any signature's `/ByteRange`: the re-anchor and the
+  lifecycle manifests of states reached after signing
+  ([ADR-26](adr-26-provenance-reanchored-after-signing.md), ADR-3's ordering
+  rule).
+- A copy whose embedded manifest was removed is verified against the remote
+  manifest it references, at this instance or at a party's instance. It must
+  show exactly the pages and carry the payload of the stored PDF. The page
+  comparison follows every object a page reaches and tolerates object
+  renumbering, key order, string and number spelling, FlateDecode
+  (re)compression and a split `/Contents` array; objects held in object
+  streams are not resolved, so a copy re-saved with object streams reports a
+  mismatch.

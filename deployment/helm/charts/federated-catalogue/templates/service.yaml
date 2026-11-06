@@ -5,6 +5,12 @@ metadata:
   labels:
     app.kubernetes.io/name: federated-catalogue
     app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+  {{- with include "digital-contracting-service.traefikServersTransportAnnotation" . }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type | default "ClusterIP" }}
   ports:
@@ -14,6 +20,9 @@ spec:
       {{- if and (eq (.Values.service.type | default "ClusterIP") "NodePort") .Values.service.nodePort }}
       nodePort: {{ .Values.service.nodePort }}
       {{- end }}
+    {{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    {{- end }}
   selector:
     app.kubernetes.io/name: federated-catalogue
     app.kubernetes.io/instance: {{ .Release.Name }}

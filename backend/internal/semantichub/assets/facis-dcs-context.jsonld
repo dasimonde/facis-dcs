@@ -21,6 +21,19 @@
     "Contract": "dcs:Contract",
     "TemplateMetadata": "dcs:TemplateMetadata",
     "ContractMetadata": "dcs:ContractMetadata",
+    "startDate": {
+      "@id": "dcs:startDate",
+      "@type": "xsd:dateTime"
+    },
+    "expirationDate": {
+      "@id": "dcs:expirationDate",
+      "@type": "xsd:dateTime"
+    },
+    "expirationNoticePeriod": {
+      "@id": "dcs:expirationNoticePeriod",
+      "@type": "xsd:integer"
+    },
+    "expirationPolicy": "dcs:expirationPolicy",
     "Section": "dcs:Section",
     "Clause": "dcs:Clause",
     "TextBlock": "dcs:TextBlock",

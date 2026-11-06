@@ -16,7 +16,7 @@ type Mechanism string
 
 const (
 	MechanismW3CBitstring Mechanism = "w3c-bitstring-v1"
-	MechanismIETFToken    Mechanism = "ietf-token-status-list"
+	MechanismIETFToken    Mechanism = "ietf-token-status-list" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 	MechanismXFSC         Mechanism = "xfsc-status-list"
 )
 

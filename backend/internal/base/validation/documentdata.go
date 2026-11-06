@@ -1,6 +1,7 @@
 package validation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -306,9 +307,11 @@ func enforceCanonicalOntologyIRIMap(context map[string]any, canonicalIRIs map[st
 }
 
 // domainField is one dcs:DomainField from the hub's SLA ontology; its IRI
-// is its identity — documents reference it via dcs:domainField {"@id": …}.
+// is its identity — documents reference it via dcs:shape / dcs:domainField {"@id": …}.
 type domainField struct {
 	IRI        string
+	Label      string
+	Range      string
 	Constraint *valueConstraint
 }
 
@@ -576,7 +579,9 @@ func decodeDocumentData(raw *datatype.JSON) (documentData, error) {
 		return documentData{}, nil
 	}
 	var data map[string]any
-	if err := json.Unmarshal(*raw, &data); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(*raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&data); err != nil {
 		return nil, fmt.Errorf("document data is not valid JSON: %w", err)
 	}
 	if data == nil {
@@ -1107,6 +1112,9 @@ func compactConstraintLeaves(constraint map[string]any) []map[string]any {
 		}
 		leaves := []map[string]any{}
 		children, _ := asArray(raw)
+		if list, ok := jsonLDList(raw); ok {
+			children = list
+		}
 		if children == nil {
 			if child, ok := raw.(map[string]any); ok {
 				children = []any{child}
@@ -1390,6 +1398,9 @@ func numericValue(value any) (float64, bool) {
 		return float64(typed), true
 	case float64:
 		return typed, true
+	case json.Number:
+		value, err := typed.Float64()
+		return value, err == nil
 	case float32:
 		return float64(typed), true
 	default:

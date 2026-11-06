@@ -1,0 +1,103 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+{{- $name := printf "%s-log-collector" .Release.Name }}
+# Log collector (DCS-NFR-SEC-09): reads the logs of every pod in the release
+# namespace through the Kubernetes API and pushes them to Loki. Namespace
+# scoped: no node access and no ClusterRole.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: log-collector
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: log-collector
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/collector-config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alloy
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}{{ with .Values.collector.image.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/tmp/alloy
+            - --server.http.listen-addr=127.0.0.1:12345
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 473
+            capabilities:
+              drop: ["ALL"]
+          {{- with .Values.collector.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            # --storage.path
+            - name: tmp
+              mountPath: /tmp
+            {{- if $tls }}
+            - name: internal-ca
+              mountPath: /etc/dcs-internal-tls
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: tmp
+          emptyDir: {}
+        {{- if $tls }}
+        - name: internal-ca
+          secret:
+            secretName: {{ .Release.Name }}-internal-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}

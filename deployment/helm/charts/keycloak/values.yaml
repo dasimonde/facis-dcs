@@ -3,6 +3,21 @@ image:
   tag: "26.6.0@sha256:b0e5dbced1775de4d629f103c0a9cfc057decc62ce8d3cb1c54f8849a6c6eb62"
   pullPolicy: IfNotPresent
 
+# 1000 is the keycloak user of the image (DCS-NFR-SEC-05). The root filesystem
+# stays writable: `kc.sh start` runs the Quarkus build into /opt/keycloak at
+# startup, which a read-only filesystem refuses. A pre-built (optimized) image
+# with an emptyDir for /opt/keycloak/data removes that need.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
 replicas: 1
 
 service:

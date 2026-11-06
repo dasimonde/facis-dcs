@@ -1,17 +1,35 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import DiffView from '@contract-workflow-engine/components/DiffView.vue'
+import {
+  type ContractDetailsSnapshot,
+  withSigningDetailsFromContractData,
+} from '@contract-workflow-engine/models/contract-details-snapshot'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { ContractState, type ContractState as ContractStateType } from '@/types/contract-state'
 import type { ContractData } from '@/models/contract/contract-data'
 import type { ContractHistoryItem } from '@/models/responses/contract-response'
 
 const DRAFT_ID = 'draft'
+const FORMAL_ID = 'formal'
 
 const props = defineProps<{
   contractDid: string
   contractState: ContractStateType
   currentContractData?: ContractData
+  currentDetails?: ContractDetailsSnapshot | null
+  /** Overrides the default "Current draft" / "Current contract" label (e.g. "Accepted changes"). */
+  currentOptionLabel?: string
+  /** Stored formal contract before accepted proposals are merged by Submit. */
+  formalContractData?: ContractData
+  formalDetails?: ContractDetailsSnapshot | null
+  formalOptionLabel?: string
+  /** Offers to restore the left history version as a new version (DCS-FR-CWE-08). */
+  restorable?: boolean
+}>()
+
+const emit = defineEmits<{
+  restore: [item: ContractHistoryItem]
 }>()
 
 const loading = ref(false)
@@ -25,7 +43,7 @@ const highlightDiff = ref(true)
 interface CompareOption {
   id: string
   label: string
-  kind: 'draft' | 'history'
+  kind: 'draft' | 'formal' | 'history'
   historyItem?: ContractHistoryItem
 }
 
@@ -42,21 +60,37 @@ const sortedHistory = computed(() => {
   return list
 })
 
-const showCurrentDraft = computed(
-  () =>
-    props.contractState === ContractState.draft ||
-    props.contractState === ContractState.rejected ||
-    props.contractState === ContractState.negotiation,
+const showCurrent = computed(() => !!props.currentContractData)
+const showFormal = computed(() => !!props.formalContractData || !!props.formalDetails)
+
+const defaultCurrentOptionLabel = computed(() =>
+  props.contractState === ContractState.draft ||
+  props.contractState === ContractState.rejected ||
+  props.contractState === ContractState.negotiation
+    ? 'Current draft'
+    : 'Current contract',
 )
+
+const currentOptionLabel = computed(() => props.currentOptionLabel ?? defaultCurrentOptionLabel.value)
+
+const formalOptionLabel = computed(() => props.formalOptionLabel ?? 'Formal contract')
 
 const compareOptions = computed<CompareOption[]>(() => {
   const opts: CompareOption[] = []
 
-  if (showCurrentDraft.value) {
+  if (showFormal.value) {
+    opts.push({
+      id: FORMAL_ID,
+      kind: 'formal',
+      label: formalOptionLabel.value,
+    })
+  }
+
+  if (showCurrent.value) {
     opts.push({
       id: DRAFT_ID,
       kind: 'draft',
-      label: 'Current draft',
+      label: currentOptionLabel.value,
     })
   }
 
@@ -71,8 +105,9 @@ const compareOptions = computed<CompareOption[]>(() => {
   return opts
 })
 
+// Several saves can snapshot one contract version, so the entry id names the option.
 function historyOptionId(item: ContractHistoryItem): string {
-  return `h:${item.did}:${item.contract_version}:${item.updated_at ?? ''}`
+  return `h:${item.id}`
 }
 
 function formatDateTime(iso?: string): string {
@@ -92,17 +127,53 @@ function formatDateTime(iso?: string): string {
 
 function formatHistoryOptionLabel(item: ContractHistoryItem): string {
   const when = formatDateTime(item.updated_at)
-  return when ? `${when} (version ${item.contract_version})` : `(version ${item.contract_version})`
+  const label = when ? `${when} (version ${item.contract_version})` : `(version ${item.contract_version})`
+  if (!item.modified_by) return label
+  const modifiedAt = formatDateTime(item.modified_at)
+  return modifiedAt
+    ? `${label}, replaced by ${item.modified_by} at ${modifiedAt}`
+    : `${label}, replaced by ${item.modified_by}`
 }
 
 function resolveData(id: string): ContractData | undefined {
   if (id === DRAFT_ID) return props.currentContractData
+  if (id === FORMAL_ID) return props.formalContractData
   const row = sortedHistory.value.find((item) => historyOptionId(item) === id)
   return row?.contract_data
 }
 
+function snapshotFromHistory(item: ContractHistoryItem): ContractDetailsSnapshot {
+  return {
+    name: item.name,
+    description: item.description,
+    contract_version: item.contract_version,
+    start_date: item.start_date,
+    exp_date: item.exp_date,
+    exp_policy: item.exp_policy,
+    exp_notice_period: item.exp_notice_period,
+  }
+}
+
+function resolveDetails(id: string): ContractDetailsSnapshot | null {
+  let base: ContractDetailsSnapshot | null = null
+  if (id === DRAFT_ID) base = props.currentDetails ?? null
+  else if (id === FORMAL_ID) base = props.formalDetails ?? null
+  else {
+    const row = sortedHistory.value.find((item) => historyOptionId(item) === id)
+    base = row ? snapshotFromHistory(row) : null
+  }
+  // Signing deadline/order live only in contract_data.
+  return withSigningDetailsFromContractData(base, resolveData(id))
+}
+
+const leftHistoryItem = computed(() => sortedHistory.value.find((item) => historyOptionId(item) === leftPick.value))
+
 const leftContractData = computed((): ContractData | undefined => resolveData(leftPick.value))
 const rightContractData = computed((): ContractData | undefined => resolveData(rightPick.value))
+const leftDetails = computed(() => resolveDetails(leftPick.value))
+const rightDetails = computed(() => resolveDetails(rightPick.value))
+const leftOptionLabel = computed(() => compareOptions.value.find((o) => o.id === leftPick.value)?.label ?? 'Left')
+const rightOptionLabel = computed(() => compareOptions.value.find((o) => o.id === rightPick.value)?.label ?? 'Right')
 
 function firstPickExcluding(exclude: string): string {
   const first = compareOptions.value.find((o) => o.id !== exclude)
@@ -155,9 +226,14 @@ function normalizePicksAfterHistoryChange() {
     optionIds.has(leftPick.value) && optionIds.has(rightPick.value) && leftPick.value !== rightPick.value
 
   if (!picksValid) {
+    const formal = opts.find((o) => o.id === FORMAL_ID)
     const draft = opts.find((o) => o.id === DRAFT_ID)
     const firstHistory = opts.find((o) => o.kind === 'history')
-    if (draft && firstHistory) {
+    // Prefer Formal → Accepted changes when accepted proposals are pending Submit.
+    if (formal && draft) {
+      leftPick.value = formal.id
+      rightPick.value = draft.id
+    } else if (draft && firstHistory) {
       leftPick.value = firstHistory.id
       rightPick.value = DRAFT_ID
     } else {
@@ -172,7 +248,7 @@ function normalizePicksAfterHistoryChange() {
   ensureDistinctPicks()
 }
 
-watch([historyItems, showCurrentDraft], () => normalizePicksAfterHistoryChange(), { immediate: true })
+watch([historyItems, showCurrent, showFormal], () => normalizePicksAfterHistoryChange(), { immediate: true })
 
 watch([leftPick, rightPick], () => ensureDistinctPicks())
 </script>
@@ -229,6 +305,17 @@ watch([leftPick, rightPick], () => ensureDistinctPicks())
         </label>
       </div>
 
+      <div v-if="restorable && leftHistoryItem" class="mt-4 border-t border-base-300 pt-4">
+        <button
+          type="button"
+          class="btn btn-sm btn-secondary"
+          data-testid="restore-history-version"
+          @click="emit('restore', leftHistoryItem)"
+        >
+          Restore left version
+        </button>
+      </div>
+
       <p v-if="loading" class="mt-3 text-sm text-base-content/70">Loading history…</p>
       <p v-else-if="loadError" class="mt-3 text-sm text-error">{{ loadError }}</p>
       <p v-else-if="compareOptions.length < 2" class="mt-3 text-sm text-base-content/70">
@@ -239,8 +326,12 @@ watch([leftPick, rightPick], () => ensureDistinctPicks())
     <DiffView
       :left-contract-data="leftContractData"
       :right-contract-data="rightContractData"
+      :left-details="leftDetails"
+      :right-details="rightDetails"
       :show-line-numbers="showLineNumbers"
       :highlight-diff="highlightDiff"
+      :left-pane-title="leftOptionLabel"
+      :right-pane-title="rightOptionLabel"
     />
   </div>
 </template>

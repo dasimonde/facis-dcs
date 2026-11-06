@@ -13,7 +13,10 @@ import type { ContractTemplateApprovalTask } from '@/models/contract-template/co
 
 type ApprovalTask = ContractTemplateApprovalTask | ContractApprovalTask
 
-const templateTask = (did: string, state = ApprovalTaskState.open): ContractTemplateApprovalTask => ({
+const templateTask = (
+  did: string,
+  state: ContractTemplateApprovalTask['state'] = ApprovalTaskState.open,
+): ContractTemplateApprovalTask => ({
   type: 'template',
   did,
   version: 1,
@@ -22,7 +25,10 @@ const templateTask = (did: string, state = ApprovalTaskState.open): ContractTemp
   created_at: '2026-08-03T00:00:00Z',
 })
 
-const contractTask = (did: string, state = ApprovalTaskState.open): ContractApprovalTask => ({
+const contractTask = (
+  did: string,
+  state: ContractApprovalTask['state'] = ApprovalTaskState.open,
+): ContractApprovalTask => ({
   type: 'contract',
   did,
   contract_version: '1',

@@ -362,6 +362,5 @@ func writeRealisticArtifact(t *testing.T, path string, document map[string]any) 
 	content, err := json.MarshalIndent(document, "", "  ")
 	require.NoError(t, err)
 	content = append(content, '\n')
-	require.NoError(t, os.WriteFile(path, content, 0o644))
-	require.NoError(t, os.Chmod(path, 0o644))
+	require.NoError(t, os.WriteFile(path, content, 0o600))
 }

@@ -59,6 +59,7 @@ func IssueLifecycleVC(ctx context.Context, signer VCSigner, issuerDID string, st
 					"@id":   "dcs:effectiveAt",
 					"@type": "http://www.w3.org/2001/XMLSchema#dateTime",
 				},
+				"rfc3161_timestamp": "dcs:rfc3161Timestamp",
 			},
 		},
 		Type:      []string{"VerifiableCredential", "ContractLifecycleCredential"},
@@ -74,6 +75,9 @@ func IssueLifecycleVC(ctx context.Context, signer VCSigner, issuerDID string, st
 			"effective_at": assertion.EffectiveAt.UTC().Format(time.RFC3339),
 		},
 		CredentialStatus: buildCredentialStatus(status),
+	}
+	if assertion.Timestamp != "" {
+		unsignedVC.CredentialSubject["rfc3161_timestamp"] = assertion.Timestamp
 	}
 
 	raw, err := json.Marshal(unsignedVC)

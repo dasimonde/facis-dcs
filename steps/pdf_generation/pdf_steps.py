@@ -367,24 +367,25 @@ def _c2pa_manifest_boxes(store_bytes: bytes):
 @then("the second assertion's prev_manifest_hash matches the first assertion's hash")
 def step_then_c2pa_chain_linkage(context):
     import hashlib
+    import io
 
     import requests as _requests  # noqa: PLC0415 — local, mirrors dcs_c2pa_manifest_steps.py
+    from pypdf import PdfReader
 
-    from steps.support.api_client import c2pa_manifest_url
+    from steps.support.api_client import signature_provenance_url
+    from steps.support.services.auth_service import AuthService
 
     name = getattr(context, "last_transitioned_contract", "Service Agreement")
     did, _ = ContractService._contract_data(context, name)
 
-    # GET /c2pa/manifest/{did} is public (no JWT) — same style as
-    # dcs_c2pa_manifest_steps.py's step_when_request_public_manifest.
-    store_resp = _requests.get(
-        c2pa_manifest_url(context, did), timeout=context.http_timeout_seconds
-    )
-    assert store_resp.status_code == 200, (
-        f"GET C2PA manifest store failed for contract '{name}': "
-        f"{store_resp.status_code} {store_resp.text}"
-    )
-    manifest_boxes = _c2pa_manifest_boxes(store_resp.content)
+    # The contract is not signed, so its manifest is not public
+    # (GET /c2pa/manifest/{did} serves signed contracts only). The manifest
+    # store is the content_credential.c2pa attachment of the PDF the previous
+    # step exported, and the chain comes from the parties' provenance endpoint.
+    attachments = PdfReader(io.BytesIO(context.requests_response.content)).attachments
+    stores = attachments.get("content_credential.c2pa") or []
+    assert stores, f"the exported PDF of contract '{name}' has no content_credential.c2pa attachment"
+    manifest_boxes = _c2pa_manifest_boxes(stores[-1])
     assert len(manifest_boxes) >= 2, (
         f"Expected at least 2 manifests in the C2PA manifest store, found "
         f"{len(manifest_boxes)}"
@@ -396,18 +397,16 @@ def step_then_c2pa_chain_linkage(context):
     expected_prev_hash = hashlib.sha256(manifest_boxes[0][8:]).hexdigest()
 
     history_resp = _requests.get(
-        c2pa_manifest_url(context, did),
-        params={"history": "true"},
+        signature_provenance_url(context, did),
+        headers=AuthService.get_headers_for_roles(["Contract Manager"]),
         timeout=context.http_timeout_seconds,
     )
     assert history_resp.status_code == 200, (
-        f"GET C2PA manifest history failed for contract '{name}': "
+        f"GET the C2PA provenance chain failed for contract '{name}': "
         f"{history_resp.status_code} {history_resp.text}"
     )
-    chain = history_resp.json()
-    assert isinstance(chain, list) and len(chain) >= 2, (
-        f"Expected at least 2 manifest chain entries, got: {chain}"
-    )
+    chain = history_resp.json().get("chain") or []
+    assert len(chain) >= 2, f"Expected at least 2 manifest chain entries, got: {chain}"
     second_lifecycle = chain[1].get("lifecycle") or {}
     actual_prev_hash = second_lifecycle.get("prev_manifest_hash", "")
     assert actual_prev_hash == expected_prev_hash, (

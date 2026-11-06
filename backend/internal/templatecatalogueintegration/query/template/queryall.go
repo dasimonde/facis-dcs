@@ -39,7 +39,7 @@ SELECT (COUNT(DISTINCT ?template_uuid) AS ?total) WHERE {
 `
 
 const retrieveTemplatesStatementTemplate = `
-SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type WHERE {
 %s}
 ORDER BY ?s
 OFFSET %d
@@ -145,9 +145,11 @@ func mapCatalogueItem(ct map[string]interface{}) *templatecatalogueintegration.T
 	}
 
 	return &templatecatalogueintegration.TemplateCatalogueItem{
-		Did:         did,
-		Version:     ptr.Ref(ptr.IntFromMap(ct, "version")),
-		Name:        ptr.Ref(ptr.StringFromMap(ct, "name")),
-		Description: ptr.Ref(ptr.StringFromMap(ct, "description")),
+		Did:          did,
+		PartyType:    ptr.Ref(ptr.StringFromMap(ct, "party_type")),
+		TemplateType: ptr.Ref(ptr.StringFromMap(ct, "template_type")),
+		Version:      ptr.Ref(ptr.IntFromMap(ct, "version")),
+		Name:         ptr.Ref(ptr.StringFromMap(ct, "name")),
+		Description:  ptr.Ref(ptr.StringFromMap(ct, "description")),
 	}
 }

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: logging
+description: Log store (Loki) and collector (Alloy) for the pods of the release namespace
+type: application
+version: 0.1.0

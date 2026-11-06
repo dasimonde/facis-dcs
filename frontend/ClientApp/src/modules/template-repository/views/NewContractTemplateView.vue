@@ -52,10 +52,12 @@ watch(
             return
           }
           const uneditableStates = [
+            TemplateState.reviewed,
+            TemplateState.approved,
+            TemplateState.deleted,
             TemplateState.deprecated,
             TemplateState.registered,
             TemplateState.published,
-            TemplateState.registered,
           ].map((s) => s.toLowerCase())
           templateEditorUiStore.setTemplateEditable(!uneditableStates.includes(template.state.toLowerCase()))
 
@@ -64,9 +66,14 @@ watch(
             name: template.name ?? '',
             description: template.description ?? '',
             templateType: template.template_type,
+            partyType: template.party_type,
+            templateLevel: template.template_level,
+            requiredTemplates: template.required_templates,
             state: template.state,
             version: template.version ?? null,
+            created_at: template.created_at ?? null,
             updated_at: template.updated_at ?? null,
+            created_by: template.created_by,
             responsible: template.responsible ?? null,
           })
         })
@@ -85,6 +92,9 @@ watch(
 const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
 const detailsValidationAttempted = ref(false)
+const partyTypeError = computed(() =>
+  detailsValidationAttempted.value && !draftStore.partyType ? 'Party type is required.' : null,
+)
 const nameError = computed(() =>
   detailsValidationAttempted.value && !draftStore.name.trim() ? 'Global Name is required.' : null,
 )
@@ -94,10 +104,14 @@ const descriptionError = computed(() =>
 
 const validateDetails = async (): Promise<boolean> => {
   detailsValidationAttempted.value = true
-  if (!nameError.value && !descriptionError.value) return true
+  if (!partyTypeError.value && !nameError.value && !descriptionError.value) return true
   templateEditorUiStore.setActiveTab('details')
   await nextTick()
-  const testId = nameError.value ? 'template-global-name' : 'template-base-description'
+  const testId = partyTypeError.value
+    ? 'template-party-type'
+    : nameError.value
+      ? 'template-global-name'
+      : 'template-base-description'
   document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus()
   return false
 }
@@ -149,6 +163,7 @@ const submit = async () => {
     <template v-else>
       <TemplateEditors
         :title="title"
+        :party-type-error="partyTypeError ?? undefined"
         :name-error="nameError ?? undefined"
         :description-error="descriptionError ?? undefined"
       >

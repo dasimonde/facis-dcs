@@ -5,8 +5,10 @@ Covers:
   - the public, unauthenticated GET /c2pa/manifest/{did} endpoint
     (backend/design/c2pa.go; raw manifest store bytes by default,
     ?history=true for a parsed chain enumeration);
-  - the embedded manifest's `remote_manifests` claim field referencing
+  - the embedded manifest's `dcs.remote_manifests` assertion referencing
     that endpoint;
+  - the verification of a copy whose embedded manifest is removed, from the
+    remote manifest it references (POST /pdf/verify/contract/{did});
   - the verify response's four independently named checks.
 
 The lifecycle-banner scenarios and the "has reached contract state"/
@@ -17,11 +19,13 @@ as-is (see that module's `_reach_state` helper and its
 `the C2PA lifecycle_status for contract "{name}" is "{status}"` step).
 """
 
+import base64
+
 import requests as _requests
 
-from behave import then, when
+from behave import given, then, when
 
-from steps.support.api_client import c2pa_manifest_url
+from steps.support.api_client import c2pa_manifest_url, contract_verify_pdf_url
 from steps.support.services.contract_service import ContractService
 
 
@@ -103,8 +107,27 @@ def step_then_history_response_shape(context):
     )
 
 
+@then('the C2PA manifest history of contract "{name}" ends with lifecycle status "{status}"')
+def step_then_history_ends_with_lifecycle_status(context, name, status):
+    did, _ = ContractService._contract_data(context, name)
+    resp = _requests.get(
+        c2pa_manifest_url(context, did),
+        params={"history": "true"},
+        timeout=context.http_timeout_seconds,
+    )
+    assert resp.status_code == 200, f"manifest history of '{name}' failed: {resp.status_code} {resp.text}"
+    statuses = [
+        (entry.get("lifecycle") or entry.get("dcs.lifecycle") or {}).get("status")
+        for entry in resp.json()
+    ]
+    statuses = [s for s in statuses if s]
+    assert statuses and statuses[-1] == status, (
+        f"Expected the provenance chain of '{name}' to end with lifecycle status {status!r}, got {statuses}"
+    )
+
+
 # ---------------------------------------------------------------------------
-# Then — remote_manifests claim field
+# Then — dcs.remote_manifests assertion
 # ---------------------------------------------------------------------------
 
 
@@ -119,13 +142,10 @@ def step_then_manifest_declares_remote_manifests(context, name):
         f"C2PA manifest request failed for contract '{name}': "
         f"{context.requests_response.status_code} {context.requests_response.text}"
     )
-    # "remote_manifests" is the C2PA Claim field name for a remote-manifest
-    # URL reference — already established by pdf-core's own BDD suite
-    # (pdf-core/features/manifest_url.feature, pdf-core/features/steps/
-    # dcs_pdf_core_steps.py:1816-1825), which also documents that c2pa-rs
-    # 0.85.1 currently REJECTS this field in V2 claims. Per this task's
-    # this is checked against the literal claim-field approach (see the
-    # feature file's header comment).
+    # The remote-manifest URL is the "dcs.remote_manifests" assertion of the
+    # manifest (pdf-core/compiler/compiler_c2pa.go), not a claim field:
+    # c2pa-rs rejects an unknown "remote_manifests" field in a V2 claim. The
+    # XMP dcterms:provenance property carries the same URL.
     assert b"remote_manifests" in manifest_bytes, (
         "C2PA manifest store does not declare a 'remote_manifests' field at all: "
         f"{manifest_bytes[:300]!r}"
@@ -181,16 +201,56 @@ def step_then_verify_four_named_checks(context, name):
         )
 
 
-@then(
-    'the PDF signature check for contract "{name}" is marked as not yet available '
-    "rather than passed"
-)
-def step_then_pdf_signature_not_available(context, name):
+@then('the PDF signature check for contract "{name}" is reported valid by the EU DSS')
+def step_then_pdf_signature_valid_by_dss(context, name):
     body = context.requests_response.json()
-    status = body.get("pdf_signature_status")
-    assert status in ("pending", "not_available"), (
-        f"Expected pdf_signature_status to be 'pending' or 'not_available' for "
-        f"contract '{name}' (the verify path does not cryptographically re-verify the "
-        "PAdES CMS signature, and DCS-OR-C2PA-006 forbids the verifier from falsely "
-        f"showing a passed PDF signature check), got: {status!r} in response {body}"
+    assert body.get("pdf_signature_source") == "eu-dss", (
+        f"Expected the PDF signature of contract '{name}' to be checked by the EU DSS, got: {body}"
     )
+    assert body.get("pdf_signature_status") == "valid", (
+        f"Expected the EU DSS to validate every PAdES signature of contract '{name}', "
+        f"got: {body.get('pdf_signature_status')!r} ({body.get('pdf_signature_detail')!r}) in response {body}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Strip-then-verify (DCS-OR-C2PA-008)
+# ---------------------------------------------------------------------------
+
+_C2PA_ATTACHMENT_NAME = b"(content_credential.c2pa)"
+
+
+@given('a local copy of contract "{name}"\'s PDF with the content_credential.c2pa attachment removed')
+def step_given_stripped_local_copy(context, name):
+    pdf = context.pdf_bytes[name]
+    # Every name of the attachment is overwritten with a name of the same
+    # length: no reader finds the embedded manifest any more, and the xref
+    # offsets stay valid. The XMP dcterms:provenance reference stays.
+    stripped = pdf.replace(_C2PA_ATTACHMENT_NAME, b"(" + b"x" * (len(_C2PA_ATTACHMENT_NAME) - 2) + b")")
+    assert stripped != pdf, f"the exported PDF of contract '{name}' has no content_credential.c2pa attachment"
+    if not hasattr(context, "stripped_pdf_bytes"):
+        context.stripped_pdf_bytes = {}
+    context.stripped_pdf_bytes[name] = stripped
+
+
+@when('the local copy of contract "{name}" is verified via the backend verify endpoint')
+def step_when_verify_local_copy(context, name):
+    did, _ = ContractService._contract_data(context, name)
+    context.requests_response = _requests.post(
+        contract_verify_pdf_url(context, did),
+        json={"pdf": base64.b64encode(context.stripped_pdf_bytes[name]).decode()},
+        headers=getattr(context, "headers", {}),
+        timeout=context.http_timeout_seconds,
+    )
+
+
+@then("the verification result reports c2pa_manifest_found is true, served from the remote manifest fallback")
+def step_then_verified_from_remote_manifest(context):
+    resp = context.requests_response
+    assert resp.status_code == 200, f"copy verification failed: {resp.status_code} {resp.text}"
+    body = resp.json()
+    assert body.get("c2pa_manifest_found") is True, f"no C2PA manifest found for the stripped copy: {body}"
+    assert body.get("c2pa_manifest_source") == "remote", (
+        f"expected the remote manifest to be used for the stripped copy, got: {body}"
+    )
+    assert body.get("c2pa_signature_status") == "valid", f"remote manifest signature not valid: {body}"

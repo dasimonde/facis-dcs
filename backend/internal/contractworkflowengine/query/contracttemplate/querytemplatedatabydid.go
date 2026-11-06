@@ -46,6 +46,7 @@ func ConvertTemplateDataToContractData(raw *datatype.JSON, templateDID string, t
 	}
 	templateDataMap["derivedFromTemplate"] = provenance
 	materializeRuleParties(templateDataMap)
+	populateFixedFieldValues(templateDataMap)
 
 	contractData, err := datatype.NewJSON(templateDataMap)
 	if err != nil {
@@ -119,4 +120,64 @@ func materializeRuleParties(doc map[string]interface{}) {
 		})
 	}
 	doc["dcs:parties"] = parties
+}
+
+// populateFixedFieldValues fills the contract terms that the template's SLA
+// rules fix (DCS-FR-TR-12): an obligation constraint "field odrl:eq literal"
+// gives that field its value. A field that already has a value keeps it.
+// Constraints under odrl:or or odrl:xone fix nothing and are not read.
+func populateFixedFieldValues(doc map[string]interface{}) {
+	policies, ok := doc["dcs:policies"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	fixed := map[string]interface{}{}
+	obligations, _ := policies["odrl:obligation"].([]interface{})
+	for _, rawRule := range obligations {
+		rule, ok := rawRule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		constraints, isList := rule["odrl:constraint"].([]interface{})
+		if !isList {
+			constraints = []interface{}{rule["odrl:constraint"]}
+		}
+		for _, rawConstraint := range constraints {
+			constraint, ok := rawConstraint.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			operator, _ := constraint["odrl:operator"].(map[string]interface{})
+			left, _ := constraint["odrl:leftOperand"].(map[string]interface{})
+			field, _ := left["@id"].(string)
+			if operator["@id"] != "odrl:eq" || field == "" {
+				continue
+			}
+			right := constraint["odrl:rightOperand"]
+			if node, isNode := right.(map[string]interface{}); right == nil || (isNode && node["@value"] == nil) {
+				continue
+			}
+			fixed[field] = right
+		}
+	}
+	fields, _ := doc["dcs:contractFields"].([]interface{})
+	for _, rawField := range fields {
+		field, ok := rawField.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id, _ := field["@id"].(string)
+		value, isFixed := fixed[id]
+		if _, hasValue := field["dcs:value"]; !isFixed || hasValue {
+			continue
+		}
+		if _, isNode := value.(map[string]interface{}); !isNode {
+			datatype, _ := field["dcs:datatype"].(string)
+			if datatype == "" {
+				datatype = "xsd:string"
+			}
+			value = map[string]interface{}{"@value": fmt.Sprint(value), "@type": datatype}
+		}
+		field["dcs:value"] = value
+	}
 }

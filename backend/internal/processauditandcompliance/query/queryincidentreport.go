@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
@@ -34,30 +35,32 @@ type IncidentReporter struct {
 	DB *sqlx.DB
 }
 
-// Handle persists each submitted finding as a PAC_INCIDENT_REPORT event
-// anchored against the linked contract/template DID (mirrors the
-// ComplianceRiskEvent anchoring pattern in querymonitor.go), so a
-// PROCESS_AUDIT_AND_COMPLIANCE-scope audit read can prove the finding was
-// recorded.
-func (h *IncidentReporter) Handle(ctx context.Context, query IncidentReportQry) error {
+// Handle opens a case for the report and persists each submitted finding as a
+// PAC_INCIDENT_REPORT event with the case ID, anchored against the linked
+// contract/template DID (mirrors the ComplianceRiskEvent anchoring pattern in
+// querymonitor.go), so a PROCESS_AUDIT_AND_COMPLIANCE-scope audit read can
+// prove the finding was recorded. It returns the case ID (DCS-FR-PACM-05).
+func (h *IncidentReporter) Handle(ctx context.Context, query IncidentReportQry) (string, error) {
 	if query.DID == "" {
-		return errors.New("incident report is missing a linked contract or template DID")
+		return "", errors.New("incident report is missing a linked contract or template DID")
 	}
 	if len(query.Findings) == 0 {
-		return errors.New("incident report has no findings")
+		return "", errors.New("incident report has no findings")
 	}
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("could not start transaction: %w", err)
+		return "", fmt.Errorf("could not start transaction: %w", err)
 	}
 	defer func(tx *sqlx.Tx) {
 		_ = tx.Rollback()
 	}(tx)
 
+	caseID := uuid.NewString()
 	occurredAt := time.Now().UTC()
 	for _, finding := range query.Findings {
 		evt := event2.IncidentReportEvent{
+			CaseID:     caseID,
 			DID:        query.DID,
 			RiskType:   finding.RiskType,
 			Detail:     finding.Detail,
@@ -67,12 +70,12 @@ func (h *IncidentReporter) Handle(ctx context.Context, query IncidentReportQry) 
 			UserRoles:  query.UserRoles,
 		}
 		if err := event.Create(ctx, tx, evt, componenttype.ProcessAuditAndCompliance); err != nil {
-			return fmt.Errorf("could not create incident report event: %w", err)
+			return "", fmt.Errorf("could not create incident report event: %w", err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
+		return "", fmt.Errorf("could not commit transaction: %w", err)
 	}
-	return nil
+	return caseID, nil
 }

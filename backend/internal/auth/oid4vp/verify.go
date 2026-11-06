@@ -99,6 +99,11 @@ func (v verifier) VerifyPID(vpToken string, ctx PresentationContext) (*VerifiedP
 		return nil, err
 	}
 
+	minimal, err := minimisePIDClaims(verified.RawClaims)
+	if err != nil {
+		return nil, err
+	}
+	verified.RawClaims = minimal
 	return verified, nil
 }
 
@@ -260,4 +265,26 @@ func evaluateLoginRoles(disclosedRoles []string) ([]string, error) {
 	}
 
 	return granted, nil
+}
+
+// HolderLockoutKey names the holder key a presentation is bound to (cnf.jwk,
+// as did:jwk). It only selects whose invalid presentations count toward a
+// lockout (FR-UC-01-4). The key counts only when the credential that binds it
+// verifies against trust for purpose (status is not read): anyone can put
+// another holder's key into a credential they sign themselves. It returns ""
+// when the presentation names no holder key or its credential does not verify.
+func HolderLockoutKey(vpToken string, trust *TrustConfig, purpose Purpose) string {
+	presentation, err := sdjwt.ParsePresentation(vpToken)
+	if err != nil || trust == nil {
+		return ""
+	}
+	chain, err := verifyPoAChain(presentation.IssuerJWT, presentation.Disclosures, trust, purpose)
+	if err != nil {
+		return ""
+	}
+	did, err := sdjwt.DIDJWKFromPublicJWK(chain[0].document.CNFJWK)
+	if err != nil {
+		return ""
+	}
+	return "holder:" + did
 }

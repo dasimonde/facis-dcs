@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
@@ -18,10 +19,18 @@ const archiveRecentActionLimit = 10
 
 // Statistics implements the archive dashboard overview (DCS-FR-CSA-21):
 // archived-contract statistics, recent actions, storage volume, expiring
-// contracts, and compliance status. An entry is compliant when its evidence
-// is complete — snapshot, content hash, signature metadata, and TSA receipt
-// (DCS-FR-CSA-19's completeness dimension); everything else is flagged.
-func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contractstoragearchive.StatisticsPayload) (*contractstoragearchive.ArchiveStatisticsResponse, error) {
+// contracts, and compliance status. The compliance counts use the per-entry
+// verdict of GET /archive/compliance (DCS-FR-CSA-19).
+func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, p *contractstoragearchive.StatisticsPayload) (*contractstoragearchive.ArchiveStatisticsResponse, error) {
+	ctx, err := contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(ctx, s.DB)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -47,11 +56,20 @@ func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contract
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
 
+	// The expiring-contracts look-ahead window is configurable via
+	// DCS_ARCHIVE_EXPIRING_WINDOW_DAYS, default 30 days (DCS-FR-CSA-04).
+	expiringWindow := conf.ArchiveExpiringWindow()
 	res := &contractstoragearchive.ArchiveStatisticsResponse{
-		RecentActions:     []*contractstoragearchive.ArchiveRecentAction{},
-		ExpiringContracts: []*contractstoragearchive.ArchiveExpiringContract{},
+		RecentActions:      []*contractstoragearchive.ArchiveRecentAction{},
+		ExpiringContracts:  []*contractstoragearchive.ArchiveExpiringContract{},
+		ExpiringWindowDays: int(expiringWindow / (24 * time.Hour)),
 	}
 
+	metadata := make(map[string]db.ContractMetadata, len(archivedContracts))
+	for _, contract := range archivedContracts {
+		metadata[contract.DID] = contract
+	}
+	now := time.Now().UTC()
 	distinct := map[string]bool{}
 	for _, entry := range entries {
 		res.StorageBytes += archiveEntryStorageBytes(entry)
@@ -61,18 +79,18 @@ func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contract
 		}
 		res.ArchivedTotal++
 		distinct[entry.DID] = true
-		if archiveEntryEvidenceComplete(entry) {
-			res.CompliantTotal++
-		} else {
+		var meta *db.ContractMetadata
+		if m, ok := metadata[entry.DID]; ok {
+			meta = &m
+		}
+		if archiveEntryFlagged(archiveComplianceChecks(entry, meta, now)) {
 			res.FlaggedTotal++
+		} else {
+			res.CompliantTotal++
 		}
 	}
 	res.ArchivedContracts = len(distinct)
 
-	// The expiring-contracts look-ahead window is configurable via
-	// DCS_ARCHIVE_EXPIRING_WINDOW_DAYS, default 30 days (DCS-FR-CSA-04).
-	expiringWindow := conf.ArchiveExpiringWindow()
-	now := time.Now().UTC()
 	for _, contract := range archivedContracts {
 		if contract.ExpDate == nil {
 			continue
@@ -91,7 +109,7 @@ func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contract
 		return res.ExpiringContracts[i].ExpDate < res.ExpiringContracts[j].ExpDate
 	})
 
-	res.RecentActions = recentArchiveActions(auditChains, archiveRecentActionLimit)
+	res.RecentActions = recentArchiveActions(filterContractAuditChains(auditChains, allowed), archiveRecentActionLimit, p.Justification != nil)
 	return res, nil
 }
 
@@ -107,13 +125,15 @@ func archiveEntryStorageBytes(entry db.ContractArchiveEntry) int64 {
 	return total
 }
 
-// archiveEntryEvidenceComplete reports whether the entry carries the full
-// evidence set an archived signed contract must hold.
-func archiveEntryEvidenceComplete(entry db.ContractArchiveEntry) bool {
-	return entry.ContentHash != "" &&
-		entry.ContractSnapshot.IsNotNullValue() &&
-		archiveEvidencePresent(entry.SignatureMeta) &&
-		archiveEvidencePresent(entry.TSAReceipt)
+// archiveEntryFlagged reports whether an entry fails at least one archive
+// compliance rule (DCS-FR-CSA-19).
+func archiveEntryFlagged(checks []*contractstoragearchive.ArchiveComplianceCheck) bool {
+	for _, check := range checks {
+		if !check.Passed {
+			return true
+		}
+	}
+	return false
 }
 
 // archiveEvidencePresent reports whether an evidence document holds content
@@ -130,8 +150,10 @@ func archiveEvidencePresent(blob *datatype.JSON) bool {
 }
 
 // recentArchiveActions flattens the component's per-resource audit chains
-// into the newest-first action list the dashboard shows.
-func recentArchiveActions(chains [][]datatype.AuditLogEntry, limit int) []*contractstoragearchive.ArchiveRecentAction {
+// into the newest-first action list the dashboard shows. The actor of each
+// action is audit-log content: it is shown only to a request that gives a
+// justification (DCS-FR-PACM-04), which the access log records.
+func recentArchiveActions(chains [][]datatype.AuditLogEntry, limit int, withActor bool) []*contractstoragearchive.ArchiveRecentAction {
 	flat := []datatype.AuditLogEntry{}
 	for _, chain := range chains {
 		flat = append(flat, chain...)
@@ -146,12 +168,16 @@ func recentArchiveActions(chains [][]datatype.AuditLogEntry, limit int) []*contr
 		if entry.DID != nil {
 			did = *entry.DID
 		}
-		actions = append(actions, &contractstoragearchive.ArchiveRecentAction{
-			Actor:      auditEntryActor(entry.EventData),
+		action := &contractstoragearchive.ArchiveRecentAction{
 			OccurredAt: entry.CreatedAt.UTC().Format(time.RFC3339),
 			EventType:  entry.EventType,
 			Did:        did,
-		})
+		}
+		if withActor {
+			actor := auditEntryActor(entry.EventData)
+			action.Actor = &actor
+		}
+		actions = append(actions, action)
 	}
 	return actions
 }
@@ -169,5 +195,20 @@ func auditEntryActor(raw json.RawMessage) string {
 			return actor
 		}
 	}
-	return ""
+	// Synthetic evidence may contain several identities; only accept an unambiguous actor.
+	actor := ""
+	for key, value := range data {
+		if !strings.HasSuffix(key, "_by") {
+			continue
+		}
+		identity, ok := value.(string)
+		if !ok || identity == "" {
+			continue
+		}
+		if actor != "" && actor != identity {
+			return ""
+		}
+		actor = identity
+	}
+	return actor
 }

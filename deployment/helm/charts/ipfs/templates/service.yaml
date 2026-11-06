@@ -1,3 +1,4 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -12,6 +13,8 @@ spec:
       {{- if and (eq (.Values.service.type | default "ClusterIP") "NodePort") .Values.service.gatewayNodePort }}
       nodePort: {{ .Values.service.gatewayNodePort }}
       {{- end }}
+    {{- if not $tls }}
+    # With in-cluster TLS the RPC API is offered only on the TLS proxy (https).
     - name: api
       port: {{ .Values.service.apiPort | default 5001 }}
       targetPort: api
@@ -19,6 +22,7 @@ spec:
       {{- if and (eq (.Values.service.type | default "ClusterIP") "NodePort") .Values.service.apiNodePort }}
       nodePort: {{ .Values.service.apiNodePort }}
       {{- end }}
+    {{- end }}
     - name: swarm-tcp
       port: {{ .Values.service.swarmPort | default 4001 }}
       targetPort: swarm-tcp
@@ -26,6 +30,9 @@ spec:
       {{- if and (eq (.Values.service.type | default "ClusterIP") "NodePort") .Values.service.swarmNodePort }}
       nodePort: {{ .Values.service.swarmNodePort }}
       {{- end }}
+    {{- if $tls }}
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    {{- end }}
   selector:
     app.kubernetes.io/name: ipfs
     app.kubernetes.io/instance: {{ .Release.Name }}

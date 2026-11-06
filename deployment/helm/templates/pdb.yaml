@@ -1,0 +1,17 @@
+{{- if and .Values.podDisruptionBudget.enabled (or .Values.autoscaling.enabled (gt (int .Values.replicaCount) 1)) }}
+# DCS-NFR-PER-03: a voluntary disruption (node drain, cluster upgrade) takes
+# down at most maxUnavailable backend pods at a time. Not rendered for a single
+# replica, where it would block every drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "digital-contracting-service.fullname" . }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "digital-contracting-service.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+{{- end }}

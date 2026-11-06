@@ -34,7 +34,7 @@ import {
 } from '@/models/dcs-jsonld'
 import { declaredPartyRoles } from '@/utils/participant-selection'
 import type { SemanticConditionValue } from '@/models/contract/contract-data'
-import type { ContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractTemplate, TemplateLevel } from '@/models/contract-template/contract-template'
 import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type {
   ContractTemplateCreateRequest,
@@ -43,6 +43,7 @@ import type {
 } from '@/models/requests/template-request'
 import type { DcsOperator } from '@/models/semantic/facis-dcs-semantic'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type {
   DomainFieldDefinition,
   MetaData,
@@ -64,8 +65,12 @@ export interface LoadDocumentMeta {
   name: string
   description: string
   templateType?: TemplateTypeValue
+  partyType?: PartyType
+  templateLevel?: TemplateLevel
+  requiredTemplates?: string[]
   state?: ContractTemplateState | null
   version?: number | null
+  created_at?: string | null
   updated_at?: string | null
   created_by?: string
   responsible?: ContractTemplateResponsible | null
@@ -113,10 +118,14 @@ export const useDcsDraftStore = defineStore(storeId, {
       }) as DcsTemplateData
     },
     templateCreateRequestData(): ContractTemplateCreateRequest {
+      if (!this.partyType) throw new Error('Party type is required.')
       return {
         name: this.name,
         description: this.description,
         template_type: this.templateType,
+        party_type: this.partyType,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -127,6 +136,9 @@ export const useDcsDraftStore = defineStore(storeId, {
         updated_at: this.updated_at,
         name: this.name,
         description: this.description,
+        party_type: this.partyType,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -138,6 +150,9 @@ export const useDcsDraftStore = defineStore(storeId, {
         template_type: this.templateType,
         name: this.name,
         description: this.description,
+        party_type: this.partyType,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -155,6 +170,9 @@ export const useDcsDraftStore = defineStore(storeId, {
         const structure = rawDoc['dcs:documentStructure']
 
         this.reset({
+          partyType: meta.partyType,
+          templateLevel: meta.templateLevel ?? 'AGREEMENT',
+          requiredTemplates: meta.requiredTemplates ?? [],
           did: meta.did,
           documentIri: rawDoc['@id'] ?? null,
           name: meta.name ? meta.name : (metadata['dcs:title'] ?? ''),
@@ -162,6 +180,7 @@ export const useDcsDraftStore = defineStore(storeId, {
           templateType: templateType !== TemplateType.component ? templateType : derivedTemplateType,
           state: meta.state ?? undefined,
           version: meta.version ?? null,
+          created_at: meta.created_at ?? null,
           updated_at: meta.updated_at ?? null,
           created_by: meta.created_by ?? '',
           responsible: meta.responsible ?? null,
@@ -179,12 +198,16 @@ export const useDcsDraftStore = defineStore(storeId, {
 
       // Unknown / empty format — start fresh
       this.reset({
+        partyType: meta.partyType,
+        templateLevel: meta.templateLevel ?? 'AGREEMENT',
+        requiredTemplates: meta.requiredTemplates ?? [],
         did: meta.did,
         name: meta.name,
         description: meta.description,
         templateType,
         state: meta.state ?? undefined,
         version: meta.version ?? null,
+        created_at: meta.created_at ?? null,
         updated_at: meta.updated_at ?? null,
         created_by: meta.created_by ?? '',
         responsible: meta.responsible ?? null,
@@ -719,6 +742,10 @@ interface CanonicalDocumentInput {
   documentId?: string
   name?: string
   description?: string
+  startDate?: string
+  expirationDate?: string
+  expirationNoticePeriod?: number
+  expirationPolicy?: string
   templateType?: TemplateTypeValue
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
@@ -747,6 +774,19 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
     ...(input.description ? { 'dcs:description': input.description } : {}),
     ...(input.customMetaData?.length ? { 'dcs:customMetaData': input.customMetaData } : {}),
   }
+  const contractSharedDetails =
+    input.documentType === 'dcs:Contract'
+      ? {
+          ...(input.startDate ? { 'dcs:startDate': { '@value': input.startDate, '@type': 'xsd:dateTime' } } : {}),
+          ...(input.expirationDate
+            ? { 'dcs:expirationDate': { '@value': input.expirationDate, '@type': 'xsd:dateTime' } }
+            : {}),
+          ...(input.expirationNoticePeriod !== undefined
+            ? { 'dcs:expirationNoticePeriod': input.expirationNoticePeriod }
+            : {}),
+          ...(input.expirationPolicy ? { 'dcs:expirationPolicy': input.expirationPolicy } : {}),
+        }
+      : {}
   const metadata =
     input.documentType === 'dcs:ContractTemplate'
       ? {
@@ -755,7 +795,7 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
           'dcs:templateType':
             input.templateType === TemplateType.contractTemplate ? 'dcs:ContractTemplate' : 'dcs:Component',
         }
-      : { '@type': 'dcs:ContractMetadata' as const, ...commonMetadata }
+      : { '@type': 'dcs:ContractMetadata' as const, ...commonMetadata, ...contractSharedDetails }
 
   return {
     '@type': input.documentType,
@@ -803,6 +843,10 @@ export interface ContractDocumentInput {
   storedDocument?: DcsContractData
   name?: string
   description?: string
+  startDate?: string
+  expirationDate?: string
+  expirationNoticePeriod?: number
+  expirationPolicy?: string
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
   contractFields: DcsContractField[]
@@ -819,7 +863,8 @@ export interface ContractDocumentInput {
  * state drops them — and posting that back discards data the server put there:
  * the party nodes a signature is attributed to (with the signatory and Power of
  * Attorney already recorded on them), the signature fields naming those
- * parties, and the shapes graph the document is pinned to.
+ * parties, the shapes graph the document is pinned to, and the signing
+ * deadline.
  */
 export function buildContractDocument(input: ContractDocumentInput): DcsContractData {
   const { storedDocument, ...editorState } = input
@@ -833,6 +878,9 @@ export function buildContractDocument(input: ContractDocumentInput): DcsContract
     document['dcs:signatureFields'] = storedDocument['dcs:signatureFields']
   }
   if (storedDocument['sh:shapesGraph'] !== undefined) document['sh:shapesGraph'] = storedDocument['sh:shapesGraph']
+  if (storedDocument['dcs:signingDeadline'] !== undefined) {
+    document['dcs:signingDeadline'] = storedDocument['dcs:signingDeadline']
+  }
   return document
 }
 
@@ -1236,9 +1284,13 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   contractData: [],
   policies: [],
   customMetaData: [],
+  partyType: undefined,
+  templateLevel: 'AGREEMENT',
+  requiredTemplates: [],
   templateType: TemplateType.component,
   state: undefined,
   version: null,
+  created_at: null,
   updated_at: null,
   created_by: '',
   responsible: null,
@@ -1589,9 +1641,6 @@ function isSetOperator(operator: string): boolean {
 function jsonLdValue(value: JsonLdTypedValue | JsonLdReference): unknown {
   if ('@id' in value) return value['@id']
   switch (value['@type']) {
-    case 'xsd:decimal':
-    case 'xsd:integer':
-      return Number(value['@value'])
     case 'xsd:boolean':
       return value['@value'] === 'true'
     // Every other datatype keeps its lexical form. The switch used to list

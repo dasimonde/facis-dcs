@@ -8,6 +8,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/db"
 )
@@ -52,4 +53,23 @@ func Create(ctx context.Context, tx *sqlx.Tx, evt Event, component componenttype
 	}
 
 	return nil
+}
+
+// CreateInOwnTx persists evt in a transaction of its own. Use it to audit a
+// failed attempt, whose business transaction rolls back. The caller's
+// cancellation is ignored, so a request that failed by timeout still records.
+func CreateInOwnTx(ctx context.Context, sqlDB *sqlx.DB, evt Event, component componenttype.ComponentType) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := sqlDB.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := Create(ctx, tx, evt, component); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

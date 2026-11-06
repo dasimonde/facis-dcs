@@ -135,3 +135,36 @@ func TestCheckStatusList_IETFStatusList_BundledKeyIssuer(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "revoked")
 }
+
+// A session carries only the status reference of the credential it was opened
+// with, and refresh checks that reference again (NFR-BR-06, IR-CI-09). The
+// reference must be enough on its own: active while the bit is clear, refused
+// once the issuer revokes the credential.
+func TestStatusReferenceIsEnoughToCheckTheCredentialAgain(t *testing.T) {
+	const index = 5
+
+	list := newIETFStatusList(t, 16)
+	trustIETFStatusList(t, list)
+
+	credential, err := json.Marshal(map[string]any{
+		"iss":          list.Issuer,
+		"sub":          "did:example:holder",
+		"vct":          PoAVCT,
+		"organization": "did:web:participant.example",
+		"roles":        []string{"Template Creator"},
+		"cnf":          map[string]any{"jwk": map[string]any{"kty": "EC", "crv": "P-256", "x": "x", "y": "y"}},
+		"status":       list.Entry(index),
+	})
+	require.NoError(t, err)
+
+	ref, err := StatusReference(credential)
+	require.NoError(t, err)
+	assert.NotContains(t, string(ref), "Template Creator", "the reference carries more than the status check reads")
+
+	require.NoError(t, CheckStatus(ref))
+
+	list.Revoke(index)
+	err = CheckStatus(ref)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "revoked")
+}

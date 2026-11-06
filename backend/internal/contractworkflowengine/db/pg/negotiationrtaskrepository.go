@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -72,14 +74,26 @@ func (r *PostgresNegotiationTaskRepo) RollForward(ctx context.Context, tx *sqlx.
 	return err
 }
 
+func (r *PostgresNegotiationTaskRepo) RollForwardKeepingState(ctx context.Context, tx *sqlx.Tx, did string, fromVersion int, toVersion int) error {
+	statement := `
+        UPDATE contract_negotiation_task SET contract_version = $3
+        WHERE did = $1 AND contract_version = $2
+    `
+	_, err := tx.ExecContext(ctx, statement, did, fromVersion, toVersion)
+	return err
+}
+
 func (r *PostgresNegotiationTaskRepo) ReadAllByNegotiator(ctx context.Context, tx *sqlx.Tx, negotiator string) ([]db.NegotiationTaskData, error) {
 	query := `
         SELECT id, did, contract_version, state, negotiator,
                created_by, created_at
         FROM contract_negotiation_task WHERE negotiator = $1
     `
+	params := []any{negotiator}
+	query += " AND " + contractreadpolicy.SQL(ctx, "contract_negotiation_task.did", &params)
+
 	var negotiationTasks []db.NegotiationTaskData
-	err := tx.SelectContext(ctx, &negotiationTasks, query, negotiator)
+	err := tx.SelectContext(ctx, &negotiationTasks, query, params...)
 	if err != nil {
 		return nil, err
 	}

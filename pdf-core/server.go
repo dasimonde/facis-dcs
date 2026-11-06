@@ -46,6 +46,7 @@ func newServer() http.Handler {
 	mux.HandleFunc("POST /evidence/extract", svc.extractEvidence)
 	mux.HandleFunc("POST /claim", svc.claim)
 	mux.HandleFunc("POST /manifest/extract", svc.extractManifest)
+	mux.HandleFunc("POST /manifest/reference", svc.manifestReference)
 	mux.HandleFunc("POST /manifest/chain", svc.manifestChain)
 	mux.HandleFunc("POST /payload/extract", svc.extractPayload)
 	mux.HandleFunc("GET /ontology/dcs-pdf-core", svc.ontologyContext)
@@ -68,7 +69,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func handleUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, swaggerHTML)
+	_, _ = fmt.Fprint(w, swaggerHTML)
 }
 
 func handleSwagger(w http.ResponseWriter, _ *http.Request) {

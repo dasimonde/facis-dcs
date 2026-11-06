@@ -538,6 +538,27 @@ class AuthService:
             if time.time() < expires_at - AuthService._TOKEN_EXPIRY_MARGIN_SECONDS:
                 return token
 
+        # The login is scenario setup, not the behavior under test. A dropped
+        # connection on one of its hops starts the whole login again: the
+        # request_uri and the presentation are single-use, so a request-level
+        # retry would be refused.
+        for attempt in range(1, AuthService._LOGIN_ATTEMPTS + 1):
+            try:
+                access_token, expires_in = AuthService._login(api_base, credentials, timeout)
+                break
+            except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+                if attempt == AuthService._LOGIN_ATTEMPTS:
+                    raise
+                print(f"WARNING: login for roles {credentials.roles} lost its connection, attempt {attempt}: {exc}", file=sys.stderr)
+        if expires_in > 0:
+            AuthService._token_cache[cache_key] = (access_token, time.time() + expires_in)
+        return access_token
+
+    _LOGIN_ATTEMPTS = 3
+
+    @staticmethod
+    def _login(api_base: str, credentials, timeout: float) -> tuple[str, int]:
+        """One headless OID4VP login. Returns the access token and its lifetime."""
         session = requests.Session()
         session.headers.update({
             "User-Agent": "bdd-auth-service",
@@ -571,15 +592,12 @@ class AuthService:
             vp_token=vp_token,
             timeout=timeout,
         )
-        access_token, expires_in = AuthService.complete_session(
+        return AuthService.complete_session(
             session,
             api_base,
             redirect_uri,
             timeout=timeout,
         )
-        if expires_in > 0:
-            AuthService._token_cache[cache_key] = (access_token, time.time() + expires_in)
-        return access_token
 
 
     # ------------------------------------------------------------------
@@ -684,17 +702,16 @@ class AuthService:
         """Create an expired JWT token for negative credential tests.
 
         The issuer must match the backend's HYDRA_PUBLIC_ISSUER_URL: go-oidc
-        checks issuer before expiry, so a foreign issuer fails with
-        "issued by a different provider" instead of the "token is expired"
-        message the scenarios assert on. Expiry is checked before the
-        signature, so the token needs no valid signature.
+        checks the signature, then the issuer, then the expiry. The token is
+        signed with the development key whose public half the BDD stack names
+        in DCS_DEV_ACCESS_TOKEN_KEY (deployment/helm/values.bdd.yml), so the
+        backend checks signatures and refuses the token for its expiry.
         """
         issuer = (
             os.getenv("BDD_HYDRA_ISSUER_URL", "").strip()
             or os.getenv("BDD_PUBLIC_ORIGIN", "").strip()
             or "http://localhost:18080"
         ).rstrip("/")
-        header = {"alg": "none"}
         payload = {
             "sub": username,
             "iss": issuer,
@@ -702,7 +719,5 @@ class AuthService:
             "ext": {"roles": roles, "iss": issuer},
             "exp": int(time.time()) - 3600,
         }
-
-        encoded_header = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
-        encoded_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
-        return f"{encoded_header}.{encoded_payload}."
+        key = (Path(__file__).resolve().parents[1] / "keys" / "access-token-dev.key.pem").read_text()
+        return jwt.encode(payload, key, algorithm="ES256")

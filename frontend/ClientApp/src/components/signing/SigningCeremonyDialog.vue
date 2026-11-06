@@ -2,11 +2,18 @@
 import { useConfirmDialog } from '@vueuse/core'
 import { useQRCode } from '@vueuse/integrations/useQRCode'
 import { computed, ref, useTemplateRef, watch } from 'vue'
-import { type CeremonyStatus, signatureManagementService } from '@/services/signature-management-service'
+import {
+  type CeremonyStatus,
+  type CeremonyStatusResult,
+  signatureManagementService,
+} from '@/services/signature-management-service'
 
 interface CeremonyRequest {
   contractDid: string
   fieldName: string
+  // A published signing request of a verified ceremony: the dialog shows its
+  // deep link and waits until the wallet's signature is accepted.
+  signingRequest?: { ceremonyId: string; walletUri: string }
 }
 
 export interface CeremonyResult {
@@ -18,6 +25,9 @@ export interface CeremonyResult {
   // ceremony has been verified for the same signer/field (e.g. a retried
   // ceremony after "Start a new ceremony").
   ceremonyId: string
+  // The signing request expired or the wallet response was refused, and the
+  // signer asked for a new signing request for the same ceremony.
+  republish?: boolean
 }
 
 const POLL_INTERVAL_MS = 2500
@@ -41,9 +51,15 @@ const { isRevealed, reveal, confirm, cancel, onReveal } = useConfirmDialog<
   CeremonyResult | undefined
 >()
 
+const signing = computed(() => !!request.value.signingRequest)
+
 onReveal((data) => {
   if (data) request.value = data
-  void startCeremony()
+  if (data?.signingRequest) {
+    showSigningRequest(data.signingRequest)
+  } else {
+    void startCeremony()
+  }
 })
 
 watch(isRevealed, (value) => {
@@ -87,20 +103,44 @@ async function startCeremony() {
   }
 }
 
+function showSigningRequest(signingRequest: { ceremonyId: string; walletUri: string }) {
+  stopPolling()
+  errorMessage.value = ''
+  copyHint.value = ''
+  ceremonyId = signingRequest.ceremonyId
+  walletUri.value = signingRequest.walletUri
+  phase.value = 'pending'
+  pollTimer = setInterval(() => void pollStatus(), POLL_INTERVAL_MS)
+}
+
 async function pollStatus() {
   if (!ceremonyId) return
   try {
     const status = await signatureManagementService.getCeremonyStatus(ceremonyId)
-    phase.value = status.status
-    if (status.status === 'verified') {
+    if (signing.value ? !!status.signed_at : status.status === 'verified') {
       stopPolling()
       confirm({ signerDid: status.signer_did ?? '', ceremonyId })
-    } else if (status.status === 'expired' || status.status === 'failed') {
-      stopPolling()
+      return
     }
+    if (status.refusal || status.refusal_code) {
+      stopPolling()
+      errorMessage.value = `The wallet response was refused: ${status.refusal ?? status.refusal_code}`
+      phase.value = 'failed'
+      return
+    }
+    if (status.status === 'expired' || status.status === 'failed' || (signing.value && requestExpired(status))) {
+      stopPolling()
+      phase.value = status.status === 'failed' ? 'failed' : 'expired'
+      return
+    }
+    if (!signing.value) phase.value = status.status
   } catch {
     // Transient poll failures are ignored; the interval retries on the next tick.
   }
+}
+
+function requestExpired(status: CeremonyStatusResult): boolean {
+  return !!status.request_expires_at && Date.parse(status.request_expires_at) <= Date.now()
 }
 
 async function copyWalletUri() {
@@ -110,7 +150,11 @@ async function copyWalletUri() {
 }
 
 function retry() {
-  void startCeremony()
+  if (request.value.signingRequest) {
+    confirm({ signerDid: '', ceremonyId: request.value.signingRequest.ceremonyId, republish: true })
+  } else {
+    void startCeremony()
+  }
 }
 
 function onCancel() {
@@ -145,7 +189,10 @@ defineExpose<DialogExpose>({ reveal })
         </div>
 
         <div v-else-if="phase === 'pending'" class="flex flex-col items-center gap-3">
-          <p :id="dialogDescriptionId" class="text-sm opacity-80">
+          <p v-if="signing" :id="dialogDescriptionId" class="text-sm opacity-80">
+            Scan the QR code with your wallet to sign the document. The wallet sends the signed document back.
+          </p>
+          <p v-else :id="dialogDescriptionId" class="text-sm opacity-80">
             Scan the QR code with your wallet to present your PID and Power of Attorney, then sign.
           </p>
           <figure class="rounded-box bg-white p-3">
@@ -153,7 +200,9 @@ defineExpose<DialogExpose>({ reveal })
           </figure>
           <button type="button" class="btn btn-sm btn-primary" @click="copyWalletUri">Copy link</button>
           <p v-if="copyHint" class="text-sm text-warning" role="status" aria-live="polite">{{ copyHint }}</p>
-          <p class="text-xs opacity-70" role="status" aria-live="polite">Waiting for the wallet presentation…</p>
+          <p class="text-xs opacity-70" role="status" aria-live="polite">
+            {{ signing ? 'Waiting for the wallet signature…' : 'Waiting for the wallet presentation…' }}
+          </p>
         </div>
 
         <div
@@ -162,9 +211,14 @@ defineExpose<DialogExpose>({ reveal })
           role="alert"
         >
           <p :id="dialogDescriptionId" class="text-sm text-error">
-            {{ phase === 'expired' ? 'The signing ceremony expired.' : errorMessage || 'The signing ceremony failed.' }}
+            <template v-if="phase === 'expired'">
+              {{ signing ? 'The signing request expired.' : 'The signing ceremony expired.' }}
+            </template>
+            <template v-else>{{ errorMessage || 'The signing ceremony failed.' }}</template>
           </p>
-          <button type="button" class="btn btn-sm btn-primary" @click="retry">Start a new ceremony</button>
+          <button type="button" class="btn btn-sm btn-primary" @click="retry">
+            {{ signing ? 'Publish a new signing request' : 'Start a new ceremony' }}
+          </button>
         </div>
 
         <div class="modal-action mt-2">

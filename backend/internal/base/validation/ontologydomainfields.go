@@ -78,13 +78,15 @@ func parseDomainOntology(content string) (*domainOntology, error) {
 	fields := map[string]domainField{}
 	for _, subject := range graph.Subjects(shacl.IRI(shacl.RDFType), shacl.IRI(dcs+"DomainField")) {
 		iri := subject.Value()
-		if firstObjectValue(graph, subject, shacl.RDFS+"label") == "" {
+		label := firstObjectValue(graph, subject, shacl.RDFS+"label")
+		if label == "" {
 			return nil, fmt.Errorf("domain field %s requires rdfs:label", iri)
 		}
-		if firstObjectValue(graph, subject, shacl.RDFS+"range") == "" {
+		rangeIRI := firstObjectValue(graph, subject, shacl.RDFS+"range")
+		if rangeIRI == "" {
 			return nil, fmt.Errorf("domain field %s requires rdfs:range", iri)
 		}
-		field := domainField{IRI: iri}
+		field := domainField{IRI: iri, Label: label, Range: rangeIRI}
 		if constraintIRI := firstObjectValue(graph, subject, dcs+"hasValueConstraint"); constraintIRI != "" {
 			constraint, ok := constraints[constraintIRI]
 			if !ok {

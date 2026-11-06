@@ -7,26 +7,57 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 )
 
+type persistedAuditRun struct {
+	Scopes                      []artifactstore.Scope
+	RequestBytes, ResponseBytes []byte
+	RequestHash, ResponseHash   string
+}
+
+type persistedAuditEvidenceResource struct {
+	DID        string                        `json:"did"`
+	Component  string                        `json:"component"`
+	AuditTrail []persistedAuditEvidenceEntry `json:"audit_trail"`
+}
+
+type persistedAuditEvidenceEntry struct {
+	ID        int64          `json:"id"`
+	Component string         `json:"component"`
+	EventType string         `json:"event_type"`
+	EventData map[string]any `json:"event_data"`
+	DID       string         `json:"did"`
+	CreatedAt string         `json:"created_at"`
+	Kind      string         `json:"kind"`
+	Reason    string         `json:"reason"`
+}
+
 type auditReport struct {
-	ReportID    string                `json:"reportId"`
-	Scope       string                `json:"scope"`
-	GeneratedAt string                `json:"generatedAt"`
-	GeneratedBy string                `json:"generatedBy"`
-	Format      string                `json:"format"`
-	DID         string                `json:"did,omitempty"`
-	ContentHash string                `json:"contentHash,omitempty"`
-	Summary     auditReportSummary    `json:"summary"`
-	Resources   []auditReportResource `json:"resources"`
-	Events      []auditReportEvent    `json:"events"`
-	Findings    []auditReportFinding  `json:"findings"`
+	ContractVersion string                 `json:"contractVersion"`
+	CorrelationID   string                 `json:"correlationId"`
+	Executor        auditexecutor.Executor `json:"executor"`
+	ExecutedAt      string                 `json:"executedAt"`
+	Receipt         json.RawMessage        `json:"receipt,omitempty"`
+	RequestHash     string                 `json:"requestHash"`
+	ResponseHash    string                 `json:"responseHash"`
+	ReportID        string                 `json:"reportId"`
+	Scope           string                 `json:"scope"`
+	GeneratedAt     string                 `json:"generatedAt"`
+	GeneratedBy     string                 `json:"generatedBy"`
+	Format          string                 `json:"format"`
+	DID             string                 `json:"did,omitempty"`
+	Summary         auditReportSummary     `json:"summary"`
+	Resources       []auditReportResource  `json:"resources"`
+	Events          []auditReportEvent     `json:"events"`
+	Findings        []auditReportFinding   `json:"findings"`
 }
 
 type auditReportSummary struct {
@@ -49,6 +80,7 @@ type auditReportResource struct {
 }
 
 type auditReportEvent struct {
+	ID        int64          `json:"id"`
 	Timestamp string         `json:"timestamp"`
 	Actor     string         `json:"actor,omitempty"`
 	Component string         `json:"component"`
@@ -58,23 +90,25 @@ type auditReportEvent struct {
 }
 
 type auditReportFinding struct {
-	Timestamp      string `json:"timestamp"`
-	Component      string `json:"component"`
-	EventType      string `json:"eventType"`
-	DID            string `json:"did,omitempty"`
-	RuleID         string `json:"ruleId,omitempty"`
-	Title          string `json:"title,omitempty"`
-	Severity       string `json:"severity,omitempty"`
-	Message        string `json:"message,omitempty"`
-	Requirement    string `json:"requirement,omitempty"`
-	ActualValue    any    `json:"actualValue,omitempty"`
-	ExpectedValue  any    `json:"expectedValue,omitempty"`
-	ExpectedValues []any  `json:"expectedValues,omitempty"`
-	Operator       string `json:"operator,omitempty"`
-	Path           string `json:"path,omitempty"`
-	FieldIri       string `json:"fieldIri,omitempty"`
-	OntologyTerm   string `json:"ontologyTerm,omitempty"`
-	Actor          string `json:"actor,omitempty"`
+	Result         string   `json:"result"`
+	EvidenceRefs   []string `json:"evidenceRefs,omitempty"`
+	Timestamp      string   `json:"timestamp"`
+	Component      string   `json:"component"`
+	EventType      string   `json:"eventType"`
+	DID            string   `json:"did,omitempty"`
+	RuleID         string   `json:"ruleId,omitempty"`
+	Title          string   `json:"title,omitempty"`
+	Severity       string   `json:"severity,omitempty"`
+	Message        string   `json:"message,omitempty"`
+	Requirement    string   `json:"requirement,omitempty"`
+	ActualValue    any      `json:"actualValue,omitempty"`
+	ExpectedValue  any      `json:"expectedValue,omitempty"`
+	ExpectedValues []any    `json:"expectedValues,omitempty"`
+	Operator       string   `json:"operator,omitempty"`
+	Path           string   `json:"path,omitempty"`
+	FieldIri       string   `json:"fieldIri,omitempty"`
+	OntologyTerm   string   `json:"ontologyTerm,omitempty"`
+	Actor          string   `json:"actor,omitempty"`
 }
 
 func buildExecutorAuditReport(response auditexecutor.Response, generatedBy string, generatedAt time.Time) auditReport {
@@ -84,6 +118,8 @@ func buildExecutorAuditReport(response auditexecutor.Response, generatedBy strin
 	}
 	report := auditReport{
 		ReportID: response.AuditID, Scope: response.Scope, DID: did,
+		ContractVersion: response.ContractVersion, CorrelationID: response.CorrelationID,
+		Executor: response.Executor, ExecutedAt: response.ExecutedAt, Receipt: response.Receipt,
 		GeneratedAt: generatedAt.UTC().Format(time.RFC3339), GeneratedBy: generatedBy,
 		Format: "json", Resources: []auditReportResource{}, Events: []auditReportEvent{},
 		Findings: []auditReportFinding{},
@@ -102,25 +138,92 @@ func buildExecutorAuditReport(response auditexecutor.Response, generatedBy strin
 			Timestamp: response.ExecutedAt, Component: response.Scope,
 			EventType: "PAC_AUDIT_EXECUTOR_FINDING", DID: did,
 			RuleID: finding.RuleID, Severity: severity, Message: finding.Reason,
+			Result: finding.Result, EvidenceRefs: finding.EvidenceRefs,
 		})
 	}
 	report.Summary = summarizeAuditReport(report)
 	return report
 }
 
-// renderPersistedExecutorReport renders exclusively from the validated
-// response stored in pac_audit_runs. For JSON the exact stored bytes are the
-// report bytes; CSV and PDF are deterministic projections of the same run.
-func renderPersistedExecutorReport(raw []byte, format, generatedBy string, generatedAt time.Time) ([]byte, auditReport, error) {
+// Every format uses the evidence frozen when the executor ran, never live audit rows.
+func renderPersistedExecutorReport(run persistedAuditRun, format, generatedBy string, generatedAt time.Time) ([]byte, auditReport, error) {
+	if hashBytes(run.RequestBytes) != run.RequestHash || hashBytes(run.ResponseBytes) != run.ResponseHash {
+		return nil, auditReport{}, fmt.Errorf("persisted PAC audit snapshot hash mismatch")
+	}
+	var request struct {
+		auditexecutor.Request
+		Evidence map[string]json.RawMessage `json:"evidence"`
+	}
 	var response auditexecutor.Response
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, auditReport{}, fmt.Errorf("decode persisted PAC audit run: %w", err)
+	if err := json.Unmarshal(run.RequestBytes, &request); err != nil {
+		return nil, auditReport{}, fmt.Errorf("decode persisted PAC audit request: %w", err)
+	}
+	if err := json.Unmarshal(run.ResponseBytes, &response); err != nil {
+		return nil, auditReport{}, fmt.Errorf("decode persisted PAC audit response: %w", err)
+	}
+	sameResource := request.Resource == nil && response.Resource == nil ||
+		request.Resource != nil && response.Resource != nil && request.Resource.DID == response.Resource.DID
+	if request.AuditID == "" || request.AuditID != response.AuditID || request.CorrelationID != response.CorrelationID || request.Scope != response.Scope || request.ContractVersion != response.ContractVersion || !sameResource {
+		return nil, auditReport{}, fmt.Errorf("persisted PAC audit request and response do not match")
+	}
+	var resources []persistedAuditEvidenceResource
+	evidence, ok := request.Evidence[request.Scope]
+	if !ok || string(evidence) == "null" {
+		return nil, auditReport{}, fmt.Errorf("persisted PAC audit request lacks scope evidence")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(evidence))
+	decoder.UseNumber()
+	if err := decoder.Decode(&resources); err != nil {
+		return nil, auditReport{}, fmt.Errorf("decode persisted PAC audit evidence: %w", err)
 	}
 	report := buildExecutorAuditReport(response, generatedBy, generatedAt)
-	report.Format = format
+	report.Format, report.RequestHash, report.ResponseHash = format, run.RequestHash, run.ResponseHash
+	report.Resources = []auditReportResource{}
+	resourceIndexes := map[string]int{}
+	for _, resource := range resources {
+		index, exists := resourceIndexes[resource.DID]
+		if !exists {
+			index = len(report.Resources)
+			resourceIndexes[resource.DID] = index
+			report.Resources = append(report.Resources, auditReportResource{DID: resource.DID, Component: resource.Component})
+		}
+		for _, entry := range resource.AuditTrail {
+			if entry.Kind != "TIMELINE" {
+				continue
+			}
+			if _, err := time.Parse(time.RFC3339Nano, entry.CreatedAt); err != nil {
+				return nil, auditReport{}, fmt.Errorf("invalid persisted lifecycle timestamp: %w", err)
+			}
+			actorData, err := json.Marshal(entry.EventData)
+			if err != nil {
+				return nil, auditReport{}, err
+			}
+			report.Events = append(report.Events, auditReportEvent{
+				ID: entry.ID, Timestamp: entry.CreatedAt, Actor: auditEntryActor(actorData),
+				Component: firstNonEmpty(entry.Component, resource.Component), EventType: entry.EventType,
+				DID: firstNonEmpty(entry.DID, resource.DID), Details: entry.EventData,
+			})
+			report.Resources[index].EventCount++
+		}
+	}
+	for _, finding := range report.Findings {
+		if index, exists := resourceIndexes[finding.DID]; exists && finding.DID != "" {
+			report.Resources[index].FindingCount++
+		}
+	}
+	sort.SliceStable(report.Events, func(i, j int) bool {
+		left, _ := time.Parse(time.RFC3339Nano, report.Events[i].Timestamp)
+		right, _ := time.Parse(time.RFC3339Nano, report.Events[j].Timestamp)
+		if left.Equal(right) {
+			return report.Events[i].ID < report.Events[j].ID
+		}
+		return left.Before(right)
+	})
+	report.Summary = summarizeAuditReport(report)
 	switch format {
 	case "json":
-		return raw, report, nil
+		content, err := json.Marshal(report)
+		return content, report, err
 	case "csv":
 		content, err := renderAuditReportCSV(report)
 		return content, report, err
@@ -181,10 +284,10 @@ func renderAuditReportCSV(report auditReport) ([]byte, error) {
 	var buffer bytes.Buffer
 	writer := csv.NewWriter(&buffer)
 	rows := [][]string{
-		{"section", "timestamp", "did", "component", "eventType", "actor", "result", "ruleId", "message", "requirement", "actualValue", "expectedValue", "expectedValues", "path"},
+		{"section", "timestamp", "did", "component", "eventType", "actor", "result", "ruleId", "message", "requirement", "actualValue", "expectedValue", "expectedValues", "path", "details", "evidenceRefs"},
 	}
 	for _, event := range report.Events {
-		rows = append(rows, []string{"event", event.Timestamp, event.DID, event.Component, event.EventType, event.Actor, "", "", "", "", "", "", "", ""})
+		rows = append(rows, []string{"event", event.Timestamp, event.DID, event.Component, event.EventType, event.Actor, "", "", "", "", "", "", "", "", formatReportValue(event.Details), ""})
 	}
 	for _, finding := range report.Findings {
 		rows = append(rows, []string{
@@ -202,7 +305,17 @@ func renderAuditReportCSV(report auditReport) ([]byte, error) {
 			formatReportValue(finding.ExpectedValue),
 			formatReportValue(finding.ExpectedValues),
 			firstNonEmpty(finding.FieldIri, finding.Path),
+			"", formatReportValue(finding.EvidenceRefs),
 		})
+	}
+	rows[0] = append(rows[0], "reportId", "correlationId", "executorId", "executorVersion", "executedAt", "receipt", "requestHash", "responseHash")
+	if len(rows) == 1 {
+		row := make([]string, 16)
+		row[0] = "report"
+		rows = append(rows, row)
+	}
+	for i := 1; i < len(rows); i++ {
+		rows[i] = append(rows[i], report.ReportID, report.CorrelationID, report.Executor.ID, report.Executor.Version, report.ExecutedAt, string(report.Receipt), report.RequestHash, report.ResponseHash)
 	}
 	for _, row := range rows {
 		if err := writer.Write(row); err != nil {
@@ -221,6 +334,11 @@ func renderAuditReportPDF(report auditReport) []byte {
 		"FACIS Audit Report",
 		"Report ID: " + report.ReportID,
 		"Scope: " + report.Scope,
+		"Executor: " + report.Executor.ID + " " + report.Executor.Version,
+		"Executed at: " + report.ExecutedAt,
+		"Request hash: " + report.RequestHash,
+		"Response hash: " + report.ResponseHash,
+		"Receipt: " + string(report.Receipt),
 		"Generated at: " + report.GeneratedAt,
 		"Generated by: " + report.GeneratedBy,
 		fmt.Sprintf("Summary: %d events, %d checks, %d passed, %d failed, %d warnings, %d needs review, %d not evaluated", report.Summary.TotalEvents, report.Summary.TotalChecks, report.Summary.Passed, report.Summary.Failed, report.Summary.Warnings, report.Summary.NeedsReview, report.Summary.NotEvaluated),
@@ -247,22 +365,38 @@ func renderAuditReportPDF(report auditReport) []byte {
 }
 
 func simplePDF(lines []string) []byte {
-	var text bytes.Buffer
-	text.WriteString("BT\n/F1 10 Tf\n50 780 Td\n14 TL\n")
+	const pageHeight, topMargin, bottomMargin, lineHeight = 842, 62, 50, 14
+	const linesPerPage = (pageHeight - topMargin - bottomMargin) / lineHeight
+	var wrapped []string
 	for _, line := range lines {
-		text.WriteString("(")
-		text.WriteString(escapePDFText(line))
-		text.WriteString(") Tj\nT*\n")
+		wrapped = append(wrapped, wrapPDFLine(line)...)
 	}
-	text.WriteString("ET\n")
-	stream := text.String()
-	objects := []string{
-		"<< /Type /Catalog /Pages 2 0 R >>",
-		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
+	const headerLines = 2
+	const capacity = linesPerPage - headerLines
+	pageCount := (len(wrapped) + capacity - 1) / capacity
+	if pageCount == 0 {
+		pageCount = 1
 	}
+	objects := []string{"<< /Type /Catalog /Pages 2 0 R >>", "", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"}
+	var kids []string
+	for page := 0; page < pageCount; page++ {
+		pageID := len(objects) + 1
+		kids = append(kids, fmt.Sprintf("%d 0 R", pageID))
+		var text bytes.Buffer
+		fmt.Fprintf(&text, "BT\n/F1 10 Tf\n50 %d Td\n%d TL\n", pageHeight-topMargin, lineHeight)
+		pageLines := []string{fmt.Sprintf("FACIS Audit Report - Page %d/%d", page+1, pageCount), ""}
+		end := min((page+1)*capacity, len(wrapped))
+		pageLines = append(pageLines, wrapped[page*capacity:end]...)
+		for _, line := range pageLines {
+			fmt.Fprintf(&text, "(%s) Tj\nT*\n", escapePDFText(line))
+		}
+		text.WriteString("ET\n")
+		objects = append(objects,
+			fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 %d] /Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>", pageHeight, pageID+1),
+			fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", text.Len(), text.String()))
+	}
+	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), pageCount)
+
 	var out bytes.Buffer
 	out.WriteString("%PDF-1.4\n")
 	offsets := make([]int, 0, len(objects)+1)
@@ -291,16 +425,15 @@ func simplePDF(lines []string) []byte {
 
 func wrapPDFLine(line string) []string {
 	const max = 95
-	if len(line) <= max {
-		return []string{line}
+	runes := []rune(line)
+	if len(runes) == 0 {
+		return []string{""}
 	}
 	var lines []string
-	for len(line) > max {
-		lines = append(lines, line[:max])
-		line = line[max:]
-	}
-	if line != "" {
-		lines = append(lines, line)
+	for len(runes) > 0 {
+		n := min(max, len(runes))
+		lines = append(lines, string(runes[:n]))
+		runes = runes[n:]
 	}
 	return lines
 }

@@ -61,3 +61,15 @@ func TestMissingSettlementStoreIsNotReportedAsWaiting(t *testing.T) {
 	require.ErrorAs(t, err, &serviceErr)
 	require.Equal(t, "internal_error", serviceErr.Name)
 }
+
+// A failed PAdES-B-LTA extension of a QES (ADR-40) wrote nothing, so the
+// wallet can send the same signature again once DSS and its TSA answer.
+func TestLongTermValidationUnavailableIsReportedAsTemporary(t *testing.T) {
+	err := mapSignatureCommandError(
+		fmt.Errorf("%w: dss: extension returned HTTP 500", command.ErrLongTermValidationUnavailable))
+
+	var serviceErr *goa.ServiceError
+	require.ErrorAs(t, err, &serviceErr)
+	require.Equal(t, "service_unavailable", serviceErr.Name)
+	require.True(t, serviceErr.Temporary)
+}

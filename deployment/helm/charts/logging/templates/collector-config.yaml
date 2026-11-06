@@ -1,0 +1,51 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+{{- $name := printf "%s-log-collector" .Release.Name }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  config.alloy: |
+    discovery.kubernetes "pods" {
+      role = "pod"
+      namespaces {
+        names = ["{{ .Release.Namespace }}"]
+      }
+    }
+
+    discovery.relabel "pods" {
+      targets = discovery.kubernetes.pods.targets
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+        target_label  = "app"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.pods.output
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint {
+        url = "{{ if $tls }}https{{ else }}http{{ end }}://{{ .Release.Name }}-loki:3101/loki/api/v1/push"
+        {{- if $tls }}
+        tls_config {
+          ca_file     = "/etc/dcs-internal-tls/ca.crt"
+          min_version = "TLS13"
+        }
+        {{- end }}
+      }
+    }

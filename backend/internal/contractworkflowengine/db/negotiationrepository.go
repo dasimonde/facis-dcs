@@ -83,18 +83,45 @@ type NegotiationDraftData struct {
 }
 
 type NegotiationRepo interface {
-	Create(ctx context.Context, tx *sqlx.Tx, data NegotiationCreateData, negotiators []string) (*time.Time, error)
+	// Create inserts the proposal and open decision slots. It returns the new
+	// negotiation id (stable wire identity for peer delivery) and created_at.
+	Create(ctx context.Context, tx *sqlx.Tx, data NegotiationCreateData, negotiators []string) (id string, createdAt *time.Time, err error)
+	// ReadDecisionID returns the decision row for (negotiation, negotiator),
+	// used when enqueueing an Accept/Reject outbound message.
+	ReadDecisionID(ctx context.Context, tx *sqlx.Tx, negotiationID, negotiator string) (string, error)
+	// ReadNegotiationByID returns the proposal row used to build an outbound
+	// ship payload. Nil when the id is unknown.
+	ReadNegotiationByID(ctx context.Context, tx *sqlx.Tx, id string) (*NegotiationData, error)
+	// ReadDecisionByID returns one decision row by its primary key.
+	ReadDecisionByID(ctx context.Context, tx *sqlx.Tx, id string) (*NegotiationDecisionData, error)
 	UpsertDraft(ctx context.Context, tx *sqlx.Tx, contractDID string, savedBy string, changeRequest *datatype.JSON) error
 	// ReadDraft returns nil when the author has no stored draft for the contract.
 	ReadDraft(ctx context.Context, tx *sqlx.Tx, contractDID string, savedBy string) (*NegotiationDraftData, error)
 	DeleteDraft(ctx context.Context, tx *sqlx.Tx, contractDID string, savedBy string) error
 	Accept(ctx context.Context, tx *sqlx.Tx, id string, acceptedBy string) error
 	Reject(ctx context.Context, tx *sqlx.Tx, id string, rejectedBy string, rejectionReason *string) error
+	// DeleteByID removes a proposal and its decisions (CASCADE). Used when the
+	// author withdraws before any counterparty has accepted.
+	DeleteByID(ctx context.Context, tx *sqlx.Tx, id string) error
+	// HasAcceptedDecision reports whether any decision on the proposal is
+	// ACCEPTED — the local withdraw gate (peer Accept already durable here).
+	HasAcceptedDecision(ctx context.Context, tx *sqlx.Tx, negotiationID string) (bool, error)
+	// RecordWithdrawn writes a tombstone so late Accept/Reject/Proposal ships
+	// after a partition can ACK as no-ops instead of retrying forever.
+	RecordWithdrawn(ctx context.Context, tx *sqlx.Tx, negotiationID, did string) error
+	// IsWithdrawn reports whether RecordWithdrawn has been called for this id.
+	IsWithdrawn(ctx context.Context, tx *sqlx.Tx, negotiationID string) (bool, error)
+	// EnsureOpenDecision inserts an undecided decision for (negotiation,
+	// negotiator) when none exists. Idempotent for Proposal re-delivery.
+	EnsureOpenDecision(ctx context.Context, tx *sqlx.Tx, negotiationID, negotiator string) error
 	ReadAllByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationData, error)
 	// ReadAllAcceptedByContractDIDAndVersion returns the round's accepted
 	// change requests ordered by (created_at, id). The order is part of the
 	// contract: the merge that consumes them is order-dependent.
 	ReadAllAcceptedByContractDIDAndVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) ([]NegotiationChangeData, error)
+	// HasOpenNegotiationDecisions is true when any proposal for the version still
+	// needs handling before Submit (local Accept/Reject owed, or caller's own
+	// proposal waiting on a counterparty). Author Not-required nulls are ignored.
 	HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int, negotiator string, caller string) (bool, error)
 	HasNegotiationForContractVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) (bool, error)
 	ReadAllNegotiationDecisionsByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationDecisionData, error)

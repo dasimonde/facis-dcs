@@ -45,7 +45,7 @@ func resolveEmbeddedFileByName(t *testing.T, pdf []byte, name string) []byte {
 	if names == nil {
 		t.Fatal("catalog carries no /EmbeddedFiles name tree")
 	}
-	entry := regexp.MustCompile(regexp.QuoteMeta("("+name+")")+`\s*(\d+) 0 R`).FindSubmatch(names[1])
+	entry := regexp.MustCompile(regexp.QuoteMeta("("+name+")") + `\s*(\d+) 0 R`).FindSubmatch(names[1])
 	if entry == nil {
 		t.Fatalf("name tree has no entry for %q (names: %s)", name, names[1])
 	}

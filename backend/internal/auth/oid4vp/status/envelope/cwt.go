@@ -185,9 +185,15 @@ func validateStatusListCWTClaims(claims map[int64]any) error {
 	if _, err := cwtClaimString(claims[cwtClaimSub]); err != nil {
 		return fmt.Errorf("cwt claim 2 (sub): %w", err)
 	}
-	if _, ok := cwtClaimUint(claims[cwtClaimIat]); !ok {
+
+	if _, exists := claims[cwtClaimIat]; !exists {
 		return fmt.Errorf("cwt claim 6 (iat) is required")
 	}
+
+	if _, err := cwtUintAsInt64(claims[cwtClaimIat]); err != nil {
+		return fmt.Errorf("cwt claim 6 (iat): %w", err)
+	}
+
 	if raw, exists := claims[cwtClaimIss]; exists {
 		if _, err := cwtClaimString(raw); err != nil {
 			return fmt.Errorf("cwt claim 1 (iss): %w", err)
@@ -199,6 +205,7 @@ func validateStatusListCWTClaims(claims map[int64]any) error {
 	if err := validateOptionalCWTUintClaim(claims, cwtClaimNbf, "nbf", false); err != nil {
 		return err
 	}
+
 	if err := validateOptionalCWTUintClaim(claims, cwtClaimTTL, "ttl", true); err != nil {
 		return err
 	}
@@ -213,9 +220,9 @@ func validateOptionalCWTUintClaim(claims map[int64]any, key int64, name string, 
 	if !ok {
 		return nil
 	}
-	v, ok := cwtClaimUint(raw)
-	if !ok {
-		return fmt.Errorf("cwt claim %d (%s) must be a non-negative integer", key, name)
+	v, err := cwtUintAsInt64(raw)
+	if err != nil {
+		return fmt.Errorf("cwt claim %d (%s) must be a non-negative integer that fits int64: %w", key, name, err)
 	}
 	if positive && v == 0 {
 		return fmt.Errorf("cwt claim %d (%s) must be positive", key, name)
@@ -232,29 +239,31 @@ func encodeCWTClaimsSet(claims map[string]any) ([]byte, error) {
 	if v := SubjectFromClaims(claims); v != "" {
 		out[cwtClaimSub] = v
 	}
-	if v, ok := IatFromClaims(claims); ok {
+	if v, present, err := IatFromClaims(claims); err != nil {
+		return nil, err
+	} else if present {
 		out[cwtClaimIat] = v
 	}
 	if raw, ok := claims["exp"]; ok {
-		v, ok := cwtClaimUint(raw)
-		if !ok {
-			return nil, fmt.Errorf("exp must be a non-negative integer")
+		v, err := cwtUintAsInt64(raw)
+		if err != nil {
+			return nil, fmt.Errorf("exp must be a non-negative integer that fits int64: %w", err)
 		}
-		out[cwtClaimExp] = v
+		out[cwtClaimExp] = uint64(v) // #nosec G115 -- cwtUintAsInt64 returns a non-negative value; bits is 1, 2, 4 or 8
 	}
 	if raw, ok := claims["nbf"]; ok {
-		v, ok := cwtClaimUint(raw)
-		if !ok {
-			return nil, fmt.Errorf("nbf must be a non-negative integer")
+		v, err := cwtUintAsInt64(raw)
+		if err != nil {
+			return nil, fmt.Errorf("nbf must be a non-negative integer that fits int64: %w", err)
 		}
-		out[cwtClaimNbf] = v
+		out[cwtClaimNbf] = uint64(v) // #nosec G115 -- cwtUintAsInt64 returns a non-negative value; bits is 1, 2, 4 or 8
 	}
 	if raw, ok := claims["ttl"]; ok {
-		v, ok := cwtClaimUint(raw)
-		if !ok || v == 0 {
-			return nil, fmt.Errorf("ttl must be a positive integer")
+		v, err := cwtUintAsInt64(raw)
+		if err != nil || v == 0 {
+			return nil, fmt.Errorf("ttl must be a positive integer that fits int64")
 		}
-		out[cwtClaimTTL] = v
+		out[cwtClaimTTL] = uint64(v) // #nosec G115 -- cwtUintAsInt64 returns a non-negative value; bits is 1, 2, 4 or 8
 	}
 
 	statusList, ok := claims["status_list"].(map[string]any)
@@ -300,17 +309,33 @@ func normalizeCWTClaims(raw map[int64]any) (map[string]any, error) {
 	if v, err := cwtClaimString(raw[cwtClaimSub]); err == nil {
 		out["sub"] = v
 	}
-	if v, ok := cwtClaimUint(raw[cwtClaimIat]); ok {
-		out["iat"] = int64(v)
+	if _, exists := raw[cwtClaimIat]; exists {
+		v, err := cwtUintAsInt64(raw[cwtClaimIat])
+		if err != nil {
+			return nil, fmt.Errorf("iat: %w", err)
+		}
+		out["iat"] = v
 	}
-	if v, ok := cwtClaimUint(raw[cwtClaimExp]); ok {
-		out["exp"] = int64(v)
+	if _, exists := raw[cwtClaimExp]; exists {
+		v, err := cwtUintAsInt64(raw[cwtClaimExp])
+		if err != nil {
+			return nil, fmt.Errorf("exp: %w", err)
+		}
+		out["exp"] = v
 	}
-	if v, ok := cwtClaimUint(raw[cwtClaimNbf]); ok {
-		out["nbf"] = int64(v)
+	if _, exists := raw[cwtClaimNbf]; exists {
+		v, err := cwtUintAsInt64(raw[cwtClaimNbf])
+		if err != nil {
+			return nil, fmt.Errorf("nbf: %w", err)
+		}
+		out["nbf"] = v
 	}
-	if v, ok := cwtClaimUint(raw[cwtClaimTTL]); ok {
-		out["ttl"] = int64(v)
+	if _, exists := raw[cwtClaimTTL]; exists {
+		v, err := cwtUintAsInt64(raw[cwtClaimTTL])
+		if err != nil {
+			return nil, fmt.Errorf("ttl: %w", err)
+		}
+		out["ttl"] = v
 	}
 
 	statusList, err := decodeCWTStatusList(raw[cwtClaimStatusList])
@@ -348,7 +373,7 @@ func decodeCWTStatusList(raw any) (map[string]any, error) {
 		return nil, fmt.Errorf("status_list.lst: %w", err)
 	}
 	return map[string]any{
-		"bits": int64(bits),
+		"bits": int64(bits), // #nosec G115 -- cwtUintAsInt64 returns a non-negative value; bits is 1, 2, 4 or 8
 		"lst":  lst,
 	}, nil
 }

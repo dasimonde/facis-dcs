@@ -225,6 +225,7 @@ func shaclResultFinding(result shacl.ValidationResult, shapesVersion int) Policy
 	}
 
 	finding := contractFinding(ruleID, shapeName, shaclResultSeverity(result), message, pathName, termValue(result.SourceShape))
+	finding.FocusNode = focusNode
 	finding.ActualValue = shaclFindingValue(result.Value)
 	finding.Operator = componentName
 	finding.ShapesVersion = shapesVersion

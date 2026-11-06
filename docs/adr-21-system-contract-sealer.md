@@ -111,7 +111,8 @@ identity it names), not bypassing ADR-20's gate outright.
   `system-user-capabilities-flow.json` will start false-alarming
   (`COMPLIANCE DEFECT`) the moment this role can sign/seal anything, unless
   its assertion is inverted to match the new intended behavior.
-- Other touch points already scoped: `querybyid.go`'s `privilegedReadRoles`
+- Other touch points already scoped: `contractreadpolicy.Scope.ActsForInstance`
+  (`backend/internal/base/contractreadpolicy/policy.go`)
   (trivial, behavior-preserving), `values.bdd.yml`'s system-client role grant
   string. (`docs/TRACEABILITY_SRS_BDD.md` no longer exists, pruned as a stale
   doc in a prior sweep — its SRS §2.4 Table 5 citation has no surviving home

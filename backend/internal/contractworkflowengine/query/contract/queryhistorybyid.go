@@ -47,6 +47,8 @@ type GetHistoryByIDResult struct {
 	ExpPolicy       *expirationpolicy.ExpirationPolicy
 	ExpNoticePeriod *int
 	Responsible     *db.Responsible
+	ModifiedBy      *string
+	ModifiedAt      *time.Time
 }
 
 type GetHistoryByIDHandler struct {
@@ -122,6 +124,8 @@ func (h *GetHistoryByIDHandler) Handle(ctx context.Context, query GetHistoryByID
 			ExpPolicy:       expPolicy,
 			ExpNoticePeriod: entry.ExpNoticePeriod,
 			Responsible:     entry.Responsible,
+			ModifiedBy:      entry.ModifiedBy,
+			ModifiedAt:      entry.ModifiedAt,
 		}
 	}
 

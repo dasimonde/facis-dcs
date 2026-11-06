@@ -11,7 +11,7 @@ import (
 // is down.
 func probeHTTP(rawURL string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(rawURL)
+	resp, err := client.Get(rawURL) // #nosec G704 -- URL comes from operator configuration (startup dependency probe), not from a request
 	if err != nil {
 		return err
 	}

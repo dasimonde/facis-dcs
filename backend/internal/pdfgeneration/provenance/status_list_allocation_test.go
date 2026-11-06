@@ -91,6 +91,7 @@ type memStatusListRevocations struct {
 	mu        sync.Mutex
 	store     *memStatusListStore
 	revokedAt map[string]time.Time
+	suspended map[string]bool
 }
 
 func (r *memStatusListRevocations) Revoke(_ context.Context, subjectID string) error {
@@ -115,6 +116,41 @@ func (r *memStatusListRevocations) RevokedIndices(_ context.Context, listID int)
 	defer r.store.mu.Unlock()
 	var indices []uint32
 	for subject := range r.revokedAt {
+		if entry, ok := r.store.entries[subject]; ok && entry.ListID == listID {
+			indices = append(indices, entry.Index)
+		}
+	}
+	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+	return indices, nil
+}
+
+func (r *memStatusListRevocations) Suspend(_ context.Context, subjectID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, revoked := r.revokedAt[subjectID]; revoked {
+		return nil
+	}
+	if r.suspended == nil {
+		r.suspended = map[string]bool{}
+	}
+	r.suspended[subjectID] = true
+	return nil
+}
+
+func (r *memStatusListRevocations) Resume(_ context.Context, subjectID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.suspended, subjectID)
+	return nil
+}
+
+func (r *memStatusListRevocations) SuspendedIndices(_ context.Context, listID int) ([]uint32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	var indices []uint32
+	for subject := range r.suspended {
 		if entry, ok := r.store.entries[subject]; ok && entry.ListID == listID {
 			indices = append(indices, entry.Index)
 		}

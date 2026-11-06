@@ -5,3 +5,4 @@ from . import dcs_process_audit_steps  # noqa: F401
 from . import audit_ui_archive_orce_steps  # noqa: F401
 from . import external_pac_audit_executor_steps  # noqa: F401
 from . import external_checkpoint_sink_steps  # noqa: F401
+from . import denied_access_audit_steps  # noqa: F401

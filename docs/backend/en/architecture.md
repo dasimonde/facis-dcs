@@ -20,7 +20,7 @@ This document describes the architecture as it emerges from the codebase — as 
 
 | Building Block | Technology | Purpose |
 |---|---|---|
-| Language/Runtime | Go 1.25 | Backend service |
+| Language/Runtime | Go 1.26 | Backend service |
 | API Framework | [Goa v3](https://goa.design) (design-first) | DSL-based API definition, code generation for transport/types |
 | Database | PostgreSQL (`sqlx`) | Transactional persistence per domain |
 | Event Bus | NATS (CloudEvents format) | Cross-domain asynchronous communication |
@@ -323,8 +323,7 @@ sequenceDiagram
     participant Slave as Peer B (not origin)
     participant Master as Peer A (origin)
 
-    Slave->>Slave: rand.Text() → secretValue
-    Slave->>Slave: DIDDocument.Sign(secretValue) → secretHash
+    Slave->>Slave: SignPeerChallenge(op, contract, from, to, body) → secretValue, secretHash
     Slave->>Master: Action/PostSync request<br/>(secretValue, secretHash, FromPeerDID)
     Master->>Master: FetchDIDDocumentFromHostname(FromPeerDID)<br/>via /.well-known/did.json
     Master->>Master: VerifyEIDASCertificate(against EU trust pool)

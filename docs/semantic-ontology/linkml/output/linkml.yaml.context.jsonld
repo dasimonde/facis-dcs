@@ -58,6 +58,17 @@
       "description": {
          "@id": "description"
       },
+      "expirationDate": {
+         "@type": "xsd:dateTime",
+         "@id": "expirationDate"
+      },
+      "expirationNoticePeriod": {
+         "@type": "xsd:integer",
+         "@id": "expirationNoticePeriod"
+      },
+      "expirationPolicy": {
+         "@id": "expirationPolicy"
+      },
       "did": {
          "@id": "did"
       },
@@ -135,6 +146,10 @@
       },
       "sourceSystemType": {
          "@id": "sourceSystemType"
+      },
+      "startDate": {
+         "@type": "xsd:dateTime",
+         "@id": "startDate"
       },
       "state": {
          "@id": "state"

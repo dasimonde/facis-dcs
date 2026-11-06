@@ -14,7 +14,8 @@ func TestPayloadCIDFormat(t *testing.T) {
 	if payloadCID([]byte("x")) == payloadCID([]byte("y")) {
 		t.Fatal("distinct payloads must yield distinct CIDs")
 	}
-	if payloadCID([]byte("same")) != payloadCID([]byte("same")) {
+	first, second := payloadCID([]byte("same")), payloadCID([]byte("same"))
+	if first != second {
 		t.Fatal("CID must be a pure function of the bytes")
 	}
 }

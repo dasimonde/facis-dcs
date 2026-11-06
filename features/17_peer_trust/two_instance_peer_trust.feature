@@ -8,11 +8,8 @@
 # GET /.well-known/dcs-agreement-credential.json) and (3b) a local,
 # per-instance policy endpoint (PDP) consulted on every inbound/outbound
 # interaction, fail-closed. The `trusted_peers` table, its `DCS_TRUSTED_PEERS`
-# seeding, and `CheckForUntrustedPeers` are to be removed entirely (ADR-19
-# decision item 4) — as of this writing that removal has not landed yet
-# (backend/internal/service/dcs_to_dcs.go's PostPdf still calls the OLD
-# CheckForUntrustedPeers), so every ADR-19 scenario below is expected to fail
-# red; that is the point of writing them ahead of the implementation.
+# seeding and `CheckForUntrustedPeers` do not exist (ADR-19 decision item 4;
+# migration 20260722_drop_trusted_peers.sql).
 #
 # The single-instance-testable scenarios ship as synthetic did:web peers the
 # orce Node-RED fixture serves — one publishing no agreement credential at all
@@ -72,11 +69,12 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     Then the contract appears on instance B in state OFFERED within a few seconds
 
   # ---------------------------------------------------------------------
-  # DCS-IR-SI-06 / DCS-FR-SM-02: GET /peer/contracts/provenance
-  # (backend/design/dcs_to_dcs.go, get_provenance) is the read-only peer
-  # contract-information endpoint: it answers with the stored JAdES
-  # provenance artifact for a contract received from a peer, so instance B
-  # can prove WHO shipped it the contract content it holds.
+  # DCS-FR-SM-02: GET /peer/contracts/provenance
+  # (backend/design/dcs_to_dcs.go, get_provenance) answers with the stored
+  # JAdES provenance artifact for a contract received from a peer, so
+  # instance B can prove WHO shipped it the contract content it holds. The
+  # counterparty information endpoint (DCS-IR-SI-06) is
+  # POST /peer/contracts/info.
   #
   # A proposal ship carries no JAdES by design ("empty for a proposal",
   # DCSToDCSContractPdfRequest), so the artifact exists only after a
@@ -87,7 +85,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # SyncRepository.UpsertSyncSignature).
   # ---------------------------------------------------------------------
 
-  @DCS-IR-SI-06 @DCS-FR-SM-02 @two-instance
+  @DCS-FR-SM-02 @two-instance
   Scenario: A contract received from instance A carries instance A's verifiable JAdES provenance on B
     Given instance A and instance B are both running and trust each other
     When the initiator on instance A creates and offers a contract with instance B as counterparty
@@ -406,6 +404,27 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     When instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance B attempts a ceremony-backed signature on the contract
     Then the signature attempt on instance B is refused because the counterparty has not settled
+
+  # ---------------------------------------------------------------------
+  # DCS-IR-SI-06: a counterparty DCS reads the information of a contract it is
+  # a party of (POST /peer/contracts/info). Every peer request carries a
+  # dcs-peer-v1 challenge (ADR-13) that binds the operation, the contract,
+  # the sender, the receiving instance and a nonce, so the same signed request
+  # is accepted once. A contract the peer does not share answers not_found,
+  # like one that does not exist.
+  # ---------------------------------------------------------------------
+
+  @DCS-IR-SI-06 @DCS-NFR-BR-08 @two-instance
+  Scenario: A counterparty reads the information of a shared contract once per signed request
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A asks instance B for the information of the cross-instance contract
+    Then instance B answers with the contract information in state OFFERED
+    When instance A sends the same signed information request to instance B again
+    Then instance B refuses the repeated request as a replay
+    When instance A asks instance B for the information of a contract instance B does not share with it
+    Then instance B answers that the contract is not found
 
   # ---------------------------------------------------------------------
   # TAKING AN AGREEMENT BACK (contractworkflowengine/command/
